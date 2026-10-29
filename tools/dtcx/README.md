@@ -41,6 +41,7 @@ tree compiles against.
 | `decimal` | the vendor's own quantities; `<node pattern>:<property>` where a name is ambiguous          |
 | `gpio`    | the vendor's own gpio properties, which dtc cannot know hold a reference                    |
 | `ref`     | the vendor's own properties holding bare references, as patterns                            |
+| `refargs` | properties holding one bare reference and its numeric arguments, as patterns                |
 | `rules`   | another base, whose `decimal`, `gpio` and `ref` a tree moved from it still needs            |
 
 | Renderer        | Writes                                                              |

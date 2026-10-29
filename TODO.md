@@ -4,6 +4,10 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
 
 ## Open
 
+- [ ] **`tools/dtcx/bases/`: out of `tools/`.** Each `.conf` describes a kernel's or a U-Boot's
+      trees, headers and vendor properties: data beside what it describes, not tool code. The
+      boards' `BOARD_*_DTB_SOURCE` and `_TARGET` name them.
+
 - [ ] **H96 Max M20: VC-1 needs GStreamer 1.26.6.** 1.26.2, trixie's, maps no caps to
       `V4L2_PIX_FMT_VC1_ANNEX_G`: `v4l2vc1dec` registers and fails "Invalid caps". By hand until
       trixie moves: `patches/gst-plugins-good/README.md`. TVBian replaces no Debian package, so it

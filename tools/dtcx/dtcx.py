@@ -123,6 +123,7 @@ DECIMAL_ARGS = (
     "sound-dai",
 )
 GPIO_FLAGS = {0: "GPIO_ACTIVE_HIGH", 1: "GPIO_ACTIVE_LOW", 6: "GPIO_OPEN_DRAIN"}
+ALL_ONES = "0xffffffff"
 GIC_TYPES = {0: "GIC_SPI", 1: "GIC_PPI"}
 IRQ_TYPES = {
     1: "IRQ_TYPE_EDGE_RISING",
@@ -185,6 +186,7 @@ class Base:
     decimal: list[str] = field(default_factory=list)
     gpio: set[str] = field(default_factory=set)
     refs: list[str] = field(default_factory=list)
+    refargs: list[str] = field(default_factory=list)
 
     @staticmethod
     def load(name: str) -> Base:
@@ -215,6 +217,8 @@ class Base:
                 base.gpio.update(rest.split())
             elif key == "ref":
                 base.refs += rest.split()
+            elif key == "refargs":
+                base.refargs += rest.split()
             elif key == "rules":
                 # a tree moved here from that base still carries its vendor's properties
                 source = Base.load(rest)
@@ -396,6 +400,16 @@ class Renderer:
                 or "arm,cortex-a15-gic" in tree.props[n].get("compatible", "")
             ]
         )
+        # a proxy passing the GIC's specifiers through unchanged, as Allwinner's wakeupgen does
+        self.gic |= set().union(
+            *[
+                tree.tokens(n)
+                for n in tree.props
+                if "interrupt-controller" in tree.props[n]
+                and tree.props[n].get("#interrupt-cells") == "<0x03>"
+                and tree.interrupt_parent(n) in self.gic
+            ]
+        )
         self.gpio = set().union(
             *[tree.tokens(n) for n in tree.props if "gpio-controller" in tree.props[n]]
         )
@@ -444,11 +458,7 @@ class Renderer:
                             self.named += 1
                         else:
                             self.unnamed.append(f"{node} {prop} {out[i + 1]}: {found or 'no name'}")
-        if "gpio-flags" in self.base.renderers and (
-            prop in ("gpio", "gpios")
-            or prop.endswith(("-gpio", "-gpios", "_gpio", "_gpios"))
-            or prop in self.base.gpio
-        ):
+        if "gpio-flags" in self.base.renderers and self.gpio_prop(prop):
             for i in range(len(out) - 2):
                 if out[i] in self.gpio and number(out[i + 1]) is not None:
                     out[i] = self.refs.get(out[i], out[i])
@@ -460,6 +470,10 @@ class Renderer:
                         self.unnamed.append(f"{node} {prop} {out[i + 2]}: no gpio flag name")
         if any(fnmatch(prop, p) for p in self.base.refs) and all(c in self.refs for c in out):
             out = [self.refs[c] for c in out]
+        # one reference and its arguments, as <&de3_sram 1>, an argument never read as a reference
+        if any(fnmatch(prop, p) for p in self.base.refargs) and out and out[0] in self.refs:
+            if all(number(c) is not None for c in out[1:]):
+                out = [self.refs[out[0]]] + [str(number(c)) for c in out[1:]]
         if "gic" in self.base.renderers and prop == "interrupts":
             if self.tree.interrupt_parent(node) in self.gic or not self.gic:
                 values = [number(c) for c in out]
@@ -488,14 +502,30 @@ class Renderer:
                     self.unnamed.append(f"{node} {prop} {c}: {found or 'no name'}")
         if "thermal" in self.base.renderers and prop == "cooling-device":
             out = ["THERMAL_NO_LIMIT" if c == "0xffffffff" else c for c in out]
+        # a gpio specifier without flags is plain numbers, as Allwinner's six cells are
+        if "gpio-flags" not in self.base.renderers and self.gpio_prop(prop):
+            out = [self.refs.get(c, c) if c in self.gpio else c for c in out]
+            after_ref = [any(t.startswith("&") for t in out[:i]) for i in range(len(out))]
+            out = [
+                str(number(c)) if c.startswith("0x") and c != ALL_ONES and a else c
+                for c, a in zip(out, after_ref)
+            ]
+        # all ones is a vendor's "unset", which a decimal would hide
         if self.decimal(node, prop):
-            out = [str(number(c)) if c.startswith("0x") else c for c in out]
+            out = [str(number(c)) if c.startswith("0x") and c != ALL_ONES else c for c in out]
         if prop in DECIMAL_ARGS:
             after_ref = [any(t.startswith("&") for t in out[:i]) for i in range(len(out))]
             out = [
                 str(number(c)) if c.startswith("0x") and a else c for c, a in zip(out, after_ref)
             ]
         return out
+
+    def gpio_prop(self, prop: str) -> bool:
+        return (
+            prop in ("gpio", "gpios")
+            or prop.endswith(("-gpio", "-gpios", "_gpio", "_gpios"))
+            or prop in self.base.gpio
+        )
 
     def line(self, node: str, line: str) -> str:
         m = PROPERTY.match(line)
