@@ -101,6 +101,8 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
       `docs/bring-up.md`'s board identity. `boards/`, `stock/` and `docs/` move; a last `tvb-r69`
       depends on `tvb-r69-1`, which `Replaces` and `Breaks` it, so an installed box upgrades into
       it; `/usr/lib/tvb/board-id` changes with it.
+- [ ] **Rename the H96 Max H313's board ID to the H96 Max 3518's.** Its name already is; the ID, its
+      directories and its image still say `h96max-h313`. The same move as the R69's rename above.
 - [ ] **A USB keyboard's keymap on `tty1`:** `console-setup` in the image and a README line, or US
       only.
 - [ ] **BTF:** dropped with debug info by `CONFIG_DEBUG_INFO_NONE`, or kept for BPF tools at the

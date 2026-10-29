@@ -1,6 +1,10 @@
-# H96 Max H313 — board details
+# H96 Max 3518 — board details
 
-Retail name "H96 Max H313" — the H313 is branding, the silicon is RK3518.
+An H96 Max 3518 in the H96 Max H313's case: the label on the back says "H96 Max H313", the unit is
+branded LEFFOT, and the board is RK3518. H96 sells the H313 case with an Allwinner H313 and with an
+RK3518 inside. The LED tells the RK3518 models apart: in the middle on the 3518
+(`https://h5.h96max.com/products-details/h96-max-rk3518-4k-android-streaming-box`), on the left on
+the 3518B; this unit's is in the middle.
 
 Runs TVBian, migrated in place from Armbian: Debian trixie, kernel `6.1.172-tvb-rk35xx`, U-Boot
 `v2026.10`, `tvb-h96max-h313`, NetworkManager, hostname `h96max-h313`. ✅ Wi-Fi, BT, IR, CEC, the
