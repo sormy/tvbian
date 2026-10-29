@@ -27,7 +27,10 @@ version() { awk -v c="kernel/$1.conf" '$1 == "kernel" && $2 == c { sub(/-[0-9]+$
     soc=$(vendor "$BOARD_FAMILY")
     extras=$(tr ' ' '\n' <<<"$BOARD_DEPENDS" | sed -n 's/^tvb-firmware-//p' | grep -vix "$soc" |
       tr '[:lower:]' '[:upper:]' | paste -sd, | sed 's/,/, /g')
-    echo "| $BOARD_NAME | ${BOARD_PCB:--} | $(vendor "$BOARD_FAMILY") ($BOARD_KERNEL) | Debian ${TVB_BUILD_SUITE:?} | $(version "$BOARD_KERNEL"), $(origin "$BOARD_KERNEL") | ${next:+$next, $(origin "$BOARD_KERNEL-next")} | $extras | \`$(basename "$img")\` |"
+    box=$BOARD_NAME
+    [ -n "${BOARD_HOME:-}" ] && box="[$BOARD_NAME]($BOARD_HOME)"
+    [ -n "${BOARD_STORE:-}" ] && box="$box · [store]($BOARD_STORE)"
+    echo "| $box | ${BOARD_PCB:--} | $(vendor "$BOARD_FAMILY") ($BOARD_KERNEL) | Debian ${TVB_BUILD_SUITE:?} | $(version "$BOARD_KERNEL"), $(origin "$BOARD_KERNEL") | ${next:+$next, $(origin "$BOARD_KERNEL-next")} | $extras | \`$(basename "$img")\` |"
   done
   echo
   next=$(for k in kernel/*-next.conf; do basename "$k" -next.conf; done | paste -sd'|')
