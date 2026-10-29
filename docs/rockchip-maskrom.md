@@ -61,6 +61,7 @@ outlives the button, and why the lower the stage, the more it survives:
 | Stage                | Route                                 | Needs                 |
 | -------------------- | ------------------------------------- | --------------------- |
 | BootROM              | idbloader unreadable — just plug in   | cable                 |
+| BootROM              | a maskrom button, marked CLK or D0    | cable                 |
 | BootROM              | short CLK or D0                       | cable + probe + hours |
 | idbloader @ 64 (SPL) | `ctrl+b` in a ~100 ms window          | cable + serial        |
 | U-Boot @ 16384       | the button (if the DT is correct)     | cable                 |
@@ -70,6 +71,10 @@ outlives the button, and why the lower the stage, the more it survives:
 The BootROM rescues you only when it never handed off — so **erasing sector 64 is recoverable,
 writing a wrong DDR blob there is not.** `ctrl+b` needs DRAM up, so it is only ever as good as the
 DDR init beside it in the same block.
+
+**Most recovery buttons are U-Boot's**, read to start Android's recovery, not the BootROM's. A DDR
+blob that cannot train DRAM (`The otp unmatched, please update ddrbin!!!` on serial) leaves no
+U-Boot to read one: only route 4, the eMMC made to fail its init.
 
 **No `rd` subcode works before `db`.** They are answered by `usbplug` — the loader's CODE472 entry,
 which `db` uploads and runs — not by the BootROM. Before `db` every one fails with
@@ -129,10 +134,14 @@ the way back up and hands to the BootROM, the same path `reboot maskrom` takes:
 
 ### 4. Shorting eMMC CLK or D0 to GND
 
-❓ Never attempted here. For one case only: the idbloader loads but its SPL hangs. No board here has
-test points — you must find the trace on a fine-pitch BGA fan-out, likely scrape solder mask, and
-time the short against power-up. **Prove routes 1 and 2 while the box still boots** and you will not
-need it.
+❓ Never attempted here. The easiest route when the board has it ready: a maskrom button, which
+grounds one of them, or marked CLK or D0 pads, held as the OTG cable goes in. Without one it is the
+last route, for a box that hangs before U-Boot: an SPL that stops, or a DDR blob that cannot train.
+The lines are unmarked and run under a BGA, often an eMCP: eMMC and DRAM in one package, so the
+eMMC's 12 signal traces (CLK, CMD, D0–D7, DS, RST_n) hide among the DRAM's dozens, some beneath
+solder mask to scrape off. A multimeter cannot tell them apart: each candidate is probed with a
+scope across power-ups, then the short timed against power-up. **Prove routes 1 and 2 while the box
+still boots** and you will not need it.
 
 ### 5. From a booted OS
 
