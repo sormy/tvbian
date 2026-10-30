@@ -32,9 +32,10 @@ it, so the encoders and the decoder move together, as a porting job.
 
 ## Bootloaders
 
-| U-Boot      | Upstream      | Follows      | Built by       |
-| ----------- | ------------- | ------------ | -------------- |
-| every board | u-boot/u-boot | pinned `TAG` | `uboot/*.conf` |
+| Bootloader           | Upstream                          | Follows                         | Built by         |
+| -------------------- | --------------------------------- | ------------------------------- | ---------------- |
+| U-Boot, every board  | u-boot/u-boot                     | pinned `TAG`                    | `uboot/*.conf`   |
+| TF-A BL31, Allwinner | ARM-software/arm-trusted-firmware | pinned `TFA_TAG`, `TFA_PATCHES` | `uboot/build.sh` |
 
 Pinned: a bad bootloader can leave a box with no way back short of maskrom. A new tag goes onto a
 box before its pin moves.

@@ -1,0 +1,66 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 24 Oct 2026 20:07:29 +0000
+Subject: [PATCH] sunxi: H616: dram: keep two 3/4-populated ranks contiguous
+
+Some H616 TV boxes carry 1.5 GB of LPDDR3 as two ranks, each with 3/4 of
+its rows populated; the Tanix TX1 V2.0's boot0 reports "32bit,2 ranks"
+and para2 0x06001000. With the chip select above the row bits, each rank
+spans a full 1 GiB and the missing quarter of rank 0, 0x70000000 to
+0x7fffffff, is a hole inside RAM: writes there read back zero. The size
+check probes 3/4 of 2 GiB, 0xa0000000, which rank 1 does back, and
+reports 2 GiB; capped to 1.5 GiB, Linux still gets the hole and locks up.
+
+Map the chip select below the two top row bits, so the missing rows sit
+at 0xa0000000 and up, where mctl_calc_size() finds them and caps the
+size at 1.5 GiB itself; the stock firmware also sees 1.5 GiB in one
+piece, 0x40000000 to 0x9fffffff.
+---
+ arch/arm/mach-sunxi/dram_sun50i_h616.c | 24 ++++++++++++++++++++++++
+ 1 file changed, 24 insertions(+)
+
+diff --git a/arch/arm/mach-sunxi/dram_sun50i_h616.c b/arch/arm/mach-sunxi/dram_sun50i_h616.c
+index 42a0550..e3dc607 100644
+--- a/arch/arm/mach-sunxi/dram_sun50i_h616.c
++++ b/arch/arm/mach-sunxi/dram_sun50i_h616.c
+@@ -141,6 +141,17 @@ static void mctl_sys_init(u32 clk_rate)
+ 	writel(0x8000, &mctl_ctl->clken);
+ }
+ 
++/* Move row bit 'bit' (11 and up) one HIF bit higher. */
++static void mctl_row_bit_up(struct sunxi_mctl_ctl_reg *mctl_ctl, u8 bit)
++{
++	if (bit < 12)
++		mctl_ctl->addrmap[5] += 1 << 24;
++	else if (bit < 16)
++		mctl_ctl->addrmap[6] += 1 << (8 * (bit - 12));
++	else
++		mctl_ctl->addrmap[7] += 1 << (8 * (bit - 16));
++}
++
+ static void mctl_set_addrmap(const struct dram_config *config)
+ {
+ 	struct sunxi_mctl_ctl_reg * const mctl_ctl =
+@@ -223,6 +234,19 @@ static void mctl_set_addrmap(const struct dram_config *config)
+ 		panic("Unsupported DRAM configuration: row number invalid\n");
+ 	}
+ 
++	/*
++	 * Two ranks of chips populated to 3/4 of their rows, as on 1.5 GB
++	 * LPDDR3 boards: with the chip select on top, the missing quarter of
++	 * rank 0 is a hole in the middle. Put the chip select under the two
++	 * top row bits, so the hole moves to the end and mctl_calc_size()
++	 * finds it. Not while probing rows, at 17.
++	 */
++	if (ranks == 2 && rows < 17) {
++		mctl_ctl->addrmap[0] = rows + cols - 5;
++		mctl_row_bit_up(mctl_ctl, rows - 2);
++		mctl_row_bit_up(mctl_ctl, rows - 1);
++	}
++
+ 	/* Bank groups, DDR4 only */
+ 	mctl_ctl->addrmap[8] = 0x3F3F;
+ }
+-- 
+2.47.3
+

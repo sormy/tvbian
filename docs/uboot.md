@@ -15,10 +15,12 @@ one that has never booted is not a free change**, so it is enabled per board rat
 family-wide.
 
 `board.conf` decides: `BOARD_UBOOT=rk3528` builds `uboot/rk3528.conf` around the board's own control
-tree, `boards/<board>/uboot.dts`, and `tvb-<board>` installs the FIT as `/usr/lib/tvb/u-boot.bin`.
-Every board here has one — a shared FIT built from mainline's `rk3528-generic` tree carries no board
-DT and no `CONFIG_ADC`, so the recovery button cannot reach Maskrom from U-Boot on it. Whether a
-board has ever booted its own belongs in that board's `board.md`.
+tree, `boards/<board>/uboot.dts` or the tree `BOARD_UBOOT_DTB` names there, and `tvb-<board>`
+installs the image as `/usr/lib/tvb/u-boot.bin`: the FIT, or Allwinner's U-Boot with its SPL. An
+Allwinner board names `board`: its stock U-Boot reads the kernel's tree, and ours does too. Every
+board here has one — a shared FIT built from mainline's `rk3528-generic` tree carries no board DT
+and no `CONFIG_ADC`, so the recovery button cannot reach Maskrom from U-Boot on it. Whether a board
+has ever booted its own belongs in that board's `board.md`.
 
 To enable a board: set `BOARD_UBOOT_DTB_SOURCE` and `BOARD_UBOOT_DTB_TARGET` in its `board.conf`,
 write `boards/<board>/uboot.patch` against `factory_uboot.dts`
@@ -187,6 +189,15 @@ On the box, slot A then slot B, the eMMC found by its `boot0`/`boot1`:
 sudo dd if=u-boot.bin of=/dev/<disk> bs=512 seek=16384 conv=notrunc,fsync
 sudo dd if=u-boot.bin of=/dev/<disk> bs=512 seek=20480 conv=notrunc,fsync
 ```
+
+On an Allwinner box, one copy, at sector 16:
+
+```sh
+sudo dd if=u-boot.bin of=/dev/<disk> bs=512 seek=16 conv=notrunc,fsync
+```
+
+A U-Boot conf's `BOOT_PREBOOT` runs before the boot targets; `uboot/sunxi-h616.conf` puts `usb0`
+before `mmc_auto`, so a USB disk with a boot entry boots before the eMMC.
 
 It builds in the container like every other step, from a defconfig made on the spot out of
 `generic-rk3528_defconfig` with the board's tree named in it, and aborts if a `CONFIGS` symbol does
