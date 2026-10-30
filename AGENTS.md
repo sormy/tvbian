@@ -39,13 +39,14 @@ mechanism no other board can use: a unit for hardware only it has.
 
 **Tools we build, and must:** `dtc` (`./build.sh tool dtc` — vanilla cannot round-trip a vendor blob
 with `&label`s) · `rkdeveloptool` (`./build.sh tool rkdeveloptool`) and each board's maskrom loader
-(`./build.sh loaders`) · `amlcmd` and `gxlimg` (`./build.sh tool amlcmd`, `./build.sh tool gxlimg` —
-Amlogic's own are closed and x86-64 Linux only) · each board's `board.dtb` and `uboot.dts` from its
-factory trees (`./build.sh board-dtb <board>`, `./build.sh uboot-dtb <board>`) — or every board's
-boot files at once with `./build.sh boards`. **From the host:** `cc` and `patch` · `fdtput` ·
-`fsck.ext4` (keg-only on Homebrew: `/opt/homebrew/opt/e2fsprogs/sbin/`) · `xz` · `npx prettier` ·
-`python3` · `mtools` and `mkimage`, for a board whose image carries a FAT boot partition. **On the
-box:** `evtest`, `fio`, `stress-ng`, `iw`, `bluez`.
+(`./build.sh loaders`) · `sunxi-fel` (`./build.sh tool sunxi-fel`) · `amlcmd` and `gxlimg`
+(`./build.sh tool amlcmd`, `./build.sh tool gxlimg` — Amlogic's own are closed and x86-64 Linux
+only) · each board's `board.dtb` and `uboot.dts` from its factory trees
+(`./build.sh board-dtb <board>`, `./build.sh uboot-dtb <board>`) — or every board's boot files at
+once with `./build.sh boards`. **From the host:** `cc` and `patch` · `fdtput` · `fsck.ext4`
+(keg-only on Homebrew: `/opt/homebrew/opt/e2fsprogs/sbin/`) · `xz` · `npx prettier` · `python3` ·
+`mtools` and `mkimage`, for a board whose image carries a FAT boot partition. **On the box:**
+`evtest`, `fio`, `stress-ng`, `iw`, `bluez`.
 
 **`e2tools`** (`./build.sh tool e2tools`) — edit a box's ext4 rootfs on an SD card or USB stick from
 a Mac, which cannot mount ext4; the stock one corrupts an image on delete.

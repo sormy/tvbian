@@ -47,13 +47,13 @@ AIC8800 set comes from Radxa's tree at the driver's commit and moves with the dr
 
 ## Userspace and the build
 
-| Source                    | Follows                                  |
-| ------------------------- | ---------------------------------------- |
-| Debian packages           | the stable suite, through `apt`          |
-| the build container       | `debian:<stable>`, rebuilt as it changes |
-| `dtc`, `e2tools`          | pinned release tag                       |
-| `rkdeveloptool`, `gxlimg` | pinned commit                            |
-| dt-bindings headers       | pinned commit, per `tools/dtcx/bases/`   |
+| Source                                 | Follows                                  |
+| -------------------------------------- | ---------------------------------------- |
+| Debian packages                        | the stable suite, through `apt`          |
+| the build container                    | `debian:<stable>`, rebuilt as it changes |
+| `dtc`, `e2tools`                       | pinned release tag                       |
+| `rkdeveloptool`, `gxlimg`, `sunxi-fel` | pinned commit                            |
+| dt-bindings headers                    | pinned commit, per `tools/dtcx/bases/`   |
 
 Host tools carry our patches and touch boards directly; they move by hand.
 
