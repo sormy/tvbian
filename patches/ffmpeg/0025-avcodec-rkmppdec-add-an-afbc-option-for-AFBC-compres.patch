@@ -1,0 +1,141 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 31 Oct 2026 03:58:59 -0400
+Subject: [PATCH] avcodec/rkmppdec: add an afbc option for AFBC compressed
+ frames
+
+afbc asks MPP for MPP_FRAME_FBC_AFBC_V2 frames, which H.264, HEVC and
+VP9 have on vdpu382; other codecs keep linear frames. Such a frame is
+one plane of DRM_FORMAT_YUV420_8BIT or YUV420_10BIT with the 16x16
+sparse AFBC modifier. Its pitch is the decoder's AFBC row stride at 12
+or 15 bits per pixel, which VOP2 reads the superblock row stride from.
+H.264 and HEVC write the picture 4 lines down the surface: the frame
+grows by them and crop_top skips them.
+
+AFBC is not asked for together with the scaled picture: with both, the
+RK3528's decoder timed out on HEVC and gave no frames on 1080p H.264.
+---
+ libavcodec/rkmppdec.c | 53 +++++++++++++++++++++++++++++++++----------
+ 1 file changed, 41 insertions(+), 12 deletions(-)
+
+diff --git a/libavcodec/rkmppdec.c b/libavcodec/rkmppdec.c
+index 38e1311..76b0968 100644
+--- a/libavcodec/rkmppdec.c
++++ b/libavcodec/rkmppdec.c
+@@ -63,6 +63,7 @@ typedef struct {
+     RKMPPDecoder *decoder;           ///< RefStruct reference
+     int capture_max_width;
+     int capture_max_height;
++    int afbc;
+ } RKMPPDecodeContext;
+ 
+ typedef struct {
+@@ -85,9 +86,11 @@ static MppCodingType rkmpp_get_codingtype(AVCodecContext *avctx)
+ 
+ static uint32_t rkmpp_get_frameformat(MppFrameFormat mppformat)
+ {
++    int afbc = MPP_FRAME_FMT_IS_AFBC(mppformat);
++
+     switch (mppformat & MPP_FRAME_FMT_MASK) {
+-    case MPP_FMT_YUV420SP:          return DRM_FORMAT_NV12;
+-    case MPP_FMT_YUV420SP_10BIT:    return DRM_FORMAT_NV15;
++    case MPP_FMT_YUV420SP:          return afbc ? DRM_FORMAT_YUV420_8BIT : DRM_FORMAT_NV12;
++    case MPP_FMT_YUV420SP_10BIT:    return afbc ? DRM_FORMAT_YUV420_10BIT : DRM_FORMAT_NV15;
+     default:                        return 0;
+     }
+ }
+@@ -320,6 +323,19 @@ static av_cold int rkmpp_init_decoder(AVCodecContext *avctx)
+             goto fail;
+     }
+ 
++    // the decoder does not reliably write AFBC and the scaled picture together
++    if (rk_context->afbc && !scale) {
++        MppFrameFormat afbc_format = MPP_FRAME_FBC_AFBC_V2;
++        ret = decoder->mpi->control(decoder->ctx, MPP_DEC_SET_OUTPUT_FORMAT, &afbc_format);
++        if (ret != MPP_OK) {
++            av_log(avctx, AV_LOG_ERROR, "Failed to ask for AFBC frames (code = %d).\n", ret);
++            ret = AVERROR_UNKNOWN;
++            goto fail;
++        }
++    } else if (rk_context->afbc) {
++        av_log(avctx, AV_LOG_WARNING, "AFBC is not asked with the scaled picture: frames come uncompressed\n");
++    }
++
+     ret = mpp_buffer_group_get_internal(&decoder->frame_group, MPP_BUFFER_TYPE_ION);
+     if (ret) {
+        av_log(avctx, AV_LOG_ERROR, "Failed to retrieve buffer group (code = %d)\n", ret);
+@@ -471,10 +487,25 @@ static int rkmpp_retrieve_frame(AVCodecContext *avctx, AVFrame *frame)
+         pitch                   = mpp_frame_get_hor_stride(mppframe);
+         y_offset                = 0;
+         uv_offset               = pitch * mpp_frame_get_ver_stride(mppframe);
++        mppformat               = mpp_frame_get_fmt(mppframe);
+         if (rkmpp_get_thumbnail(avctx, mppframe, &y_offset, &uv_offset)) {
+             frame->width      >>= 1;
+             frame->height     >>= 1;
+             pitch               = FFALIGN(pitch >> 1, 16);
++            mppformat          &= ~MPP_FRAME_FBC_MASK;  // the scaled picture is linear
++        } else if (MPP_FRAME_FMT_IS_AFBC(mppformat)) {
++            // the picture starts this many lines down the AFBC surface
++            frame->crop_top     = mpp_frame_get_offset_y(mppframe);
++            frame->height      += frame->crop_top;
++            // VOP2 takes the decoder's AFBC row stride as the pitch in bits per pixel
++            pitch               = mpp_frame_get_fbc_hdr_stride(mppframe) *
++                                  (MPP_FRAME_FMT_IS_YUV_10BIT(mppformat) ? 15 : 12) / 8;
++        }
++        drmformat               = rkmpp_get_frameformat(mppformat);
++        if (!drmformat) {
++            av_log(avctx, AV_LOG_ERROR, "Unsupported frame format %#x\n", mppformat);
++            ret = AVERROR_PATCHWELCOME;
++            goto fail;
+         }
+         frame->pts              = mpp_frame_get_pts(mppframe);
+         if (frame->pts != AV_NOPTS_VALUE && avctx->pkt_timebase.num)
+@@ -490,14 +521,6 @@ static int rkmpp_retrieve_frame(AVCodecContext *avctx, AVFrame *frame)
+         if ((mode & MPP_FRAME_FLAG_FIELD_ORDER_MASK) == MPP_FRAME_FLAG_TOP_FIRST)
+             frame->flags |= AV_FRAME_FLAG_TOP_FIELD_FIRST;
+ 
+-        mppformat = mpp_frame_get_fmt(mppframe);
+-        drmformat = rkmpp_get_frameformat(mppformat);
+-        if (!drmformat) {
+-            av_log(avctx, AV_LOG_ERROR, "Unsupported frame format %#x\n", mppformat);
+-            ret = AVERROR_PATCHWELCOME;
+-            goto fail;
+-        }
+-
+         // now setup the frame buffer info
+         buffer = mpp_frame_get_buffer(mppframe);
+         if (buffer) {
+@@ -524,7 +547,10 @@ static int rkmpp_retrieve_frame(AVCodecContext *avctx, AVFrame *frame)
+             desc->nb_layers = 1;
+             layer = &desc->layers[0];
+             layer->format = drmformat;
+-            layer->nb_planes = 2;
++            layer->nb_planes = MPP_FRAME_FMT_IS_AFBC(mppformat) ? 1 : 2;
++            if (MPP_FRAME_FMT_IS_AFBC(mppformat))
++                desc->objects[0].format_modifier =
++                    DRM_FORMAT_MOD_ARM_AFBC(AFBC_FORMAT_MOD_BLOCK_SIZE_16x16 | AFBC_FORMAT_MOD_SPARSE);
+ 
+             layer->planes[0].object_index = 0;
+             layer->planes[0].offset = y_offset;
+@@ -549,7 +575,8 @@ static int rkmpp_retrieve_frame(AVCodecContext *avctx, AVFrame *frame)
+             framecontext->decoder_ref = av_refstruct_ref(rk_context->decoder);
+ 
+             if (!decoder->frames_ref &&
+-                (ret = rkmpp_init_frames(avctx, frame->width, frame->height, mppformat)) < 0) {
++                (ret = rkmpp_init_frames(avctx, frame->width, frame->height - frame->crop_top,
++                                         mppformat)) < 0) {
+                 av_frame_unref(frame);
+                 return ret;
+             }
+@@ -658,6 +685,8 @@ static const AVOption rkmpp_options[] = {
+         OFFSET(capture_max_width), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, INT_MAX, VD },
+     { "capture_max_height", "Scale frames taller than this by 1/2, 0 off",
+         OFFSET(capture_max_height), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, INT_MAX, VD },
++    { "afbc", "Ask for AFBC compressed frames, where the codec has them",
++        OFFSET(afbc), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, VD },
+     { NULL },
+ };
+ 
+-- 
+2.47.3
+

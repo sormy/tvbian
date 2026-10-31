@@ -1,0 +1,96 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Tue, 27 Oct 2026 02:40:00 +0000
+Subject: [PATCH] avutil/hwcontext_v4l2request: ask for AFBC frames by bit depth
+
+A driver keeps a linear capture format as its default (Cedrus: NV12,
+P010) and offers its AFBC compressed formats beside it, so the frames
+never came AFBC. The device option "afbc" lists the bit depths ("8",
+"8,10") whose frames are asked for in the driver's AFBC format, where it
+offers one; refused, the driver's default as before. The formats are
+defined where the kernel's headers predate them.
+---
+ libavutil/hwcontext_v4l2request.c | 44 ++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 44 insertions(+)
+
+--- a/libavutil/hwcontext_v4l2request.c
++++ b/libavutil/hwcontext_v4l2request.c
+@@ -19,6 +19,7 @@
+ #include "config.h"
+ 
+ #include <fcntl.h>
++#include <stdlib.h>
+ #include <linux/dma-buf.h>
+ #include <linux/media.h>
+ #include <sys/ioctl.h>
+@@ -36,6 +37,14 @@
+ #include "mathematics.h"
+ #include "mem.h"
+ 
++// Cedrus's AFBC formats, where the kernel's headers predate them.
++#ifndef V4L2_PIX_FMT_YUV420_8_AFBC_16X16_SPLIT
++#define V4L2_PIX_FMT_YUV420_8_AFBC_16X16_SPLIT v4l2_fourcc('A', 'S', '1', '2')
++#endif
++#ifndef V4L2_PIX_FMT_YUV420_10_AFBC_16X16_SPLIT
++#define V4L2_PIX_FMT_YUV420_10_AFBC_16X16_SPLIT v4l2_fourcc('A', 'S', '0', '1')
++#endif
++
+ typedef struct V4L2RequestVideoDecoder {
+     dev_t media_dev;
+     dev_t video_dev;
+@@ -50,6 +59,9 @@ typedef struct V4L2RequestDeviceContext {
+     // ask for a CAPTURE picture no larger than this, 0 for full size
+     int capture_max_width;
+     int capture_max_height;
++
++    // Bit depths whose frames are asked for AFBC compressed, a bit each (1 << 8, 1 << 10).
++    uint32_t afbc_depths;
+ } V4L2RequestDeviceContext;
+ 
+ typedef struct V4L2RequestFramesContext {
+@@ -225,6 +237,18 @@ static int v4l2request_device_create(AVHWDeviceContext *hwdev, const char *devic
+     if ((entry = av_dict_get(opts, "capture_max_height", NULL, 0)))
+         hwctx->capture_max_height = strtol(entry->value, NULL, 10);
+ 
++    // "afbc": the bit depths to ask the decoder's AFBC formats for, "8" or "8,10"
++    hwctx->afbc_depths = 0;
++    for (const char *p = (entry = av_dict_get(opts, "afbc", NULL, 0)) ? entry->value : ""; *p;) {
++        char *end;
++        long depth = strtol(p, &end, 10);
++        if (end == p)
++            break;
++        if (depth > 0 && depth < 32)
++            hwctx->afbc_depths |= 1u << depth;
++        p = *end == ',' ? end + 1 : end;
++    }
++
+     // TODO: enumerate V4L2 Request API capable video decoders
+     //       and fill hwctx->decoders and hwctx->nb_decoders,
+     //       limit to decoders for the media 'device' when specified
+@@ -276,6 +300,26 @@ static int v4l2request_select_capture_format(AVHWFramesContext *hwfc)
+         .type = type,
+     };
+ 
++    V4L2RequestDeviceContext *hwctx = hwfc->device_ctx->hwctx;
++
++    // AFBC where asked for this bit depth and the driver offers it; else as below
++    if (fctx->bit_depth && fctx->bit_depth < 32 && (hwctx->afbc_depths & (1u << fctx->bit_depth))) {
++        for (struct v4l2_fmtdesc afbc = { .type = type };
++             ioctl(fctxi->video_fd, VIDIOC_ENUM_FMT, &afbc) >= 0; afbc.index++) {
++            for (int i = 0; i < FF_ARRAY_ELEMS(v4l2request_capture_pixelformats); i++) {
++                if (afbc.pixelformat != v4l2request_capture_pixelformats[i].pixelformat ||
++                    (v4l2request_capture_pixelformats[i].format_modifier >> 56) != DRM_FORMAT_MOD_VENDOR_ARM ||
++                    v4l2request_capture_pixelformats[i].bit_depth != fctx->bit_depth ||
++                    v4l2request_set_format(hwfc, type, afbc.pixelformat, 0) < 0 ||
++                    ioctl(fctxi->video_fd, VIDIOC_G_FMT, &format) < 0)
++                    continue;
++                if ((V4L2_TYPE_IS_MULTIPLANAR(type) ? format.fmt.pix_mp.pixelformat :
++                                                      format.fmt.pix.pixelformat) == afbc.pixelformat)
++                    return 0;
++            }
++        }
++    }
++
+     // Get the driver preferred (or default) format
+     if (ioctl(fctxi->video_fd, VIDIOC_G_FMT, &format) < 0)
+         return AVERROR(errno);

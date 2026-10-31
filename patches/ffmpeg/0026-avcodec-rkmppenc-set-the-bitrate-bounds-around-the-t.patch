@@ -1,0 +1,33 @@
+From a2bc9eec525beab21f966f0ae2750d31e8674883 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 31 Oct 2026 03:59:04 -0400
+Subject: [PATCH 25/25] avcodec/rkmppenc: set the bitrate bounds around the
+ target
+
+The encoder set rc:bps_target and left rc:bps_max and rc:bps_min at
+MPP's defaults, derived from its own default target: -b:v 8M encoded
+as "vbr bps [8000000:2500000:1500000]", capped at 2.5 Mbit/s. Bound
+the target as MPP's mpi_enc_test does, 17/16 above it and 15/16 (CBR)
+or 1/16 below; maxrate and minrate still override.
+---
+ libavcodec/rkmppenc.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/libavcodec/rkmppenc.c b/libavcodec/rkmppenc.c
+index 09501f0..f88f7f1 100644
+--- a/libavcodec/rkmppenc.c
++++ b/libavcodec/rkmppenc.c
+@@ -276,6 +276,10 @@ static av_cold int rkmpp_init_encoder(AVCodecContext *avctx)
+     mpp_enc_cfg_set_u32(cfg, "rc:mode", ctx->rc_mode);
+     if (avctx->bit_rate > 0) {
+         mpp_enc_cfg_set_s32(cfg, "rc:bps_target", avctx->bit_rate);
++        // bounds around the target, as MPP's own tests set them; its defaults cap below most targets
++        mpp_enc_cfg_set_s32(cfg, "rc:bps_max", avctx->bit_rate * 17 / 16);
++        mpp_enc_cfg_set_s32(cfg, "rc:bps_min", ctx->rc_mode == MPP_ENC_RC_MODE_CBR ?
++                                               avctx->bit_rate * 15 / 16 : avctx->bit_rate / 16);
+         if (avctx->rc_buffer_size >= avctx->bit_rate) {
+             int seconds = round((double)avctx->rc_buffer_size / avctx->bit_rate);
+             // 60 is the upper bound from the doc
+-- 
+2.47.3
+

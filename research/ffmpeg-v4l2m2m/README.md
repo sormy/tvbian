@@ -1,9 +1,9 @@
 # ffmpeg 9 with V4L2 mem2mem on the H96 Max M20
 
-ffmpeg 9.0.2 with `0001`-`0005` drives every hardware decoder and both encoders on the S905L3 the
-way GStreamer does, with `patches/meson-codecs/` `0014` and `0015`; `0009` asks for a scaled
-CAPTURE, with `0017`; `0010` and `0011` carry a decode across a resolution change. Not shipped: a
-static build into `/opt/ffmpeg-9`, beside Debian's ffmpeg.
+ffmpeg 9.0.2 with `patches/ffmpeg/` `0003`-`0007` drives every hardware decoder and both encoders on
+the S905L3 the way GStreamer does, with `patches/meson-codecs/` `0014` and `0015`; `0011` asks for a
+scaled CAPTURE, with `0017`; `0012` and `0013` carry a decode across a resolution change. Not
+shipped: a static build into `/opt/ffmpeg-9`, beside Debian's ffmpeg.
 
 ## Build
 
@@ -17,37 +17,37 @@ sh research/ffmpeg-v4l2m2m/build.sh
 
 | Patch  | Fixes                                                              |
 | ------ | ------------------------------------------------------------------ |
-| `0001` | raw elementary streams: unstamped packets came back all at pts 0   |
-| `0002` | MPEG-1/2, MPEG-4 and VC-1 `extradata` sent ahead of the first one  |
-| `0003` | `mjpeg_v4l2m2m`, which ffmpeg lacks                                |
-| `0004` | encoders fill `extradata` for Matroska and MP4                     |
-| `0005` | the drain waits for a CAPTURE buffer before it reports end of file |
-| `0006` | DRM PRIME frames and a DRM hardware context, from LibreELEC        |
-| `0007` | a bounded wait for a picture                                       |
-| `0008` | `ftp`: the URL's path decoded                                      |
-| `0009` | `-capture_max_height`: a COMPOSE request for a scaled CAPTURE      |
-| `0010` | a reinit no longer waits for the user to free its frames           |
-| `0011` | the frames before a resolution change are dequeued, not dropped    |
+| `0003` | raw elementary streams: unstamped packets came back all at pts 0   |
+| `0004` | MPEG-1/2, MPEG-4 and VC-1 `extradata` sent ahead of the first one  |
+| `0005` | `mjpeg_v4l2m2m`, which ffmpeg lacks                                |
+| `0006` | encoders fill `extradata` for Matroska and MP4                     |
+| `0007` | the drain waits for a CAPTURE buffer before it reports end of file |
+| `0008` | DRM PRIME frames and a DRM hardware context, from LibreELEC        |
+| `0009` | a bounded wait for a picture                                       |
+| `0010` | `ftp`: the URL's path decoded                                      |
+| `0011` | `-capture_max_height`: a COMPOSE request for a scaled CAPTURE      |
+| `0012` | a reinit no longer waits for the user to free its frames           |
+| `0013` | the frames before a resolution change are dequeued, not dropped    |
 
-`0006` makes `v4l2_m2m` depend on libdrm, so the build enables it.
+`0008` makes `v4l2_m2m` depend on libdrm, so the build enables it.
 
-`0009` sizes the request from the visible picture the decoder reports as `CROP`, with
+`0011` sizes the request from the visible picture the decoder reports as `CROP`, with
 `V4L2_SEL_FLAG_LE`, before the CAPTURE buffers and again after a source change.
 
-`0010`: the reinit waited from inside `avcodec_send_packet()` for frames its caller still held, so
+`0012`: the reinit waited from inside `avcodec_send_packet()` for frames its caller still held, so
 ffmpeg, ffprobe and any player hung at the first resolution change. A held buffer now keeps its
 mapping past `REQBUFS(0)` and is unmapped when freed.
 
-`0011`: the driver queues the event, then an empty buffer flagged `LAST`; ffmpeg handled the event
+`0013`: the driver queues the event, then an empty buffer flagged `LAST`; ffmpeg handled the event
 first and dropped the ready frame, or returned the empty buffer as one and ended at the `EPIPE`.
 
-`0001`: ffmpeg sends a packet without pts as 0, and the constant-rate output keeps 3 frames of 60.
+`0003`: ffmpeg sends a packet without pts as 0, and the constant-rate output keeps 3 frames of 60.
 
-`0004`: the encoders join SPS/PPS (VPS/SPS/PPS) to the first frame and take no `HEADER_MODE`; the
+`0006`: the encoders join SPS/PPS (VPS/SPS/PPS) to the first frame and take no `HEADER_MODE`; the
 patch encodes one black frame at init, keeps its parameter sets as `extradata`, and forces the first
 real frame to a key frame.
 
-`0005`: ffmpeg ends a drain once no CAPTURE buffer is in the driver; MJPEG's four-buffer pool hits
+`0007`: ffmpeg ends a drain once no CAPTURE buffer is in the driver; MJPEG's four-buffer pool hits
 that between frames, and a 1080p decode lost frames without it.
 
 ## Results
@@ -78,6 +78,6 @@ does.
 | Tried                                   | Why dropped                           |
 | --------------------------------------- | ------------------------------------- |
 | driver: no `EPOLLERR` until LAST        | no frame count changed once `0015` in |
-| ffmpeg: copy frames out of a short pool | `0005` alone keeps MJPEG whole        |
+| ffmpeg: copy frames out of a short pool | `0009` alone keeps MJPEG whole        |
 | Raspberry Pi's fork, `7.1.5+rpt2`       | 4K HEVC, MPEG-4, VC-1 fail; no MJPEG  |
 | `-num_capture_buffers 8` for 4K         | the driver caps it: `0014`            |

@@ -1,0 +1,39 @@
+From 35e63fd1a25de79bdf2bcf40f7e66d26a15da0e1 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 31 Oct 2026 03:58:37 -0400
+Subject: [PATCH 20/25] avutil/hwcontext_drm: refuse to map a frame whose
+ planes sw_format lacks
+
+A frames context's sw_format can name a frame's samples without
+describing its memory: rkmpp's NV15 frames have two planes against
+YUV420P10's three, its AFBC frames one. Mapping such a frame filled
+only some plane pointers, and the copy behind hwdownload dereferenced
+the rest. Fail the map when the layers' planes and sw_format's differ
+in number.
+---
+ libavutil/hwcontext_drm.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/libavutil/hwcontext_drm.c b/libavutil/hwcontext_drm.c
+index 565c02d..22c962f 100644
+--- a/libavutil/hwcontext_drm.c
++++ b/libavutil/hwcontext_drm.c
+@@ -130,6 +130,15 @@ static int drm_map_frame(AVHWFramesContext *hwfc,
+     int mmap_prot;
+     void *addr;
+ 
++    // a compressed or packed layout leaves sw_format's planes unfilled
++    for (i = plane = 0; i < desc->nb_layers; i++)
++        plane += desc->layers[i].nb_planes;
++    if (plane != av_pix_fmt_count_planes(hwfc->sw_format)) {
++        av_log(hwfc, AV_LOG_ERROR, "Cannot map a frame of %d planes as %s.\n",
++               plane, av_get_pix_fmt_name(hwfc->sw_format));
++        return AVERROR(ENOSYS);
++    }
++
+     map = av_mallocz(sizeof(*map));
+     if (!map)
+         return AVERROR(ENOMEM);
+-- 
+2.47.3
+

@@ -1,0 +1,74 @@
+From fcf32668c32aa92fa4e5fc7053098dc0fcb24646 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 31 Oct 2026 03:58:32 -0400
+Subject: [PATCH 19/25] avcodec/rkmppdec: export 10-bit frames as
+ DRM_FORMAT_NV15
+
+MPP decodes 10-bit H.264, HEVC and VP9 to MPP_FMT_YUV420SP_10BIT, the
+packed layout DRM names NV15. The decoder mapped it to
+DRM_FORMAT_NV12_10, a define only Rockchip's vendor headers carry, so
+those frames had no format, and their frames context had sw_format
+AV_PIX_FMT_NONE, which buffersrc's format query dereferences: ffmpeg
+stopped at the first 10-bit frame.
+
+NV15 has no AVPixelFormat; the frames context names its samples,
+YUV420P10. The format is read under MPP_FRAME_FMT_MASK, so frames
+flagged HDR map too, and any other format fails the decode instead of
+exporting a layer without one.
+---
+ libavcodec/rkmppdec.c | 24 ++++++++++++++++++------
+ 1 file changed, 18 insertions(+), 6 deletions(-)
+
+diff --git a/libavcodec/rkmppdec.c b/libavcodec/rkmppdec.c
+index a6bc565..e69efe1 100644
+--- a/libavcodec/rkmppdec.c
++++ b/libavcodec/rkmppdec.c
+@@ -80,15 +80,23 @@ static MppCodingType rkmpp_get_codingtype(AVCodecContext *avctx)
+ 
+ static uint32_t rkmpp_get_frameformat(MppFrameFormat mppformat)
+ {
+-    switch (mppformat) {
++    switch (mppformat & MPP_FRAME_FMT_MASK) {
+     case MPP_FMT_YUV420SP:          return DRM_FORMAT_NV12;
+-#ifdef DRM_FORMAT_NV12_10
+-    case MPP_FMT_YUV420SP_10BIT:    return DRM_FORMAT_NV12_10;
+-#endif
++    case MPP_FMT_YUV420SP_10BIT:    return DRM_FORMAT_NV15;
+     default:                        return 0;
+     }
+ }
+ 
++static enum AVPixelFormat rkmpp_get_swformat(MppFrameFormat mppformat)
++{
++    switch (mppformat & MPP_FRAME_FMT_MASK) {
++    case MPP_FMT_YUV420SP:          return AV_PIX_FMT_NV12;
++    // NV15 has no AVPixelFormat; this one names its samples
++    case MPP_FMT_YUV420SP_10BIT:    return AV_PIX_FMT_YUV420P10;
++    default:                        return AV_PIX_FMT_NONE;
++    }
++}
++
+ static int rkmpp_write_data(AVCodecContext *avctx, uint8_t *buffer, int size, int64_t pts)
+ {
+     RKMPPDecodeContext *rk_context = avctx->priv_data;
+@@ -352,11 +360,15 @@ static int rkmpp_retrieve_frame(AVCodecContext *avctx, AVFrame *frame)
+             }
+ 
+             mppformat = mpp_frame_get_fmt(mppframe);
+-            drmformat = rkmpp_get_frameformat(mppformat);
++            if (!rkmpp_get_frameformat(mppformat)) {
++                av_log(avctx, AV_LOG_ERROR, "Unsupported frame format %#x\n", mppformat);
++                ret = AVERROR_PATCHWELCOME;
++                goto fail;
++            }
+ 
+             hwframes = (AVHWFramesContext*)decoder->frames_ref->data;
+             hwframes->format    = AV_PIX_FMT_DRM_PRIME;
+-            hwframes->sw_format = drmformat == DRM_FORMAT_NV12 ? AV_PIX_FMT_NV12 : AV_PIX_FMT_NONE;
++            hwframes->sw_format = rkmpp_get_swformat(mppformat);
+             hwframes->width     = avctx->width;
+             hwframes->height    = avctx->height;
+             ret = av_hwframe_ctx_init(decoder->frames_ref);
+-- 
+2.47.3
+

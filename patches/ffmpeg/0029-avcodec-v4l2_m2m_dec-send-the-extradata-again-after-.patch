@@ -1,0 +1,29 @@
+From 1bfcb51ff1dbe3b61ca6bf69c51844f9e4b5e06d Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 31 Oct 2026 08:27:28 -0400
+Subject: [PATCH 3/3] avcodec/v4l2_m2m_dec: send the extradata again after a
+ flush
+
+A decoder that restarts on a seek loses the headers the extradata carried;
+MPEG-4 and VC-1 from a container have them nowhere else, and decoded
+nothing after the seek.
+---
+ libavcodec/v4l2_m2m_dec.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/libavcodec/v4l2_m2m_dec.c b/libavcodec/v4l2_m2m_dec.c
+index 42d05c8..585ca73 100644
+--- a/libavcodec/v4l2_m2m_dec.c
++++ b/libavcodec/v4l2_m2m_dec.c
+@@ -347,6 +347,8 @@ static void v4l2_decode_flush(AVCodecContext *avctx)
+         av_log(avctx, AV_LOG_ERROR, "VIDIOC_DECODER_CMD start error: %d\n", errno);
+ 
+     s->draining = 0;
++    /* a decoder that restarts on the seek has lost the stream headers */
++    s->extradata_sent = 0;
+     output->done = 0;
+     capture->done = 0;
+ }
+-- 
+2.55.0
+

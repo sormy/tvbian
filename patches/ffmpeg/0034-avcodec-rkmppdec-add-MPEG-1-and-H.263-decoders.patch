@@ -1,0 +1,80 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 31 Oct 2026 10:38:12 -0400
+Subject: [PATCH] avcodec/rkmppdec: add MPEG-1 and H.263 decoders
+
+MPP decodes both on the legacy VPU, MPEG-1 through its MPEG-2 parser.
+MPEG-1 refuses a stream past 1920x1088 there, as MPEG-2 does; H.263
+decodes to its largest picture, 1408x1152.
+---
+ configure              | 2 ++
+ libavcodec/allcodecs.c | 2 ++
+ libavcodec/rkmppdec.c  | 7 ++++++-
+ 3 files changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/configure b/configure
+index 758148f..6da56f8 100755
+--- a/configure
++++ b/configure
+@@ -3717,6 +3717,8 @@ mpeg2_qsv_decoder_select="qsvdec"
+ mpeg2_qsv_encoder_select="qsvenc"
+ mpeg2_vaapi_encoder_select="cbs_mpeg2 vaapi_encode"
+ mpeg2_rkmpp_decoder_deps="rkmpp"
++mpeg1_rkmpp_decoder_deps="rkmpp"
++h263_rkmpp_decoder_deps="rkmpp"
+ mpeg2_v4l2m2m_decoder_deps="v4l2_m2m mpeg2_v4l2_m2m"
+ mpeg4_cuvid_decoder_deps="cuvid"
+ mpeg4_mediacodec_decoder_deps="mediacodec"
+diff --git a/libavcodec/allcodecs.c b/libavcodec/allcodecs.c
+index 1512ac5..2b288c6 100644
+--- a/libavcodec/allcodecs.c
++++ b/libavcodec/allcodecs.c
+@@ -216,6 +216,8 @@ extern const FFCodec ff_mpegvideo_decoder;
+ extern const FFCodec ff_mpeg1_v4l2m2m_decoder;
+ extern const FFCodec ff_mpeg2_mmal_decoder;
+ extern const FFCodec ff_mpeg2_rkmpp_decoder;
++extern const FFCodec ff_mpeg1_rkmpp_decoder;
++extern const FFCodec ff_h263_rkmpp_decoder;
+ extern const FFCodec ff_mpeg2_v4l2m2m_decoder;
+ extern const FFCodec ff_mpeg2_qsv_decoder;
+ extern const FFCodec ff_mpeg2_mediacodec_decoder;
+diff --git a/libavcodec/rkmppdec.c b/libavcodec/rkmppdec.c
+index 0e068a6..a701490 100644
+--- a/libavcodec/rkmppdec.c
++++ b/libavcodec/rkmppdec.c
+@@ -76,7 +76,9 @@ static MppCodingType rkmpp_get_codingtype(AVCodecContext *avctx)
+     switch (avctx->codec_id) {
+     case AV_CODEC_ID_H264:          return MPP_VIDEO_CodingAVC;
+     case AV_CODEC_ID_HEVC:          return MPP_VIDEO_CodingHEVC;
++    case AV_CODEC_ID_MPEG1VIDEO:
+     case AV_CODEC_ID_MPEG2VIDEO:    return MPP_VIDEO_CodingMPEG2;
++    case AV_CODEC_ID_H263:          return MPP_VIDEO_CodingH263;
+     case AV_CODEC_ID_MPEG4:         return MPP_VIDEO_CodingMPEG4;
+     case AV_CODEC_ID_VP8:           return MPP_VIDEO_CodingVP8;
+     case AV_CODEC_ID_VP9:           return MPP_VIDEO_CodingVP9;
+@@ -84,10 +86,11 @@ static MppCodingType rkmpp_get_codingtype(AVCodecContext *avctx)
+     }
+ }
+ 
+-/* MPEG-2, MPEG-4 and VP8 run on the legacy VPU, which stops at 1920x1088. */
++/* MPEG-1, MPEG-2, MPEG-4 and VP8 run on the legacy VPU, which stops at 1920x1088. */
+ static int rkmpp_exceeds_hardware(AVCodecContext *avctx)
+ {
+     switch (avctx->codec_id) {
++    case AV_CODEC_ID_MPEG1VIDEO:
+     case AV_CODEC_ID_MPEG2VIDEO:
+     case AV_CODEC_ID_MPEG4:
+     case AV_CODEC_ID_VP8:
+@@ -738,7 +741,9 @@ static const AVOption rkmpp_options[] = {
+ 
+ RKMPP_DEC(h264,  AV_CODEC_ID_H264,          "h264_mp4toannexb")
+ RKMPP_DEC(hevc,  AV_CODEC_ID_HEVC,          "hevc_mp4toannexb")
++RKMPP_DEC(mpeg1, AV_CODEC_ID_MPEG1VIDEO,    NULL)
+ RKMPP_DEC(mpeg2, AV_CODEC_ID_MPEG2VIDEO,    NULL)
++RKMPP_DEC(h263,  AV_CODEC_ID_H263,          NULL)
+ RKMPP_DEC(mpeg4, AV_CODEC_ID_MPEG4,         "mpeg4_unpack_bframes")
+ RKMPP_DEC(vp8,   AV_CODEC_ID_VP8,           NULL)
+ RKMPP_DEC(vp9,   AV_CODEC_ID_VP9,           NULL)
+-- 
+2.47.3
+

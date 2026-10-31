@@ -1,0 +1,41 @@
+From fb0c84ca86147f2d216b107b38780bcd0bc27e6f Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 31 Oct 2026 03:58:42 -0400
+Subject: [PATCH 21/25] avcodec/rkmppdec: pass timestamps to MPP in
+ microseconds
+
+MPP's MPEG-2 parser derives each picture's timestamp from the packets'
+assuming microseconds, or 90 kHz, which it detects; given Matroska's
+milliseconds it returned them out of order and the muxer dropped
+frames. Rescale between pkt_timebase and microseconds both ways; the
+other codecs carry the value through unchanged.
+---
+ libavcodec/rkmppdec.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/libavcodec/rkmppdec.c b/libavcodec/rkmppdec.c
+index e69efe1..20586f3 100644
+--- a/libavcodec/rkmppdec.c
++++ b/libavcodec/rkmppdec.c
+@@ -111,6 +111,9 @@ static int rkmpp_write_data(AVCodecContext *avctx, uint8_t *buffer, int size, in
+         return AVERROR_UNKNOWN;
+     }
+ 
++    // MPP counts microseconds; its MPEG-2 parser derives timestamps in them
++    if (pts != AV_NOPTS_VALUE && avctx->pkt_timebase.num)
++        pts = av_rescale_q(pts, avctx->pkt_timebase, AV_TIME_BASE_Q);
+     mpp_packet_set_pts(packet, pts);
+ 
+     if (!buffer)
+@@ -401,6 +404,8 @@ static int rkmpp_retrieve_frame(AVCodecContext *avctx, AVFrame *frame)
+         frame->width            = mpp_frame_get_width(mppframe);
+         frame->height           = mpp_frame_get_height(mppframe);
+         frame->pts              = mpp_frame_get_pts(mppframe);
++        if (frame->pts != AV_NOPTS_VALUE && avctx->pkt_timebase.num)
++            frame->pts          = av_rescale_q(frame->pts, AV_TIME_BASE_Q, avctx->pkt_timebase);
+         frame->color_range      = mpp_frame_get_color_range(mppframe);
+         frame->color_primaries  = mpp_frame_get_color_primaries(mppframe);
+         frame->color_trc        = mpp_frame_get_color_trc(mppframe);
+-- 
+2.47.3
+

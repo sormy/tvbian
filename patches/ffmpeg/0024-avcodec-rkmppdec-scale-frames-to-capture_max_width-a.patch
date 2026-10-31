@@ -1,0 +1,285 @@
+From 43c7d46f17273b148efe9f2b2502cb5bb57d2789 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 31 Oct 2026 03:58:53 -0400
+Subject: [PATCH 23/25] avcodec/rkmppdec: scale frames to capture_max_width and
+ capture_max_height
+
+capture_max_width and capture_max_height, as the v4l2m2m and
+v4l2request decoders take them, ask for a picture within them. MPP's
+decoders scale by 1/2 in both directions, through base:enable_thumbnail.
+MPP_FRAME_THUMBNAIL_ONLY is handled by the vdpu383 and vdpu384 HALs
+only; vdpu382 (RK3528, RK3562) writes the scaled picture behind the
+full one, MPP_FRAME_THUMBNAIL_MIXED, and gives its plane offsets in the
+frame's meta, so MIXED is asked for.
+
+The decoder is asked for it when the container's size exceeds a limit,
+or the container gives none. A frame that exceeds a limit is exported
+as its scaled picture where the decoder wrote one, else in full; 1/2
+can still exceed the limits. The frames context is set up at the first
+frame after an info change, at the size frames are exported at.
+---
+ libavcodec/rkmppdec.c | 160 +++++++++++++++++++++++++++++++++---------
+ 1 file changed, 127 insertions(+), 33 deletions(-)
+
+diff --git a/libavcodec/rkmppdec.c b/libavcodec/rkmppdec.c
+index 9e5ffc5..38e1311 100644
+--- a/libavcodec/rkmppdec.c
++++ b/libavcodec/rkmppdec.c
+@@ -40,6 +40,7 @@
+ #include "libavutil/imgutils.h"
+ #include "libavutil/log.h"
+ #include "libavutil/mem.h"
++#include "libavutil/opt.h"
+ 
+ #define RECEIVE_FRAME_TIMEOUT   100
+ #define FRAMEGROUP_MAX_FRAMES   16
+@@ -60,6 +61,8 @@ typedef struct {
+ typedef struct {
+     AVClass *av_class;
+     RKMPPDecoder *decoder;           ///< RefStruct reference
++    int capture_max_width;
++    int capture_max_height;
+ } RKMPPDecodeContext;
+ 
+ typedef struct {
+@@ -163,12 +166,87 @@ static void rkmpp_release_decoder(AVRefStructOpaque unused, void *obj)
+     av_buffer_unref(&decoder->device_ref);
+ }
+ 
++/*
++ * Have the decoder write a picture scaled by 1/2, the hardware's only ratio,
++ * after each full one, for the frames that exceed capture_max_width or
++ * capture_max_height.
++ */
++static av_cold int rkmpp_enable_thumbnail(AVCodecContext *avctx)
++{
++    RKMPPDecodeContext *rk_context = avctx->priv_data;
++    RKMPPDecoder *decoder = rk_context->decoder;
++    MppDecCfg cfg = NULL;
++    int ret;
++
++    if (mpp_dec_cfg_init(&cfg) != MPP_OK)
++        return AVERROR(ENOMEM);
++
++    ret = decoder->mpi->control(decoder->ctx, MPP_DEC_GET_CFG, cfg);
++    if (ret == MPP_OK)
++        ret = mpp_dec_cfg_set_u32(cfg, "base:enable_thumbnail", MPP_FRAME_THUMBNAIL_MIXED);
++    if (ret == MPP_OK)
++        ret = decoder->mpi->control(decoder->ctx, MPP_DEC_SET_CFG, cfg);
++    mpp_dec_cfg_deinit(cfg);
++
++    if (ret != MPP_OK) {
++        av_log(avctx, AV_LOG_ERROR, "Failed to enable the scaled picture (code = %d).\n", ret);
++        return AVERROR_UNKNOWN;
++    }
++    return 0;
++}
++
++static int rkmpp_exceeds_limits(AVCodecContext *avctx, int width, int height)
++{
++    RKMPPDecodeContext *rk_context = avctx->priv_data;
++
++    return (rk_context->capture_max_width  && width  > rk_context->capture_max_width) ||
++           (rk_context->capture_max_height && height > rk_context->capture_max_height);
++}
++
++/*
++ * Whether the frame exceeds the limits and the decoder wrote its scaled
++ * picture, whose plane offsets then go to y_offset and uv_offset.
++ */
++static int rkmpp_get_thumbnail(AVCodecContext *avctx, MppFrame mppframe,
++                               RK_S32 *y_offset, RK_S32 *uv_offset)
++{
++    MppMeta meta = mpp_frame_get_meta(mppframe);
++
++    if (!rkmpp_exceeds_limits(avctx, mpp_frame_get_width(mppframe), mpp_frame_get_height(mppframe)))
++        return 0;
++
++    return mpp_frame_get_thumbnail_en(mppframe) == MPP_FRAME_THUMBNAIL_MIXED && meta &&
++           mpp_meta_get_s32(meta, KEY_DEC_TBN_Y_OFFSET, y_offset) == MPP_OK &&
++           mpp_meta_get_s32(meta, KEY_DEC_TBN_UV_OFFSET, uv_offset) == MPP_OK;
++}
++
++static int rkmpp_init_frames(AVCodecContext *avctx, int width, int height, MppFrameFormat mppformat)
++{
++    RKMPPDecodeContext *rk_context = avctx->priv_data;
++    RKMPPDecoder *decoder = rk_context->decoder;
++    AVHWFramesContext *hwframes;
++
++    decoder->frames_ref = av_hwframe_ctx_alloc(decoder->device_ref);
++    if (!decoder->frames_ref)
++        return AVERROR(ENOMEM);
++
++    avctx->width  = width;
++    avctx->height = height;
++
++    hwframes = (AVHWFramesContext*)decoder->frames_ref->data;
++    hwframes->format    = AV_PIX_FMT_DRM_PRIME;
++    hwframes->sw_format = rkmpp_get_swformat(mppformat);
++    hwframes->width     = width;
++    hwframes->height    = height;
++    return av_hwframe_ctx_init(decoder->frames_ref);
++}
++
+ static av_cold int rkmpp_init_decoder(AVCodecContext *avctx)
+ {
+     RKMPPDecodeContext *rk_context = avctx->priv_data;
+     RKMPPDecoder *decoder = NULL;
+     MppCodingType codectype = MPP_VIDEO_CodingUnused;
+-    int ret;
++    int ret, scale;
+     RK_S64 paramS64;
+     RK_S32 paramS32;
+ 
+@@ -232,6 +310,16 @@ static av_cold int rkmpp_init_decoder(AVCodecContext *avctx)
+         goto fail;
+     }
+ 
++    // a size the container leaves out may exceed the limits
++    scale = (rk_context->capture_max_width || rk_context->capture_max_height) &&
++            (!avctx->width || !avctx->height ||
++             rkmpp_exceeds_limits(avctx, avctx->width, avctx->height));
++    if (scale) {
++        ret = rkmpp_enable_thumbnail(avctx);
++        if (ret < 0)
++            goto fail;
++    }
++
+     ret = mpp_buffer_group_get_internal(&decoder->frame_group, MPP_BUFFER_TYPE_ION);
+     if (ret) {
+        av_log(avctx, AV_LOG_ERROR, "Failed to retrieve buffer group (code = %d)\n", ret);
+@@ -332,7 +420,8 @@ static int rkmpp_retrieve_frame(AVCodecContext *avctx, AVFrame *frame)
+     MppFrame mppframe = NULL;
+     MppBuffer buffer = NULL;
+     AVDRMLayerDescriptor *layer = NULL;
+-    int mode;
++    int mode, pitch;
++    RK_S32 y_offset, uv_offset;
+     MppFrameFormat mppformat;
+     uint32_t drmformat;
+ 
+@@ -345,41 +434,15 @@ static int rkmpp_retrieve_frame(AVCodecContext *avctx, AVFrame *frame)
+     if (mppframe) {
+         // Check whether we have a special frame or not
+         if (mpp_frame_get_info_change(mppframe)) {
+-            AVHWFramesContext *hwframes;
+-
+             av_log(avctx, AV_LOG_INFO, "Decoder noticed an info change (%dx%d), format=%d\n",
+                                         (int)mpp_frame_get_width(mppframe), (int)mpp_frame_get_height(mppframe),
+                                         (int)mpp_frame_get_fmt(mppframe));
+ 
+-            avctx->width = mpp_frame_get_width(mppframe);
+-            avctx->height = mpp_frame_get_height(mppframe);
+-
+             decoder->mpi->control(decoder->ctx, MPP_DEC_SET_INFO_CHANGE_READY, NULL);
+ 
++            // the next frame sets up the frames context, at its size, full or scaled
+             av_buffer_unref(&decoder->frames_ref);
+ 
+-            decoder->frames_ref = av_hwframe_ctx_alloc(decoder->device_ref);
+-            if (!decoder->frames_ref) {
+-                ret = AVERROR(ENOMEM);
+-                goto fail;
+-            }
+-
+-            mppformat = mpp_frame_get_fmt(mppframe);
+-            if (!rkmpp_get_frameformat(mppformat)) {
+-                av_log(avctx, AV_LOG_ERROR, "Unsupported frame format %#x\n", mppformat);
+-                ret = AVERROR_PATCHWELCOME;
+-                goto fail;
+-            }
+-
+-            hwframes = (AVHWFramesContext*)decoder->frames_ref->data;
+-            hwframes->format    = AV_PIX_FMT_DRM_PRIME;
+-            hwframes->sw_format = rkmpp_get_swformat(mppformat);
+-            hwframes->width     = avctx->width;
+-            hwframes->height    = avctx->height;
+-            ret = av_hwframe_ctx_init(decoder->frames_ref);
+-            if (ret < 0)
+-                goto fail;
+-
+             // here decoder is fully initialized, we need to feed it again with data
+             ret = AVERROR(EAGAIN);
+             goto fail;
+@@ -405,6 +468,14 @@ static int rkmpp_retrieve_frame(AVCodecContext *avctx, AVFrame *frame)
+         frame->format           = AV_PIX_FMT_DRM_PRIME;
+         frame->width            = mpp_frame_get_width(mppframe);
+         frame->height           = mpp_frame_get_height(mppframe);
++        pitch                   = mpp_frame_get_hor_stride(mppframe);
++        y_offset                = 0;
++        uv_offset               = pitch * mpp_frame_get_ver_stride(mppframe);
++        if (rkmpp_get_thumbnail(avctx, mppframe, &y_offset, &uv_offset)) {
++            frame->width      >>= 1;
++            frame->height     >>= 1;
++            pitch               = FFALIGN(pitch >> 1, 16);
++        }
+         frame->pts              = mpp_frame_get_pts(mppframe);
+         if (frame->pts != AV_NOPTS_VALUE && avctx->pkt_timebase.num)
+             frame->pts          = av_rescale_q(frame->pts, AV_TIME_BASE_Q, avctx->pkt_timebase);
+@@ -421,6 +492,11 @@ static int rkmpp_retrieve_frame(AVCodecContext *avctx, AVFrame *frame)
+ 
+         mppformat = mpp_frame_get_fmt(mppframe);
+         drmformat = rkmpp_get_frameformat(mppformat);
++        if (!drmformat) {
++            av_log(avctx, AV_LOG_ERROR, "Unsupported frame format %#x\n", mppformat);
++            ret = AVERROR_PATCHWELCOME;
++            goto fail;
++        }
+ 
+         // now setup the frame buffer info
+         buffer = mpp_frame_get_buffer(mppframe);
+@@ -451,12 +527,12 @@ static int rkmpp_retrieve_frame(AVCodecContext *avctx, AVFrame *frame)
+             layer->nb_planes = 2;
+ 
+             layer->planes[0].object_index = 0;
+-            layer->planes[0].offset = 0;
+-            layer->planes[0].pitch = mpp_frame_get_hor_stride(mppframe);
++            layer->planes[0].offset = y_offset;
++            layer->planes[0].pitch = pitch;
+ 
+             layer->planes[1].object_index = 0;
+-            layer->planes[1].offset = layer->planes[0].pitch * mpp_frame_get_ver_stride(mppframe);
+-            layer->planes[1].pitch = layer->planes[0].pitch;
++            layer->planes[1].offset = uv_offset;
++            layer->planes[1].pitch = pitch;
+ 
+             // MPP decoder needs to be closed only when all frames have been released.
+             framecontext->frame = mppframe;
+@@ -472,6 +548,12 @@ static int rkmpp_retrieve_frame(AVCodecContext *avctx, AVFrame *frame)
+             }
+             framecontext->decoder_ref = av_refstruct_ref(rk_context->decoder);
+ 
++            if (!decoder->frames_ref &&
++                (ret = rkmpp_init_frames(avctx, frame->width, frame->height, mppformat)) < 0) {
++                av_frame_unref(frame);
++                return ret;
++            }
++
+             frame->hw_frames_ctx = av_buffer_ref(decoder->frames_ref);
+             if (!frame->hw_frames_ctx) {
+                 av_frame_unref(frame);
+@@ -569,9 +651,21 @@ static const AVCodecHWConfigInternal *const rkmpp_hw_configs[] = {
+     NULL
+ };
+ 
++#define OFFSET(x) offsetof(RKMPPDecodeContext, x)
++#define VD AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_DECODING_PARAM
++static const AVOption rkmpp_options[] = {
++    { "capture_max_width", "Scale frames wider than this by 1/2, 0 off",
++        OFFSET(capture_max_width), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, INT_MAX, VD },
++    { "capture_max_height", "Scale frames taller than this by 1/2, 0 off",
++        OFFSET(capture_max_height), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, INT_MAX, VD },
++    { NULL },
++};
++
+ #define RKMPP_DEC_CLASS(NAME) \
+     static const AVClass rkmpp_##NAME##_dec_class = { \
+         .class_name = "rkmpp_" #NAME "_dec", \
++        .item_name  = av_default_item_name, \
++        .option     = rkmpp_options, \
+         .version    = LIBAVUTIL_VERSION_INT, \
+     };
+ 
+-- 
+2.47.3
+

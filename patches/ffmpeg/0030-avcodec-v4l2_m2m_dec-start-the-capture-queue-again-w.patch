@@ -1,0 +1,33 @@
+From 727e0a4e87ea7f9e078b8648e151507c99e100c9 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 31 Oct 2026 09:25:16 -0400
+Subject: [PATCH] avcodec/v4l2_m2m_dec: start the capture queue again without a
+ new packet
+
+After a resolution change the capture queue stays off until the next
+packet is sent. A caller that waits for the frames of the packets it
+already sent before sending more, as a player paced by its output does,
+waited for good: H.264 stopped at its first change. Start the queue when
+asked for a frame with no packet too.
+---
+ libavcodec/v4l2_m2m_dec.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/libavcodec/v4l2_m2m_dec.c b/libavcodec/v4l2_m2m_dec.c
+index 585ca73..79ab615 100644
+--- a/libavcodec/v4l2_m2m_dec.c
++++ b/libavcodec/v4l2_m2m_dec.c
+@@ -204,6 +204,10 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
+     if (!s->buf_pkt.size) {
+         ret = ff_decode_get_packet(avctx, &s->buf_pkt);
+         if (ret < 0) {
++            /* a resolution change left the capture queue off; its frames need it on */
++            if (ret == AVERROR(EAGAIN) && !capture->streamon && !s->draining &&
++                v4l2_try_start(avctx) == AVERROR(ENOMEM))
++                return AVERROR(ENOMEM);
+             if (ret == AVERROR(EAGAIN))
+                 return ff_v4l2_context_dequeue_frame(capture, frame, 0);
+             else if (ret != AVERROR_EOF)
+-- 
+2.55.0
+

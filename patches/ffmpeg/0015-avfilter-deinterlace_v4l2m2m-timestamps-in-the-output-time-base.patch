@@ -1,0 +1,43 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 25 Oct 2026 05:46:14 +0000
+Subject: [PATCH] avfilter/deinterlace_v4l2m2m: timestamps in the output time
+ base
+
+The output time base is half the input's, a frame per field, but both
+frames kept the input's timestamps: the second the input frame's own,
+the first the midpoint of the previous and current ones. In the output
+time base the second frame sits at twice the input's timestamp and the
+first at the sum of the previous and current ones, or one input frame's
+duration earlier when there is no previous frame. Duplicate timestamps
+reached the muxer, and an output seek dropped every frame.
+---
+ libavfilter/vf_deinterlace_v4l2m2m.c | 12 ++++++++----
+ 1 file changed, 8 insertions(+), 4 deletions(-)
+
+diff --git a/libavfilter/vf_deinterlace_v4l2m2m.c b/libavfilter/vf_deinterlace_v4l2m2m.c
+index f47a33b..07a9cb6 100644
+--- a/libavfilter/vf_deinterlace_v4l2m2m.c
++++ b/libavfilter/vf_deinterlace_v4l2m2m.c
+@@ -821,10 +821,14 @@ static int deint_v4l2m2m_dequeue(AVFilterContext *avctx, AVFrame *input_frame)
+ 
+     output_frame_2->flags &= ~AV_FRAME_FLAG_INTERLACED;
+ 
+-    if (ctx->prev_in_frame && ctx->prev_in_frame->pts != AV_NOPTS_VALUE
+-       && input_frame->pts != AV_NOPTS_VALUE) {
+-      first_pts = (ctx->prev_in_frame->pts + input_frame->pts) / 2;
+-      av_log(priv, AV_LOG_DEBUG, "calculated first pts %"PRId64"\n", first_pts);
++    /* the output time base is half the input's: a frame per field */
++    if (input_frame->pts != AV_NOPTS_VALUE) {
++        output_frame_2->pts = input_frame->pts * 2;
++        if (ctx->prev_in_frame && ctx->prev_in_frame->pts != AV_NOPTS_VALUE)
++            first_pts = ctx->prev_in_frame->pts + input_frame->pts;
++        else
++            first_pts = output_frame_2->pts - FFMAX(input_frame->duration, 1);
++        av_log(priv, AV_LOG_DEBUG, "calculated first pts %"PRId64"\n", first_pts);
+     }
+ 
+     output_frame_1->pts = first_pts;
+-- 
+2.47.3
+

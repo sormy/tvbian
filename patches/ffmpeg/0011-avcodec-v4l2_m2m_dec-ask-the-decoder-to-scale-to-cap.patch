@@ -1,25 +1,26 @@
-From 423d375fd41a8a8ebf708e16044dadc31a70dcbe Mon Sep 17 00:00:00 2001
+From 89aa23f55f78a5d9e6a1db20b8594148f40d0169 Mon Sep 17 00:00:00 2001
 From: Artem Butusov <art.sormy@gmail.com>
 Date: Sun, 18 Oct 2026 17:32:29 -0400
 Subject: [PATCH] avcodec/v4l2_m2m_dec: ask the decoder to scale to
- capture_max_height
+ capture_max_width and capture_max_height
 
 A stateful decoder that can scale takes a smaller COMPOSE rectangle on
 its CAPTURE queue, before CAPTURE buffers are allocated, and G_FMT then
-reports the scaled size. capture_max_height asks for a picture no
-taller than its value, sized from the visible picture the decoder
-reports as CROP and with V4L2_SEL_FLAG_LE; a decoder that cannot scale
-refuses or answers with the full size, and decoding goes on at full
-size. The request is made before the CAPTURE buffers and again after a
-source change.
+reports the scaled size. capture_max_width and capture_max_height,
+either or both, ask for a picture that fits within them: the visible
+picture the decoder reports as CROP, clamped to each limit set, is the
+rectangle, with V4L2_SEL_FLAG_LE, and the decoder fits the picture in
+it keeping its aspect. A decoder that cannot scale refuses or answers
+with the full size, and decoding goes on at full size. The request is
+made before the CAPTURE buffers and again after a source change.
 ---
- libavcodec/v4l2_m2m.c     | 40 +++++++++++++++++++++++++++++++++++++++
- libavcodec/v4l2_m2m.h     | 12 ++++++++++++
- libavcodec/v4l2_m2m_dec.c | 12 ++++++++++++
- 3 files changed, 64 insertions(+)
+ libavcodec/v4l2_m2m.c     | 43 +++++++++++++++++++++++++++++++++++++++
+ libavcodec/v4l2_m2m.h     | 14 +++++++++++++
+ libavcodec/v4l2_m2m_dec.c | 14 +++++++++++++
+ 3 files changed, 71 insertions(+)
 
 diff --git a/libavcodec/v4l2_m2m.c b/libavcodec/v4l2_m2m.c
-index 07c7500..1d4691d 100644
+index 07c7500..1033470 100644
 --- a/libavcodec/v4l2_m2m.c
 +++ b/libavcodec/v4l2_m2m.c
 @@ -33,6 +33,7 @@
@@ -30,12 +31,12 @@ index 07c7500..1d4691d 100644
  #include "v4l2_context.h"
  #include "v4l2_fmt.h"
  #include "v4l2_m2m.h"
-@@ -205,6 +206,41 @@ error:
+@@ -205,6 +206,43 @@ error:
   *                  V4L2 M2M Interface
   *
   ******************************************************************************/
 +/* A decoder that scales takes a COMPOSE rectangle smaller than the visible
-+ * picture, no larger than asked, and reports the one it chose. */
++ * picture, fits the picture in it, and reports the size it chose. */
 +void ff_v4l2_m2m_request_compose(V4L2m2mContext *s)
 +{
 +    struct v4l2_selection sel = {
@@ -44,19 +45,21 @@ index 07c7500..1d4691d 100644
 +    };
 +    int width  = s->capture.width;
 +    int height = s->capture.height;
++    int max_width  = s->capture_max_width  ? s->capture_max_width  : INT_MAX;
++    int max_height = s->capture_max_height ? s->capture_max_height : INT_MAX;
 +
 +    if (!ioctl(s->fd, VIDIOC_G_SELECTION, &sel) && sel.r.height > 0) {
 +        width  = sel.r.width;
 +        height = sel.r.height;
 +    }
-+    if (height <= s->capture_max_height)
++    if (width <= max_width && height <= max_height)
 +        return;
 +    sel.target   = V4L2_SEL_TGT_COMPOSE;
 +    sel.flags    = V4L2_SEL_FLAG_LE;
 +    sel.r.left   = 0;
 +    sel.r.top    = 0;
-+    sel.r.height = s->capture_max_height;
-+    sel.r.width  = (width * (int64_t)s->capture_max_height + height - 1) / height;
++    sel.r.width  = FFMIN(width, max_width);
++    sel.r.height = FFMIN(height, max_height);
 +    if (ioctl(s->fd, VIDIOC_S_SELECTION, &sel)) {
 +        av_log(s->avctx, AV_LOG_DEBUG, "capture COMPOSE not taken, full size\n");
 +        return;
@@ -72,53 +75,56 @@ index 07c7500..1d4691d 100644
  int ff_v4l2_m2m_codec_reinit(V4L2m2mContext *s)
  {
      void *log_ctx = s->avctx;
-@@ -227,6 +263,9 @@ int ff_v4l2_m2m_codec_reinit(V4L2m2mContext *s)
+@@ -227,6 +265,9 @@ int ff_v4l2_m2m_codec_reinit(V4L2m2mContext *s)
  
      ff_v4l2_context_release(&s->capture);
  
-+    if (s->capture_max_height)
++    if (s->capture_max_width || s->capture_max_height)
 +        ff_v4l2_m2m_request_compose(s);
 +
      /* 3. get the new capture format */
      ret = ff_v4l2_context_get_format(&s->capture, 0);
      if (ret) {
-@@ -339,6 +378,7 @@ int ff_v4l2_m2m_create_context(V4L2m2mPriv *priv, V4L2m2mContext **s)
+@@ -339,6 +380,8 @@ int ff_v4l2_m2m_create_context(V4L2m2mPriv *priv, V4L2m2mContext **s)
      /* populate it */
      priv->context->capture.num_buffers = priv->num_capture_buffers;
      priv->context->output.num_buffers  = priv->num_output_buffers;
++    priv->context->capture_max_width   = priv->capture_max_width;
 +    priv->context->capture_max_height  = priv->capture_max_height;
      priv->context->self_ref = priv->context;
      priv->context->fd = -1;
  
 diff --git a/libavcodec/v4l2_m2m.h b/libavcodec/v4l2_m2m.h
-index 4c9b9e2..3f73eff 100644
+index 4c9b9e2..32f8c49 100644
 --- a/libavcodec/v4l2_m2m.h
 +++ b/libavcodec/v4l2_m2m.h
-@@ -55,6 +55,9 @@ typedef struct V4L2m2mContext {
+@@ -55,6 +55,10 @@ typedef struct V4L2m2mContext {
      atomic_uint refcount;
      int reinit;
  
-+    /* decoder: ask for a CAPTURE picture no taller than this, 0 for full size */
++    /* decoder: ask for a CAPTURE picture no larger than this, 0 for full size */
++    int capture_max_width;
 +    int capture_max_height;
 +
      /* null frame/packet received */
      int draining;
      AVPacket buf_pkt;
-@@ -92,6 +95,7 @@ typedef struct V4L2m2mPriv {
+@@ -92,6 +96,8 @@ typedef struct V4L2m2mPriv {
      int num_output_buffers;
      int num_capture_buffers;
      enum AVPixelFormat pix_fmt;
++    int capture_max_width;
 +    int capture_max_height;
  } V4L2m2mPriv;
  
  /**
-@@ -133,6 +137,14 @@ int ff_v4l2_m2m_codec_end(V4L2m2mPriv *priv);
+@@ -133,6 +139,14 @@ int ff_v4l2_m2m_codec_end(V4L2m2mPriv *priv);
   *
   * @returns 0 in case of success, negative number otherwise
   */
 +/**
-+ * Ask a decoder that scales for a CAPTURE picture no taller than
-+ * capture_max_height, before the capture buffers are allocated.
++ * Ask a decoder that scales for a CAPTURE picture within capture_max_width
++ * and capture_max_height, before the capture buffers are allocated.
 + *
 + * @param[in] ctx The V4L2m2mContext instantiated by the encoder/decoder.
 + */
@@ -128,7 +134,7 @@ index 4c9b9e2..3f73eff 100644
  
  /**
 diff --git a/libavcodec/v4l2_m2m_dec.c b/libavcodec/v4l2_m2m_dec.c
-index d73cb9c..73a14a5 100644
+index d73cb9c..9311547 100644
 --- a/libavcodec/v4l2_m2m_dec.c
 +++ b/libavcodec/v4l2_m2m_dec.c
 @@ -100,6 +100,16 @@ static int v4l2_try_start(AVCodecContext *avctx)
@@ -136,7 +142,7 @@ index d73cb9c..73a14a5 100644
      }
  
 +    /* 3.1 ask a decoder that scales for a smaller picture, and take its format */
-+    if (s->capture_max_height) {
++    if (s->capture_max_width || s->capture_max_height) {
 +        ff_v4l2_m2m_request_compose(s);
 +        ret = ioctl(s->fd, VIDIOC_G_FMT, &capture->format);
 +        if (ret) {
@@ -148,15 +154,14 @@ index d73cb9c..73a14a5 100644
      /* 4. init the capture context now that we have the capture format */
      if (!capture->buffers) {
          ret = ff_v4l2_context_init(capture);
-@@ -349,6 +359,8 @@ static const AVOption options[] = {
+@@ -349,6 +359,10 @@ static const AVOption options[] = {
      { "num_capture_buffers", "Number of buffers in the capture context",
          OFFSET(num_capture_buffers), AV_OPT_TYPE_INT, {.i64 = 20}, 2, INT_MAX, FLAGS },
      { "pixel_format", "Pixel format to be used by the decoder", OFFSET(pix_fmt), AV_OPT_TYPE_PIXEL_FMT, {.i64 = AV_PIX_FMT_NONE}, AV_PIX_FMT_NONE, AV_PIX_FMT_NB, FLAGS },
++    { "capture_max_width", "Ask the decoder to scale frames to this width or less, 0 off",
++        OFFSET(capture_max_width), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, FLAGS },
 +    { "capture_max_height", "Ask the decoder to scale frames to this height or less, 0 off",
 +        OFFSET(capture_max_height), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, FLAGS },
      { NULL},
  };
  
--- 
-2.55.0
-

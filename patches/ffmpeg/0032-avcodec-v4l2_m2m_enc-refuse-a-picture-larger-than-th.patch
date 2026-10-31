@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 31 Oct 2026 10:03:16 -0400
+Subject: [PATCH] avcodec/v4l2_m2m_enc: refuse a picture larger than the
+ encoder takes
+
+A driver clamps a format it cannot take to its largest size; the frame
+copy then asserted on the driver's narrower stride: Cedrus' H.264
+encoder, 4096 wide at most, aborted ffmpeg at 5120x2880.
+---
+ libavcodec/v4l2_m2m_enc.c | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/libavcodec/v4l2_m2m_enc.c b/libavcodec/v4l2_m2m_enc.c
+index 4d8286a..33c3c7a 100644
+--- a/libavcodec/v4l2_m2m_enc.c
++++ b/libavcodec/v4l2_m2m_enc.c
+@@ -476,6 +476,16 @@ static av_cold int v4l2_encode_init(AVCodecContext *avctx)
+         return AVERROR(EINVAL);
+     }
+ 
++    /* A driver clamps a picture it cannot take to its largest size. */
++    if ((V4L2_TYPE_IS_MULTIPLANAR(output->type) ?
++         output->format.fmt.pix_mp.width : output->format.fmt.pix.width) < avctx->width ||
++        (V4L2_TYPE_IS_MULTIPLANAR(output->type) ?
++         output->format.fmt.pix_mp.height : output->format.fmt.pix.height) < avctx->height) {
++        av_log(avctx, AV_LOG_ERROR, "%dx%d is larger than the encoder takes\n",
++               avctx->width, avctx->height);
++        return AVERROR(EINVAL);
++    }
++
+     ret = v4l2_prepare_encoder(s);
+     if (ret || !(avctx->flags & AV_CODEC_FLAG_GLOBAL_HEADER))
+         return ret;
+-- 
+2.47.3
+

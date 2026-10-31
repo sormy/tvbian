@@ -1,0 +1,239 @@
+From 92e3ddddd4a02acde36c6a9647fe2b4be514b025 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 31 Oct 2026 08:27:28 -0400
+Subject: [PATCH 2/3] avcodec/v4l2m2m: ask the meson decoder for compressed
+ frames by bit depth
+
+Amlogic's decoder offers its compressed picture beside NV12M: the scatter
+layout of Amlogic FBC, the buffer its header, which the display's video
+plane reads as is. At 4K that halves what the plane fetches, and it
+carries 10-bit pictures, which NV12M cuts to 8.
+
+The decoder option "afbc" lists the bit depths ("8", "8,10") whose DRM
+frames are asked for compressed, the name the request API's and rkmpp's
+decoders take for their AFBC. The decoder corrects the format to the
+stream's bit depth once it knows it, and a change of the choice reinits the
+capture queue as a resolution change does. Frames carry
+DRM_FORMAT_YUV420_8BIT or _10BIT with DRM_FORMAT_MOD_AMLOGIC_FBC, scatter,
+memory saving at 8 bits.
+---
+ libavcodec/v4l2_buffers.c | 22 ++++++++++++++++++++-
+ libavcodec/v4l2_context.c | 13 ++++++++++++-
+ libavcodec/v4l2_m2m.c     | 40 +++++++++++++++++++++++++++++++++++++++
+ libavcodec/v4l2_m2m.h     | 20 ++++++++++++++++++++
+ libavcodec/v4l2_m2m_dec.c |  2 ++
+ 5 files changed, 95 insertions(+), 2 deletions(-)
+
+diff --git a/libavcodec/v4l2_buffers.c b/libavcodec/v4l2_buffers.c
+index 992008e..a5e127b 100644
+--- a/libavcodec/v4l2_buffers.c
++++ b/libavcodec/v4l2_buffers.c
+@@ -255,6 +255,14 @@ static uint8_t * v4l2_get_drm_frame(V4L2Buffer *avbuf)
+         layer->planes[i].pitch = avbuf->plane_info[i].bytesperline;
+     }
+ 
++    switch (avbuf->context->format.fmt.pix_mp.pixelformat) {
++    case V4L2_PIX_FMT_AM_FBC8:
++    case V4L2_PIX_FMT_AM_FBC10:
++        layer->format = avbuf->context->format.fmt.pix_mp.pixelformat ==
++            V4L2_PIX_FMT_AM_FBC8 ? DRM_FORMAT_YUV420_8BIT : DRM_FORMAT_YUV420_10BIT;
++        return (uint8_t *) drm_desc;
++    }
++
+     switch (avbuf->context->av_pix_fmt) {
+     case AV_PIX_FMT_YUYV422:
+ 
+@@ -353,6 +361,18 @@ void ff_v4l2_buffer_unmap(V4L2Buffer *avbuf)
+     }
+ }
+ 
++static uint64_t v4l2_drm_modifier(V4L2Buffer *avbuf)
++{
++    switch (avbuf->context->format.fmt.pix_mp.pixelformat) {
++    case V4L2_PIX_FMT_AM_FBC8:
++        return DRM_FORMAT_MOD_AMLOGIC_FBC(AMLOGIC_FBC_LAYOUT_SCATTER,
++                                          AMLOGIC_FBC_OPTION_MEM_SAVING);
++    case V4L2_PIX_FMT_AM_FBC10:
++        return DRM_FORMAT_MOD_AMLOGIC_FBC(AMLOGIC_FBC_LAYOUT_SCATTER, 0);
++    }
++    return DRM_FORMAT_MOD_LINEAR;
++}
++
+ static int v4l2_buffer_export_drm(V4L2Buffer* avbuf)
+ {
+     struct v4l2_exportbuffer expbuf;
+@@ -373,7 +393,7 @@ static int v4l2_buffer_export_drm(V4L2Buffer* avbuf)
+             /* drm frame */
+             avbuf->drm_frame.objects[i].size = avbuf->buf.m.planes[i].length;
+             avbuf->drm_frame.objects[i].fd = expbuf.fd;
+-            avbuf->drm_frame.objects[i].format_modifier = DRM_FORMAT_MOD_LINEAR;
++            avbuf->drm_frame.objects[i].format_modifier = v4l2_drm_modifier(avbuf);
+         } else {
+             /* drm frame */
+             avbuf->drm_frame.objects[0].size = avbuf->buf.length;
+diff --git a/libavcodec/v4l2_context.c b/libavcodec/v4l2_context.c
+index aeaaa0f..82354ec 100644
+--- a/libavcodec/v4l2_context.c
++++ b/libavcodec/v4l2_context.c
+@@ -86,6 +86,16 @@ static AVRational v4l2_get_sar(V4L2Context *ctx)
+     return sar;
+ }
+ 
++/* the compressed CAPTURE format the context runs with, else 0 */
++static uint32_t v4l2_fbc_format(V4L2Context *ctx)
++{
++    uint32_t f = ctx->format.fmt.pix_mp.pixelformat;
++
++    if (!V4L2_TYPE_IS_MULTIPLANAR(ctx->type))
++        return 0;
++    return f == V4L2_PIX_FMT_AM_FBC8 || f == V4L2_PIX_FMT_AM_FBC10 ? f : 0;
++}
++
+ static inline unsigned int v4l2_resolution_changed(V4L2Context *ctx, struct v4l2_format *fmt2)
+ {
+     struct v4l2_format *fmt1 = &ctx->format;
+@@ -205,7 +215,8 @@ static int v4l2_handle_event(V4L2Context *ctx)
+         return 0;
+     }
+ 
+-    if (v4l2_resolution_changed(&s->capture, &cap_fmt)) {
++    if (v4l2_resolution_changed(&s->capture, &cap_fmt) ||
++        ff_v4l2_m2m_fbc_format(s) != v4l2_fbc_format(&s->capture)) {
+         s->capture.height = v4l2_get_height(&cap_fmt);
+         s->capture.width = v4l2_get_width(&cap_fmt);
+         s->capture.sample_aspect_ratio = v4l2_get_sar(&s->capture);
+diff --git a/libavcodec/v4l2_m2m.c b/libavcodec/v4l2_m2m.c
+index 045b914..c9d70bb 100644
+--- a/libavcodec/v4l2_m2m.c
++++ b/libavcodec/v4l2_m2m.c
+@@ -133,6 +133,34 @@ done:
+     return ret;
+ }
+ 
++uint32_t ff_v4l2_m2m_fbc_format(V4L2m2mContext *s)
++{
++    struct v4l2_format fmt = s->capture.format;
++    uint32_t f;
++
++    if (!s->output_drm || !s->fbc_depths || !V4L2_TYPE_IS_MULTIPLANAR(fmt.type))
++        return 0;
++    /* the driver answers with the stream's bit depth once it knows it */
++    fmt.fmt.pix_mp.pixelformat = s->fbc_depths & (1 << 8) ?
++        V4L2_PIX_FMT_AM_FBC8 : V4L2_PIX_FMT_AM_FBC10;
++    if (ioctl(s->fd, VIDIOC_TRY_FMT, &fmt))
++        return 0;
++    f = fmt.fmt.pix_mp.pixelformat;
++    if (f == V4L2_PIX_FMT_AM_FBC8)
++        return s->fbc_depths & (1 << 8) ? f : 0;
++    if (f == V4L2_PIX_FMT_AM_FBC10)
++        return s->fbc_depths & (1 << 10) ? f : 0;
++    return 0;
++}
++
++static void v4l2_m2m_set_fbc(V4L2m2mContext *s)
++{
++    uint32_t f = ff_v4l2_m2m_fbc_format(s);
++
++    if (f)
++        s->capture.format.fmt.pix_mp.pixelformat = f;
++}
++
+ static av_cold int v4l2_configure_contexts(V4L2m2mContext *s)
+ {
+     void *log_ctx = s->avctx;
+@@ -165,6 +193,7 @@ static av_cold int v4l2_configure_contexts(V4L2m2mContext *s)
+         goto error;
+     }
+ 
++    v4l2_m2m_set_fbc(s);
+     ret = ff_v4l2_context_set_format(&s->capture);
+     if (ret) {
+         av_log(log_ctx, AV_LOG_ERROR, "can't to set v4l2 capture format\n");
+@@ -266,6 +295,8 @@ int ff_v4l2_m2m_codec_reinit(V4L2m2mContext *s)
+         return ret;
+     }
+ 
++    v4l2_m2m_set_fbc(s);
++
+     /* 4. set the capture format */
+     ret = ff_v4l2_context_set_format(&s->capture);
+     if (ret) {
+@@ -371,6 +402,15 @@ int ff_v4l2_m2m_create_context(V4L2m2mPriv *priv, V4L2m2mContext **s)
+     priv->context->output.num_buffers  = priv->num_output_buffers;
+     priv->context->capture_max_width   = priv->capture_max_width;
+     priv->context->capture_max_height  = priv->capture_max_height;
++    for (const char *p = priv->afbc ? priv->afbc : ""; *p;) {
++        char *end;
++        long depth = strtol(p, &end, 10);
++
++        if (end == p || depth < 8 || depth > 16)
++            break;
++        priv->context->fbc_depths |= 1 << depth;
++        p = *end == ',' ? end + 1 : end;
++    }
+     priv->context->self_ref = priv->context;
+     priv->context->fd = -1;
+ 
+diff --git a/libavcodec/v4l2_m2m.h b/libavcodec/v4l2_m2m.h
+index 031bffc..4d2190a 100644
+--- a/libavcodec/v4l2_m2m.h
++++ b/libavcodec/v4l2_m2m.h
+@@ -32,6 +32,14 @@
+ #include "libavutil/pixfmt.h"
+ #include "v4l2_context.h"
+ 
++/* the meson decoder's compressed frames, its own formats */
++#ifndef V4L2_PIX_FMT_AM_FBC8
++#define V4L2_PIX_FMT_AM_FBC8  v4l2_fourcc('A', 'M', 'F', '8')
++#endif
++#ifndef V4L2_PIX_FMT_AM_FBC10
++#define V4L2_PIX_FMT_AM_FBC10 v4l2_fourcc('A', 'M', 'F', 'A')
++#endif
++
+ #define container_of(ptr, type, member) ({ \
+         const __typeof__(((type *)0)->member ) *__mptr = (ptr); \
+         (type *)((char *)__mptr - offsetof(type,member) );})
+@@ -55,6 +63,9 @@ typedef struct V4L2m2mContext {
+     int capture_max_width;
+     int capture_max_height;
+ 
++    /* decoder: the bit depths whose DRM frames come compressed, a bit each */
++    int fbc_depths;
++
+     /* null frame/packet received */
+     int draining;
+     AVPacket buf_pkt;
+@@ -94,8 +105,17 @@ typedef struct V4L2m2mPriv {
+     enum AVPixelFormat pix_fmt;
+     int capture_max_width;
+     int capture_max_height;
++    char *afbc;
+ } V4L2m2mPriv;
+ 
++/**
++ * The decoder's compressed CAPTURE format for the stream's bit depth, where
++ * the afbc option lists that depth, else 0.
++ *
++ * @param[in] s The V4L2m2mContext of the decoder, its device open.
++ */
++uint32_t ff_v4l2_m2m_fbc_format(V4L2m2mContext *s);
++
+ /**
+  * Allocate a new context and references for a V4L2 M2M instance.
+  *
+diff --git a/libavcodec/v4l2_m2m_dec.c b/libavcodec/v4l2_m2m_dec.c
+index 3b86fd9..42d05c8 100644
+--- a/libavcodec/v4l2_m2m_dec.c
++++ b/libavcodec/v4l2_m2m_dec.c
+@@ -363,6 +363,8 @@ static const AVOption options[] = {
+         OFFSET(capture_max_width), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, FLAGS },
+     { "capture_max_height", "Ask the decoder to scale frames to this height or less, 0 off",
+         OFFSET(capture_max_height), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, FLAGS },
++    { "afbc", "Bit depths whose DRM frames come compressed, \"8\" or \"8,10\"",
++        OFFSET(afbc), AV_OPT_TYPE_STRING, {.str = NULL}, 0, 0, FLAGS },
+     { NULL},
+ };
+ 
+-- 
+2.55.0
+

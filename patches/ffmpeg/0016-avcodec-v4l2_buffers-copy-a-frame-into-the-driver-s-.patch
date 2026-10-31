@@ -1,0 +1,81 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 25 Oct 2026 14:39:13 +0000
+Subject: [PATCH] avcodec/v4l2_buffers: copy a frame into the driver's stride
+
+A single-buffer format was copied plane by plane at the frame's own
+linesize, which the driver's bytesperline need not match: a 1366-wide
+rawvideo frame landed sheared in a buffer with a 1376-byte stride.
+---
+ libavcodec/v4l2_buffers.c | 44 ++++++++++++++++++++++++++++-----------
+ 1 file changed, 32 insertions(+), 12 deletions(-)
+
+diff --git a/libavcodec/v4l2_buffers.c b/libavcodec/v4l2_buffers.c
+index 5ade828..992008e 100644
+--- a/libavcodec/v4l2_buffers.c
++++ b/libavcodec/v4l2_buffers.c
+@@ -32,6 +32,7 @@
+ #include "libavutil/attributes.h"
+ #include "libavutil/hwcontext.h"
+ #include "libavutil/pixdesc.h"
++#include "libavutil/imgutils.h"
+ #include "libavutil/refstruct.h"
+ #include "v4l2_context.h"
+ #include "v4l2_buffers.h"
+@@ -551,22 +552,41 @@ static int v4l2_buffer_swframe_to_buf(const AVFrame *frame, V4L2Buffer *out)
+ 
+     if (!is_planar_format) {
+         const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(frame->format);
+-        int planes_nb = 0;
++        uint8_t *dst = out->plane_info[0].mm_addr;
++        unsigned int length = out->plane_info[0].length;
++        int planes_nb = av_pix_fmt_count_planes(frame->format);
++        int linesizes[4];
+         int offset = 0;
+ 
+-        for (i = 0; i < desc->nb_components; i++)
+-            planes_nb = FFMAX(planes_nb, desc->comp[i].plane + 1);
++        /* The buffer's planes follow the driver's stride, not the frame's. */
++        ret = av_image_fill_linesizes(linesizes, frame->format,
++                                      out->plane_info[0].bytesperline /
++                                      desc->comp[0].step);
++        if (ret < 0)
++            return ret;
+ 
+         for (i = 0; i < planes_nb; i++) {
+-            int size, h = height;
+-            if (i == 1 || i == 2) {
+-                h = AV_CEIL_RSHIFT(h, desc->log2_chroma_h);
+-            }
+-            size = frame->linesize[i] * h;
+-            ret = v4l2_bufref_to_buf(out, 0, frame->data[i], size, offset);
+-            if (ret)
+-                return ret;
+-            offset += size;
++            int chroma = i == 1 || i == 2;
++            int h = chroma ? AV_CEIL_RSHIFT(height, desc->log2_chroma_h) : height;
++            int rows = chroma ? AV_CEIL_RSHIFT(frame->height, desc->log2_chroma_h)
++                              : frame->height;
++
++            if (offset + linesizes[i] * h > length)
++                return AVERROR(EINVAL);
++
++            av_image_copy_plane(dst + offset, linesizes[i],
++                                frame->data[i], frame->linesize[i],
++                                av_image_get_linesize(frame->format, frame->width, i),
++                                FFMIN(rows, h));
++            offset += linesizes[i] * h;
++        }
++
++        if (V4L2_TYPE_IS_MULTIPLANAR(out->buf.type)) {
++            out->planes[0].bytesused = offset;
++            out->planes[0].length = length;
++        } else {
++            out->buf.bytesused = offset;
++            out->buf.length = length;
+         }
+         return 0;
+     }
+-- 
+2.47.3
+

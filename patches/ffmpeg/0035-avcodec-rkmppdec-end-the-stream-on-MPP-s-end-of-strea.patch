@@ -1,0 +1,98 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 31 Oct 2026 13:01:01 -0400
+Subject: [PATCH] avcodec/rkmppdec: end the stream on MPP's end-of-stream frame
+
+eos_reached was set when the end of stream was sent, so a receive that
+found no frame ready returned AVERROR_EOF: at 7680x4320 MPP is still
+allocating its buffers after the info change, and H.264 and VP9 ended
+with no frame. The frame MPP marks as the end of stream may carry the
+last picture, which was dropped. A flush left the flag set, so a seek
+back from the end decoded nothing more.
+
+The end of stream sent and reached are now two flags; past the first,
+receive waits for MPP's end-of-stream frame, keeps a picture it carries,
+and a flush clears both.
+---
+ libavcodec/rkmppdec.c | 17 +++++++++++------
+ 1 file changed, 11 insertions(+), 6 deletions(-)
+
+diff --git a/libavcodec/rkmppdec.c b/libavcodec/rkmppdec.c
+index 797eae9..3e0baaa 100644
+--- a/libavcodec/rkmppdec.c
++++ b/libavcodec/rkmppdec.c
+@@ -52,6 +52,7 @@ typedef struct {
+     MppBufferGroup frame_group;
+ 
+     char first_packet;
++    char eos_sent;
+     char eos_reached;
+ 
+     AVBufferRef *frames_ref;
+@@ -409,7 +410,7 @@ static int rkmpp_send_packet(AVCodecContext *avctx, const AVPacket *avpkt)
+     // handle EOF
+     if (!avpkt->size) {
+         av_log(avctx, AV_LOG_DEBUG, "End of stream.\n");
+-        decoder->eos_reached = 1;
++        decoder->eos_sent = 1;
+         ret = rkmpp_write_data(avctx, NULL, 0, 0);
+         if (ret)
+             av_log(avctx, AV_LOG_ERROR, "Failed to send EOS to decoder (code = %d)\n", ret);
+@@ -485,7 +486,7 @@ static int rkmpp_retrieve_frame(AVCodecContext *avctx, AVFrame *frame)
+             // here decoder is fully initialized, we need to feed it again with data
+             ret = AVERROR(EAGAIN);
+             goto fail;
+-        } else if (mpp_frame_get_eos(mppframe)) {
++        } else if (mpp_frame_get_eos(mppframe) && !mpp_frame_get_buffer(mppframe)) {
+             av_log(avctx, AV_LOG_DEBUG, "Received a EOS frame.\n");
+             decoder->eos_reached = 1;
+             ret = AVERROR_EOF;
+@@ -500,8 +501,9 @@ static int rkmpp_retrieve_frame(AVCodecContext *avctx, AVFrame *frame)
+             goto fail;
+         }
+ 
+-        // here we should have a valid frame
++        // here we should have a valid frame, the last one if it carries the end of stream
+         av_log(avctx, AV_LOG_DEBUG, "Received a frame.\n");
++        decoder->eos_reached = mpp_frame_get_eos(mppframe);
+ 
+         // setup general frame fields
+         frame->format           = AV_PIX_FMT_DRM_PRIME;
+@@ -637,7 +639,7 @@ static int rkmpp_receive_frame(AVCodecContext *avctx, AVFrame *frame)
+     int ret = MPP_NOK;
+     RK_S32 usedslots, freeslots;
+ 
+-    if (!decoder->eos_reached) {
++    if (!decoder->eos_sent) {
+         // we get the available slots in decoder
+         ret = decoder->mpi->control(decoder->ctx, MPP_DEC_GET_STREAM_COUNT, &usedslots);
+         if (ret != MPP_OK) {
+@@ -670,13 +672,14 @@ static int rkmpp_receive_frame(AVCodecContext *avctx, AVFrame *frame)
+         }
+ 
+         // make sure we keep decoder full
+-        if (freeslots > 1 && !decoder->eos_reached)
++        if (freeslots > 1 && !decoder->eos_sent)
+             return AVERROR(EAGAIN);
+     }
+ 
++    // past the end of stream sent, MPP may still be setting up: wait for its end of stream
+     do {
+         ret = rkmpp_retrieve_frame(avctx, frame);
+-    } while (decoder->eos_reached && ret == AVERROR(EAGAIN));
++    } while (decoder->eos_sent && ret == AVERROR(EAGAIN));
+ 
+     return ret;
+ }
+@@ -692,6 +695,8 @@ static av_cold void rkmpp_flush(AVCodecContext *avctx)
+     ret = decoder->mpi->reset(decoder->ctx);
+     if (ret == MPP_OK) {
+         decoder->first_packet = 1;
++        decoder->eos_sent = 0;
++        decoder->eos_reached = 0;
+     } else
+         av_log(avctx, AV_LOG_ERROR, "Failed to reset MPI (code = %d)\n", ret);
+ }
+-- 
+2.55.0
+

@@ -8,7 +8,7 @@ WORK="${1:-/root/ffmpeg-build}"
 mkdir -p "$WORK" && cd "$WORK"
 [ -s ffmpeg-$VER.tar.xz ] || curl -fsSL -o ffmpeg-$VER.tar.xz https://ffmpeg.org/releases/ffmpeg-$VER.tar.xz
 rm -rf ffmpeg-$VER && tar -xJf ffmpeg-$VER.tar.xz && cd ffmpeg-$VER
-for p in "$HERE"/patches/*.patch; do patch -p1 < "$p"; done
+for p in "$HERE"/../../patches/ffmpeg/0*.patch; do patch -p1 < "$p"; done
 ./configure --prefix=/opt/ffmpeg-9 --disable-shared --enable-static --disable-doc \
   --disable-everything --enable-ffmpeg --enable-ffprobe --enable-v4l2-m2m --enable-libdrm \
   --enable-decoder=h264,hevc,vp9,mpeg1video,mpeg2video,mpeg4,mjpeg,vc1,wmv3,rawvideo \

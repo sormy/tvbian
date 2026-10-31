@@ -1,0 +1,54 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 31 Oct 2026 09:56:39 -0400
+Subject: [PATCH] avcodec/rkmppdec: refuse streams larger than the legacy VPU
+ decodes
+
+MPEG-2, MPEG-4 and VP8 run on the legacy VPU, which stops at 1920x1088.
+Wider VP8 decoded to broken pictures and wider MPEG-2 and MPEG-4 to no
+frames; the decoder now fails to open, so a player picks another.
+---
+ libavcodec/rkmppdec.c | 20 ++++++++++++++++++++
+ 1 file changed, 20 insertions(+)
+
+diff --git a/libavcodec/rkmppdec.c b/libavcodec/rkmppdec.c
+index bf410ab..0e068a6 100644
+--- a/libavcodec/rkmppdec.c
++++ b/libavcodec/rkmppdec.c
+@@ -84,6 +84,19 @@ static MppCodingType rkmpp_get_codingtype(AVCodecContext *avctx)
+     }
+ }
+ 
++/* MPEG-2, MPEG-4 and VP8 run on the legacy VPU, which stops at 1920x1088. */
++static int rkmpp_exceeds_hardware(AVCodecContext *avctx)
++{
++    switch (avctx->codec_id) {
++    case AV_CODEC_ID_MPEG2VIDEO:
++    case AV_CODEC_ID_MPEG4:
++    case AV_CODEC_ID_VP8:
++        return avctx->width > 1920 || avctx->height > 1088;
++    default:
++        return 0;
++    }
++}
++
+ static uint32_t rkmpp_get_frameformat(MppFrameFormat mppformat)
+ {
+     int afbc = MPP_FRAME_FMT_IS_AFBC(mppformat);
+@@ -273,6 +286,13 @@ static av_cold int rkmpp_init_decoder(AVCodecContext *avctx)
+         goto fail;
+     }
+ 
++    if (rkmpp_exceeds_hardware(avctx)) {
++        av_log(avctx, AV_LOG_ERROR, "%dx%d is larger than the hardware decodes\n",
++               avctx->width, avctx->height);
++        ret = AVERROR(ENOSYS);
++        goto fail;
++    }
++
+     ret = mpp_check_support_format(MPP_CTX_DEC, codectype);
+     if (ret != MPP_OK) {
+         av_log(avctx, AV_LOG_ERROR, "Codec type (%d) unsupported by MPP\n", avctx->codec_id);
+-- 
+2.47.3
+
