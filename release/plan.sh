@@ -28,15 +28,35 @@ field() {  # field <package> <name> [inputs]: that field of the package's stanza
       n = split($0, l, "\n"); for (k = 1; k <= n; k++) if (index(l[k], f ": ") == 1) print substr(l[k], length(f) + 3)
     }' "$REL/Packages.published"
 }
+# stanzas <awk condition> [-v <name>=<value>]...: Package, Source, Version and Filename of each
+# published stanza the condition matches
+stanzas() {
+  local cond=$1
+  shift
+  awk -v RS= "$@" '{
+    pkg = src = ver = file = ""
+    n = split($0, l, "\n")
+    for (k = 1; k <= n; k++) {
+      if (index(l[k], "Package: ") == 1) pkg = substr(l[k], 10)
+      else if (index(l[k], "Source: ") == 1) { src = substr(l[k], 9); sub(/ .*/, "", src) }
+      else if (index(l[k], "Version: ") == 1) ver = substr(l[k], 10)
+      else if (index(l[k], "Filename: ") == 1) file = substr(l[k], 11)
+    }
+    if (src == "") src = pkg
+  } '"$cond"' { print pkg, src, ver, file }' "$REL/Packages.published"
+}
 fetch() {  # fetch <package> <version>: its published deb, into /out/debs
   local file
-  file=$(awk -v RS= -v p="$1" -v v="$2" '$0 ~ "(^|\n)Package: " p "\n" && $0 ~ "\nVersion: " v "\n"' \
-    "$REL/Packages.published" | sed -n 's|^Filename: \(\./\)\{0,1\}||p')
+  file=$(stanzas 'pkg == p && ver == v' -v p="$1" -v v="$2" | awk '{print $4}' | sed 's|^\./||')
   curl -fsSL "$APT/$file" -o "/out/debs/$file"
 }
-# plan <step> <argument> <package> <inputs> <upstream>: the next version counts revisions per upstream
+source_packages() {  # source_packages <source> <version>: every published package built from it
+  stanzas 'src == s && ver == v' -v s="$1" -v v="$2" | awk '{print $1}'
+}
+# plan <step> <argument> <package> <inputs> <upstream> [separator, -]: the next version counts revisions
+# per upstream
 plan() {
-  local had next
+  local had next sep=${6:--}
   # the newest match: the index lists a package's versions oldest first
   had=$(field "$3" Version "$4" | tail -1)
   if [ -n "$had" ]; then
@@ -49,10 +69,12 @@ plan() {
         case $dep in linux-image-*) fetch "linux-headers-${dep#linux-image-}" "$had" ;; esac
       done
     fi
+    # an extra is every package its source built
+    [ "$1" != extra ] || for p in $(source_packages "$7" "$had"); do [ "$p" = "$3" ] || fetch "$p" "$had"; done
     return
   fi
-  next=$(field "$3" Version | sed -n "s/^${5:+$5-}\([0-9]*\)$/\1/p" | sort -n | tail -1)
-  echo "$1 $2 ${5:+$5-}$((${next:-0} + 1)) new" >>"$REL/plan"
+  next=$(field "$3" Version | sed -n "s/^${5:+$5$sep}\([0-9]*\)$/\1/p" | sort -n | tail -1)
+  echo "$1 $2 ${5:+$5$sep}$((${next:-0} + 1)) new" >>"$REL/plan"
 }
 
 for conf in kernel/*.conf; do
@@ -69,6 +91,18 @@ done
 for c in firmware/*/firmware.conf; do
   d=$(basename "$(dirname "$c")")
   plan firmware "$d" "tvb-firmware-$(sed -n 's/^FIRMWARE_CHIP=//p' "$c")" "$(bash release/inputs.sh firmware "$d")"
+done
+for c in extras/*/extra.conf; do
+  [ -f "$c" ] || continue
+  e=$(basename "$(dirname "$c")")
+  debian=$(bash extras/version.sh "$e")
+  if bash extras/carried.sh "$e" "$debian"; then
+    echo "extra $e retired: Debian's $debian carries its patches; delete extras/$e/" >>"$REL/plan"
+    continue
+  fi
+  # shellcheck source=/dev/null
+  plan extra "$e" "$(. "$c"; echo "$PACKAGE")" "$(bash release/inputs.sh extra "$e" "$debian")" \
+    "$debian" +tvb "$(. "$c"; echo "$SOURCE")"
 done
 plan base - tvb-base "$(bash release/inputs.sh base)"
 plan keyring - tvb-archive-keyring "$(bash release/inputs.sh keyring)"

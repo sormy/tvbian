@@ -51,12 +51,25 @@ AIC8800 set comes from Radxa's tree at the driver's commit and moves with the dr
 | Source                                 | Follows                                  |
 | -------------------------------------- | ---------------------------------------- |
 | Debian packages                        | the stable suite, through `apt`          |
+| Debian packages in `extras/`           | Debian's newest source, our patches over |
 | the build container                    | `debian:<stable>`, rebuilt as it changes |
 | `dtc`, `e2tools`                       | pinned release tag                       |
 | `rkdeveloptool`, `gxlimg`, `sunxi-fel` | pinned commit                            |
 | dt-bindings headers                    | pinned commit, per `tools/dtcx/bases/`   |
 
 Host tools carry our patches and touch boards directly; they move by hand.
+
+## Extras
+
+A fix Debian does not ship yet ships as an extra, shadowing Debian's package:
+`extras/<package>/extra.conf` names the Debian source, the package the plan tracks, our patches.
+`./build.sh extra <package>` rebuilds Debian's newest version of that source with the patches over
+it, every binary it makes, versioned `<Debian's>+tvb<n>`, so apt takes ours. A newer Debian version
+moves the plan's inputs, and the next release rebuilds the extra on it; until then Debian's wins, so
+a security update is never held back. Each patch is upstream's commit, backported, or written to go
+upstream as it is. Once every patch applies in reverse to Debian's newest source
+(`extras/carried.sh`), the plan builds nothing for the extra and says so: "retired … delete
+`extras/<package>/`"; Debian's version then reaches boxes as it is.
 
 ## When a floating source breaks
 

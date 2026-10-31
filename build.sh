@@ -6,6 +6,7 @@
 #          ./build.sh firmware <dir>          tvb-firmware-<chip>, from firmware/<dir>/
 #          ./build.sh base                    tvb-base, what every box gets, from base/
 #          ./build.sh keyring                 tvb-archive-keyring
+#          ./build.sh extra <name>            Debian's package rebuilt with our patches, from extras/
 #          ./build.sh debs                    all of the above
 #          ./build.sh image <board>           its image, from build/out/debs/
 #          ./build.sh images                  every board's image
@@ -89,7 +90,7 @@ boards_files() {
 
 usage() { awk 'NR > 2 { if (!/^#/) exit; sub(/^# ?/, ""); print }' "$0"; exit 1; }
 case "${1:-}" in
-  kernel | uboot | board | firmware | base | keyring | test | debs | image | images | plan | repo | assemble | release) ;;
+  kernel | uboot | board | firmware | base | keyring | extra | test | debs | image | images | plan | repo | assemble | release) ;;
   serve) cd "$OUT" && exec python3 -m http.server 8000 ;;
   publish) exec bash release/publish.sh ;;
   tool)
@@ -159,6 +160,7 @@ boards() {
   return 0
 }
 firmwares() { for c in firmware/*/firmware.conf; do [ -f "$c" ] && basename "$(dirname "$c")"; done; return 0; }
+extras() { for c in extras/*/extra.conf; do [ -f "$c" ] && basename "$(dirname "$c")"; done; return 0; }
 
 board() {
   ! grep -q '^BOARD_UBOOT=' "boards/$1/board.conf" || [ -f "$OUT/uboot/$1/u-boot.bin" ] ||
@@ -174,12 +176,14 @@ case "$1" in
   base) run bash package/base.sh ;;
   test) run python3 -m unittest discover -s /repo/tests -v ;;
   keyring) run bash package/keyring.sh ;;
+  extra) run bash extras/build.sh "${2:?usage: ./build.sh extra <name>}" ;;
   debs)
     for k in kernel/*.conf; do run bash kernel/build.sh "$k"; done
     for f in $(firmwares); do run bash package/firmware.sh "$f"; done
     for b in $(boards); do board "$b"; done
     run bash package/base.sh
-    run bash package/keyring.sh ;;
+    run bash package/keyring.sh
+    for e in $(extras); do run bash extras/build.sh "$e"; done ;;
   image) run bash image/build.sh "${2:?usage: ./build.sh image <board>}" ;;
   images) for b in $(boards); do run bash image/build.sh "$b"; done ;;
   plan)
@@ -203,6 +207,7 @@ case "$1" in
           firmware) TVB_BUILD_REVISION=$version run bash package/firmware.sh "$arg" ;;
           base) TVB_BUILD_REVISION=$version run bash package/base.sh ;;
           keyring) TVB_BUILD_REVISION=$version run bash package/keyring.sh ;;
+          extra) TVB_BUILD_REVISION=${version##*+tvb} run bash extras/build.sh "$arg" ;;
         esac
       done <"$OUT/release/plan"
       if [ "${TVB_RELEASE_GUARD:-1}" = 0 ]; then

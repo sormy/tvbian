@@ -9,26 +9,27 @@ Debian with our own kernel, drivers and board packages, not a fork of a distro. 
 userspace come from upstream; we carry only what upstream can't know. **Adding a board is data, not
 code** — one `boards/<board>/` directory. If a change needs new code per board, the design is wrong.
 
-| Tree               | Holds                                                                                          |
-| ------------------ | ---------------------------------------------------------------------------------------------- |
-| `boards/<board>/`  | `board.conf`, the factory trees, the patches on them and their output, loaders, `package.list` |
-| `boards/common/`   | mechanism some boards share, each picking it in its `package.list`                             |
-| `base/`            | `tvb-base`: what every box gets, and its `package.list`                                        |
-| `firmware/<chip>/` | a chip's firmware, packaged as `tvb-firmware-<chip>`                                           |
-| `docs/<board>/`    | `worklog.md` (history), `dtb.md` (tree changes), `board.md` (usage)                            |
-| `stock/<board>/`   | factory evidence: dumps, logs, partition maps                                                  |
-| `backup/`          | `<board>-stock.img.xz`, the factory eMMC (gitignored)                                          |
-| `patches/<topic>/` | every patch to an upstream's code, one folder per upstream, with its upstream status           |
-| `tools/<tool>/`    | host tools: a build script or our own source; `tools/board/`, the boot-file generators         |
-| `keyring/`         | the `apt` repo's public signing key                                                            |
-| `kernel/`          | each kernel's pin, config, fragment and patch list, and the step building it                   |
-| `build-env/`       | the build environment: one container image every `./build.sh` step runs in                     |
-| `modules/`         | each out-of-tree driver: its pin, our patches, the step packaging it per kernel                |
-| `uboot/`           | each U-Boot a board package ships, and each FEL loader: pin, defconfig, the step building it   |
-| `package/`         | the steps building `tvb-<board>`, `tvb-firmware-<chip>`, `tvb-base` and `tvb-archive-keyring`  |
-| `image/`           | the image step, its package list, and the image's own state: locale, root's first SSH login    |
-| `release/`         | the release plan, the signed `apt` repo, and the upload to GitHub                              |
-| `tests/`           | the scripts' tests, one file a script, run by `./build.sh test` in the build container         |
+| Tree                | Holds                                                                                          |
+| ------------------- | ---------------------------------------------------------------------------------------------- |
+| `boards/<board>/`   | `board.conf`, the factory trees, the patches on them and their output, loaders, `package.list` |
+| `boards/common/`    | mechanism some boards share, each picking it in its `package.list`                             |
+| `base/`             | `tvb-base`: what every box gets, and its `package.list`                                        |
+| `firmware/<chip>/`  | a chip's firmware, packaged as `tvb-firmware-<chip>`                                           |
+| `docs/<board>/`     | `worklog.md` (history), `dtb.md` (tree changes), `board.md` (usage)                            |
+| `stock/<board>/`    | factory evidence: dumps, logs, partition maps                                                  |
+| `backup/`           | `<board>-stock.img.xz`, the factory eMMC (gitignored)                                          |
+| `patches/<topic>/`  | every patch to an upstream's code, one folder per upstream, with its upstream status           |
+| `tools/<tool>/`     | host tools: a build script or our own source; `tools/board/`, the boot-file generators         |
+| `keyring/`          | the `apt` repo's public signing key                                                            |
+| `kernel/`           | each kernel's pin, config, fragment and patch list, and the step building it                   |
+| `build-env/`        | the build environment: one container image every `./build.sh` step runs in                     |
+| `modules/`          | each out-of-tree driver: its pin, our patches, the step packaging it per kernel                |
+| `uboot/`            | each U-Boot a board package ships, and each FEL loader: pin, defconfig, the step building it   |
+| `package/`          | the steps building `tvb-<board>`, `tvb-firmware-<chip>`, `tvb-base` and `tvb-archive-keyring`  |
+| `extras/<package>/` | a Debian package we shadow, rebuilt with our patches until Debian ships the fix                |
+| `image/`            | the image step, its package list, and the image's own state: locale, root's first SSH login    |
+| `release/`          | the release plan, the signed `apt` repo, and the upload to GitHub                              |
+| `tests/`            | the scripts' tests, one file a script, run by `./build.sh test` in the build container         |
 
 **Repo files carry no prefix**: each board's `package.list` names where a file installs. A board
 directory holds `board.conf`, the tree, the factory idbloader and the maskrom loader,
@@ -95,6 +96,7 @@ another, so nothing rots when one is rewritten.
 | `patches/meson-dw-hdmi/README.md`        | mainline HDMI for the GXLX2 (S905L3), in-tree                        |
 | `patches/meson-codecs/README.md`         | the video decoder in-tree and the encoders beside it on the GXLX2    |
 | `patches/gst-plugins-good/README.md`     | VC-1 through V4L2 on GStreamer 1.26.2: the patched plugin, by hand   |
+| `patches/mesa/README.md`                 | Panfrost fixes on Debian's Mesa, backported from upstream            |
 | `patches/gxlimg/README.md`               | the Amlogic boot-image tool, built on macOS                          |
 | `keyring/README.md`                      | the archive signing key: fingerprint, secret, rotation               |
 

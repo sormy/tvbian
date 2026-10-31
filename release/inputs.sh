@@ -1,6 +1,7 @@
 #!/bin/bash
 # Print the X-Tvb-Inputs hash of one package group: what the plan compares with the published deb.
-#   inputs.sh kernel <kernel/*.conf> <ref> | board <board> | firmware <dir> | base | keyring
+#   inputs.sh kernel <kernel/*.conf> <ref> | board <board> | firmware <dir> | base | keyring |
+#             extra <name> <Debian's version>
 # Beside the files, the versions of the tools that shape the group's bytes: none for copied files,
 # so a build image changed for another step rebuilds nothing it does not touch.
 set -euo pipefail
@@ -43,6 +44,10 @@ files() {
       echo base/package.list package/base.sh package/install-list.sh
       sed -E 's/#.*//' base/package.list | awk 'NF && $1 != "link" {print "base/" $2}' ;;
     keyring) echo keyring/tvb-archive-keyring.gpg package/keyring.sh ;;
+    extra)
+      echo "extras/$2/extra.conf" extras/build.sh extras/version.sh extras/carried.sh
+      # shellcheck source=/dev/null
+      (. "extras/$2/extra.conf"; echo $PATCHES) ;;
   esac
 }
 # settings <group> <arg>: what a conf sets, sorted, so a comment or a reordering moves nothing

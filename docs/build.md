@@ -40,6 +40,7 @@ the tools they need: `./build.sh tool <name>` builds one from `tools/<name>/` na
 ./build.sh firmware swt6621s            # host: tvb-firmware-swt6621s, from firmware/swt6621s/
 ./build.sh base                         # host: tvb-base, what every box gets
 ./build.sh keyring                      # host: tvb-archive-keyring
+./build.sh extra mesa                   # host: Debian's mesa, rebuilt with patches/mesa/
 ./build.sh debs                         # host: all of the above, every kernel and board
 ./build.sh image h96max-m20             # host: build/out/images/, from build/out/debs/
 ./build.sh test                         # host: tests/, in the build container
@@ -91,12 +92,12 @@ a Mac's alike; `verify.py` also runs alone, on the host.
 `.github/workflows/release.yml` splits the same steps into jobs, on `ubuntu-24.04-arm`: native
 arm64, GitHub's hosted runners, free for a public repo.
 
-| Job     | Count        | Does                                                              |
-| ------- | ------------ | ----------------------------------------------------------------- |
-| plan    | 1            | each group's version, `new` or `published`, as an artifact        |
-| kernel  | one a kernel | that kernel's debs, unless already published; as artifacts        |
-| test    | 1            | `tests/`, on the runner; the release waits on it                  |
-| release | 1            | firmware, boards, base, keyring, the guard, images, repo; publish |
+| Job     | Count        | Does                                                                  |
+| ------- | ------------ | --------------------------------------------------------------------- |
+| plan    | 1            | each group's version, `new` or `published`, as an artifact            |
+| kernel  | one a kernel | that kernel's debs, unless already published; as artifacts            |
+| test    | 1            | `tests/`, on the runner; the release waits on it                      |
+| release | 1            | firmware, boards, base, keyring, extras, guard, images, repo; publish |
 
 | Trigger                   | Builds                | Publishes |
 | ------------------------- | --------------------- | --------- |
