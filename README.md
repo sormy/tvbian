@@ -9,7 +9,8 @@ shipped with and never updated. We fixed the last part.
 
 TVBian is plain Debian plus our own kernel, drivers and board packages, from a signed `apt`
 repository. Every Monday a robot builds fresh images and nobody has to remember to. This page is the
-Rockchip boxes; Amlogic ones are in [README_AMLOGIC.md](README_AMLOGIC.md).
+Rockchip boxes; Amlogic ones are in [README_AMLOGIC.md](README_AMLOGIC.md), Allwinner ones in
+[README_ALLWINNER.md](README_ALLWINNER.md).
 
 ## Boxes
 
@@ -109,7 +110,7 @@ untouched: eject the card and it boots again, unaware of what almost happened.
 
 ## First login
 
-`ssh root@<board-key>.local`, or a keyboard on HDMI. The password is `1234`, and it is expired, so
+`ssh root@<hostname>.local`, or a keyboard on HDMI. The password is `1234`, and it is expired, so
 the first thing the box does is make you pick a better one. A user, the timezone, the locale and
 Wi-Fi: [docs/first-login.md](docs/first-login.md).
 

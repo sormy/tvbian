@@ -6,7 +6,7 @@
 
 Debian on an Amlogic Android TV box: mainline Linux, our drivers, a weekly signed image. The box
 came with Android and a promise of updates; one of those two was real. Rockchip boxes are in
-[README.md](README.md).
+[README.md](README.md), Allwinner ones in [README_ALLWINNER.md](README_ALLWINNER.md).
 
 **Host: macOS or Linux.** Not Windows.
 
@@ -72,9 +72,8 @@ came with Android and a promise of updates; one of those two was real. Rockchip 
 | eMMC backup over USB, burning mode                       |       ✅        |
 | Unbrick from the mask ROM                                |       ❓        |
 
-H.263, VC-1 Simple and Main, AVS and RealVideo are not implemented: the chip has microcode for
-them, the driver no decoder yet. If you have RealVideo files to watch, you have other
-problems.
+H.263, VC-1 Simple and Main, AVS and RealVideo are not implemented: the chip has microcode for them,
+the driver no decoder yet. If you have RealVideo files to watch, you have other problems.
 
 ## Get an image
 
@@ -117,7 +116,7 @@ build/bin/amlcmd reset
 
 Once is enough: every later power-on boots the stick. Pull it and Android boots, none the wiser.
 
-3. Log in: `ssh root@<board-key>.local`, password `1234`, expired, so pick a new one. A user, the
+3. Log in: `ssh root@<hostname>.local`, password `1234`, expired, so pick a new one. A user, the
    timezone, the locale and Wi-Fi: [docs/first-login.md](docs/first-login.md). No Ethernet is
    fitted, so a USB adapter or the HDMI console gets you to Wi-Fi first.
 

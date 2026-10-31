@@ -38,6 +38,10 @@ to be this board's. **What every box gets lives in `base/`, mechanism some board
 `boards/common/`** — a board never keeps its own copy of a family script. What it may keep is
 mechanism no other board can use: a unit for hardware only it has.
 
+**A board's version lives in `BOARD_ID` alone**, beside `BOARD_PCB`'s silkscreen, which says it
+anyway. `BOARD_NAME` and `BOARD_HOSTNAME` name the model: `tanix-tx1-v2` is `Tanix TX1` at
+`tanix-tx1.local`.
+
 **Tools we build, and must:** `dtc` (`./build.sh tool dtc` — vanilla cannot round-trip a vendor blob
 with `&label`s) · `rkdeveloptool` (`./build.sh tool rkdeveloptool`) and each board's maskrom loader
 (`./build.sh loaders`) · `sunxi-fel` (`./build.sh tool sunxi-fel`) and each board's FEL loader, the
@@ -111,13 +115,14 @@ another, so nothing rots when one is rewritten.
 
 ## Claims and evidence
 
-Five states, meaning exactly what they say:
+Six states, meaning exactly what they say:
 
 - **✅ verified here** — run on this box, with the number or output to show for it.
 - **🟡 likely** — not verified here, but something proven backs it and nothing indicates a problem:
   the same mechanism ✅ on a sibling board with no sign the boards differ, or a ✅ layer beneath it
   that we do not touch.
 - **❓ never tested** — nobody has looked, and nothing predicts the answer.
+- **🟠 works, degraded** — verified here, but measurably short of its siblings or stock.
 - **❌ tested and broken.**
 - **➖ not present on this box.**
 
@@ -137,6 +142,9 @@ cannot be backed, say so rather than rounding up.
   family's terms. A doc that needs another's fact states it. Exceptions: the index above, the top
   READMEs routing a reader to a family or a guide, a board's own `board.md` for its per-board facts,
   and a worklog naming the files it changed.
+- **Checklist IDs live in `docs/bring-up.md`, nowhere else**: a renumbered checklist leaves every
+  other mention pointing at the wrong line. A board's test report and every other doc say what the
+  line checks.
 - **Worklogs are written as work happens** — dated entries, wrong turns included. They are the raw
   material everything else derives from, and what the next port follows.
 - **Narrative lives in `docs/`**, never in scripts, payload files or DTB tables. Those stay terse.
