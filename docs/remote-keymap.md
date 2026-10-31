@@ -24,7 +24,8 @@ HID usage that produces the wrong key is still the wrong key.
 - [ ] every button produces an event
 - [ ] no button reports `KEY_UNKNOWN`
 - [ ] no two buttons share a keycode
-- [ ] the keycode matches the icon — `KEY_MENU` on a ⌫ key is a fault, not a quirk
+- [ ] the keycode matches the icon — `KEY_MENU` on a ⌫ key is a fault, not a quirk; the icon is
+      seen, on the remote or in a photo, before its key is chosen
 - [ ] both transports produce the canonical keymap below, button for button
 - [ ] the resulting table is recorded in `docs/<board>/board.md`
 
@@ -44,7 +45,7 @@ keysym an action. Traced through xkeyboard-config's `symbols/inet`, and Kodi's
 | Label       | Keycode                | Keysym                 | Kodi                          |
 | ----------- | ---------------------- | ---------------------- | ----------------------------- |
 | Power       | `KEY_POWER`            | `XF86PowerOff`         | none: logind suspends first   |
-| Mouse       | ➖                     | ➖                     | not a key: air-mouse toggle   |
+| Mouse       | `KEY_TOUCHPAD_TOGGLE`  | `XF86TouchpadToggle`   | none: a pointer mode's toggle |
 | Hamburger   | `KEY_MENU`             | `XF86MenuKB`           | `ContextMenu`; held, `Menu`   |
 | Voice       | `KEY_SEARCH`           | `XF86Search`           | `VoiceRecognizer`             |
 | Cog         | `KEY_CONFIG`           | `XF86Tools`            | the Settings window           |
@@ -55,18 +56,27 @@ keysym an action. Traced through xkeyboard-config's `symbols/inet`, and Kodi's
 | Backspace   | `KEY_BACKSPACE`        | `BackSpace`            | `Back`; typing, deletes       |
 | Vol +/-     | `KEY_VOLUMEUP`/`DOWN`  | `XF86Audio…Volume`     | `VolumeUp` / `VolumeDown`     |
 | Mute        | `KEY_MUTE`             | `XF86AudioMute`        | `Mute`                        |
+| ⏮ / ⏭       | `KEY_PREVIOUSSONG` …   | `XF86AudioPrev`/`Next` | chapter, else item            |
+| 1/a         | `KEY_SUBTITLE`         | `XF86Subtitle`         | none; `<subtitle>` rebinds    |
 | P +/-       | `KEY_CHANNELUP`/`DOWN` | `XF86ChannelUp`/`Down` | `PageUp` / `PageDown`         |
 | YouTube     | `KEY_RED`              | `XF86Red`              | TV channels; rebindable       |
 | Netflix     | `KEY_YELLOW`           | `XF86Yellow`           | Music; rebindable             |
 | Prime Video | `KEY_BLUE`             | `XF86Blue`             | Pictures; rebindable          |
 | Google Play | `KEY_GREEN`            | `XF86Green`            | Videos; rebindable            |
+| Colours     | `KEY_RED` … `BLUE`     | `XF86Red` …            | as the app keys above         |
 | Digits      | `KEY_0` … `KEY_9`      | `0` … `9`              | numbers                       |
 
+Mouse maps only on a remote that leaves the pointer mode to the box: an air mouse that switches
+itself and sends pointer motion needs no key for it.
+
 The keys a likely alternative would get wrong: `KEY_HOME` is `Home`, which Kodi takes as
-`FirstPage`; `KEY_SETUP` has no keysym, so the key never reaches Kodi. `KEY_PROG2`…`4` become
-`XF86Launch2`…`4`, which Kodi has no key for, so no keymap can bind them; the colour keys reach
-Kodi, and a `userdata/keymaps/` file rebinds each to the app its button names. `KEY_OK` and
-`KEY_CHANNELUP` are evdev codes above 255, which libxkbcommon carries and X11 does not.
+`FirstPage`; `KEY_SETUP`, `KEY_PREVIOUS` and `KEY_NEXT` have no keysym, so the key never reaches
+Kodi; `KEY_REWIND` and `KEY_FASTFORWARD` are ⏪ ⏩: Kodi's trick-play speed, not a seek; in video
+the D-pad seeks. 1/a, a digits-or-letters toggle, has no evdev code of its own; mainline's is
+`KEY_SUBTITLE`. `KEY_PROG2`…`4` become `XF86Launch2`…`4`, which Kodi has no key for, so no keymap
+can bind them; the colour keys reach Kodi, and a `userdata/keymaps/` file rebinds each to the app
+its button names. `KEY_OK` and `KEY_CHANNELUP` are evdev codes above 255, which libxkbcommon carries
+and X11 does not.
 
 ## Capturing
 
