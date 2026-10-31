@@ -1,0 +1,27 @@
+From aee59bf04a6a9bf440aaf771d65a64c84741e23c Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 24 Oct 2026 01:18:42 -0400
+Subject: [PATCH] atbm6031: match AltoBeam's SDIO IDs only
+
+The port matched any SDIO device, and any AltoBeam one, so the module
+would bind every SDIO card on any board that carries it.
+---
+ hal_apollo/apollo_sdio.c | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/hal_apollo/apollo_sdio.c b/hal_apollo/apollo_sdio.c
+index 897cdcf..7807f89 100644
+--- a/hal_apollo/apollo_sdio.c
++++ b/hal_apollo/apollo_sdio.c
+@@ -172,8 +172,6 @@ static const struct sdio_device_id atbm_sdio_ids[] = {
+ 	{ SDIO_DEVICE(0x007a, 0x6011) },
+ 	{ SDIO_DEVICE(0x007a, 0x6031) },
+ 	{ SDIO_DEVICE(0x007a, 0x6032) },
+-	{ SDIO_DEVICE(0x007a, SDIO_ANY_ID) },
+-	{ SDIO_DEVICE(SDIO_ANY_ID, SDIO_ANY_ID) },
+ 	{ /* end: all zeroes */			},
+ };
+ MODULE_DEVICE_TABLE(sdio, atbm_sdio_ids);
+-- 
+2.55.0
+

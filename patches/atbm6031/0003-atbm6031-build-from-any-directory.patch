@@ -1,0 +1,42 @@
+From 2ad515daae14e198321947fcb4a023b19a2f6ebd Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 24 Oct 2026 01:19:49 -0400
+Subject: [PATCH] atbm6031: build from any directory
+
+The port fixed its build paths to /tmp/wifi-test/atbm-wifi. The driver's
+own form, $(srctree)/$(src), breaks from 6.13, where kbuild builds an
+external module from its own directory and $(src) is relative to it:
+$(abspath $(src)) holds either way.
+---
+ hal_apollo/Makefile | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/hal_apollo/Makefile b/hal_apollo/Makefile
+index 2a3fa24..3353a6e 100755
+--- a/hal_apollo/Makefile
++++ b/hal_apollo/Makefile
+@@ -26,7 +26,7 @@
+ #####################################################################################################################################################################################################################
+ 
+ ifneq ($(ATBM_BUILD_IN_KERNEL),y)
+-WIFI_PROJ_DIR := /tmp/wifi-test/atbm-wifi
++WIFI_PROJ_DIR := $(abspath $(src)/..)
+ -include $(WIFI_PROJ_DIR)/.config
+ endif
+ 
+@@ -34,9 +34,9 @@ endif
+ 
+ 
+ 
+-k-dir := /tmp/wifi-test/atbm-wifi/hal_apollo
+-NOSTDINC_FLAGS := -I/tmp/wifi-test/atbm-wifi/include/ \
+-        -include /tmp/wifi-test/atbm-wifi/include/linux/compat-2.6.h \
++k-dir := $(abspath $(src))
++NOSTDINC_FLAGS := -I$(k-dir)/../include/ \
++        -include $(k-dir)/../include/linux/compat-2.6.h \
+         -DCOMPAT_STATIC
+ 
+ #####
+-- 
+2.55.0
+

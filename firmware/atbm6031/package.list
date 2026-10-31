@@ -1,0 +1,3 @@
+# tvb-firmware-atbm6031's files (mode src dest, src under firmware/): the name the driver asks for
+0644 atbm6031/atbm6031_fw.bin /usr/lib/firmware/atbm6031_fw.bin
+0644 atbm6031/atbm6031_ble_fw.bin /usr/lib/firmware/atbm6031_ble_fw.bin

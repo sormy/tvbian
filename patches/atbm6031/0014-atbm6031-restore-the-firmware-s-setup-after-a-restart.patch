@@ -1,0 +1,39 @@
+From abfcc9eeadf5c27b32f70442f004c9bf26c0294b Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Tue, 27 Oct 2026 10:55:00 -0400
+Subject: [PATCH 14/15] atbm6031: restore the firmware's setup after a restart
+
+atbm_reinit_firmware() reloads the firmware in place but sends only
+the operational mode and multi-TX confirms. The probe also sends the
+per-rate TX power and "cfo 1 0", which turns the firmware's automatic
+CFO calibration on; after a restart the firmware's CFO MIB read
+uninitialised for as long as it ran. Send both again.
+---
+ hal_apollo/util.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/hal_apollo/util.c b/hal_apollo/util.c
+index 90295c3..c3a1bf1 100644
+--- a/hal_apollo/util.c
++++ b/hal_apollo/util.c
+@@ -14,6 +14,7 @@
+ #include "sta.h"
+ #include "ap.h"
+ #include "scan.h"
++#include "internal_cmd.h"
+ /* Must be called from BH thraed. */
+ void atbm_enable_powersave(struct atbm_vif *priv,
+ 			     bool enable)
+@@ -392,6 +393,9 @@ int atbm_reinit_firmware(struct atbm_common *hw_priv)
+ #endif
+ 		}
+ 	}
++	/* the probe's setup the reloaded firmware lost: per-rate power, automatic CFO calibration */
++	wsm_set_rate_power(hw_priv, 1);
++	open_auto_cfo(hw_priv, 1);
+ 	
+ error_reload:
+ 	return ret;
+-- 
+2.55.0
+

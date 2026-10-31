@@ -1,0 +1,646 @@
+From b3e6b61fe7b61eff8266dcc0570253c86d39dc4a Mon Sep 17 00:00:00 2001
+From: NoNamedCat <NoNamedCat@users.noreply.github.com>
+Date: Sat, 24 Oct 2026 01:18:41 -0400
+Subject: [PATCH] atbm6031: the 603x on SDIO, on Linux 6.18
+
+github.com/NoNamedCat/armbian-tanix-tx1-6031's patches/atbm6031_driver_linux6.18.patch,
+reduced to its substance: the same 214 added and 63 removed lines, without the
+line-ending and whitespace churn across 132 other files.
+---
+ .config                                  | 51 ++++++++------
+ hal_apollo/Makefile                      |  9 +--
+ hal_apollo/apollo_sdio.c                 |  7 +-
+ hal_apollo/dev_ioctl.c                   | 11 +--
+ hal_apollo/fwio.c                        |  2 -
+ hal_apollo/mac80211/cfg.c                | 90 +++++++++++++++++++++---
+ hal_apollo/mac80211/ieee80211_atbm_skb.h | 11 +++
+ hal_apollo/mac80211/mlme.c               | 30 +++++++-
+ hal_apollo/mac80211/rx.c                 | 14 +++-
+ hal_apollo/main.c                        |  5 +-
+ hal_apollo/util.c                        | 15 ++--
+ include/linux/compat-2.6.h               | 22 ++++++
+ include/net/atbm_mac80211.h              | 10 ++-
+ 13 files changed, 214 insertions(+), 63 deletions(-)
+
+diff --git a/.config b/.config
+index d44a52c..1772410 100644
+--- a/.config
++++ b/.config
+@@ -4,37 +4,38 @@
+ #
+ CONFIG_ATBM_MENUCONFIG=y
+ CONFIG_ATBM_WIRELESS=y
+-# CONFIG_ATBM_WEXT is not set
+-# CONFIG_ATBM603x is not set
+-CONFIG_ATBM6012B_y=y
+-# CONFIG_ATBM603x_ATBM6012B_y is not set
+-CONFIG_ATBM_USB_BUS=y
+-# CONFIG_ATBM_SDIO_BUS is not set
++CONFIG_ATBM_WEXT=y
++
++#
++# select which atbm Wi-Fi chip type
++#
++CONFIG_ATBM603x=y
++# CONFIG_ATBM6012B_y is not set
++# CONFIG_ATBM6132 is not set
++# CONFIG_ATBM_USB_BUS is not set
++CONFIG_ATBM_SDIO_BUS=y
+ # CONFIG_ATBM_SPI_BUS is not set
+-# CONFIG_ATBM_USE_FIRMWARE_BIN is not set
+-CONFIG_ATBM_USE_FIRMWARE_H=y
++CONFIG_ATBM_USE_FIRMWARE_BIN=y
++# CONFIG_ATBM_USE_FIRMWARE_H is not set
++CONFIG_ATBM_SUPPORT_BAN_24G=y
++# CONFIG_ATBM_SUPPORT_BAN_5G_PRETEND_24 is not set
+ 
+ #
+ # Driver Extern Function Select
+ #
+-# CONFIG_ATBM_SUPPORT_BRIDGE is not set
++CONFIG_ATBM_SUPPORT_BRIDGE=y
+ CONFIG_ATBM_FUNC_NOTXCONFIRM=y
+ # CONFIG_ATBM_FUNC_EARLYSUSPEND is not set
+-# CONFIG_ATBM_FUNC_MONITOR is not set
++CONFIG_ATBM_FUNC_MONITOR=y
++# CONFIG_ATBM_FUNC_MONITOR_HDR_PRISM is not set
+ # CONFIG_ATBM_FUNC_SKB_DEBUG is not set
+ # CONFIG_ATBM_FUNC_MEM_DEBUG is not set
+-# CONFIG_ATBM_FUNC_CHANNEL_5G_PRETEND_2G is not set
+ # CONFIG_ATBM_WITHBAND_ONLY_HT20 is not set
+-# CONFIG_ATBM_FUNC_USB_AGGRTX is not set
+-# CONFIG_ATBM_FUNC_USB_DMABUFF is not set
+-# CONFIG_ATBM_FUNC_USB_CMD_ENHANCE is not set
+-# CONFIG_ATBM_FUNC_USB_DATA_ENHANCE is not set
+-# CONFIG_ATBM_FUNC_PS_WAKEUP_RELOAD_FW is not set
++# CONFIG_ATBM_FUNC_HW_CHSUM is not set
+ # CONFIG_ATBM_FUNC_P2P_ENABLE is not set
+ # CONFIG_ATBM_FUNC_SW_ENC is not set
+ CONFIG_ATBM_FUNC_DEV_CTRL_API=y
+ CONFIG_ATBM_FUNC_MODULE_FS=y
+-CONFIG_ATBM_FUNC_DRV_LOADER_FAST=y
+ CONFIG_ATBM_FUNC_PRIVE_IE=y
+ # CONFIG_ATBM_FUNC_SAE_AUTHEN is not set
+ 
+@@ -51,16 +52,20 @@ CONFIG_ATBM_FUNC_PRIVE_IE=y
+ # CONFIG_ATBM_APOLLO_TX_POLICY_DEBUG is not set
+ # CONFIG_ATBM_APOLLO_STA_DEBUG is not set
+ # CONFIG_ATBM_APOLLO_DUMP_ON_ERROR is not set
++# CONFIG_BLUEDROID is not set
++CONFIG_ATBM_SDIO_MMCx="mmc1"
++# CONFIG_ATBM_APOLLO_USE_GPIO_IRQ is not set
+ CONFIG_ATBM_APOLLO_SUPPORT_SGI=y
+ CONFIG_ATBM_WIFIIF1_NAME="wlan%d"
+ # CONFIG_NEED_P2P0_INTERFACE is not set
+ CONFIG_ATBM_MODULE_PM_STAYAWK="pm_stayawake"
+ CONFIG_ATBM_MODULE_DRIVER_NAME="atbm_wlan"
+ CONFIG_ATBM_PLATFORM_DEVICE_NAME="atbm_dev_wifi"
+-CONFIG_ATBM_USB_VID=0x007a
+-CONFIG_ATBM_USB_PID=0x888B
+-CONFIG_ATBM_MODULE_NAME="atbm603x_wifi_usb"
++CONFIG_ATBM_SDIO_VID=0x007a
++CONFIG_ATBM_SDIO_PID=0x6011
++CONFIG_ATBM_MODULE_DRIVER_NAME="atbm6031"
++CONFIG_ATBM_MODULE_NAME="atbm6031"
++CONFIG_ATBM_FW_NAME="/lib/firmware/atbm6031_fw.bin"
++CONFIG_ATBM_CONFIG_FILE="/usr/share/wifi/atbm_txpwer_dcxo_cfg.txt"
++CONFIG_ATBM_RATE_POWER_CONFIG_FILE="/usr/share/wifi/set_rate_power.txt"
+ CONFIG_MAC80211_ATBM_RC_DEFAULT=""
+-CONFIG_ATBM_BLE=y
+-CONFIG_ATBM_BLE_WIFI_PLATFORM=y
+-# CONFIG_ATBM_BLE_ADV_COEXIST is not set
+diff --git a/hal_apollo/Makefile b/hal_apollo/Makefile
+index e08e8b8..2a3fa24 100755
+--- a/hal_apollo/Makefile
++++ b/hal_apollo/Makefile
+@@ -26,6 +26,7 @@
+ #####################################################################################################################################################################################################################
+ 
+ ifneq ($(ATBM_BUILD_IN_KERNEL),y)
++WIFI_PROJ_DIR := /tmp/wifi-test/atbm-wifi
+ -include $(WIFI_PROJ_DIR)/.config
+ endif
+ 
+@@ -33,9 +34,9 @@ endif
+ 
+ 
+ 
+-k-dir:=$(if $(filter /%,$(src)),$(src),$(srctree)/$(src))
+-NOSTDINC_FLAGS := -I$(k-dir)/../include/ \
+-        -include $(k-dir)/../include/linux/compat-2.6.h \
++k-dir := /tmp/wifi-test/atbm-wifi/hal_apollo
++NOSTDINC_FLAGS := -I/tmp/wifi-test/atbm-wifi/include/ \
++        -include /tmp/wifi-test/atbm-wifi/include/linux/compat-2.6.h \
+         -DCOMPAT_STATIC
+ 
+ #####
+@@ -244,7 +245,7 @@ endif
+ 
+ ATBM_MODULES_NAME ?= $(MODULES_NAME)
+ ifneq ($(FW),)
+-ccflags-y += -DCONFIG_FW_NAME=\"$(FW)\"
++ccflags-y += -DCONFIG_FW_NAME=\"atbm6031_fw.bin\"
+ endif
+ ifneq ($(SDIO_HOST),)
+ ccflags-y += -DCONFIG_ATBM_SDIO_MMC_ID=\"$(SDIO_HOST)\"
+diff --git a/hal_apollo/apollo_sdio.c b/hal_apollo/apollo_sdio.c
+index 8a3106a..897cdcf 100644
+--- a/hal_apollo/apollo_sdio.c
++++ b/hal_apollo/apollo_sdio.c
+@@ -169,9 +169,14 @@ struct sbus_wtd {
+ 	atomic_t				wtd_probe;
+ };
+ static const struct sdio_device_id atbm_sdio_ids[] = {
+-	{ SDIO_DEVICE(WIFI_SDIO_VID, WIFI_SDIO_PID) },
++	{ SDIO_DEVICE(0x007a, 0x6011) },
++	{ SDIO_DEVICE(0x007a, 0x6031) },
++	{ SDIO_DEVICE(0x007a, 0x6032) },
++	{ SDIO_DEVICE(0x007a, SDIO_ANY_ID) },
++	{ SDIO_DEVICE(SDIO_ANY_ID, SDIO_ANY_ID) },
+ 	{ /* end: all zeroes */			},
+ };
++MODULE_DEVICE_TABLE(sdio, atbm_sdio_ids);
+ 
+ static int  atbm_sdio_init(void);
+ static void  atbm_sdio_exit(void);
+diff --git a/hal_apollo/dev_ioctl.c b/hal_apollo/dev_ioctl.c
+index ce21a81..63147fa 100644
+--- a/hal_apollo/dev_ioctl.c
++++ b/hal_apollo/dev_ioctl.c
+@@ -320,7 +320,7 @@ static int atbm_dev_set_private_mgmt_frame(struct net_device *dev, struct altm_w
+ 					memcpy(&ap_vendor_cfg_ie.private_ie , &private_ie,sizeof(struct atbm_vendor_cfg_ie)); 
+ 					
+ 					ap_vendor_cfg_ie.ap_sdata = sdata;
+-					ieee80211_send_probe_resp_mgmt_queue(hw_priv,&ap_vendor_cfg_ie,1);
++					ieee80211_send_probe_resp_mgmt_queue(hw_priv,(char *)&ap_vendor_cfg_ie,1);
+ 
+ 					
+ 				
+@@ -350,21 +350,16 @@ static int atbm_dev_set_private_mgmt_frame(struct net_device *dev, struct altm_w
+ 					memset(&customer_action_ie,0,sizeof(struct atbm_customer_action));
+ 					customer_action_ie.sdata = sdata;
+ 					customer_action_ie.action = msg->externData[1];
+-					ieee80211_send_action_mgmt_queue(hw_priv,&customer_action_ie,1);					
++					ieee80211_send_action_mgmt_queue(hw_priv,(char *)&customer_action_ie,1);					
+ 				}
+ 			}break;
+ 		default:{
+ 			atbm_printk_err("atbm_dev_set_private_mgmt_frame:value = %d \n",msg->value);
+ 
+ 		}break;
+-		
+-
+-
+-
+ 	}
+ 
+-
+-
++	return 0;
+ }
+ 
+ #endif
+diff --git a/hal_apollo/fwio.c b/hal_apollo/fwio.c
+index 858b888..fa8c7ce 100644
+--- a/hal_apollo/fwio.c
++++ b/hal_apollo/fwio.c
+@@ -43,10 +43,8 @@
+ static char *fw = FIRMWARE_DEFAULT_PATH;
+ 
+ 
+-#if 0
+ module_param(fw, charp, 0644);
+ MODULE_PARM_DESC(fw, "Override platform_data firmware file");
+-#endif
+ #pragma message(FIRMWARE_DEFAULT_PATH)
+ 
+ 
+diff --git a/hal_apollo/mac80211/cfg.c b/hal_apollo/mac80211/cfg.c
+index b73953c..e65b13c 100644
+--- a/hal_apollo/mac80211/cfg.c
++++ b/hal_apollo/mac80211/cfg.c
+@@ -219,9 +219,15 @@ int atbm_change_iface_to_monitor(struct net_device *dev)
+ #endif
+ }
+ 
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
++static int ieee80211_add_key(struct wiphy *wiphy, struct net_device *dev,
++			     int link_id, u8 key_idx, bool pairwise, const u8 *mac_addr,
++			     struct key_params *params)
++#else
+ static int ieee80211_add_key(struct wiphy *wiphy, struct net_device *dev,
+ 			     u8 key_idx, bool pairwise, const u8 *mac_addr,
+ 			     struct key_params *params)
++#endif
+ {
+ 	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
+ 	struct sta_info *sta = NULL;
+@@ -282,8 +288,13 @@ static int ieee80211_add_key(struct wiphy *wiphy, struct net_device *dev,
+ 	return err;
+ }
+ 
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
++static int ieee80211_del_key(struct wiphy *wiphy, struct net_device *dev,
++			     int link_id, u8 key_idx, bool pairwise, const u8 *mac_addr)
++#else
+ static int ieee80211_del_key(struct wiphy *wiphy, struct net_device *dev,
+ 			     u8 key_idx, bool pairwise, const u8 *mac_addr)
++#endif
+ {
+ 	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
+ 	struct ieee80211_local *local = sdata->local;
+@@ -323,11 +334,19 @@ static int ieee80211_del_key(struct wiphy *wiphy, struct net_device *dev,
+ 	return ret;
+ }
+ 
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
++static int ieee80211_get_key(struct wiphy *wiphy, struct net_device *dev,
++			     int link_id, u8 key_idx, bool pairwise, const u8 *mac_addr,
++			     void *cookie,
++			     void (*callback)(void *cookie,
++					      struct key_params *params))
++#else
+ static int ieee80211_get_key(struct wiphy *wiphy, struct net_device *dev,
+ 			     u8 key_idx, bool pairwise, const u8 *mac_addr,
+ 			     void *cookie,
+ 			     void (*callback)(void *cookie,
+ 					      struct key_params *params))
++#endif
+ {
+ 	struct ieee80211_sub_if_data *sdata;
+ 	struct sta_info *sta = NULL;
+@@ -416,10 +435,18 @@ static int ieee80211_get_key(struct wiphy *wiphy, struct net_device *dev,
+ 	return err;
+ }
+ 
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
++static int ieee80211_config_default_key(struct wiphy *wiphy,
++					struct net_device *dev,
++					int link_id,
++					u8 key_idx, bool uni,
++					bool multi)
++#else
+ static int ieee80211_config_default_key(struct wiphy *wiphy,
+ 					struct net_device *dev,
+ 					u8 key_idx, bool uni,
+ 					bool multi)
++#endif
+ {
+ 	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
+ 
+@@ -428,9 +455,16 @@ static int ieee80211_config_default_key(struct wiphy *wiphy,
+ 	return 0;
+ }
+ 
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
++static int ieee80211_config_default_mgmt_key(struct wiphy *wiphy,
++					     struct net_device *dev,
++					     int link_id,
++					     u8 key_idx)
++#else
+ static int ieee80211_config_default_mgmt_key(struct wiphy *wiphy,
+ 					     struct net_device *dev,
+ 					     u8 key_idx)
++#endif
+ {
+ 	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
+ 
+@@ -1088,6 +1122,17 @@ static int ieee80211_start_ap(struct wiphy *wiphy, struct net_device *dev,
+ #endif
+ 	return ieee80211_add_beacon(wiphy,dev,&params);	
+ }
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
++static int ieee80211_change_beacon(struct wiphy *wiphy, struct net_device *dev,
++				   struct cfg80211_ap_update *info)
++{
++	struct beacon_parameters params;
++	memset(&params,0,sizeof(struct beacon_parameters));
++	BEACON_PARAMS_CPY(params,(&info->beacon));
++
++	return ieee80211_set_beacon(wiphy, dev,&params);
++}
++#else
+ static  int ieee80211_change_beacon(struct wiphy *wiphy, struct net_device *dev,
+ 									   struct cfg80211_beacon_data *info)
+ {
+@@ -1097,6 +1142,7 @@ static  int ieee80211_change_beacon(struct wiphy *wiphy, struct net_device *dev,
+ 
+ 	return ieee80211_set_beacon(wiphy, dev,&params);
+ }
++#endif
+ 
+ #endif
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
+@@ -1282,11 +1328,21 @@ static void sta_apply_parameters(struct ieee80211_local *local,
+ 	if (params->listen_interval >= 0)
+ 		sta->listen_interval = params->listen_interval;
+ 
+-	if (params->supported_rates) {
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
++	const u8 *supp_rates = params->link_sta_params.supported_rates;
++	u8 supp_rates_len = params->link_sta_params.supported_rates_len;
++	const struct ieee80211_ht_cap *ht_capa = params->link_sta_params.ht_capa;
++#else
++	const u8 *supp_rates = params->supported_rates;
++	u8 supp_rates_len = params->supported_rates_len;
++	const struct ieee80211_ht_cap *ht_capa = params->ht_capa;
++#endif
++
++	if (supp_rates) {
+ 		rates = 0;
+ 
+-		for (i = 0; i < params->supported_rates_len; i++) {
+-			int rate = (params->supported_rates[i] & 0x7f) * 5;
++		for (i = 0; i < supp_rates_len; i++) {
++			int rate = (supp_rates[i] & 0x7f) * 5;
+ 			for (j = 0; j < sband->n_bitrates; j++) {
+ 				if (sband->bitrates[j].bitrate == rate)
+ 					rates |= BIT(j);
+@@ -1295,9 +1351,9 @@ static void sta_apply_parameters(struct ieee80211_local *local,
+ 		sta->sta.supp_rates[chan_state->oper_channel->band] = rates;
+ 	}
+ 
+-	if (params->ht_capa){
++	if (ht_capa){
+ 		ieee80211_ht_cap_ie_to_sta_ht_cap(sband,
+-						  params->ht_capa,
++						  ht_capa,
+ 						  &sta->sta.ht_cap);
+ 		ieee80211_ht_cap_to_sta_channel_type(sta);
+ 	}
+@@ -2063,7 +2119,19 @@ int ieee80211_set_channel(struct wiphy *wiphy,
+ 
+ 	return ret;
+ }
+-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 8, 0))
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
++static int ieee80211_set_monitor_channel(struct wiphy *wiphy,
++					 struct net_device *dev,
++					 struct cfg80211_chan_def *chandef)
++{
++	 enum nl80211_channel_type chtype;
++	 struct ieee80211_channel *chan = NULL;
++
++	 chtype = cfg80211_get_chandef_type(chandef);
++	 chan = chandef->chan;
++	 return ieee80211_set_channel(wiphy,dev,chan,chtype);
++}
++#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 8, 0))
+ static int ieee80211_set_monitor_channel(struct wiphy *wiphy,
+ 					 struct cfg80211_chan_def *chandef)
+ {
+@@ -2510,11 +2578,13 @@ static int ieee80211_leave_ibss(struct wiphy *wiphy, struct net_device *dev)
+ 	return ieee80211_ibss_leave(sdata);
+ }
+ #endif
+-static int ieee80211_set_wiphy_params(struct wiphy *wiphy,
+-		#if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 0, 0))
+-		struct net_device *dev, 
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
++static int ieee80211_set_wiphy_params(struct wiphy *wiphy, int radio_idx, u32 changed)
++#elif (LINUX_VERSION_CODE < KERNEL_VERSION(3, 0, 0))
++static int ieee80211_set_wiphy_params(struct wiphy *wiphy, struct net_device *dev, u32 changed)
++#else
++static int ieee80211_set_wiphy_params(struct wiphy *wiphy, u32 changed)
+ 		#endif
+-		u32 changed)
+ {
+ #ifndef CONFIG_RATE_HW_CONTROL
+ 	struct ieee80211_local *local = wiphy_priv(wiphy);
+diff --git a/hal_apollo/mac80211/ieee80211_atbm_skb.h b/hal_apollo/mac80211/ieee80211_atbm_skb.h
+index 9ab889f..a52a223 100644
+--- a/hal_apollo/mac80211/ieee80211_atbm_skb.h
++++ b/hal_apollo/mac80211/ieee80211_atbm_skb.h
+@@ -231,6 +231,16 @@ extern void ieee80211_atbm_skb_orphan(struct sk_buff *skb,const char *func);
+ #endif
+ 
+ 
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
++#define atbm_amsdu_to_8023s(_skb, _list,_addr,_iftype,_extra_headroom)		\
++		do {																\
++			struct ethhdr _eth;												\
++			if(atbm_ieee80211_data_to_8023_exthdr(_skb,&_eth,_addr,_iftype) == 0)	\
++				ieee80211_amsdu_to_8023s(_skb, _list,_addr,_iftype,_extra_headroom,NULL,NULL,0);	\
++			else	\
++				atbm_dev_kfree_skb(_skb);	\
++		}while(0)
++#else
+ #define atbm_amsdu_to_8023s(_skb, _list,_addr,_iftype,_extra_headroom)		\
+ 		do {																\
+ 			struct ethhdr _eth;												\
+@@ -239,6 +249,7 @@ extern void ieee80211_atbm_skb_orphan(struct sk_buff *skb,const char *func);
+ 			else	\
+ 				atbm_dev_kfree_skb(_skb);	\
+ 		}while(0)
++#endif
+ //#endif
+ #if 0
+ #define atbm_amsdu_to_8023s(_skb, _list,_addr,_iftype,_extra_headroom)		\
+diff --git a/hal_apollo/mac80211/mlme.c b/hal_apollo/mac80211/mlme.c
+index 68c3832..112319a 100644
+--- a/hal_apollo/mac80211/mlme.c
++++ b/hal_apollo/mac80211/mlme.c
+@@ -4032,6 +4032,15 @@ static void ieee80211_mgd_assoc_rx_resp(struct ieee80211_work* wk,struct atbm_ie
+ 	atbm_wdev_lock(wdev);
+ 	cfg80211_rx_assoc_resp(wk->sdata->dev,wk->assoc.bss,(u8*)mgmt,len);
+ 	atbm_wdev_unlock(wdev);
++#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
++	struct cfg80211_rx_assoc_resp_data resp_data = {
++		.buf = (const u8 *)mgmt,
++		.len = len,
++		.links[0].bss = wk->assoc.bss,
++	};
++	atbm_wdev_lock(wdev);
++	cfg80211_rx_assoc_resp(wk->sdata->dev, &resp_data);
++	atbm_wdev_unlock(wdev);
+ #elif (LINUX_VERSION_CODE > KERNEL_VERSION(5,0,0))
+ 	atbm_wdev_lock(wdev);
+ 	cfg80211_rx_assoc_resp(wk->sdata->dev,wk->assoc.bss,(u8*)mgmt,len, -1, NULL, 0);
+@@ -4048,6 +4057,15 @@ static void ieee80211_mgd_assoc_timeout(struct ieee80211_work* wk)
+ 	
+ #if (LINUX_VERSION_CODE < KERNEL_VERSION(3,11,0))
+ 	cfg80211_send_assoc_timeout(wk->sdata->dev, wk->filter_bssid);
++#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
++	struct wireless_dev *wdev = wk->sdata->dev->ieee80211_ptr;
++	struct cfg80211_assoc_failure failure = {
++		.bss[0] = wk->assoc.bss,
++		.timeout = true,
++	};
++	atbm_wdev_lock(wdev);
++	cfg80211_assoc_failure(wk->sdata->dev, &failure);
++	atbm_wdev_unlock(wdev);
+ #else
+ 	struct wireless_dev *wdev = wk->sdata->dev->ieee80211_ptr;
+ 	atbm_wdev_lock(wdev);
+@@ -4849,20 +4867,26 @@ int ieee80211_mgd_disassoc(struct ieee80211_sub_if_data *sdata,
+ 	 * to cfg80211 while that's in a locked section already
+ 	 * trying to tell us that the user wants to disconnect.
+ 	 */
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
++	const u8 *target_bssid = req->ap_addr;
++#else
++	const u8 *target_bssid = req->bss ? req->bss->bssid : NULL;
+ 	if (ifmgd->associated != req->bss) {
+ 		mutex_unlock(&ifmgd->mtx);
+ 		return -ENOLINK;
+ 	}
++#endif
+ 
+ 	atbm_printk_mgmt( "%s: disassociating from %pM by local choice (reason=%d)\n",
+-	       sdata->name, req->bss->bssid, req->reason_code);
++	       sdata->name, target_bssid, req->reason_code);
+ 
+-	memcpy(bssid, req->bss->bssid, ETH_ALEN);
++	if (target_bssid)
++		memcpy(bssid, target_bssid, ETH_ALEN);
+ 	ieee80211_set_disassoc(sdata, false, true);
+ 
+ 	mutex_unlock(&ifmgd->mtx);
+ 
+-	ieee80211_send_deauth_disassoc(sdata, req->bss->bssid,
++	ieee80211_send_deauth_disassoc(sdata, target_bssid,
+ 			IEEE80211_STYPE_DISASSOC, req->reason_code,
+ 			cookie, !req->local_state_change);
+ 	sta_info_flush(sdata->local, sdata);
+diff --git a/hal_apollo/mac80211/rx.c b/hal_apollo/mac80211/rx.c
+index a18c30d..74d45c7 100644
+--- a/hal_apollo/mac80211/rx.c
++++ b/hal_apollo/mac80211/rx.c
+@@ -1048,7 +1048,12 @@ ieee80211_rx_h_check(struct ieee80211_rx_data *rx)
+ 		return ieee80211_rx_mesh_check(rx);
+ #endif	
+ 	if((status->flag & RX_FLAG_UNKOWN_STA_FRAME)&&(rx->sdata->vif.type == NL80211_IFTYPE_AP)){
+-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 3, 0))
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
++		if(rx->sdata->vif.type == NL80211_IFTYPE_AP){
++	    	if(cfg80211_rx_spurious_frame(rx->sdata->dev,hdr->addr2,-1,GFP_ATOMIC)==true)
++				return RX_DROP_UNUSABLE;
++		}
++#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 3, 0))
+ 		if(rx->sdata->vif.type == NL80211_IFTYPE_AP){
+ 	    	if(cfg80211_rx_spurious_frame(rx->sdata->dev,hdr->addr2,GFP_ATOMIC)==true)
+ 				return RX_DROP_UNUSABLE;
+@@ -1077,7 +1082,12 @@ ieee80211_rx_h_check(struct ieee80211_rx_data *rx)
+ 			if(rx->sta)
+ 				atbm_printk_err("%s:[%s]:sta[%pM] not assoc[%x]\n",__func__,rx->sdata->name,hdr->addr2,status->flag);
+ 
+-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 3, 0))
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
++			if(rx->sdata->vif.type == NL80211_IFTYPE_AP){
++		    	if(cfg80211_rx_spurious_frame(rx->sdata->dev,hdr->addr2,-1,GFP_ATOMIC)==true)
++					return RX_DROP_UNUSABLE;
++			}
++#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 3, 0))
+ 			if(rx->sdata->vif.type == NL80211_IFTYPE_AP){
+ 		    	if(cfg80211_rx_spurious_frame(rx->sdata->dev,hdr->addr2,GFP_ATOMIC)==true)
+ 					return RX_DROP_UNUSABLE;
+diff --git a/hal_apollo/main.c b/hal_apollo/main.c
+index d35e36c..d3777bd 100755
+--- a/hal_apollo/main.c
++++ b/hal_apollo/main.c
+@@ -62,8 +62,9 @@
+ //#endif
+ #include "internal_cmd.h"
+ 
+-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,10,0))
+-
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6,13,0))
++MODULE_IMPORT_NS("VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver");
++#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(5,10,0))
+ MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver); 
+ #endif
+ 
+diff --git a/hal_apollo/util.c b/hal_apollo/util.c
+index 5e02a33..90295c3 100644
+--- a/hal_apollo/util.c
++++ b/hal_apollo/util.c
+@@ -212,17 +212,20 @@ void atbm_xmit_linearize(struct atbm_common	*hw_priv,
+ 		for (sg = 0; sg < skb_shinfo(skb)->nr_frags; sg++){
+ 			
+ 			skb_frag_t *frag = &skb_shinfo(skb)->frags[sg];
+-#if (LINUX_VERSION_CODE > KERNEL_VERSION(5, 4, 0))
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
++			memcpy(xmit, page_address(skb_frag_page(frag)) + skb_frag_off(frag), skb_frag_size(frag));
++			xmit += skb_frag_size(frag);
++			sg_len += skb_frag_size(frag);
++#elif (LINUX_VERSION_CODE > KERNEL_VERSION(5, 4, 0))
+ 			memcpy(xmit,page_address(frag->bv_page) + frag->bv_offset,frag->bv_len);
++			xmit += frag->bv_len;
++			sg_len += frag->bv_len;
+ #elif (LINUX_VERSION_CODE < KERNEL_VERSION(3, 2, 0))		
+ 			memcpy(xmit,page_address(frag->page) + frag->page_offset,frag->size);
++			xmit += frag->size;
++			sg_len += frag->size;
+ #else
+ 			memcpy(xmit,page_address(frag->page.p) + frag->page_offset,frag->size);
+-#endif
+-#if (LINUX_VERSION_CODE > KERNEL_VERSION(5, 4, 0))
+-			xmit += frag->bv_len;
+-			sg_len += frag->bv_len;
+-#else
+ 			xmit += frag->size;
+ 			sg_len += frag->size;
+ #endif
+diff --git a/include/linux/compat-2.6.h b/include/linux/compat-2.6.h
+index 2c4b2e4..49514a4 100644
+--- a/include/linux/compat-2.6.h
++++ b/include/linux/compat-2.6.h
+@@ -47,3 +47,25 @@
+ #include <linux/compat-3.8.h>
+ #include <linux/compat-3.10.h>
+ #endif /* LINUX_26_COMPAT_H */
++
++/* Linux 6.15+ / 6.18+ compatibility shims */
++#include <linux/timer.h>
++#ifndef from_timer
++#define from_timer(var, callback_timer, timer_fieldname) \
++    container_of(callback_timer, typeof(*var), timer_fieldname)
++#endif
++
++#ifndef del_timer_sync
++#define del_timer_sync(t) timer_delete_sync(t)
++#endif
++
++#ifndef del_timer
++#define del_timer(t) timer_delete(t)
++#endif
++
++
++#include <linux/random.h>
++#ifndef prandom_u32
++#define prandom_u32() get_random_u32()
++#endif
++
+diff --git a/include/net/atbm_mac80211.h b/include/net/atbm_mac80211.h
+index 6af4f3f..00a777d 100644
+--- a/include/net/atbm_mac80211.h
++++ b/include/net/atbm_mac80211.h
+@@ -4843,17 +4843,23 @@ ieee80211_vif_type_p2p(struct ieee80211_vif *vif)
+ 	return ieee80211_iftype_p2p(vif->type, vif->p2p);
+ }
+ static inline void atbm_wdev_lock(struct wireless_dev *wdev)
+-	__acquires(wdev)
+ {
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0))
++	wiphy_lock(wdev->wiphy);
++#else
+ 	mutex_lock(&wdev->mtx);
+ 	__acquire(wdev->mtx);
++#endif
+ }
+ 
+ static inline void atbm_wdev_unlock(struct wireless_dev *wdev)
+-	__releases(wdev)
+ {
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0))
++	wiphy_unlock(wdev->wiphy);
++#else
+ 	__release(wdev->mtx);
+ 	mutex_unlock(&wdev->mtx);
++#endif
+ }
+ #ifdef CONFIG_ATBM_MAC80211_NO_USE
+ void ieee80211_enable_rssi_reports(struct ieee80211_vif *vif,
+-- 
+2.55.0
+

@@ -90,6 +90,7 @@ another, so nothing rots when one is rewritten.
 | `patches/linux-meson/README.md`          | mainline kernel patches for Amlogic boards, on their way upstream    |
 | `patches/linux-sunxi/README.md`          | mainline kernel patches for Allwinner boards: the H616 display       |
 | `patches/aic8800/README.md`              | the AIC8800 SDIO driver: Radxa's patches, then ours                  |
+| `patches/atbm6031/README.md`             | the ATBM6031 SDIO driver: a community 6.18 port, then ours           |
 | `patches/seekwave-swt6621s/README.md`    | the H96 Max Wi-Fi driver patches and their PRs                       |
 | `patches/mt76-mt7668/README.md`          | mainline mt76 for the MT7668S: what it does, its gaps, its firmware  |
 | `patches/btmtksdio-mt7668/README.md`     | mainline Bluetooth for the MT7668S, in-tree                          |

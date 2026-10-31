@@ -1,0 +1,45 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 24 Oct 2026 19:54:18 -0400
+Subject: [PATCH] atbm6031: transfer in 488-byte SDIO blocks
+
+The stock 613x driver runs the 6031-X's function at a 488-byte block: a
+1.6 KB frame takes 4 blocks instead of 7. wsm_buf_reserve() rounded with
+a power-of-two mask, and a wrong one; round up instead.
+---
+ hal_apollo/bh.h  | 2 +-
+ hal_apollo/wsm.c | 5 +----
+ 2 files changed, 2 insertions(+), 5 deletions(-)
+
+diff --git a/hal_apollo/bh.h b/hal_apollo/bh.h
+index 41f1e7f..60f4e58 100644
+--- a/hal_apollo/bh.h
++++ b/hal_apollo/bh.h
+@@ -17,7 +17,7 @@
+ 
+ /* extern */ struct atbm_common;
+ 
+-#define SDIO_BLOCK_SIZE 256
++#define SDIO_BLOCK_SIZE 488
+ 
+ /* Suspend state privates */
+ enum atbm_bh_pm_state {
+diff --git a/hal_apollo/wsm.c b/hal_apollo/wsm.c
+index a907023..13a1893 100644
+--- a/hal_apollo/wsm.c
++++ b/hal_apollo/wsm.c
+@@ -3388,10 +3388,7 @@ static int wsm_buf_reserve(struct wsm_buf *buf, size_t extra_size)
+ 	size_t pos = buf->data - buf->begin;
+ 	size_t size = pos + extra_size;
+ 
+-	if (size & (SDIO_BLOCK_SIZE - 1)) {
+-		size &= SDIO_BLOCK_SIZE;
+-		size += SDIO_BLOCK_SIZE;
+-	}
++	size = roundup(size, SDIO_BLOCK_SIZE);
+ 
+ 	buf->begin = atbm_krealloc(buf->begin, size, GFP_KERNEL | GFP_DMA);
+ 	if (buf->begin) {
+-- 
+2.55.0
+

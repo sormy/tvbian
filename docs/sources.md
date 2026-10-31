@@ -28,6 +28,7 @@ reached `develop-6.1` and no tagged kernel. Moving a kernel to another series is
 | `aic8800`    | radxa-pkg/aic8800            | newest release tag | how Radxa ships its own package     |
 | `swt6621s`   | retro98boy/seekwave-swt6621s | pinned `COMMIT`    | one maintainer, untagged            |
 | `meson-venc` | ray38080289/meson-sm1-codecs | pinned `COMMIT`    | the kernel imports a snapshot of it |
+| `atbm6031`   | gtxaspec/atbm-wifi           | pinned `COMMIT`    | one maintainer, untagged            |
 
 `meson64`'s decoder is the same repository at the same commit, imported with 18 patches ported onto
 it, so the encoders and the decoder move together, as a porting job.

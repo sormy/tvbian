@@ -1,0 +1,39 @@
+From db31e82a22fd6c9e568ca3c99ad076a048d8e889 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 24 Oct 2026 01:20:45 -0400
+Subject: [PATCH] atbm6031: build on 6.12 and later
+
+Linux 6.12 moved <asm/unaligned.h> to <linux/unaligned.h>. Fifteen files
+include the old one; the driver's own include directory, ahead of the
+kernel's, forwards it. The driver's Wi-Fi bridging is off: bridge.c
+includes <net/ipx.h>, which Linux dropped with IPX in 5.15.
+---
+ .config                 | 2 +-
+ include/asm/unaligned.h | 2 ++
+ 2 files changed, 3 insertions(+), 1 deletion(-)
+ create mode 100644 include/asm/unaligned.h
+
+diff --git a/.config b/.config
+index 1772410..55466a9 100644
+--- a/.config
++++ b/.config
+@@ -23,7 +23,7 @@ CONFIG_ATBM_SUPPORT_BAN_24G=y
+ #
+ # Driver Extern Function Select
+ #
+-CONFIG_ATBM_SUPPORT_BRIDGE=y
++# CONFIG_ATBM_SUPPORT_BRIDGE is not set
+ CONFIG_ATBM_FUNC_NOTXCONFIRM=y
+ # CONFIG_ATBM_FUNC_EARLYSUSPEND is not set
+ CONFIG_ATBM_FUNC_MONITOR=y
+diff --git a/include/asm/unaligned.h b/include/asm/unaligned.h
+new file mode 100644
+index 0000000..efb3665
+--- /dev/null
++++ b/include/asm/unaligned.h
+@@ -0,0 +1,2 @@
++/* Linux 6.12 moved it to linux/unaligned.h */
++#include <linux/unaligned.h>
+-- 
+2.55.0
+

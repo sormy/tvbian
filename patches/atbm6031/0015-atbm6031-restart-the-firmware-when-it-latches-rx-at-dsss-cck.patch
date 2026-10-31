@@ -1,0 +1,377 @@
+From 407bce6096f37cce275f275dfbac50462de0d853 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Tue, 27 Oct 2026 11:15:00 -0400
+Subject: [PATCH 15/15] atbm6031: restart the firmware when it latches RX at
+ DSSS/CCK
+
+The firmware can latch the AP's data to us at DSSS/CCK rates on a
+strong link: 11 Mbit/s, about 5 down, until it is restarted; a
+reassociation does not cure it. Every 5 s, a work judges the unicast
+data frames from the AP above latch_rssi: latch_strikes windows in a
+row of latch_frames or more, latch_dsss_pct of them DSSS/CCK, halt
+and reload the firmware and reassociate, at most once per
+latch_holdoff seconds.
+
+For a look at the firmware: latch_trace logs its CFO MIB and
+temperature every so many seconds, latch_fwlog forwards its own log,
+and latch_ppm warns when its running crystal estimate passes that
+many ppm. All three are off by default: the firmware's log over SDIO
+coincided with its reboots coming faster.
+---
+ hal_apollo/Makefile |   3 +-
+ hal_apollo/apollo.h |  13 +++
+ hal_apollo/latch.c  | 233 ++++++++++++++++++++++++++++++++++++++++++++
+ hal_apollo/main.c   |   2 +
+ hal_apollo/txrx.c   |   2 +
+ hal_apollo/util.c   |   2 +
+ hal_apollo/wsm.c    |   3 +-
+ 7 files changed, 256 insertions(+), 2 deletions(-)
+ create mode 100644 hal_apollo/latch.c
+
+diff --git a/hal_apollo/Makefile b/hal_apollo/Makefile
+index 93fc7e8..2093f98 100755
+--- a/hal_apollo/Makefile
++++ b/hal_apollo/Makefile
+@@ -825,7 +825,8 @@ $(ATBM_MODULES_NAME)-y += \
+ 		scan.o \
+ 		main.o \
+ 		util.o \
+-		internal_cmd.o
++		internal_cmd.o \
++		latch.o
+ $(ATBM_MODULES_NAME)-$(P2PENABLE) += atbm_p2p.o
+ $(ATBM_MODULES_NAME)-$(MODULEFS) += module_fs.o
+ $(ATBM_MODULES_NAME)-$(DEVCTRL) += dev_ioctl.o
+diff --git a/hal_apollo/apollo.h b/hal_apollo/apollo.h
+index 424ef49..00683ef 100644
+--- a/hal_apollo/apollo.h
++++ b/hal_apollo/apollo.h
+@@ -390,6 +390,14 @@ struct atbm_common {
+ 	atomic_t			bh_suspend;
+ 	atomic_t			bh_suspend_usb;
+ 	atomic_t			bh_halt;
++	struct delayed_work		latch_work;
++	atomic_t			latch_rx_dsss;
++	atomic_t			latch_rx_fast;
++	unsigned int			latch_strikes;
++	unsigned int			latch_trace_ticks;
++	bool				latch_fwlog_on;
++	bool				latch_ppm_beyond;
++	unsigned long			latch_holdoff_end;
+ #ifdef ATBM_USB_RESET
+ 	atomic_t			usb_reset;
+ #endif
+@@ -1057,6 +1065,11 @@ extern void atbm_destroy_wsm_cmd(struct atbm_common *hw_priv);
+ extern int atbm_reinit_firmware(struct atbm_common *hw_priv);
+ extern int atbm_rx_bh_flush(struct atbm_common *hw_priv);
+ extern void atbm_bh_halt(struct atbm_common *hw_priv);
++void atbm_latch_rx(struct atbm_common *hw_priv, const struct atbm_vif *priv,
++		   const struct ieee80211_hdr *frame, u8 rxed_rate, int signal);
++bool atbm_latch_fw_line(struct atbm_common *hw_priv, const char *line);
++void atbm_latch_start(struct atbm_common *hw_priv);
++void atbm_latch_stop(struct atbm_common *hw_priv);
+ extern void atbm_hif_status_set(int status);
+ extern void  atbm_bh_multrx_trace(struct atbm_common *hw_priv,u8 n_rx);
+ void atbm_get_drv_version(short *p);
+diff --git a/hal_apollo/latch.c b/hal_apollo/latch.c
+new file mode 100644
+index 0000000..aab305f
+--- /dev/null
++++ b/hal_apollo/latch.c
+@@ -0,0 +1,233 @@
++/*
++ * Rate latch watchdog: the firmware can latch the AP's unicast data to us
++ * at DSSS/CCK rates on a strong link until it is restarted.
++ */
++#include <linux/module.h>
++#include <linux/etherdevice.h>
++#include <linux/iopoll.h>
++#include <linux/rtnetlink.h>
++#include <net/atbm_mac80211.h>
++
++#include "apollo.h"
++#include "bh.h"
++#include "wsm.h"
++
++#define ATBM_LATCH_PERIOD		(5 * HZ)
++#define ATBM_LATCH_RESTART_POLL_US	(100 * USEC_PER_MSEC)
++#define ATBM_LATCH_RESTART_TIMEOUT_US	(30 * USEC_PER_SEC)
++
++static bool latch_recover = true;
++module_param(latch_recover, bool, 0644);
++MODULE_PARM_DESC(latch_recover, "Restart the firmware when it latches RX at DSSS/CCK rates");
++
++static int latch_rssi = -65;
++module_param(latch_rssi, int, 0644);
++MODULE_PARM_DESC(latch_rssi, "Count only frames stronger than this, dBm");
++
++static uint latch_frames = 40;
++module_param(latch_frames, uint, 0644);
++MODULE_PARM_DESC(latch_frames, "Fewest unicast data frames from the AP a 5 s window is judged on");
++
++static uint latch_dsss_pct = 90;
++module_param(latch_dsss_pct, uint, 0644);
++MODULE_PARM_DESC(latch_dsss_pct, "Share of DSSS/CCK frames, percent, that marks a window latched");
++
++static uint latch_strikes = 6;
++module_param(latch_strikes, uint, 0644);
++MODULE_PARM_DESC(latch_strikes, "Latched windows in a row before a restart");
++
++static uint latch_holdoff = 300;
++module_param(latch_holdoff, uint, 0644);
++MODULE_PARM_DESC(latch_holdoff, "Fewest seconds between two restarts");
++
++static uint latch_ppm;
++module_param(latch_ppm, uint, 0644);
++MODULE_PARM_DESC(latch_ppm, "Warn when the firmware's crystal estimate exceeds this, ppm; 0 off");
++
++static bool latch_fwlog;
++module_param(latch_fwlog, bool, 0644);
++MODULE_PARM_DESC(latch_fwlog, "Forward the firmware's own log to the kernel log");
++
++static uint latch_trace;
++module_param(latch_trace, uint, 0644);
++MODULE_PARM_DESC(latch_trace, "Log the firmware's CFO correction and temperature every this many seconds, 0 off");
++
++void atbm_latch_rx(struct atbm_common *hw_priv, const struct atbm_vif *priv,
++		   const struct ieee80211_hdr *frame, u8 rxed_rate, int signal)
++{
++	if (priv->join_status != ATBM_APOLLO_JOIN_STATUS_STA ||
++	    signal <= latch_rssi ||
++	    !ieee80211_is_data_present(frame->frame_control) ||
++	    is_multicast_ether_addr(frame->addr1) ||
++	    !ether_addr_equal(frame->addr2, priv->join_bssid))
++		return;
++
++	if (rxed_rate <= WSM_TRANSMIT_RATE_11)
++		atomic_inc(&hw_priv->latch_rx_dsss);
++	else
++		atomic_inc(&hw_priv->latch_rx_fast);
++}
++
++struct atbm_latch_sample {
++	struct cfo_ppm_t cfo;
++	int temp;
++};
++
++static void atbm_latch_sample(struct atbm_common *hw_priv, struct atbm_latch_sample *sample)
++{
++	memset(sample, 0, sizeof(*sample));
++	wsm_get_cfo_ppm_correction_value(hw_priv, &sample->cfo, sizeof(sample->cfo));
++	wsm_get_temperature(hw_priv, (u8 *)&sample->temp, sizeof(sample->temp));
++}
++
++static void atbm_latch_trace(struct atbm_common *hw_priv, const char *why)
++{
++	struct atbm_latch_sample sample;
++
++	atbm_latch_sample(hw_priv, &sample);
++	wiphy_info(hw_priv->hw->wiphy,
++		   "latch %s: rx_cfo %d tx_cfo %d init %u temp %d dsss %d fast %d strikes %u\n",
++		   why, sample.cfo.rx_cfo, sample.cfo.tx_cfo,
++		   sample.cfo.cfo_ppm_has_init_flag, sample.temp,
++		   atomic_read(&hw_priv->latch_rx_dsss),
++		   atomic_read(&hw_priv->latch_rx_fast), hw_priv->latch_strikes);
++}
++
++static void atbm_latch_apply_fwlog(struct atbm_common *hw_priv)
++{
++	struct atbm_vif *priv;
++	u8 on = latch_fwlog || latch_ppm;
++	int i;
++
++	if (on == hw_priv->latch_fwlog_on)
++		return;
++	atbm_for_each_vif(hw_priv, priv, i) {
++		if (priv && !wsm_write_mib(hw_priv, WSM_MIB_ID_DBG_PRINT_TO_HOST,
++					   &on, sizeof(on), priv->if_id)) {
++			hw_priv->latch_fwlog_on = on;
++			break;
++		}
++	}
++}
++
++/* OFDM fails at an offset DSSS still decodes: a drifting crystal shows here first. */
++static void atbm_latch_check_ppm(struct atbm_common *hw_priv, int ppm)
++{
++	bool beyond = latch_ppm && abs(ppm) > latch_ppm;
++
++	if (beyond != hw_priv->latch_ppm_beyond)
++		wiphy_warn(hw_priv->hw->wiphy, "crystal %d ppm off the AP, %s %u\n",
++			   ppm, beyond ? "beyond" : "back within", latch_ppm);
++	hw_priv->latch_ppm_beyond = beyond;
++}
++
++bool atbm_latch_fw_line(struct atbm_common *hw_priv, const char *line)
++{
++	int ppm, samples;
++
++	if (sscanf(line, "ppm%d,cnt%d", &ppm, &samples) == 2)
++		atbm_latch_check_ppm(hw_priv, ppm);
++	return latch_fwlog;
++}
++
++static bool atbm_latch_judge(struct atbm_common *hw_priv)
++{
++	unsigned int dsss = atomic_xchg(&hw_priv->latch_rx_dsss, 0);
++	unsigned int total = dsss + atomic_xchg(&hw_priv->latch_rx_fast, 0);
++	bool allowed;
++
++	if (!total || total < latch_frames ||
++	    dsss * 100 < total * latch_dsss_pct) {
++		hw_priv->latch_strikes = 0;
++		return false;
++	}
++	if (++hw_priv->latch_strikes < latch_strikes)
++		return false;
++
++	allowed = latch_recover &&
++		  time_after_eq(jiffies, hw_priv->latch_holdoff_end);
++	if (allowed || hw_priv->latch_strikes == latch_strikes)
++		wiphy_warn(hw_priv->hw->wiphy,
++			   "RX latched at DSSS/CCK: %u of %u frames above %d dBm, %u s in a row; %s\n",
++			   dsss, total, latch_rssi,
++			   hw_priv->latch_strikes * ATBM_LATCH_PERIOD / HZ,
++			   allowed ? "restarting the firmware" : "not restarting");
++	return allowed;
++}
++
++/* Still associated, the host keeps block-ack sessions the reloaded firmware lacks. */
++static void atbm_latch_reassociate(struct atbm_common *hw_priv)
++{
++	struct atbm_vif *priv;
++	int i;
++
++	atbm_for_each_vif(hw_priv, priv, i) {
++		if (priv && priv->join_status == ATBM_APOLLO_JOIN_STATUS_STA)
++			ieee80211_connection_loss(priv->vif);
++	}
++}
++
++static void atbm_latch_recover(struct atbm_common *hw_priv)
++{
++	int halted;
++
++	hw_priv->latch_strikes = 0;
++	hw_priv->latch_holdoff_end = jiffies + latch_holdoff * HZ;
++
++	atbm_bh_halt(hw_priv);
++	if (read_poll_timeout(atomic_read, halted, !halted,
++			      ATBM_LATCH_RESTART_POLL_US,
++			      ATBM_LATCH_RESTART_TIMEOUT_US, false,
++			      &hw_priv->bh_halt)) {
++		wiphy_warn(hw_priv->hw->wiphy, "firmware restart timed out\n");
++		return;
++	}
++
++	/* bh_halt clears mid-restart; the restart holds rtnl to its end. */
++	rtnl_lock();
++	if (!atbm_bh_is_term(hw_priv))
++		atbm_latch_reassociate(hw_priv);
++	rtnl_unlock();
++
++	atomic_set(&hw_priv->latch_rx_dsss, 0);
++	atomic_set(&hw_priv->latch_rx_fast, 0);
++}
++
++static void atbm_latch_work(struct work_struct *work)
++{
++	struct atbm_common *hw_priv =
++		container_of(to_delayed_work(work), struct atbm_common, latch_work);
++
++	if (atomic_read(&hw_priv->bh_halt) || atbm_bh_is_term(hw_priv) ||
++	    atomic_read(&hw_priv->scan.in_progress)) {
++		atomic_set(&hw_priv->latch_rx_dsss, 0);
++		atomic_set(&hw_priv->latch_rx_fast, 0);
++	} else {
++		atbm_latch_apply_fwlog(hw_priv);
++		if (latch_trace &&
++		    ++hw_priv->latch_trace_ticks * ATBM_LATCH_PERIOD >= latch_trace * HZ) {
++			hw_priv->latch_trace_ticks = 0;
++			atbm_latch_trace(hw_priv, "trace");
++		}
++		if (atbm_latch_judge(hw_priv)) {
++			atbm_latch_trace(hw_priv, "restart");
++			atbm_latch_recover(hw_priv);
++		}
++	}
++
++	queue_delayed_work(system_freezable_wq, &hw_priv->latch_work,
++			   ATBM_LATCH_PERIOD);
++}
++
++void atbm_latch_start(struct atbm_common *hw_priv)
++{
++	INIT_DELAYED_WORK(&hw_priv->latch_work, atbm_latch_work);
++	hw_priv->latch_holdoff_end = jiffies;
++	queue_delayed_work(system_freezable_wq, &hw_priv->latch_work,
++			   ATBM_LATCH_PERIOD);
++}
++
++void atbm_latch_stop(struct atbm_common *hw_priv)
++{
++	cancel_delayed_work_sync(&hw_priv->latch_work);
++}
+diff --git a/hal_apollo/main.c b/hal_apollo/main.c
+index d3777bd..00ad9d7 100755
+--- a/hal_apollo/main.c
++++ b/hal_apollo/main.c
+@@ -1176,6 +1176,7 @@ int atbm_register_common(struct ieee80211_hw *dev)
+ 	}
+ 	atbm_printk_always( "is registered as '%s'\n",
+ 			wiphy_name(dev->wiphy));
++	atbm_latch_start(dev->priv);
+ 	return 0;
+ }
+ //EXPORT_SYMBOL_GPL(atbm_register_common);
+@@ -1218,6 +1219,7 @@ void atbm_unregister_common(struct ieee80211_hw *dev)
+ 	atomic_set(&hw_priv->atbm_pluged,0);
+ #endif
+ 	atbm_printk_exit("atbm_unregister_common.++\n");
++	atbm_latch_stop(hw_priv);
+ 	ieee80211_unregister_hw(dev);
+ 	
+ 	hw_priv->sbus_ops->irq_unsubscribe(hw_priv->sbus_priv);
+diff --git a/hal_apollo/txrx.c b/hal_apollo/txrx.c
+index 248bb48..62e95c5 100644
+--- a/hal_apollo/txrx.c
++++ b/hal_apollo/txrx.c
+@@ -2077,6 +2077,8 @@ void atbm_rx_cb(struct atbm_vif *priv,
+ 
+ 	hdr->signal = (s8)arg->rcpiRssi;
+ 	hdr->antenna = 0;
++	if (!arg->status)
++		atbm_latch_rx(hw_priv, priv, frame, arg->rxedRate, hdr->signal);
+ 	if(priv->join_status == ATBM_APOLLO_JOIN_STATUS_SIMPLE_MONITOR){
+ 		atbm_ieee80211_rx(priv->hw, skb);
+ 		*skb_p = NULL;
+diff --git a/hal_apollo/util.c b/hal_apollo/util.c
+index c3a1bf1..0603091 100644
+--- a/hal_apollo/util.c
++++ b/hal_apollo/util.c
+@@ -396,6 +396,8 @@ int atbm_reinit_firmware(struct atbm_common *hw_priv)
+ 	/* the probe's setup the reloaded firmware lost: per-rate power, automatic CFO calibration */
+ 	wsm_set_rate_power(hw_priv, 1);
+ 	open_auto_cfo(hw_priv, 1);
++	/* the reloaded firmware's log is off again */
++	hw_priv->latch_fwlog_on = false;
+ 	
+ error_reload:
+ 	return ret;
+diff --git a/hal_apollo/wsm.c b/hal_apollo/wsm.c
+index 13a1893..f3be137 100644
+--- a/hal_apollo/wsm.c
++++ b/hal_apollo/wsm.c
+@@ -1812,7 +1812,8 @@ static int wsm_debug_print_indication(struct atbm_common *hw_priv,
+ 	WSM_GET(buf, &fw_debug_print[0], length);
+ 	fw_debug_print[length] = '\0';
+ 
+-	atbm_printk_lmac("[lmac]:%s", fw_debug_print);
++	if (atbm_latch_fw_line(hw_priv, fw_debug_print))
++		atbm_printk_lmac("[lmac]:%s", fw_debug_print);
+ 	return 0;
+ underflow:
+ 	atbm_printk_err("wsm_debug_print_indication:EINVAL\n");
+-- 
+2.55.0
+

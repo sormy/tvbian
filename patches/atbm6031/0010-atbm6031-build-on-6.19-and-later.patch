@@ -1,0 +1,187 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 25 Oct 2026 13:30:00 -0400
+Subject: [PATCH] atbm6031: build on 6.19 and later
+
+6.19 hands cfg80211's key and station ops, and cfg80211_new_sta() and
+cfg80211_del_sta(), the wireless_dev instead of its net_device. Wrap the
+ops, which keep taking the net_device; IEEE80211_MIN_ACTION_SIZE, now
+sized up to a named field, keeps its old meaning.
+
+---
+--- a/hal_apollo/mac80211/cfg.c
++++ b/hal_apollo/mac80211/cfg.c
+@@ -4170,15 +4170,91 @@
+ #endif
+ #endif 
+ #endif
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 19, 0))
++/* 6.19 hands key and station ops the wireless_dev, not its netdev */
++static int ieee80211_add_key_wdev(struct wiphy *wiphy, struct wireless_dev *wdev,
++				  int link_id, u8 key_idx, bool pairwise,
++				  const u8 *mac_addr, struct key_params *params)
++{
++	return ieee80211_add_key(wiphy, wdev->netdev, link_id, key_idx,
++				 pairwise, mac_addr, params);
++}
++
++static int ieee80211_del_key_wdev(struct wiphy *wiphy, struct wireless_dev *wdev,
++				  int link_id, u8 key_idx, bool pairwise,
++				  const u8 *mac_addr)
++{
++	return ieee80211_del_key(wiphy, wdev->netdev, link_id, key_idx,
++				 pairwise, mac_addr);
++}
++
++static int ieee80211_get_key_wdev(struct wiphy *wiphy, struct wireless_dev *wdev,
++				  int link_id, u8 key_idx, bool pairwise,
++				  const u8 *mac_addr, void *cookie,
++				  void (*callback)(void *cookie,
++						   struct key_params *params))
++{
++	return ieee80211_get_key(wiphy, wdev->netdev, link_id, key_idx,
++				 pairwise, mac_addr, cookie, callback);
++}
++
++static int ieee80211_config_default_mgmt_key_wdev(struct wiphy *wiphy,
++						  struct wireless_dev *wdev,
++						  int link_id, u8 key_idx)
++{
++	return ieee80211_config_default_mgmt_key(wiphy, wdev->netdev, link_id,
++						 key_idx);
++}
++
++static int ieee80211_add_station_wdev(struct wiphy *wiphy,
++				      struct wireless_dev *wdev, const u8 *mac,
++				      struct station_parameters *params)
++{
++	return ieee80211_add_station(wiphy, wdev->netdev, mac, params);
++}
++
++static int ieee80211_del_station_wdev(struct wiphy *wiphy,
++				      struct wireless_dev *wdev,
++				      struct station_del_parameters *params)
++{
++	return ieee80211_del_station(wiphy, wdev->netdev, params);
++}
++
++static int ieee80211_change_station_wdev(struct wiphy *wiphy,
++					 struct wireless_dev *wdev,
++					 const u8 *mac,
++					 struct station_parameters *params)
++{
++	return ieee80211_change_station(wiphy, wdev->netdev, mac, params);
++}
++
++static int ieee80211_get_station_wdev(struct wiphy *wiphy,
++				      struct wireless_dev *wdev, const u8 *mac,
++				      struct station_info *sinfo)
++{
++	return ieee80211_get_station(wiphy, wdev->netdev, mac, sinfo);
++}
++
++static int ieee80211_dump_station_wdev(struct wiphy *wiphy,
++				       struct wireless_dev *wdev, int idx,
++				       u8 *mac, struct station_info *sinfo)
++{
++	return ieee80211_dump_station(wiphy, wdev->netdev, idx, mac, sinfo);
++}
++#define ATBM_WDEV_OP(op) op##_wdev
++#else
++#define ATBM_WDEV_OP(op) op
++#endif
++
+ struct cfg80211_ops mac80211_config_ops = {
+ 	.add_virtual_intf = ieee80211_add_iface,
+ 	.del_virtual_intf = ieee80211_del_iface,
+ 	.change_virtual_intf = ieee80211_change_iface,
+-	.add_key = ieee80211_add_key,
+-	.del_key = ieee80211_del_key,
+-	.get_key = ieee80211_get_key,
++	.add_key = ATBM_WDEV_OP(ieee80211_add_key),
++	.del_key = ATBM_WDEV_OP(ieee80211_del_key),
++	.get_key = ATBM_WDEV_OP(ieee80211_get_key),
+ 	.set_default_key = ieee80211_config_default_key,
+-	.set_default_mgmt_key = ieee80211_config_default_mgmt_key,
++	.set_default_mgmt_key = ATBM_WDEV_OP(ieee80211_config_default_mgmt_key),
+ #if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 4, 0))
+ 	.add_beacon = ieee80211_add_beacon,
+ 	.set_beacon = ieee80211_set_beacon,
+@@ -4188,11 +4264,11 @@
+ 	.change_beacon = ieee80211_change_beacon,
+ 	.stop_ap = ieee80211_del_beacon,
+ #endif
+-	.add_station = ieee80211_add_station,
+-	.del_station = ieee80211_del_station,
+-	.change_station = ieee80211_change_station,
+-	.get_station = ieee80211_get_station,
+-	.dump_station = ieee80211_dump_station,
++	.add_station = ATBM_WDEV_OP(ieee80211_add_station),
++	.del_station = ATBM_WDEV_OP(ieee80211_del_station),
++	.change_station = ATBM_WDEV_OP(ieee80211_change_station),
++	.get_station = ATBM_WDEV_OP(ieee80211_get_station),
++	.dump_station = ATBM_WDEV_OP(ieee80211_dump_station),
+ #ifdef CONFIG_MAC80211_ATBM_MESH
+ 	.add_mpath = ieee80211_add_mpath,
+ 	.del_mpath = ieee80211_del_mpath,
+--- a/hal_apollo/mac80211/ieee80211_i.h
++++ b/hal_apollo/mac80211/ieee80211_i.h
+@@ -37,6 +37,12 @@
+ #include "ieee80211_atbm_skb.h"
+ #include "atbm_workqueue.h"
+ 
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 19, 0))
++/* 6.19 sizes an action frame up to a named field; the driver means its category */
++#undef IEEE80211_MIN_ACTION_SIZE
++#define IEEE80211_MIN_ACTION_SIZE offsetofend(struct ieee80211_mgmt, u.action.category)
++#endif
++
+ #ifdef SIGMSTAR_SCAN_FEATURE
+ #define CHANNEL_NUM 14
+ #endif  //SIGMSTAR_SCAN_FEATURE
+--- a/hal_apollo/mac80211/sta_info.c
++++ b/hal_apollo/mac80211/sta_info.c
+@@ -26,6 +26,12 @@
+ #include "mesh.h"
+ #include "wme.h"
+ 
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 19, 0))
++#define ATBM_STA_DEV(sdata) (&(sdata)->wdev)
++#else
++#define ATBM_STA_DEV(sdata) ((sdata)->dev)
++#endif
++
+ /**
+  * DOC: STA information lifetime rules
+  *
+@@ -485,10 +491,10 @@
+ #ifdef ATBM_AP_SME
+ 	if (!((sdata->vif.type == NL80211_IFTYPE_AP)||(sdata->vif.type == NL80211_IFTYPE_P2P_GO))){
+ 		
+-			cfg80211_new_sta(sdata->dev, sta->sta.addr, &sinfo, GFP_KERNEL);
++			cfg80211_new_sta(ATBM_STA_DEV(sdata), sta->sta.addr, &sinfo, GFP_KERNEL);
+ 		}
+ #else
+-		cfg80211_new_sta(sdata->dev, sta->sta.addr, &sinfo, GFP_KERNEL);
++		cfg80211_new_sta(ATBM_STA_DEV(sdata), sta->sta.addr, &sinfo, GFP_KERNEL);
+ #endif
+ 	}
+ 
+@@ -1046,7 +1052,7 @@
+ 	 * roaming time.
+ 	 */
+ 	if (sdata->vif.type == NL80211_IFTYPE_STATION) {
+-		cfg80211_del_sta(sdata->dev, sta->sta.addr, GFP_KERNEL);
++		cfg80211_del_sta(ATBM_STA_DEV(sdata), sta->sta.addr, GFP_KERNEL);
+ 
+ #ifdef CONFIG_MAC80211_ATBM_VERBOSE_DEBUG
+ 		wiphy_debug(local->hw.wiphy,
+@@ -1084,7 +1090,7 @@
+ 	atbm_cancel_work_sync(&sta->drv_unblock_wk);
+ #endif
+ 
+-	cfg80211_del_sta(sdata->dev, sta->sta.addr, GFP_KERNEL);
++	cfg80211_del_sta(ATBM_STA_DEV(sdata), sta->sta.addr, GFP_KERNEL);
+ #ifndef CONFIG_RATE_HW_CONTROL
+ 	rate_control_remove_sta_debugfs(sta);
+ #endif

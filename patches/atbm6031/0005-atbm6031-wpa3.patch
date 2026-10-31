@@ -1,0 +1,29 @@
+From 997aecd2ad98e51fc95c349015253304e85f0760 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 24 Oct 2026 10:29:52 -0400
+Subject: [PATCH] atbm6031: WPA3
+
+SAE authentication is the driver's own, on by its Kconfig default and off
+in its .config. Without it the driver does not declare NL80211_FEATURE_SAE,
+and cfg80211 refuses the SAE authentication wpa_supplicant sends to an
+access point in WPA2/WPA3 transition mode: -EINVAL, before the driver.
+---
+ .config | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/.config b/.config
+index 55466a9..11187de 100644
+--- a/.config
++++ b/.config
+@@ -37,7 +37,7 @@ CONFIG_ATBM_FUNC_MONITOR=y
+ CONFIG_ATBM_FUNC_DEV_CTRL_API=y
+ CONFIG_ATBM_FUNC_MODULE_FS=y
+ CONFIG_ATBM_FUNC_PRIVE_IE=y
+-# CONFIG_ATBM_FUNC_SAE_AUTHEN is not set
++CONFIG_ATBM_FUNC_SAE_AUTHEN=y
+ 
+ #
+ # Driver debug features
+-- 
+2.55.0
+

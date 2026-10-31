@@ -1,0 +1,32 @@
+From de6c2fe6b654265d633233f611147aba0e46d7ec Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Tue, 27 Oct 2026 13:52:00 -0400
+Subject: [PATCH 17/17] atbm6031: drop a flush's frames when joined to nothing
+
+After a firmware restart the AP is lost, and the scan that follows
+recalculates idle under iflist_mtx, which flushes with a 7 s wait for
+frames addressed to that AP; nothing can send them. wpa_supplicant's
+authenticate waits on the same mutex: 7 s of every reconnect. Joined to
+nothing, flush by dropping. A forced restart reconnects in 2.8 s, not
+10.
+---
+ hal_apollo/sta.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/hal_apollo/sta.c b/hal_apollo/sta.c
+index b29bfb7..2d1dede 100644
+--- a/hal_apollo/sta.c
++++ b/hal_apollo/sta.c
+@@ -1383,6 +1383,9 @@ int __atbm_flush(struct atbm_common *hw_priv, bool drop, int if_id)
+ 		atbm_printk_err("%s:if_id[%d] is already reset\n",__func__,if_id);
+ 		return -1;
+ 	}
++	/* joined to nothing, its frames have no peer: waiting would sit out the timeout */
++	if (priv->join_status == ATBM_APOLLO_JOIN_STATUS_PASSIVE)
++		drop = true;
+ 	
+ 	for (;;) {
+ 		/* TODO: correct flush handling is required when dev_stop.
+-- 
+2.55.0
+

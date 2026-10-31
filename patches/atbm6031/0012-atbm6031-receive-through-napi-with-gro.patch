@@ -1,0 +1,302 @@
+From a768c1f72efb8d70980def53f28e7dcca5e757f3 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Tue, 27 Oct 2026 09:00:00 -0400
+Subject: [PATCH 12/15] atbm6031: receive through NAPI with GRO
+
+Each frame went up through netif_rx() as the SDIO RX thread read it,
+so GRO had nothing to merge. As AltoBeam's newer SDK
+(CONFIG_ATBM_SUPPORT_GRO), each interface queues its delivered frames
+and a NAPI poll hands them to napi_gro_receive(): at the end of each
+SDIO read pass, after a reorder timeout release, or once 64 are
+queued. A poll that completes with frames queued behind its last
+dequeue schedules itself again.
+---
+ hal_apollo/Makefile                      |  1 +
+ hal_apollo/bh_sdio.c                     |  1 +
+ hal_apollo/mac80211/agg-rx.c             |  1 +
+ hal_apollo/mac80211/ieee80211_atbm_skb.c |  5 ++
+ hal_apollo/mac80211/ieee80211_atbm_skb.h |  3 ++
+ hal_apollo/mac80211/ieee80211_i.h        |  9 ++++
+ hal_apollo/mac80211/iface.c              | 62 ++++++++++++++++++++++++
+ hal_apollo/mac80211/rx.c                 | 33 +++++++++++++
+ include/net/atbm_mac80211.h              |  1 +
+ 9 files changed, 116 insertions(+)
+
+diff --git a/hal_apollo/Makefile b/hal_apollo/Makefile
+index 4add941..93fc7e8 100755
+--- a/hal_apollo/Makefile
++++ b/hal_apollo/Makefile
+@@ -279,6 +279,7 @@ ccflags-y += -DCONFIG_ATBM_SUPPORT_REKEY
+ #ccflags-y += -DIEEE80211_TASKLET
+ #ccflags-y += -DCONFIG_RATE_HW_CONTROL
+ ccflags-y += -DCONFIG_ATBM_SUPPORT_SG
++ccflags-y += -DCONFIG_ATBM_SUPPORT_GRO
+ ccflags-y += -DCONFIG_ATBM_START_WOL_TEST
+ #ccflags-y += -DCONFIG_ATBM_SUPPORT_COUNTRY_CODE
+ #add AP+STA mode , sta channel change send event to hostapd
+diff --git a/hal_apollo/bh_sdio.c b/hal_apollo/bh_sdio.c
+index 2407f1f..74f5b78 100644
+--- a/hal_apollo/bh_sdio.c
++++ b/hal_apollo/bh_sdio.c
+@@ -906,6 +906,7 @@ restart:
+ //	hw_priv->sbus_ops->lock(hw_priv->sbus_priv);
+ 	atbm_sdio_process_read_data(hw_priv,atbm_bh_read_ctrl_reg,atbm_data_read,atbm_rx_directly,ATBM_RX_RAW_FRAME);
+ //	hw_priv->sbus_ops->unlock(hw_priv->sbus_priv);
++	ieee80211_napi_sched(hw_priv->hw);
+ }
+ 
+ void atbm_irq_handler(struct atbm_common *hw_priv)
+diff --git a/hal_apollo/mac80211/agg-rx.c b/hal_apollo/mac80211/agg-rx.c
+index 43b4cec..117c4e5 100644
+--- a/hal_apollo/mac80211/agg-rx.c
++++ b/hal_apollo/mac80211/agg-rx.c
+@@ -196,6 +196,7 @@ static void sta_rx_agg_reorder_timer_expired(unsigned long data)
+ 	rcu_read_lock();
+ 	ieee80211_release_reorder_timeout(sta, *ptid);
+ 	rcu_read_unlock();
++	ieee80211_napi_sched(&sta->local->hw);
+ }
+ #ifdef CONFIG_ATBM_DRIVER_PROCESS_BA
+ static void ieee80211_send_addba_resp(struct ieee80211_sub_if_data *sdata, u8 *da, u16 tid,
+diff --git a/hal_apollo/mac80211/ieee80211_atbm_skb.c b/hal_apollo/mac80211/ieee80211_atbm_skb.c
+index 6845649..c20370e 100644
+--- a/hal_apollo/mac80211/ieee80211_atbm_skb.c
++++ b/hal_apollo/mac80211/ieee80211_atbm_skb.c
+@@ -525,6 +525,11 @@ int ieee80211_atbm_netif_rx(struct sk_buff *skb)
+ 	ieee80211_atbm_skb_hash_drow(skb);
+ 	return netif_rx(skb);
+ }
++int ieee80211_atbm_napi_gro_receive(struct napi_struct *napi, struct sk_buff *skb)
++{
++	ieee80211_atbm_skb_hash_drow(skb);
++	return (int)napi_gro_receive(napi,skb);
++}
+ int ieee80211_atbm_netif_receive_skb(struct sk_buff *skb)
+ {	
+ 	ieee80211_atbm_skb_hash_drow(skb);
+diff --git a/hal_apollo/mac80211/ieee80211_atbm_skb.h b/hal_apollo/mac80211/ieee80211_atbm_skb.h
+index a52a223..845563c 100644
+--- a/hal_apollo/mac80211/ieee80211_atbm_skb.h
++++ b/hal_apollo/mac80211/ieee80211_atbm_skb.h
+@@ -70,6 +70,7 @@ extern int ieee80211_atbm_skb_shared(const struct sk_buff *skb);
+ 
+ extern int ieee80211_atbm_skb_padto(struct sk_buff *skb, unsigned int len);
+ extern int ieee80211_atbm_netif_rx(struct sk_buff *skb);
++extern int ieee80211_atbm_napi_gro_receive(struct napi_struct *napi, struct sk_buff *skb);
+ extern struct sk_buff *ieee80211_atbm_skb_get(struct sk_buff *skb);
+ extern void ieee80211_atbm_rx_debug_setflag(struct sk_buff *skb,u32 flags);
+ extern void ieee80211_atbm_rx_debug_setflag2(struct sk_buff *skb,u16 fc);
+@@ -142,6 +143,7 @@ extern void ieee80211_atbm_skb_orphan(struct sk_buff *skb,const char *func);
+ #define atbm_skb_clone(_skb,_gfp_mask)							ieee80211_atbm_skb_clone(_skb,_gfp_mask,__func__)
+ #define atbm_netif_receive_skb(_skb)							ieee80211_atbm_netif_receive_skb(_skb)
+ #define atbm_netif_rx(_skb)										ieee80211_atbm_netif_rx(_skb)
++#define atbm_napi_gro_receive(_napi,_skb)						ieee80211_atbm_napi_gro_receive(_napi,_skb)
+ #define atbm_dev_queue_xmit(_skb)								ieee80211_atbm_dev_queue_xmit(_skb)
+ #define atbm_skb_linearize(_skb)								ieee80211_atbm_skb_linearize(_skb)
+ #define atbm_skb_peek(_list_)									ieee80211_atbm_skb_peek(_list_)
+@@ -204,6 +206,7 @@ extern void ieee80211_atbm_skb_orphan(struct sk_buff *skb,const char *func);
+ #define atbm_skb_clone(_skb,_gfp_mask)							skb_clone(_skb,_gfp_mask)
+ #define atbm_netif_receive_skb(_skb)							netif_receive_skb(_skb)
+ #define atbm_netif_rx(_skb)										netif_rx(_skb)
++#define atbm_napi_gro_receive(_napi,_skb)						napi_gro_receive(_napi,_skb)
+ #define atbm_dev_queue_xmit(_skb)								dev_queue_xmit(_skb)
+ #define atbm_skb_linearize(_skb)								skb_linearize(_skb)
+ #define atbm_skb_peek(_list_)									skb_peek(_list_)
+diff --git a/hal_apollo/mac80211/ieee80211_i.h b/hal_apollo/mac80211/ieee80211_i.h
+index 9bb8f78..c95bdb8 100644
+--- a/hal_apollo/mac80211/ieee80211_i.h
++++ b/hal_apollo/mac80211/ieee80211_i.h
+@@ -967,6 +967,7 @@ enum ieee80211_sub_if_data_flags {
+ enum ieee80211_sdata_state_bits {
+ 	SDATA_STATE_RUNNING,
+ 	SDATA_STATE_OFFCHANNEL,
++	SDATA_STATE_NAPI,
+ };
+ #ifdef ATBM_AP_SME
+ enum ap_sme_event_id{
+@@ -1107,6 +1108,10 @@ struct ieee80211_sub_if_data {
+ 	*8023
+ 	*/
+ 	struct sk_buff_head skb_deliver;
++#ifdef CONFIG_ATBM_SUPPORT_GRO
++	struct napi_struct napi_rx;
++	struct sk_buff_head napi_rx_list;
++#endif
+ 
+ 	bool arp_filter_state;
+ 
+@@ -2250,6 +2255,10 @@ int ieee80211_if_change_type(struct ieee80211_sub_if_data *sdata,
+ 			     enum nl80211_iftype type);
+ void ieee80211_if_remove(struct ieee80211_sub_if_data *sdata);
+ void ieee80211_remove_interfaces(struct ieee80211_local *local);
++#ifdef CONFIG_ATBM_SUPPORT_GRO
++int ieee80211_rx_napi_poll(struct napi_struct *napi, int budget);
++void ieee80211_sdata_napi_sched(struct ieee80211_sub_if_data *sdata, struct sk_buff *skb);
++#endif
+ u32 __ieee80211_recalc_idle(struct ieee80211_local *local);
+ void ieee80211_recalc_idle(struct ieee80211_local *local);
+ void ieee80211_adjust_monitor_flags(struct ieee80211_sub_if_data *sdata,
+diff --git a/hal_apollo/mac80211/iface.c b/hal_apollo/mac80211/iface.c
+index 2ba9287..50f3d63 100644
+--- a/hal_apollo/mac80211/iface.c
++++ b/hal_apollo/mac80211/iface.c
+@@ -116,6 +116,59 @@ void ieee80211_medium_traffic_init(struct ieee80211_sub_if_data *sdata)
+ 	sdata->traffic.last_rx_bytes = sdata->dev->stats.rx_bytes;
+ 	atbm_setup_timer(&sdata->traffic.traffic_timer,ieee80211_medium_traffic_timer,(unsigned long) sdata);
+ }
++#ifdef CONFIG_ATBM_SUPPORT_GRO
++static void ieee80211_sdata_gro_setup(struct ieee80211_sub_if_data *sdata)
++{
++	atbm_skb_queue_head_init(&sdata->napi_rx_list);
++	netif_napi_add(sdata->dev, &sdata->napi_rx, ieee80211_rx_napi_poll);
++}
++
++static void ieee80211_sdata_gro_enable(struct ieee80211_sub_if_data *sdata)
++{
++	if (test_bit(SDATA_STATE_NAPI, &sdata->state))
++		return;
++	napi_enable(&sdata->napi_rx);
++	set_bit(SDATA_STATE_NAPI, &sdata->state);
++}
++
++static void ieee80211_sdata_gro_disable(struct ieee80211_sub_if_data *sdata)
++{
++	if (!test_and_clear_bit(SDATA_STATE_NAPI, &sdata->state))
++		return;
++	/* receive runs under rcu_read_lock(): nothing is queued past this */
++	synchronize_rcu();
++	napi_disable(&sdata->napi_rx);
++	atbm_skb_queue_purge(&sdata->napi_rx_list);
++}
++
++void ieee80211_sdata_napi_sched(struct ieee80211_sub_if_data *sdata, struct sk_buff *skb)
++{
++	atbm_skb_queue_tail(&sdata->napi_rx_list, skb);
++	if (atbm_skb_queue_len(&sdata->napi_rx_list) >= NAPI_POLL_WEIGHT)
++		napi_schedule(&sdata->napi_rx);
++}
++
++void ieee80211_napi_sched(struct ieee80211_hw *hw)
++{
++	struct ieee80211_local *local = hw_to_local(hw);
++	struct ieee80211_sub_if_data *sdata;
++
++	/* poll in this thread at local_bh_enable(), not in ksoftirqd */
++	local_bh_disable();
++	rcu_read_lock();
++	list_for_each_entry_rcu(sdata, &local->interfaces, list) {
++		if (test_bit(SDATA_STATE_NAPI, &sdata->state) &&
++		    !atbm_skb_queue_empty(&sdata->napi_rx_list))
++			napi_schedule(&sdata->napi_rx);
++	}
++	rcu_read_unlock();
++	local_bh_enable();
++}
++#else
++void ieee80211_napi_sched(struct ieee80211_hw *hw)
++{
++}
++#endif
+ 
+ static int ieee80211_change_mtu(struct net_device *dev, int new_mtu)
+ {
+@@ -551,6 +604,9 @@ static int ieee80211_do_open(struct net_device *dev, bool coming_up)
+ #endif //	CONFIG_MAC80211_BRIDGE
+ 	}
+ 
++#ifdef CONFIG_ATBM_SUPPORT_GRO
++	ieee80211_sdata_gro_enable(sdata);
++#endif
+ 	set_bit(SDATA_STATE_RUNNING, &sdata->state);
+ #ifdef CONFIG_ATBM_SUPPORT_WDS
+ 	if (sdata->vif.type == NL80211_IFTYPE_WDS) {
+@@ -772,6 +828,9 @@ static void ieee80211_do_stop(struct ieee80211_sub_if_data *sdata,
+ #endif
+ 		ieee80211_free_authen_bss(sdata);
+ 	}
++#ifdef CONFIG_ATBM_SUPPORT_GRO
++	ieee80211_sdata_gro_disable(sdata);
++#endif
+ #ifdef CONFIG_ATBM_SUPPORT_AP_CONFIG
+ 	ieee80211_update_ap_config(sdata,NULL,true);
+ #endif
+@@ -2606,6 +2665,9 @@ int ieee80211_if_add(struct ieee80211_local *local, const char *name,
+ 		if (type == NL80211_IFTYPE_STATION)
+ 			sdata->u.mgd.use_4addr = params->use_4addr;
+ 	}
++#ifdef CONFIG_ATBM_SUPPORT_GRO
++	ieee80211_sdata_gro_setup(sdata);
++#endif
+ #ifdef CONFIG_WIRELESS_EXT
+     ndev->wireless_handlers = &atbm_handlers_def;
+ #endif
+diff --git a/hal_apollo/mac80211/rx.c b/hal_apollo/mac80211/rx.c
+index 74d45c7..a0bc16b 100644
+--- a/hal_apollo/mac80211/rx.c
++++ b/hal_apollo/mac80211/rx.c
+@@ -2238,6 +2238,16 @@ static bool ieee80211_deliver_special_dhcp(struct ieee80211_sub_if_data* sdata,
+ 	
+ 	return true;
+ }
++#ifdef CONFIG_ATBM_SUPPORT_GRO
++static bool ieee80211_deliver_special_napi(struct ieee80211_sub_if_data* sdata, struct sk_buff* skb)
++{
++	if (!test_bit(SDATA_STATE_NAPI, &sdata->state))
++		return false;
++
++	ieee80211_sdata_napi_sched(sdata, skb);
++	return true;
++}
++#endif
+ static bool ieee80211_deliver_special(struct ieee80211_sub_if_data* sdata, struct sk_buff* skb)
+ {
+ 	bool res;
+@@ -2249,6 +2259,9 @@ static bool ieee80211_deliver_special(struct ieee80211_sub_if_data* sdata, struc
+ 	} while (0)	
+ 	CALL_RXSPECAL(ieee80211_deliver_special_pae);
+ 	CALL_RXSPECAL(ieee80211_deliver_special_dhcp);
++#ifdef CONFIG_ATBM_SUPPORT_GRO
++	CALL_RXSPECAL(ieee80211_deliver_special_napi);
++#endif
+ 	
+ 	return false;
+ handle:	
+@@ -4116,3 +4129,23 @@ void ieee80211_rx_irqsafe(struct ieee80211_hw *hw, struct sk_buff *skb)
+ 		tasklet_schedule(&local->tasklet);
+ }
+ //EXPORT_SYMBOL(ieee80211_rx_irqsafe);
++#ifdef CONFIG_ATBM_SUPPORT_GRO
++int ieee80211_rx_napi_poll(struct napi_struct *napi, int budget)
++{
++	struct ieee80211_sub_if_data *sdata = container_of(napi, struct ieee80211_sub_if_data, napi_rx);
++	struct sk_buff *skb;
++	int done = 0;
++
++	while (done < budget && (skb = atbm_skb_dequeue(&sdata->napi_rx_list))) {
++		atbm_napi_gro_receive(napi, skb);
++		done++;
++	}
++
++	/* a frame queued after the last dequeue would otherwise wait for the next RX pass */
++	if (done < budget && napi_complete_done(napi, done) &&
++	    !atbm_skb_queue_empty(&sdata->napi_rx_list))
++		napi_schedule(napi);
++
++	return done;
++}
++#endif
+diff --git a/include/net/atbm_mac80211.h b/include/net/atbm_mac80211.h
+index 00a777d..fa6b435 100644
+--- a/include/net/atbm_mac80211.h
++++ b/include/net/atbm_mac80211.h
+@@ -3593,6 +3593,7 @@ void ieee80211_napi_schedule(struct ieee80211_hw *hw);
+  */
+ void ieee80211_napi_complete(struct ieee80211_hw *hw);
+ #endif
++void ieee80211_napi_sched(struct ieee80211_hw *hw);
+ /**
+  * ieee80211_rx - receive frame
+  *
+-- 
+2.55.0
+

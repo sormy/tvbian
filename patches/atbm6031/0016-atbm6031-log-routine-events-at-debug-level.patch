@@ -1,0 +1,541 @@
+From cd7c91238740e34fc89f3378ec9efd81dfd90eda Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Tue, 27 Oct 2026 13:45:00 -0400
+Subject: [PATCH 16/17] atbm6031: log routine events at debug level
+
+Every atbm_printk went out at KERN_ERR whatever its class, and the
+default mask let through scans, block-ack sessions, LMAC and power
+management: about 9 lines a minute at error level on a quiet link.
+Print each class at its level, ERR and WARN as such and the rest at
+debug, default the mask to ERR and WARN (atbm_printk_mask takes the
+rest), and move routine events the driver logged as errors or
+unconditionally to their class: scans, the SAE and 4-way handshake
+steps, association, the probe's chip and firmware chatter.
+atbm_printk_always prints at info level, as do latch_fwlog's firmware
+lines, whatever the mask. The rekey setup no longer logs bytes of the
+KEK and KCK.
+---
+ hal_apollo/ap.c                         |  4 ++--
+ hal_apollo/apollo_sdio.c                |  6 +++---
+ hal_apollo/fwio.c                       |  2 +-
+ hal_apollo/hwio_sdio.c                  |  6 +++---
+ hal_apollo/mac80211/agg-rx.c            |  2 +-
+ hal_apollo/mac80211/ble.c               |  2 +-
+ hal_apollo/mac80211/iface.c             |  2 +-
+ hal_apollo/mac80211/main.c              |  4 ++--
+ hal_apollo/mac80211/mlme.c              | 24 +++++++++++-------------
+ hal_apollo/mac80211/rx.c                |  2 +-
+ hal_apollo/mac80211/scan.c              |  8 ++++----
+ hal_apollo/mac80211/send_special_mgmt.c |  2 +-
+ hal_apollo/mac80211/tx.c                |  6 +++---
+ hal_apollo/mac80211/work.c              |  6 +++---
+ hal_apollo/main.c                       |  6 +++---
+ hal_apollo/sta.c                        |  4 ++--
+ hal_apollo/txrx.c                       |  4 ++--
+ hal_apollo/wsm.c                        |  2 +-
+ include/net/atbm_mac80211.h             |  9 +++++----
+ 19 files changed, 50 insertions(+), 51 deletions(-)
+
+diff --git a/hal_apollo/ap.c b/hal_apollo/ap.c
+index fb5db5c..c5a2d8c 100644
+--- a/hal_apollo/ap.c
++++ b/hal_apollo/ap.c
+@@ -609,7 +609,7 @@ void atbm_bss_info_changed(struct ieee80211_hw *dev,
+ 		return;
+ 	}
+ 	if(atomic_read(&priv->enabled) == 0){
+-		atbm_printk_err("[%s] has been disabled\n",vif_to_sdata(vif)->name);
++		atbm_printk_mgmt("[%s] has been disabled\n",vif_to_sdata(vif)->name);
+ 		return;
+ 	}
+ 	mutex_lock(&hw_priv->conf_mutex);
+@@ -1390,7 +1390,7 @@ int atbm_ampdu_action(struct ieee80211_hw *hw,
+ 		return 0;
+ 	}
+ 	
+-	atbm_printk_err("AMPDU[%s]:action[%d],tid[%d],ssn[%d],buff_size[%d],token[%d],ta[%pM]\n",
++	atbm_printk_agg("AMPDU[%s]:action[%d],tid[%d],ssn[%d],buff_size[%d],token[%d],ta[%pM]\n",
+ 			vif_to_sdata(vif)->name,action,tid,ssn ? *ssn:0,buf_size,hw_token,sta->addr);
+ 	switch (action) {
+ 	case IEEE80211_AMPDU_RX_START:
+diff --git a/hal_apollo/apollo_sdio.c b/hal_apollo/apollo_sdio.c
+index 7807f89..c02673a 100644
+--- a/hal_apollo/apollo_sdio.c
++++ b/hal_apollo/apollo_sdio.c
+@@ -328,7 +328,7 @@ static int atbm_sdio_irq_period(struct atbm_sdio_thread *thread)
+ 	struct sbus_priv *self = (struct sbus_priv *)thread->self;
+ 	struct atbm_common *hw_priv = self->core;
+ 
+-	printk_once("[atbm_log]:rx timeout\n");
++	printk_once(KERN_INFO "[atbm_log]:rx timeout\n");
+ 	
+ 	hw_priv->sbus_ops->lock(hw_priv->sbus_priv);
+ 	
+@@ -345,7 +345,7 @@ static int atbm_sdio_irq_period(struct atbm_sdio_thread *thread)
+ 	atbm_bh_read_ctrl_reg_unlock(hw_priv, &ctrl_reg);	
+ 	if(ctrl_reg & ATBM_HIFREG_CONT_NEXT_LEN_MASK){
+ 		__set_current_state(TASK_RUNNING);
+-		atbm_printk_err("%s:Miss\n",__func__);
++		atbm_printk_bus("%s:Miss\n",__func__);
+ 		atbm_sdio_miss_irq(hw_priv->sbus_priv);
+ 		ret = 1;
+ 		goto exit;
+@@ -1504,7 +1504,7 @@ static int atbm_sdio_probe(struct sdio_func *func,
+ 	int status;
+ 	
+ 	atbm_dbg(ATBM_APOLLO_DBG_INIT, "Probe called\n");
+-	atbm_printk_err("atbm_sdio_probe : idVendor[%x] idProduct[%x] \n",id->vendor,id->device);
++	atbm_printk_init("atbm_sdio_probe : idVendor[%x] idProduct[%x] \n",id->vendor,id->device);
+ 	if(atbm_wifi_chip_probe_get() != 0){
+ 		atbm_printk_err("current wifi is running! \n");
+ 		return -1;
+diff --git a/hal_apollo/fwio.c b/hal_apollo/fwio.c
+index 76d133f..d01387a 100644
+--- a/hal_apollo/fwio.c
++++ b/hal_apollo/fwio.c
+@@ -334,7 +334,7 @@ bool atbm_check_aresLite_type(struct atbm_common *priv)
+ 				(atbm_efuse_read_bit(priv,9) == 1)){
+ 			atbm_wifi_chip_probe_set(0x888b);
+ 			priv->loader_ble = atbm_wifi_bt_comb_get() == 1;
+-			atbm_printk_err("Get 6031-X UID Success!!support BLE\n");
++			atbm_printk_init("Get 6031-X UID Success!!support BLE\n");
+ 			priv->chip_flag = 0;
+ 		}else{
+ 			atbm_wifi_chip_probe_set(0x8888);
+diff --git a/hal_apollo/hwio_sdio.c b/hal_apollo/hwio_sdio.c
+index 877e9dc..d0c7192 100644
+--- a/hal_apollo/hwio_sdio.c
++++ b/hal_apollo/hwio_sdio.c
+@@ -979,7 +979,7 @@ int atbm_before_load_firmware(struct atbm_common *hw_priv)
+ 	ret = atbm_direct_read_reg_32(hw_priv,0xab0016c,&val32);
+ 	if(ret<0)
+ 		atbm_printk_err("read 0xab0016c err\n");
+-	atbm_printk_err("%s:0xab0016c = [%x]\n",__func__,val32);
++	atbm_printk_init("%s:0xab0016c = [%x]\n",__func__,val32);
+ 	val32 |= BIT(0);
+ 	ret = atbm_direct_write_reg_32(hw_priv,0xab0016c,val32);
+ 	if(ret<0)
+@@ -988,7 +988,7 @@ int atbm_before_load_firmware(struct atbm_common *hw_priv)
+ 	ret = atbm_direct_read_reg_32(hw_priv,0xab0016c,&val32);
+ 	if(ret<0)
+ 		atbm_printk_err("read 0xab0016c err\n");
+-	atbm_printk_err("%s:0xab0016c = [%x]\n",__func__,val32);
++	atbm_printk_init("%s:0xab0016c = [%x]\n",__func__,val32);
+ 	val32 &= ~BIT(0);
+ 	ret = atbm_direct_write_reg_32(hw_priv,0xab0016c,val32);
+ 	if(ret<0)
+@@ -1079,7 +1079,7 @@ retry:
+ 				atbm_dbg(ATBM_APOLLO_DBG_MSG, "atbm_system_done error.\n");
+ 			}
+ #else		
+-			atbm_printk_err("%s:do not set config to smu\n",__func__);
++			atbm_printk_init("%s:do not set config to smu\n",__func__);
+ #endif
+ 
+ 
+diff --git a/hal_apollo/mac80211/agg-rx.c b/hal_apollo/mac80211/agg-rx.c
+index 117c4e5..a66eaf1 100644
+--- a/hal_apollo/mac80211/agg-rx.c
++++ b/hal_apollo/mac80211/agg-rx.c
+@@ -361,7 +361,7 @@ void ieee80211_process_addba_request(struct ieee80211_local *local,
+ 		atbm_kfree(tid_agg_rx->reorder_buf);
+ 		atbm_kfree(tid_agg_rx->reorder_time);
+ 		atbm_kfree(tid_agg_rx);
+-		atbm_printk_err("aggr token not enough\n");
++		atbm_printk_agg("aggr token not enough\n");
+ 		goto end;
+ 	}
+ 
+diff --git a/hal_apollo/mac80211/ble.c b/hal_apollo/mac80211/ble.c
+index 1555522..906d662 100644
+--- a/hal_apollo/mac80211/ble.c
++++ b/hal_apollo/mac80211/ble.c
+@@ -1922,7 +1922,7 @@ int ieee80211_ble_dev_int(struct ieee80211_local *local)
+ 	pble_dev->dev.release = ieee80211_ble_device_release;
+ 	
+ 	ble_local->ble_recv_callback = 0;
+-	atbm_printk_err("ble_spin_lock init \n");
++	atbm_printk_init("ble_spin_lock init \n");
+ 	spin_lock_init(&ble_local->ble_spin_lock);
+ 	mutex_init(&ble_local->ble_mutex_lock);
+ 	return 0;
+diff --git a/hal_apollo/mac80211/iface.c b/hal_apollo/mac80211/iface.c
+index 50f3d63..433a7fb 100644
+--- a/hal_apollo/mac80211/iface.c
++++ b/hal_apollo/mac80211/iface.c
+@@ -1862,7 +1862,7 @@ static void ieee80211_iface_process_deliver_skb(struct ieee80211_sub_if_data *sd
+ 
+ 	while ((skb = atbm_skb_dequeue(&sdata->skb_deliver))){
+ 		u8 cb = skb->cb[0];
+-		atbm_printk_warn("[%s]:[%x] deliver slow\n",sdata->name,skb->protocol);
++		atbm_printk_mgmt("[%s]:[%x] deliver slow\n",sdata->name,skb->protocol);
+ 		skb->cb[0] = 0;
+ 		switch(cb){
+ 		case IEEE80211_IF_FRAME_TYPE_PAE:
+diff --git a/hal_apollo/mac80211/main.c b/hal_apollo/mac80211/main.c
+index 02a12d6..1f37876 100644
+--- a/hal_apollo/mac80211/main.c
++++ b/hal_apollo/mac80211/main.c
+@@ -1543,10 +1543,10 @@ void atbm_get_cfg80211_country_code(struct wiphy *wiphy,struct regulatory_reques
+ 			cfg80211_regdomain->reg_rules[1].freq_range.start_freq_khz)/5000 - 3);
+ 		}			
+ 	}else{
+-		atbm_printk_err("cfg80211_regdomain is NULL\n");
++		atbm_printk_init("cfg80211_regdomain is NULL\n");
+ 		local->country_support_chan = country_chan_found(local->country_code);
+ 	}
+-	atbm_printk_err("country code %c%c country_support_chan = %d \n",request->alpha2[0],request->alpha2[1],local->country_support_chan);
++	atbm_printk_init("country code %c%c country_support_chan = %d \n",request->alpha2[0],request->alpha2[1],local->country_support_chan);
+ #endif
+ }
+ 
+diff --git a/hal_apollo/mac80211/mlme.c b/hal_apollo/mac80211/mlme.c
+index 112319a..b9f080b 100644
+--- a/hal_apollo/mac80211/mlme.c
++++ b/hal_apollo/mac80211/mlme.c
+@@ -153,8 +153,6 @@ static inline void ASSERT_MGD_MTX(struct ieee80211_if_managed *ifmgd)
+ #ifdef CONFIG_ATBM_SUPPORT_REKEY
+ void ieee80211_rekey_set_data_enable(struct ieee80211_sub_if_data *sdata,u8 *kck,u8 *kek)
+ {
+-	atbm_printk_err("KEK[%d][%d][%d][%d]\n",kek[0],kek[1],kek[2],kek[3]);
+-	atbm_printk_err("KCK[%d][%d][%d][%d]\n",kck[0],kck[1],kck[2],kck[3]);
+ 	
+ 	sdata->vif.rekey_set = 1;
+ 	memcpy(sdata->vif.kck,kck,16);
+@@ -1334,7 +1332,7 @@ void ieee80211_recalc_ps(struct ieee80211_local *local, s32 latency)
+ #endif
+ 		}
+ 		if(busy_work){
+-			atbm_printk_err("%s:work busy\n",__func__);
++			atbm_printk_mgmt("%s:work busy\n",__func__);
+ 			goto change;
+ 		}
+ 	}
+@@ -1752,7 +1750,7 @@ static void ieee80211_mgd_enable_netq(struct ieee80211_sub_if_data *sdata,size_t
+ 			break;
+ 		}
+ 		wait ++;
+-		atbm_printk_err("[%s] Waiting Txq Ready[%d]\n",sdata->name,wait);
++		atbm_printk_mgmt("[%s] Waiting Txq Ready[%d]\n",sdata->name,wait);
+ 		schedule_timeout_interruptible(msecs_to_jiffies(sleep));
+ 	}while(1);
+ 	
+@@ -2674,7 +2672,7 @@ static void ieee80211_rx_mgmt_beacon(struct ieee80211_sub_if_data *sdata,
+ 	}
+ 
+ 	if(elems.tim && sdata->vif.bss_conf.dtim_period != elems.tim->dtim_period){
+-		atbm_printk_err("[%s]:dtim changed [%d]->[%d]\n",sdata->name,sdata->vif.bss_conf.dtim_period,elems.tim->dtim_period);
++		atbm_printk_mgmt("[%s]:dtim changed [%d]->[%d]\n",sdata->name,sdata->vif.bss_conf.dtim_period,elems.tim->dtim_period);
+ 		ifmgd->beacon_crc_valid = false;
+ 		changed |= BSS_CHANGED_STA_DTIM;
+ 		sdata->vif.bss_conf.dtim_period = elems.tim->dtim_period;
+@@ -3226,13 +3224,13 @@ static void ieee80211_mgd_auth_timeout(struct ieee80211_work* wk)
+ static enum work_done_result ieee80211_flush_sta_done(struct ieee80211_work *wk,
+ 						  struct sk_buff *skb)
+ {
+-	atbm_printk_err("flush sta(%d):\n",wk->type);
++	atbm_printk_mgmt("flush sta(%d):\n",wk->type);
+ 	return WORK_DONE_DESTROY;
+ }
+ static enum work_action __must_check
+ ieee80211_wk_sta_flush(struct ieee80211_work *wk)
+ {
+-	atbm_printk_err("work:flush sta[%pM]\n",wk->filter_bssid);
++	atbm_printk_mgmt("work:flush sta[%pM]\n",wk->filter_bssid);
+ 	
+ 	wk->raw_work.tries ++;
+ 	
+@@ -3341,7 +3339,7 @@ static enum work_action ieee80211_sae_authen_state(struct ieee80211_work *wk,enu
+ 		/*
+ 		*sae finished,so process done
+ 		*/
+-		atbm_printk_err("[%s] SAE Finished\n",sdata->name);
++		atbm_printk_mgmt("[%s] SAE Finished\n",sdata->name);
+ 		if(res == WORK_ACT_NONE)
+ 			res = WORK_ACT_TIMEOUT;
+ 	}
+@@ -3353,7 +3351,7 @@ static enum work_done_result
+ ieee80211_auth_deliver_sae_done(struct ieee80211_work* wk,
+ 	struct sk_buff* skb)
+ {
+-	atbm_printk_err("[%s] deliver sae done\n",wk->sdata->name);
++	atbm_printk_mgmt("[%s] deliver sae done\n",wk->sdata->name);
+ 	ieee80211_mgd_auth_rx_authen(wk,(struct atbm_ieee80211_mgmt *)wk->ie,wk->ie_len);
+ 
+ 	return WORK_DONE_DESTROY;
+@@ -3532,7 +3530,7 @@ ieee80211_authenticate(struct ieee80211_work *wk)
+ 		sdata->queues_locked = 1;
+ #endif
+ 	wk->probe_auth.tries++;
+-	atbm_printk_err("authenticate[%pM]:[%d][%d]\n",wk->filter_bssid,wk->probe_auth.algorithm,wk->probe_auth.tries);
++	atbm_printk_mgmt("authenticate[%pM]:[%d][%d]\n",wk->filter_bssid,wk->probe_auth.algorithm,wk->probe_auth.tries);
+ 	switch (wk->probe_auth.algorithm) {
+ 	case WLAN_AUTH_OPEN:
+ 	case WLAN_AUTH_LEAP:
+@@ -3612,7 +3610,7 @@ ieee80211_authenticate(struct ieee80211_work *wk)
+ 		WARN_ON(1);
+ 	/* End of the hack */
+ 	
+-	atbm_printk_err("%s: authenticate with %pM (try %d) (%d)(%d)\n",
++	atbm_printk_mgmt("%s: authenticate with %pM (try %d) (%d)(%d)\n",
+ 	       sdata->name, wk->filter_bssid, wk->probe_auth.tries,trans,status);
+ 	if(ieee80211_mgd_pre_sta(sdata,wk->probe_auth.bss) == 0){
+ 		ieee80211_send_auth(sdata, trans, wk->probe_auth.algorithm, status, wk->ie,
+@@ -3916,7 +3914,7 @@ int ieee80211_mgd_pre_sta(struct ieee80211_sub_if_data *sdata,struct cfg80211_bs
+ 
+ 	if((err = ieee80211_mgd_sta_status(sdata,cbss->bssid)) >= 0){
+ 
+-		atbm_printk_err("sta has been insert(%d)\n",err);
++		atbm_printk_mgmt("sta has been insert(%d)\n",err);
+ 		return err;
+ 	}
+ 
+@@ -4140,7 +4138,7 @@ static enum work_done_result ieee80211_assoc_done(struct ieee80211_work *wk,
+ 		wk->connecting.scan_reties = 0;
+ 		atomic_set(&wk->sdata->connectting,IEEE80211_ATBM_CONNECT_RUN);
+ 		atomic_set(&local->connectting,1);
+-		atbm_printk_err("[%pM]:assc sucess band[%d]\n",wk->filter_bssid,wk->chan->band);	
++		atbm_printk_mgmt("[%pM]:assc sucess band[%d]\n",wk->filter_bssid,wk->chan->band);	
+ 		return WORK_DONE_REQUEUE;
+ 	}
+  destroy:
+diff --git a/hal_apollo/mac80211/rx.c b/hal_apollo/mac80211/rx.c
+index a0bc16b..8290d62 100644
+--- a/hal_apollo/mac80211/rx.c
++++ b/hal_apollo/mac80211/rx.c
+@@ -1080,7 +1080,7 @@ ieee80211_rx_h_check(struct ieee80211_rx_data *rx)
+ 		}
+ 		if (!ieee80211_frame_eapol(rx->skb->data, rx->skb->len)){
+ 			if(rx->sta)
+-				atbm_printk_err("%s:[%s]:sta[%pM] not assoc[%x]\n",__func__,rx->sdata->name,hdr->addr2,status->flag);
++				atbm_printk_rx("%s:[%s]:sta[%pM] not assoc[%x]\n",__func__,rx->sdata->name,hdr->addr2,status->flag);
+ 
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
+ 			if(rx->sdata->vif.type == NL80211_IFTYPE_AP){
+diff --git a/hal_apollo/mac80211/scan.c b/hal_apollo/mac80211/scan.c
+index 60cb38a..7c707f5 100644
+--- a/hal_apollo/mac80211/scan.c
++++ b/hal_apollo/mac80211/scan.c
+@@ -146,7 +146,7 @@ static int ieee80211_check_country_limit_scan_2_4G_chan(struct ieee80211_local *
+   	}while(country_t[i].country);
+ 
+ 	if((country_chan > 0) && (req != NULL)){
+-		atbm_printk_err("%s : scan_n_channals = %d ++++++++ \n",__func__,req->n_channels);
++		atbm_printk_scan("%s : scan_n_channals = %d ++++++++ \n",__func__,req->n_channels);
+ 	/*
+ 		1?¡éD¨¨¨°a¨¨¡¤?¡§¨¦¡§?¨¨¦Ì?D?¦Ì¨¤??¨ºy
+ 		2?¡éD¨¨¨°a¨¨¡¤¨¨?¨¦¡§?¨¨¦Ì?D?¦Ì¨¤¨º?¡¤??¨²?T??¡¤??¡ì?¨²¡ê?3?3?¡¤??¡ì?¨ª2?¨¦¡§?¨¨
+@@ -196,7 +196,7 @@ static int ieee80211_check_country_limit_scan_2_4G_chan(struct ieee80211_local *
+ 			}
+ 			req->n_channels = scan_n_chans;	
+ 		}
+-		atbm_printk_err("%s : scan_n_channals = %d --------- \n",__func__,req->n_channels);
++		atbm_printk_scan("%s : scan_n_channals = %d --------- \n",__func__,req->n_channels);
+ 	}
+ 
+   	return country_chan;  
+@@ -1336,7 +1336,7 @@ static bool ieee80211_prep_hw_scan(struct ieee80211_local *local)
+ 	
+ 	do {
+ 		if(list_empty(&local->scan_policy)){
+-			atbm_printk_err("stop scan:policy empty \n");
++			atbm_printk_scan("stop scan:policy empty \n");
+ 			return false;
+ 		}
+ 		
+@@ -1401,7 +1401,7 @@ static bool ieee80211_prep_hw_scan(struct ieee80211_local *local)
+ start_scan:
+ 	
+ 	local->hw_scan_req->n_channels = n_chans;
+-	atbm_printk_err("%s:n_chans(%d),space(%d),index(%d),scaned(%d)\n",__func__,n_chans,
++	atbm_printk_scan("%s:n_chans(%d),space(%d),index(%d),scaned(%d)\n",__func__,n_chans,
+ 		local->scan_channel_space,local->scan_channel_idx,local->scan_n_channels);
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 1, 0))
+ 	ielen = ieee80211_build_preq_ies(local->scan_sdata, (u8 *)local->hw_scan_req->ie,
+diff --git a/hal_apollo/mac80211/send_special_mgmt.c b/hal_apollo/mac80211/send_special_mgmt.c
+index 9ac0435..786b472 100644
+--- a/hal_apollo/mac80211/send_special_mgmt.c
++++ b/hal_apollo/mac80211/send_special_mgmt.c
+@@ -182,7 +182,7 @@ static int atbm_ieee80211_send_private_mgmt_thread(void *arg)
+ //	hw_priv->stop_prvmgmt_thread = false;
+ //	hw_priv->start_send_prbresp = false;
+ 	while(1){
+-		atbm_printk_err(" wait_event_interruptible from  send_prbresp_wq\n");
++		atbm_printk_mgmt(" wait_event_interruptible from  send_prbresp_wq\n");
+ 		wait_event_interruptible(hw_priv->send_prvmgmt_wq, hw_priv->start_send_prbresp || hw_priv->start_send_action);
+ 
+ 		if(hw_priv->stop_prvmgmt_thread)
+diff --git a/hal_apollo/mac80211/tx.c b/hal_apollo/mac80211/tx.c
+index c264775..cc3cabb 100644
+--- a/hal_apollo/mac80211/tx.c
++++ b/hal_apollo/mac80211/tx.c
+@@ -1396,9 +1396,9 @@ ieee80211_tx_prepare(struct ieee80211_sub_if_data *sdata,
+ 			clear_sta_flag(tx->sta,WLAN_STA_HANDSHAKE4OF4_SUCCESS);
+ 			info->flags |= IEEE80211_TX_HANDSHAKE;
+ 			info->flags |= IEEE80211_TX_INTFL_DONT_ENCRYPT;
+-			atbm_printk_err("%s:4/4 Pairwise\n",sdata->name);
++			atbm_printk_mgmt("%s:4/4 Pairwise\n",sdata->name);
+ 		}else {
+-			atbm_printk_err("%s:2/4 Pairwise\n",sdata->name);
++			atbm_printk_mgmt("%s:2/4 Pairwise\n",sdata->name);
+ 		}
+ 	}
+ 	return TX_CONTINUE;
+@@ -1681,7 +1681,7 @@ static void ieee80211_xmit_down_bootp_rate(struct ieee80211_sub_if_data *sdata,
+ static void ieee80211_xmit_down_eap_rate(struct ieee80211_sub_if_data *sdata, struct sk_buff *skb)
+ {
+ 	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
+-	atbm_printk_err("[%s]:down_eap_rate\n",sdata->name);
++	atbm_printk_mgmt("[%s]:down_eap_rate\n",sdata->name);
+ 	info->flags |= IEEE80211_TX_CTL_USE_MINRATE;
+ 
+ 	if(sdata->vif.p2p)
+diff --git a/hal_apollo/mac80211/work.c b/hal_apollo/mac80211/work.c
+index a269910..5bde15d 100644
+--- a/hal_apollo/mac80211/work.c
++++ b/hal_apollo/mac80211/work.c
+@@ -749,7 +749,7 @@ void ieee80211_free_authen_bss(struct ieee80211_sub_if_data *sdata)
+ 	struct cfg80211_bss *free_bss;
+ 	lockdep_assert_held(&local->mtx);
+ 	
+-	atbm_printk_always("%s:free authen bss ++\n",sdata->name);
++	atbm_printk_mgmt("%s:free authen bss ++\n",sdata->name);
+ 	if(sdata->vif.type != NL80211_IFTYPE_STATION){
+ 		atbm_printk_err("%s: is not sta mode\n",sdata->name);
+ 		return;
+@@ -761,14 +761,14 @@ void ieee80211_free_authen_bss(struct ieee80211_sub_if_data *sdata)
+ 	rcu_assign_pointer(ifmgd->authen_bss, NULL);
+ 	synchronize_rcu();	
+ 	
+-	atbm_printk_always("%s:free authen bss --\n",sdata->name);
++	atbm_printk_mgmt("%s:free authen bss --\n",sdata->name);
+ 	atbm_printk_mgmt("%s:free authen bss[%p]\n",sdata->name,free_bss);
+ 	ieee80211_atbm_release_bss(local->hw.wiphy,free_bss);
+ }
+ static enum work_done_result ieee80211_work_cancle_work_done(struct ieee80211_work* wk,
+ 	struct sk_buff* skb)
+ {
+-	atbm_printk_always("cancle_work_done:[%pM][%d][%d]\n",wk->filter_bssid,wk->type,wk->work_cancle.type);
++	atbm_printk_mgmt("cancle_work_done:[%pM][%d][%d]\n",wk->filter_bssid,wk->type,wk->work_cancle.type);
+ 	if(wk->type == IEEE80211_WORK_ABANDON){
+ 		return WORK_DONE_DESTROY;
+ 	}
+diff --git a/hal_apollo/main.c b/hal_apollo/main.c
+index 00ad9d7..bbdc2c6 100755
+--- a/hal_apollo/main.c
++++ b/hal_apollo/main.c
+@@ -116,7 +116,7 @@ void atbm_wifi_chip_probe_set(u16 idProduct)
+ 		atbm_printk_err("AresB or AresM probe!\n");
+ 		wifi_chip_probe = 1;
+ 	}else if (idProduct == 0x888b){
+-		atbm_printk_err("AsmLite probe!\n");
++		atbm_printk_init("AsmLite probe!\n");
+ 		wifi_chip_probe = 2;
+ 	}else if(idProduct == 0x8891){
+ 		wifi_chip_probe = 3;
+@@ -1774,7 +1774,7 @@ reload_fw:
+ 	
+ 
+ 	{
+-		atbm_printk_err("get chip id [%x][%x][%x] \n",
++		atbm_printk_init("get chip id [%x][%x][%x] \n",
+ 							hw_priv->wsm_caps.firmeareExCap,
+ 							hw_priv->wsm_caps.firmeareExCap >> 7,
+ 							(hw_priv->wsm_caps.firmeareExCap >> 7) & 0x7 
+@@ -1860,7 +1860,7 @@ int access_file(char *path, char *buffer, int size, int isRead)
+ 		fp = filp_open(path,O_CREAT|O_WRONLY,S_IRUSR);
+ 
+ 	if (IS_ERR(fp)) {
+-		atbm_printk_err("apollo wifi : can't open %s\n",path);
++		atbm_printk_init("apollo wifi : can't open %s\n",path);
+ 		return -1;
+ 	}
+ 
+diff --git a/hal_apollo/sta.c b/hal_apollo/sta.c
+index 2ecad7e..b29bfb7 100644
+--- a/hal_apollo/sta.c
++++ b/hal_apollo/sta.c
+@@ -47,9 +47,9 @@
+ #include "dbg_event.h"
+ #include "smartconfig.h"
+ #if defined(CONFIG_ATBM_APOLLO_STA_DEBUG)
+-#define sta_printk(...) atbm_printk_always(__VA_ARGS__)
++#define sta_printk(...) atbm_printk_sta(__VA_ARGS__)
+ #else
+-#define sta_printk(...)	atbm_printk_always(__VA_ARGS__)
++#define sta_printk(...)	atbm_printk_sta(__VA_ARGS__)
+ #endif
+ extern int start_choff;
+ #include "mac80211/ieee80211_i.h"
+diff --git a/hal_apollo/txrx.c b/hal_apollo/txrx.c
+index 62e95c5..46be7c5 100644
+--- a/hal_apollo/txrx.c
++++ b/hal_apollo/txrx.c
+@@ -2130,7 +2130,7 @@ void atbm_rx_cb(struct atbm_vif *priv,
+ #endif
+ 	}else {
+ 		if(ieee80211_has_protected(frame->frame_control)){
+-			atbm_printk_err("[RX]:need sw decrypted?\n");
++			atbm_printk_rx("[RX]:need sw decrypted?\n");
+ 		}
+ 	}
+ 
+@@ -2143,7 +2143,7 @@ void atbm_rx_cb(struct atbm_vif *priv,
+ 	}
+ 	atbm_debug_rxed(priv);
+ 	if (arg->flags & WSM_RX_STATUS_AGGREGATE){
+-		printk_once("<WIFI> rx ampdu ++ \n");
++		printk_once(KERN_INFO "<WIFI> rx ampdu ++ \n");
+ 		atbm_debug_rxed_agg(priv);
+ 		hdr->flag |= RX_FLAG_AMPDU;
+ 	}
+diff --git a/hal_apollo/wsm.c b/hal_apollo/wsm.c
+index f3be137..d042916 100644
+--- a/hal_apollo/wsm.c
++++ b/hal_apollo/wsm.c
+@@ -1813,7 +1813,7 @@ static int wsm_debug_print_indication(struct atbm_common *hw_priv,
+ 	fw_debug_print[length] = '\0';
+ 
+ 	if (atbm_latch_fw_line(hw_priv, fw_debug_print))
+-		atbm_printk_lmac("[lmac]:%s", fw_debug_print);
++		printk(KERN_INFO "%s[lmac]:%s", atbm_log, fw_debug_print);
+ 	return 0;
+ underflow:
+ 	atbm_printk_err("wsm_debug_print_indication:EINVAL\n");
+diff --git a/include/net/atbm_mac80211.h b/include/net/atbm_mac80211.h
+index fa6b435..876c778 100644
+--- a/include/net/atbm_mac80211.h
++++ b/include/net/atbm_mac80211.h
+@@ -5489,8 +5489,7 @@ struct ieee80211_vif *ieee80211_get_monitor_vif(struct ieee80211_hw *hw);
+ #define ATBM_PRINTK_MASK_DEBUG			BIT(20)
+ #define ATBM_PRINTK_MASK_BLE			BIT(21)
+ 
+-#define ATBM_PRINTK_DEFAULT_MASK	(ATBM_PRINTK_MASK_ERR|ATBM_PRINTK_MASK_WARN|ATBM_PRINTK_MASK_INIT|ATBM_PRINTK_MASK_AGG| \
+-									ATBM_PRINTK_MASK_LMAC|ATBM_PRINTK_MASK_EXIT|ATBM_PRINTK_MASK_SCAN|ATBM_PRINTK_MASK_PM | ATBM_PRINTK_MASK_WEXT)
++#define ATBM_PRINTK_DEFAULT_MASK	(ATBM_PRINTK_MASK_ERR|ATBM_PRINTK_MASK_WARN)
+ extern const char *atbm_log;
+ 
+ #ifdef CONFIG_ATBM_MOULE_FS
+@@ -5502,7 +5501,9 @@ extern u32 atbm_printk_mask;
+ #define ATBM_PRINTK_ALL ((u32)(-1))
+ #define ATBM_PRINTK_CLEAR		(0)
+ #define ATBM_TAG "[atbm_log]:"
+-#define atbm_printk(_level,fmt,arg...) 	do {if(atbm_printk_mask&(_level)) printk(KERN_ERR "%s" fmt,atbm_log,##arg);}while(0)
++#define ATBM_PRINTK_LEVEL(_level)	(((_level) & ATBM_PRINTK_MASK_ERR) ? KERN_ERR : \
++					 ((_level) & ATBM_PRINTK_MASK_WARN) ? KERN_WARNING : KERN_DEBUG)
++#define atbm_printk(_level,fmt,arg...) 	do {if(atbm_printk_mask&(_level)) printk("%s%s" fmt,ATBM_PRINTK_LEVEL(_level),atbm_log,##arg);}while(0)
+ 
+ 
+ /*
+@@ -5530,7 +5531,7 @@ extern u32 atbm_printk_mask;
+ #define atbm_printk_cfg(...)		atbm_printk(ATBM_PRINTK_MASK_CFG80211,__VA_ARGS__)
+ #define atbm_printk_debug(...)		atbm_printk(ATBM_PRINTK_MASK_DEBUG,__VA_ARGS__)
+ #define atbm_printk_ble(...)		atbm_printk(ATBM_PRINTK_MASK_BLE,__VA_ARGS__)
+-#define atbm_printk_always(fmt,arg...)		printk(KERN_ERR "%s" fmt,atbm_log,##arg)
++#define atbm_printk_always(fmt,arg...)		printk(KERN_INFO "%s" fmt,atbm_log,##arg)
+ #define atbm_printk_limit(fmt,arg...)	do{if(ieee80211_ratelimit()) printk(KERN_ERR "%s" fmt,atbm_log,##arg);}while(0)
+ 
+ 
+-- 
+2.55.0
+

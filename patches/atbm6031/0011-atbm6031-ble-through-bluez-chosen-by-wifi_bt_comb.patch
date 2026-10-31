@@ -1,0 +1,129 @@
+From 3da336374bde81b8152cc0818e4d99bec56424d7 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 25 Oct 2026 17:20:00 -0400
+Subject: [PATCH] atbm6031: BLE through BlueZ, chosen by wifi_bt_comb
+
+The 6031-X is a Wi-Fi and BLE combo, but its BLE firmware leaves Wi-Fi
+6 input buffers instead of 29, so the choice belongs to the user. Build
+the BLE glue in and let wifi_bt_comb pick at load: 0, the default, loads
+atbm6031_fw.bin and registers no BLE device; 1 loads atbm6031_ble_fw.bin
+and registers the controller with BlueZ as an SDIO HCI device.
+
+The BlueZ glue builds on 6.4 and later: hci_dev_set_flag() for the LE
+flag, class_create() without its owner, and a platform remove that
+returns void from 6.11.
+---
+ .config                   |  2 ++
+ hal_apollo/Makefile       |  4 ++--
+ hal_apollo/fwio.c         |  5 +++--
+ hal_apollo/mac80211/ble.c | 12 +++++++++++-
+ 4 files changed, 18 insertions(+), 5 deletions(-)
+
+diff --git a/.config b/.config
+index 11187de..f1e0323 100644
+--- a/.config
++++ b/.config
+@@ -58,6 +58,8 @@ CONFIG_ATBM_SDIO_MMCx="mmc1"
+ CONFIG_ATBM_APOLLO_SUPPORT_SGI=y
+ CONFIG_ATBM_WIFIIF1_NAME="wlan%d"
+ # CONFIG_NEED_P2P0_INTERFACE is not set
++CONFIG_ATBM_BLE=y
++CONFIG_ATBM_BLE_WIFI_PLATFORM=y
+ CONFIG_ATBM_MODULE_PM_STAYAWK="pm_stayawake"
+ CONFIG_ATBM_MODULE_DRIVER_NAME="atbm_wlan"
+ CONFIG_ATBM_PLATFORM_DEVICE_NAME="atbm_dev_wifi"
+diff --git a/hal_apollo/Makefile b/hal_apollo/Makefile
+index ffe40b2..4add941 100755
+--- a/hal_apollo/Makefile
++++ b/hal_apollo/Makefile
+@@ -245,7 +245,7 @@ endif
+ 
+ ATBM_MODULES_NAME ?= $(MODULES_NAME)
+ ifneq ($(FW),)
+-ccflags-y += -DCONFIG_FW_NAME=\"atbm6031_fw.bin\"
++ccflags-y += -DCONFIG_FW_NAME=\"atbm6031_fw.bin\" -DCONFIG_FW_BLE_NAME=\"atbm6031_ble_fw.bin\"
+ endif
+ ifneq ($(SDIO_HOST),)
+ ccflags-y += -DCONFIG_ATBM_SDIO_MMC_ID=\"$(SDIO_HOST)\"
+@@ -733,7 +733,7 @@ ccflags-y  += -DCONFIG_MAC80211_ATBM_DEBUGFS
+ endif
+ 
+ ccflags-$(BLUEDROID) += -DBLUEDROID
+-ccflags-$(BLE) += -DCONFIG_ATBM_BLE_CDEV
++ccflags-$(BLE) += -DCONFIG_ATBM_BLE_CDEV -DCONFIG_ATBM_SUPPORT_BLUEZ
+ ccflags-$(CONFIG_MAC80211_ATBM_RC_MINSTREL) += -DCONFIG_MAC80211_ATBM_RC_MINSTREL
+ ccflags-$(CONFIG_MAC80211_ATBM_RC_MINSTREL_HT) += -DCONFIG_MAC80211_ATBM_RC_MINSTREL_HT
+ $(ATBM_MODULES_NAME)-y := \
+diff --git a/hal_apollo/fwio.c b/hal_apollo/fwio.c
+index fa8c7ce..76d133f 100644
+--- a/hal_apollo/fwio.c
++++ b/hal_apollo/fwio.c
+@@ -333,8 +333,7 @@ bool atbm_check_aresLite_type(struct atbm_common *priv)
+ 		if ((atbm_efuse_read_bit(priv,153) == 0) && 
+ 				(atbm_efuse_read_bit(priv,9) == 1)){
+ 			atbm_wifi_chip_probe_set(0x888b);
+-			//if(atbm_wifi_bt_comb_get() == 1)
+-					priv->loader_ble = 1;
++			priv->loader_ble = atbm_wifi_bt_comb_get() == 1;
+ 			atbm_printk_err("Get 6031-X UID Success!!support BLE\n");
+ 			priv->chip_flag = 0;
+ 		}else{
+@@ -437,6 +436,8 @@ char * atbm_HwGetChipFw(struct atbm_common *priv)
+ #endif
+ 	char * strHwChipFw = NULL;
+ 
++	if (atbm_wifi_bt_comb_get() == 1)
++		return FIRMWARE_BLE_PATH;
+ 	if(fw)
+ 	{
+ 		atbm_printk_always("fw [%s]\n", fw );
+diff --git a/hal_apollo/mac80211/ble.c b/hal_apollo/mac80211/ble.c
+index 5aea39d..1555522 100644
+--- a/hal_apollo/mac80211/ble.c
++++ b/hal_apollo/mac80211/ble.c
+@@ -739,7 +739,7 @@ err:
+ static void ieee80211_ble_bluez_recv(struct hci_dev *hdev,struct sk_buff *skb)
+ {
+ 	/* Ensure LE is enabled for incoming connections */
+-	set_bit(HCI_LE_ENABLED, &hdev->dev_flags);
++	hci_dev_set_flag(hdev, HCI_LE_ENABLED);
+ 
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 12, 0))
+ 	hci_recv_frame(hdev,skb);
+@@ -1232,7 +1232,11 @@ err:
+ 	return -1;
+ }
+ 
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 11, 0))
++static void atbm_ble_platform_remove(struct platform_device *pdev)
++#else
+ static int atbm_ble_platform_remove(struct platform_device *pdev)
++#endif
+ {
+ 	struct ieee80211_ble_cdev *ble_cdev = dev_get_drvdata(&pdev->dev);
+ 
+@@ -1255,7 +1259,9 @@ static int atbm_ble_platform_remove(struct platform_device *pdev)
+ 	dev_set_drvdata(&pdev->dev,NULL);
+ 	atbm_printk_always("ble_platform_remove(%p)\n",ble_cdev);
+ 	atbm_kfree(ble_cdev);
++#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 11, 0))
+ 	return 0;
++#endif
+ }
+ 
+ static struct platform_driver atbm_ble_platform_driver = {
+@@ -1473,7 +1479,11 @@ int  ieee80211_ble_platform_init(void)
+ 		goto error_region;
+ 	}
+ 	
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 4, 0))
++	ble_class = class_create("atbm_ioctl_class");
++#else
+ 	ble_class = class_create(THIS_MODULE, "atbm_ioctl_class");
++#endif
+ 
+ 	if(ble_class == NULL){
+ 		ret = -1;
+-- 
+2.55.0
+

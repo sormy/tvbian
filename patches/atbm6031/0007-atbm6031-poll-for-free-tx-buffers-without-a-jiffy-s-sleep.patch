@@ -1,0 +1,40 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 24 Oct 2026 18:02:40 -0400
+Subject: [PATCH] atbm6031: poll for free TX buffers without a jiffy's sleep
+
+With TX confirms off, the driver learns that the firmware's 4 input
+buffers are free only by polling, and slept a jiffy after every 4 polls:
+up to 4 ms at HZ=250, while 4 frames of 1.5 KB drain much faster. That
+caps upload near 12 Mbit/s. Sleep 100 to 200 us, with the poll count
+scaled so the timeout stays about the same.
+---
+ hal_apollo/bh_sdio.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/hal_apollo/bh_sdio.c b/hal_apollo/bh_sdio.c
+index 22bb35a..2407f1f 100644
+--- a/hal_apollo/bh_sdio.c
++++ b/hal_apollo/bh_sdio.c
+@@ -438,7 +438,8 @@ err:
+ #define MAX_POOL_BUFF_NUM	4
+ static bool atbm_sdio_wait_enough_space(struct atbm_common	*hw_priv,u32 n_needs)
+ {
+-#define MAX_LOOP_POLL_CNT  (2*3000)
++/* a short sleep between polls: a jiffy is up to 4 ms, longer than 4 buffers take to drain */
++#define MAX_LOOP_POLL_CNT  (2*3000*20)
+ 	u32 hw_xmited = 0;
+ 	bool enough = false;
+ 	int ret = 0;
+@@ -497,7 +498,7 @@ static bool atbm_sdio_wait_enough_space(struct atbm_common	*hw_priv,u32 n_needs)
+ #ifdef CONFIG_ATBM_SDIO_TX_HOLD
+ 			hw_priv->sbus_ops->unlock(hw_priv->sbus_priv);
+ #endif
+-			schedule_timeout_interruptible(msecs_to_jiffies(2));
++			usleep_range(100, 200);
+ #ifdef CONFIG_ATBM_SDIO_TX_HOLD
+ 			hw_priv->sbus_ops->lock(hw_priv->sbus_priv);
+ #endif
+-- 
+2.55.0
+

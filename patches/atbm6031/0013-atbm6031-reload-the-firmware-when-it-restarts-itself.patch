@@ -1,0 +1,43 @@
+From c66c73b21129259353c4164c5ad99aa5e9c5b632 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Tue, 27 Oct 2026 09:45:00 -0400
+Subject: [PATCH 13/17] atbm6031: reload the firmware when it restarts itself
+
+The firmware reboots itself under load, minutes to hours apart.
+Its message sequence starts again at 0, and the driver only logged
+the mismatch: the rebooted firmware ran without the setup the driver
+gave it until a command happened to time out, seconds or minutes
+later, or never. A message numbered 0 out of turn now halts the bus
+and reloads the firmware at once, as AltoBeam's commented-out code
+did for any mismatch; a single lost message still only logs.
+---
+ hal_apollo/bh_sdio.c | 13 +++++++------
+ 1 file changed, 7 insertions(+), 6 deletions(-)
+
+diff --git a/hal_apollo/bh_sdio.c b/hal_apollo/bh_sdio.c
+index 74f5b78..37e720e 100644
+--- a/hal_apollo/bh_sdio.c
++++ b/hal_apollo/bh_sdio.c
+@@ -269,12 +269,13 @@ static int atbm_rx_directly(struct atbm_common *hw_priv,struct sk_buff *skb)
+ 		//			rx_resync,hw_priv->wsm_rx_seq,wsm_seq,wsm_len,wsm_id);
+ 		if (wsm_seq != hw_priv->wsm_rx_seq) {
+ 			atbm_printk_err("atbm_rx_directly :yzh hw_priv->wsm_rx_seq=%d,wsm_seq=%d \n",hw_priv->wsm_rx_seq,wsm_seq);
+-	/*		
+-			status = -2;
+-			atbm_hif_status_set(1);
+-			atbm_bh_halt(hw_priv);
+-			goto exit;
+-			*/
++			/* the firmware rebooted itself and lost what the driver set up */
++			if (!wsm_seq) {
++				wiphy_warn(hw_priv->hw->wiphy, "firmware restarted itself; reloading it\n");
++				status = -2;
++				atbm_bh_halt(hw_priv);
++				goto exit;
++			}
+ 		}
+ 	}
+ 	hw_priv->wsm_rx_seq = (wsm_seq + 1) & 7;
+-- 
+2.55.0
+

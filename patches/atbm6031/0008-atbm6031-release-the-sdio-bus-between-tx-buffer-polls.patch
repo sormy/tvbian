@@ -1,0 +1,29 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 24 Oct 2026 18:05:42 -0400
+Subject: [PATCH] atbm6031: release the SDIO bus between TX buffer polls
+
+CONFIG_ATBM_SDIO_TX_HOLD keeps the host claimed for the whole TX pass,
+buffer polls included, so the RX thread and the SDIO interrupt wait
+behind it: TCP ACKs back up, and the driver's 30 ms poll logs missed
+interrupts. Without it each poll claims and releases the bus.
+---
+ hal_apollo/Makefile | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/hal_apollo/Makefile b/hal_apollo/Makefile
+index 3353a6e..ffe40b2 100755
+--- a/hal_apollo/Makefile
++++ b/hal_apollo/Makefile
+@@ -691,7 +691,7 @@ ccflags-y += -DMCAST_FWDING
+ ccflags-y += -DRESET_CHANGE
+ ccflags-y += -DSDIO_BUS
+ #ccflags-y += -DCONFIG_SDIO_IRQ_THREAD_PROCESS_DATA
+-ccflags-y += -DCONFIG_ATBM_SDIO_TX_HOLD
++#ccflags-y += -DCONFIG_ATBM_SDIO_TX_HOLD
+ ccflags-y += -DCONFIG_ATBM_SDIO_TX_THREAD_FIFO
+ #ccflags-y += -DCONFIG_SDIO_TXRX_WORKQUEUE
+ #ccflags-y += -DATBM_SDIO_TXRX_ENHANCE
+-- 
+2.55.0
+
