@@ -1,8 +1,7 @@
 # A universal media stick
 
 One stick, HDMI into whatever screen is to hand, everything else over Wi-Fi. Measured on the H96 Max
-3518D; `docs/h96max-3518d/board.md` is what that **board** still needs, this is what the **stack**
-needs. None of it is built yet.
+3518D: what the **stack** needs, not the board. None of it is built yet.
 
 ## The capabilities, against what is measured
 
@@ -37,15 +36,15 @@ needs. None of it is built yet.
 
 ## What decides the design
 
-- **The display path is the ceiling.** 4K HEVC decodes at 110 fps through
-  `-hwaccel rkmpp -hwaccel_output_format drm_prime` and reaches the screen at 27, because every
-  frame is copied into `/dev/fb0`. The fix: import the dmabuf as a DRM framebuffer and page-flip it
-  onto `Cluster0-win0`, DRM plane 266, vp0's only overlay taking NV12 and NV15. Kodi, AirPlay
-  mirroring and Remote Play all wait on it.
+- **The display path is the ceiling.** 4K HEVC decodes at 117 fps through `hevc_rkmpp` (on the H96
+  Max H313, the same chip); through `/dev/fb0`, every frame a CPU copy, it reached the screen at 27.
+  The fix: import the dmabuf as a DRM framebuffer and page-flip it onto `Cluster0-win0`, DRM plane
+  266, vp0's only overlay taking NV12 and NV15. Kodi, AirPlay mirroring and Remote Play all wait on
+  it.
 - **The decoder speaks MPP, not V4L2.** `/dev/mpp_service`, no `/dev/video*`; a player reaches it
   through an ffmpeg with `rkmpp`, or GStreamer's rockchip elements. The packaged
-  `libgstrockchipmpp.so` is 1.14.4 against a 1.26.2 core and fails every pipeline. Debian's Kodi
-  links Debian's ffmpeg, which has no `rkmpp`: the one unproven link.
+  `libgstrockchipmpp.so` is 1.14.4 against a 1.26.2 core and fails every pipeline. Kodi links our
+  FFmpeg, which has the `*_rkmpp` decoders; Kodi picking them is the one unproven link.
 - **V4L2 is the alternative, not the plan.** `CONFIG_VIDEO_ROCKCHIP_VDEC=m` in the fragment selects
   the request API; RK3528's VDPU382 then needs a port from its mainline neighbours, H.264 first. It
   buys stock GStreamer, Kodi and Chromium, not speed, and takes the decoder from MPP.

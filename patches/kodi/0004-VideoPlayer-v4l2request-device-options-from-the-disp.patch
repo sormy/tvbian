@@ -1,0 +1,131 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Fri, 30 Oct 2026 19:40:38 -0400
+Subject: [PATCH] VideoPlayer: v4l2request device options from the display
+
+A v4l2request device takes options a DRM PRIME decode can use: "afbc",
+the bit depths to ask the decoder for AFBC frames at, and
+capture_max_width and capture_max_height, a size the decoder scales its
+pictures to fit. Kodi created the device with none.
+
+For a picture no larger than the display mode, the device now asks for
+AFBC at each depth a plane on Kodi's CRTC scans out: full size, for the
+plane to show or enlarge. A larger picture, or one no plane takes as
+AFBC, comes from the decoder scaled to fit the display mode, since a
+display may refuse to shrink an AFBC layer.
+---
+ .../DVDCodecs/Video/DVDVideoCodecDRMPRIME.cpp | 48 ++++++++++++++++++-
+ xbmc/windowing/gbm/drm/DRMUtils.cpp           |  8 ++++
+ xbmc/windowing/gbm/drm/DRMUtils.h             |  1 +
+ 3 files changed, 55 insertions(+), 2 deletions(-)
+
+diff --git a/xbmc/cores/VideoPlayer/DVDCodecs/Video/DVDVideoCodecDRMPRIME.cpp b/xbmc/cores/VideoPlayer/DVDCodecs/Video/DVDVideoCodecDRMPRIME.cpp
+index ca5ef82..283e9bf 100644
+--- a/xbmc/cores/VideoPlayer/DVDCodecs/Video/DVDVideoCodecDRMPRIME.cpp
++++ b/xbmc/cores/VideoPlayer/DVDCodecs/Video/DVDVideoCodecDRMPRIME.cpp
+@@ -21,9 +21,13 @@
+ #include "utils/CPUInfo.h"
+ #include "utils/StringUtils.h"
+ #include "utils/log.h"
++#include "windowing/GraphicContext.h"
++#include "windowing/WinSystem.h"
+ 
+ #if defined(HAVE_GBM)
+ #include "windowing/gbm/WinSystemGbm.h"
++
++#include <drm_fourcc.h>
+ #endif
+ 
+ extern "C"
+@@ -73,6 +77,37 @@ static void AlignedSize(AVCodecContext* avctx, int& width, int& height)
+   height = h;
+ }
+ 
++// v4l2request device options: AFBC at each depth a plane scans it out, for a picture the display
++// need not shrink; else pictures the decoder scales to fit the display
++AVDictionary* V4L2RequestOptions(const CDVDStreamInfo& hints)
++{
++  AVDictionary* options = nullptr;
++  const RESOLUTION_INFO res = CServiceBroker::GetWinSystem()->GetGfxContext().GetResInfo();
++#if defined(HAVE_GBM)
++  auto* winSystem =
++      dynamic_cast<KODI::WINDOWING::GBM::CWinSystemGbm*>(CServiceBroker::GetWinSystem());
++  if (winSystem && winSystem->GetDrm() && hints.width <= res.iScreenWidth &&
++      hints.height <= res.iScreenHeight)
++  {
++    constexpr uint64_t afbc = DRM_FORMAT_MOD_ARM_AFBC(
++        AFBC_FORMAT_MOD_BLOCK_SIZE_16x16 | AFBC_FORMAT_MOD_SPARSE | AFBC_FORMAT_MOD_SPLIT);
++    std::vector<std::string> depths;
++    if (winSystem->GetDrm()->SupportsVideoFormat(DRM_FORMAT_YUV420_8BIT, afbc))
++      depths.emplace_back("8");
++    if (winSystem->GetDrm()->SupportsVideoFormat(DRM_FORMAT_YUV420_10BIT, afbc))
++      depths.emplace_back("10");
++    if (!depths.empty())
++    {
++      av_dict_set(&options, "afbc", StringUtils::Join(depths, ",").c_str(), 0);
++      return options;
++    }
++  }
++#endif
++  av_dict_set_int(&options, "capture_max_width", res.iScreenWidth, 0);
++  av_dict_set_int(&options, "capture_max_height", res.iScreenHeight, 0);
++  return options;
++}
++
+ bool SupportsDRM()
+ {
+   AVHWDeviceType type = AV_HWDEVICE_TYPE_NONE;
+@@ -342,8 +377,17 @@ bool CDVDVideoCodecDRMPRIME::Open(CDVDStreamInfo& hints, CDVDCodecOptions& optio
+               "CDVDVideoCodecDRMPRIME::{} - creating {} hwdevice context using device: {}",
+               __FUNCTION__, type ? type : "unknown", device ? device : "(null)");
+ 
+-    if (av_hwdevice_ctx_create(&m_pCodecContext->hw_device_ctx, pConfig->device_type,
+-                               device, nullptr, 0) < 0)
++    AVDictionary* options =
++        type && std::string_view(type) == "v4l2request" ? V4L2RequestOptions(hints) : nullptr;
++    const AVDictionaryEntry* option = nullptr;
++    while ((option = av_dict_iterate(options, option)))
++      CLog::Log(LOGINFO, "CDVDVideoCodecDRMPRIME::{} - {} option {}={}", __FUNCTION__, type,
++                option->key, option->value);
++
++    const int ret = av_hwdevice_ctx_create(&m_pCodecContext->hw_device_ctx, pConfig->device_type,
++                                           device, options, 0);
++    av_dict_free(&options);
++    if (ret < 0)
+     {
+       CLog::Log(
+           LOGERROR,
+diff --git a/xbmc/windowing/gbm/drm/DRMUtils.cpp b/xbmc/windowing/gbm/drm/DRMUtils.cpp
+index 6985b88..2f05774 100644
+--- a/xbmc/windowing/gbm/drm/DRMUtils.cpp
++++ b/xbmc/windowing/gbm/drm/DRMUtils.cpp
+@@ -229,6 +229,14 @@ bool CDRMUtils::FindGuiPlane(uint32_t format, uint64_t modifier)
+   return false;
+ }
+ 
++bool CDRMUtils::SupportsVideoFormat(uint32_t format, uint64_t modifier)
++{
++  const RESOLUTION_INFO res = GetCurrentMode();
++  return m_crtc && std::ranges::any_of(m_planes, [&](const auto& plane) {
++           return plane->Check(res.iWidth, res.iHeight, format, modifier, m_crtc, PLANE_TYPE_ANY);
++         });
++}
++
+ bool CDRMUtils::FindVideoPlane(uint32_t format, uint64_t modifier)
+ {
+   const auto output_format = std::ranges::find(m_output_formats, format, &outputformat::drm);
+diff --git a/xbmc/windowing/gbm/drm/DRMUtils.h b/xbmc/windowing/gbm/drm/DRMUtils.h
+index db4d756..177163e 100644
+--- a/xbmc/windowing/gbm/drm/DRMUtils.h
++++ b/xbmc/windowing/gbm/drm/DRMUtils.h
+@@ -71,6 +71,7 @@ public:
+   std::vector<outputformat>& GetOutputFormats() { return m_output_formats; }
+   bool FindGuiPlane(uint32_t format, uint64_t modifier);
+   bool FindVideoPlane(uint32_t format, uint64_t modifier);
++  bool SupportsVideoFormat(uint32_t format, uint64_t modifier);
+   bool FindVideoAndGuiPlane(uint32_t format, uint64_t modifier, uint64_t width, uint64_t height);
+   // FindGuiPlane never releases a D2P video plane reservation; a caller that
+   // means "video is over" states it here before revalidating the gui plane.
+-- 
+2.55.0
+

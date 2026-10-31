@@ -101,6 +101,7 @@ another, so nothing rots when one is rewritten.
 | `patches/meson-codecs/README.md`         | the video decoder in-tree and the encoders beside it on the GXLX2    |
 | `patches/gst-plugins-good/README.md`     | VC-1 through V4L2 on GStreamer 1.26.2: the patched plugin, by hand   |
 | `patches/ffmpeg/README.md`               | FFmpeg 9.0.2: V4L2 request, mem2mem and Rockchip MPP codecs          |
+| `patches/kodi/README.md`                 | Kodi 22 on GBM: handing the screen to another program                |
 | `patches/mesa/README.md`                 | Panfrost fixes on Debian's Mesa, backported from upstream            |
 | `patches/gxlimg/README.md`               | the Amlogic boot-image tool, built on macOS                          |
 | `keyring/README.md`                      | the archive signing key: fingerprint, secret, rotation               |

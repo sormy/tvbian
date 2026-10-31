@@ -89,7 +89,7 @@ FFmpeg's, and what no chip has measured yet.
       broken, not refused. `0032` refuses it for the encoders.
 - [ ] `*_v4l2m2m` decoders decode nothing after an end of stream: a seek back from the end or a
       looped input gets no frames. The restart command goes out; the capture queue stays done.
-- [ ] Kodi and fuseamp ask for compressed frames: `afbc` on `v4l2request` and `*_rkmpp`, `-afbc` on
+- [ ] fuseamp asks for compressed frames: `afbc` on `v4l2request` and `*_rkmpp`, `-afbc` on
       `*_v4l2m2m`, where the plane takes the modifier.
 
 ## CMA

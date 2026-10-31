@@ -144,3 +144,5 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
 | `docs/todo/website.md`                  | tvbian.com: one page on GitHub Pages        |
 | `docs/todo/repo-layout.md`              | folders, patches, tools and docs, regrouped |
 | `docs/todo/video.md`                    | hardware video: what is left, every SoC     |
+| `docs/todo/kodi.md`                     | Kodi 22 on our FFmpeg, built on trixie      |
+| `docs/todo/extras-upstream.md`          | extras built from an upstream release       |

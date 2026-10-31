@@ -1,0 +1,1140 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Thu, 29 Oct 2026 21:13:05 -0400
+Subject: [PATCH] cmake: link libcec and libdvdnav into kodi
+
+libcec is built static with the Linux kernel CEC framework, which it
+leaves off by default, so it reaches /dev/cec0, and without X11 RandR,
+which a GBM build has no use for.
+
+libdvdnav, with libdvdread and libdvdcss, is linked in rather than
+wrapped into a shared library loaded at runtime: the navigator calls
+it directly, and DllDvdNav goes. Windows, which ships its own DLL, is
+left out.
+---
+ cmake/modules/FindCEC.cmake                   |   8 +-
+ cmake/modules/FindLibDvd.cmake                |   5 +-
+ tools/depends/target/cec/CEC-VERSION          |   2 +-
+ xbmc/DllPaths_generated.h.in                  |   1 -
+ .../DVDInputStreams/CMakeLists.txt            |   1 -
+ .../DVDInputStreamNavigator.cpp               | 210 ++++++------
+ .../DVDInputStreams/DVDInputStreamNavigator.h |   3 +-
+ .../VideoPlayer/DVDInputStreams/DllDvdNav.h   | 303 ------------------
+ 8 files changed, 110 insertions(+), 423 deletions(-)
+ delete mode 100644 xbmc/cores/VideoPlayer/DVDInputStreams/DllDvdNav.h
+
+diff --git a/cmake/modules/FindCEC.cmake b/cmake/modules/FindCEC.cmake
+index c278ac2..f493210 100644
+--- a/cmake/modules/FindCEC.cmake
++++ b/cmake/modules/FindCEC.cmake
+@@ -14,17 +14,15 @@ if(NOT TARGET ${APP_NAME_LC}::${CMAKE_FIND_PACKAGE_NAME})
+ 
+     set(${${CMAKE_FIND_PACKAGE_NAME}_MODULE}_VERSION ${${${CMAKE_FIND_PACKAGE_NAME}_MODULE}_VER})
+ 
+-    set(${${CMAKE_FIND_PACKAGE_NAME}_MODULE}_SHARED_LIB TRUE)
+-
+     if(CORE_SYSTEM_NAME STREQUAL "osx")
+       set(${${CMAKE_FIND_PACKAGE_NAME}_MODULE}_LOCATION_POSTFIX "dylib")
+     endif()
+ 
+-    set(CMAKE_ARGS -DBUILD_SHARED_LIBS=ON
+-                   -DSKIP_PYTHON_WRAPPER=ON
++    set(CMAKE_ARGS -DSKIP_PYTHON_WRAPPER=ON
+                    -DDISABLE_BUILDINFO=ON
+                    -DDISABLE_CLIENT=ON
+-                   -DDISABLE_STATIC=ON
++                   -DHAVE_LINUX_API=ON
++                   -DHAVE_RANDR=OFF
+                    -DCMAKE_INSTALL_BINDIR=bin
+                    -DCMAKE_INSTALL_LIBDIR=lib
+                    -DCMAKE_INSTALL_INCLUDEDIR=include
+diff --git a/cmake/modules/FindLibDvd.cmake b/cmake/modules/FindLibDvd.cmake
+index 2610d20..bb3b31d 100644
+--- a/cmake/modules/FindLibDvd.cmake
++++ b/cmake/modules/FindLibDvd.cmake
+@@ -18,11 +18,10 @@ if(NOT TARGET ${APP_NAME_LC}::${CMAKE_FIND_PACKAGE_NAME})
+       list(APPEND _dvdlibs LIBRARY::LibDvdCSS)
+     endif()
+ 
+-    # link a shared dvdnav library that includes the whole archives of dvdread and dvdcss as well
+-    # the quotes around _dvdlibs are on purpose, since we want to pass a list to the function that will be unpacked automatically
+-    core_link_library(LIBRARY::LibDvdNav system/players/VideoPlayer/libdvdnav archives "${_dvdlibs}")
+   endif()
+ 
+   add_library(${APP_NAME_LC}::${CMAKE_FIND_PACKAGE_NAME} INTERFACE IMPORTED)
+   add_dependencies(${APP_NAME_LC}::${CMAKE_FIND_PACKAGE_NAME} LIBRARY::LibDvdNav)
++  set_target_properties(${APP_NAME_LC}::${CMAKE_FIND_PACKAGE_NAME} PROPERTIES
++                        INTERFACE_LINK_LIBRARIES "LIBRARY::LibDvdNav;${_dvdlibs}")
+ endif()
+diff --git a/tools/depends/target/cec/CEC-VERSION b/tools/depends/target/cec/CEC-VERSION
+index e47b590..a138035 100644
+--- a/tools/depends/target/cec/CEC-VERSION
++++ b/tools/depends/target/cec/CEC-VERSION
+@@ -2,5 +2,5 @@ LIBNAME=libcec
+ VERSION=8.1.6
+ ARCHIVE=$(LIBNAME)-$(VERSION).tar.gz
+ SHA512=1bbefa39cd04e58b611fd1b49ef9c79aa3f64755c75d95d6d6a57a04fee90a2f412a19bca5fe8d258de1634b5ec6dfd3982312d9f20361120a2662abbad5ed31
+-BYPRODUCT=libcec.so
++BYPRODUCT=libcec.a
+ BYPRODUCT_WIN=cec.lib
+diff --git a/xbmc/DllPaths_generated.h.in b/xbmc/DllPaths_generated.h.in
+index f29faa4..bf0608c 100644
+--- a/xbmc/DllPaths_generated.h.in
++++ b/xbmc/DllPaths_generated.h.in
+@@ -12,7 +12,6 @@
+ #define PREFIX_USR_PATH        "@prefix@"
+ 
+ /* VideoPlayer */
+-#define DLL_PATH_LIBDVDNAV     "special://xbmcbin/system/players/VideoPlayer/libdvdnav-@ARCH@.so"
+ 
+ /* sse4 */
+ #define DLL_PATH_LIBSSE4      "special://xbmcbin/system/libsse4-@ARCH@.so"
+diff --git a/xbmc/cores/VideoPlayer/DVDInputStreams/CMakeLists.txt b/xbmc/cores/VideoPlayer/DVDInputStreams/CMakeLists.txt
+index 1cb7b33..cfbde28 100644
+--- a/xbmc/cores/VideoPlayer/DVDInputStreams/CMakeLists.txt
++++ b/xbmc/cores/VideoPlayer/DVDInputStreams/CMakeLists.txt
+@@ -20,7 +20,6 @@ set(HEADERS BlurayStateSerializer.h
+             DVDInputStreamMemory.h
+             DVDInputStreamNavigator.h
+             DVDStateSerializer.h
+-            DllDvdNav.h
+             InputStreamAddon.h
+             InputStreamMultiStreams.h
+             InputStreamMultiSource.h
+diff --git a/xbmc/cores/VideoPlayer/DVDInputStreams/DVDInputStreamNavigator.cpp b/xbmc/cores/VideoPlayer/DVDInputStreams/DVDInputStreamNavigator.cpp
+index de3d6b7..ff53cee 100644
+--- a/xbmc/cores/VideoPlayer/DVDInputStreams/DVDInputStreamNavigator.cpp
++++ b/xbmc/cores/VideoPlayer/DVDInputStreams/DVDInputStreamNavigator.cpp
+@@ -135,10 +135,6 @@ bool CDVDInputStreamNavigator::Open()
+   CEnvironment::putenv("DVDCSS_CACHE=" + CSpecialProtocol::TranslatePath("special://masterprofile/cache"));
+ #endif
+ 
+-  // load libdvdnav.dll
+-  if (!m_dll.Load())
+-    return false;
+-
+   // libdvdcss fails if the file path contains VIDEO_TS.IFO or VIDEO_TS/VIDEO_TS.IFO
+   // libdvdnav is still able to play without, so strip them.
+ 
+@@ -170,10 +166,10 @@ bool CDVDInputStreamNavigator::Open()
+     m_pstream =
+         std::make_unique<CDVDInputStreamFile>(m_item, XFILE::READ_TRUNCATED | XFILE::READ_BITRATE);
+ #if DVDNAV_VERSION >= 60100
+-    if (!m_pstream->Open() || m_dll.dvdnav_open_stream2(&m_dvdnav, m_pstream.get(), &loggerCallback,
++    if (!m_pstream->Open() || dvdnav_open_stream2(&m_dvdnav, m_pstream.get(), &loggerCallback,
+                                                         &m_dvdnav_stream_cb) != DVDNAV_STATUS_OK)
+ #else
+-    if (!m_pstream->Open() || m_dll.dvdnav_open_stream(&m_dvdnav, m_pstream.get(), &m_dvdnav_stream_cb) != DVDNAV_STATUS_OK)
++    if (!m_pstream->Open() || dvdnav_open_stream(&m_dvdnav, m_pstream.get(), &m_dvdnav_stream_cb) != DVDNAV_STATUS_OK)
+ #endif
+     {
+       CLog::Log(LOGERROR, "Error opening image file or Error on dvdnav_open_stream");
+@@ -182,10 +178,10 @@ bool CDVDInputStreamNavigator::Open()
+     }
+   }
+ #if DVDNAV_VERSION >= 60100
+-  else if (m_dll.dvdnav_open2(&m_dvdnav, nullptr, &loggerCallback, path.c_str()) !=
++  else if (dvdnav_open2(&m_dvdnav, nullptr, &loggerCallback, path.c_str()) !=
+            DVDNAV_STATUS_OK)
+ #else
+-  else if (m_dll.dvdnav_open(&m_dvdnav, path.c_str()) != DVDNAV_STATUS_OK)
++  else if (dvdnav_open(&m_dvdnav, path.c_str()) != DVDNAV_STATUS_OK)
+ #endif
+   {
+     CLog::Log(LOGERROR, "Error on dvdnav_open");
+@@ -200,16 +196,16 @@ bool CDVDInputStreamNavigator::Open()
+   else
+   {
+     // find out what region dvd reports itself to be from, and use that as mask if available
+-    if (m_dll.dvdnav_get_disk_region_mask(m_dvdnav, &mask) == DVDNAV_STATUS_ERR)
++    if (dvdnav_get_disk_region_mask(m_dvdnav, &mask) == DVDNAV_STATUS_ERR)
+     {
+       CLog::LogF(LOGERROR, "Error getting DVD region code: {}",
+-                 m_dll.dvdnav_err_to_string(m_dvdnav));
++                 dvdnav_err_to_string(m_dvdnav));
+       mask = 0xff;
+     }
+   }
+ 
+   CLog::Log(LOGDEBUG, "{} - Setting region mask {:02x}", __FUNCTION__, mask);
+-  m_dll.dvdnav_set_region_mask(m_dvdnav, mask);
++  dvdnav_set_region_mask(m_dvdnav, mask);
+ 
+   // get default language settings
+   char language_menu[3];
+@@ -233,48 +229,48 @@ bool CDVDInputStreamNavigator::Open()
+   if (language_subtitle[0] == '\0') strcpy(language_subtitle, "en");
+ 
+   // set default language settings
+-  if (m_dll.dvdnav_menu_language_select(m_dvdnav, (char*)language_menu) != DVDNAV_STATUS_OK)
++  if (dvdnav_menu_language_select(m_dvdnav, (char*)language_menu) != DVDNAV_STATUS_OK)
+   {
+     CLog::Log(LOGERROR, "Error on setting default menu language: {}",
+-              m_dll.dvdnav_err_to_string(m_dvdnav));
++              dvdnav_err_to_string(m_dvdnav));
+     CLog::Log(LOGERROR, "Defaulting to \"en\"");
+     //! @bug libdvdnav isn't const correct
+-    m_dll.dvdnav_menu_language_select(m_dvdnav, const_cast<char*>("en"));
++    dvdnav_menu_language_select(m_dvdnav, const_cast<char*>("en"));
+   }
+ 
+-  if (m_dll.dvdnav_audio_language_select(m_dvdnav, (char*)language_audio) != DVDNAV_STATUS_OK)
++  if (dvdnav_audio_language_select(m_dvdnav, (char*)language_audio) != DVDNAV_STATUS_OK)
+   {
+     CLog::Log(LOGERROR, "Error on setting default audio language: {}",
+-              m_dll.dvdnav_err_to_string(m_dvdnav));
++              dvdnav_err_to_string(m_dvdnav));
+     CLog::Log(LOGERROR, "Defaulting to \"en\"");
+     //! @bug libdvdnav isn't const correct
+-    m_dll.dvdnav_audio_language_select(m_dvdnav, const_cast<char*>("en"));
++    dvdnav_audio_language_select(m_dvdnav, const_cast<char*>("en"));
+   }
+ 
+-  if (m_dll.dvdnav_spu_language_select(m_dvdnav, (char*)language_subtitle) != DVDNAV_STATUS_OK)
++  if (dvdnav_spu_language_select(m_dvdnav, (char*)language_subtitle) != DVDNAV_STATUS_OK)
+   {
+     CLog::Log(LOGERROR, "Error on setting default subtitle language: {}",
+-              m_dll.dvdnav_err_to_string(m_dvdnav));
++              dvdnav_err_to_string(m_dvdnav));
+     CLog::Log(LOGERROR, "Defaulting to \"en\"");
+     //! @bug libdvdnav isn't const correct
+-    m_dll.dvdnav_spu_language_select(m_dvdnav, const_cast<char*>("en"));
++    dvdnav_spu_language_select(m_dvdnav, const_cast<char*>("en"));
+   }
+ 
+   // set read ahead cache usage
+-  if (m_dll.dvdnav_set_readahead_flag(m_dvdnav, 1) != DVDNAV_STATUS_OK)
++  if (dvdnav_set_readahead_flag(m_dvdnav, 1) != DVDNAV_STATUS_OK)
+   {
+     CLog::Log(LOGERROR, "Error on dvdnav_set_readahead_flag: {}",
+-              m_dll.dvdnav_err_to_string(m_dvdnav));
++              dvdnav_err_to_string(m_dvdnav));
+     Close();
+     return false;
+   }
+ 
+   // set the PGC positioning flag to have position information relatively to the
+   // whole feature instead of just relatively to the current chapter
+-  if (m_dll.dvdnav_set_PGC_positioning_flag(m_dvdnav, 1) != DVDNAV_STATUS_OK)
++  if (dvdnav_set_PGC_positioning_flag(m_dvdnav, 1) != DVDNAV_STATUS_OK)
+   {
+     CLog::Log(LOGERROR, "Error on dvdnav_set_PGC_positioning_flag: {}",
+-              m_dll.dvdnav_err_to_string(m_dvdnav));
++              dvdnav_err_to_string(m_dvdnav));
+     Close();
+     return false;
+   }
+@@ -287,18 +283,18 @@ bool CDVDInputStreamNavigator::Open()
+     uint8_t* buf_ptr = buf;
+ 
+     // must startup vm and pgc
+-    m_dll.dvdnav_get_next_cache_block(m_dvdnav,&buf_ptr,&event,&len);
+-    m_dll.dvdnav_sector_search(m_dvdnav, 0, SEEK_SET);
++    dvdnav_get_next_cache_block(m_dvdnav,&buf_ptr,&event,&len);
++    dvdnav_sector_search(m_dvdnav, 0, SEEK_SET);
+ 
+     // first try title menu
+-    if(m_dll.dvdnav_menu_call(m_dvdnav, DVD_MENU_Title) != DVDNAV_STATUS_OK)
++    if(dvdnav_menu_call(m_dvdnav, DVD_MENU_Title) != DVDNAV_STATUS_OK)
+     {
+       CLog::Log(LOGERROR, "Error on dvdnav_menu_call(Title): {}",
+-                m_dll.dvdnav_err_to_string(m_dvdnav));
++                dvdnav_err_to_string(m_dvdnav));
+       // next try root menu
+-      if(m_dll.dvdnav_menu_call(m_dvdnav, DVD_MENU_Root) != DVDNAV_STATUS_OK )
++      if(dvdnav_menu_call(m_dvdnav, DVD_MENU_Root) != DVDNAV_STATUS_OK )
+         CLog::Log(LOGERROR, "Error on dvdnav_menu_call(Root): {}",
+-                  m_dll.dvdnav_err_to_string(m_dvdnav));
++                  dvdnav_err_to_string(m_dvdnav));
+     }
+   }
+ 
+@@ -325,9 +321,9 @@ void CDVDInputStreamNavigator::Close()
+   if (!m_dvdnav) return;
+ 
+   // finish off by closing the dvdnav device
+-  if (m_dll.dvdnav_close(m_dvdnav) != DVDNAV_STATUS_OK)
++  if (dvdnav_close(m_dvdnav) != DVDNAV_STATUS_OK)
+   {
+-    CLog::Log(LOGERROR, "Error on dvdnav_close: {}", m_dll.dvdnav_err_to_string(m_dvdnav));
++    CLog::Log(LOGERROR, "Error on dvdnav_close: {}", dvdnav_err_to_string(m_dvdnav));
+     return ;
+   }
+ 
+@@ -413,11 +409,11 @@ int CDVDInputStreamNavigator::ProcessBlock(uint8_t* dest_buffer, int* read)
+     result = DVDNAV_STATUS_OK;
+   }
+   else
+-    result = m_dll.dvdnav_get_next_cache_block(m_dvdnav, &buf, &m_lastevent, &len);
++    result = dvdnav_get_next_cache_block(m_dvdnav, &buf, &m_lastevent, &len);
+ 
+   if (result == DVDNAV_STATUS_ERR)
+   {
+-    CLog::Log(LOGERROR, "Error getting next block: {}", m_dll.dvdnav_err_to_string(m_dvdnav));
++    CLog::Log(LOGERROR, "Error getting next block: {}", dvdnav_err_to_string(m_dvdnav));
+     m_bEOF = true;
+     return NAVRESULT_ERROR;
+   }
+@@ -518,7 +514,7 @@ int CDVDInputStreamNavigator::ProcessBlock(uint8_t* dest_buffer, int* read)
+         }
+         else
+         {
+-          bool menu = (0 == m_dll.dvdnav_is_domain_vts(m_dvdnav));
++          bool menu = (0 == dvdnav_is_domain_vts(m_dvdnav));
+           if (menu != m_bInMenu)
+           {
+             m_bInMenu = menu;
+@@ -538,13 +534,13 @@ int CDVDInputStreamNavigator::ProcessBlock(uint8_t* dest_buffer, int* read)
+         uint32_t pos = 0;
+         uint32_t len = 0;
+ 
+-        m_dll.dvdnav_current_title_info(m_dvdnav, &m_iTitle, &m_iPart);
+-        m_dll.dvdnav_get_number_of_titles(m_dvdnav, &m_iTitleCount);
++        dvdnav_current_title_info(m_dvdnav, &m_iTitle, &m_iPart);
++        dvdnav_get_number_of_titles(m_dvdnav, &m_iTitleCount);
+         if(m_iTitle > 0)
+-          m_dll.dvdnav_get_number_of_parts(m_dvdnav, m_iTitle, &m_iPartCount);
++          dvdnav_get_number_of_parts(m_dvdnav, m_iTitle, &m_iPartCount);
+         else
+           m_iPartCount = 0;
+-        m_dll.dvdnav_get_position(m_dvdnav, &pos, &len);
++        dvdnav_get_position(m_dvdnav, &pos, &len);
+ 
+         // get chapters' timestamps if we have not cached them yet
+         if (!m_mapTitleChapters.contains(m_iTitle))
+@@ -552,7 +548,7 @@ int CDVDInputStreamNavigator::ProcessBlock(uint8_t* dest_buffer, int* read)
+           uint64_t* times = NULL;
+           uint64_t duration;
+           //dvdnav_describe_title_chapters returns 0 on failure and NULL for times
+-          int entries = m_dll.dvdnav_describe_title_chapters(m_dvdnav, m_iTitle, &times, &duration);
++          int entries = dvdnav_describe_title_chapters(m_dvdnav, m_iTitle, &times, &duration);
+ 
+           if (entries != m_iPartCount)
+             CLog::Log(LOGDEBUG,
+@@ -601,11 +597,11 @@ int CDVDInputStreamNavigator::ProcessBlock(uint8_t* dest_buffer, int* read)
+ 
+         // Calculate current time
+         //unsigned int pos, len;
+-        //m_dll.dvdnav_get_position(m_dvdnav, &pos, &len);
++        //dvdnav_get_position(m_dvdnav, &pos, &len);
+         //m_iTime = (int)(((int64_t)m_iTotalTime * pos) / len);
+ 
+-        pci_t* pci = m_dll.dvdnav_get_current_nav_pci(m_dvdnav);
+-        m_dll.dvdnav_get_current_nav_dsi(m_dvdnav);
++        pci_t* pci = dvdnav_get_current_nav_pci(m_dvdnav);
++        dvdnav_get_current_nav_dsi(m_dvdnav);
+ 
+         if(!pci)
+         {
+@@ -614,7 +610,7 @@ int CDVDInputStreamNavigator::ProcessBlock(uint8_t* dest_buffer, int* read)
+         }
+ 
+         /* if we have any buttons or are not in vts domain we assume we are in menu */
+-        bool menu = pci->hli.hl_gi.hli_ss || (0 == m_dll.dvdnav_is_domain_vts(m_dvdnav));
++        bool menu = pci->hli.hl_gi.hli_ss || (0 == dvdnav_is_domain_vts(m_dvdnav));
+         if (menu != m_bInMenu)
+         {
+           m_bInMenu = menu;
+@@ -642,7 +638,7 @@ int CDVDInputStreamNavigator::ProcessBlock(uint8_t* dest_buffer, int* read)
+         m_iVobUnitStart = pci->pci_gi.vobu_s_ptm;
+         m_iVobUnitStop = pci->pci_gi.vobu_e_ptm;
+ 
+-        m_iTime = (int) ( m_dll.dvdnav_get_current_time(m_dvdnav)  / 90 );
++        m_iTime = (int) ( dvdnav_get_current_time(m_dvdnav)  / 90 );
+ 
+         iNavresult = m_pVideoPlayer->OnDiscNavResult((void*)pci, DVDNAV_NAV_PACKET);
+       }
+@@ -681,7 +677,7 @@ int CDVDInputStreamNavigator::ProcessBlock(uint8_t* dest_buffer, int* read)
+     // probably not needed since function will check if buf
+     // is part of the internal cache, but do it for good measure
+     if( buf != m_lastblock )
+-      m_dll.dvdnav_free_cache_block(m_dvdnav, buf);
++      dvdnav_free_cache_block(m_dvdnav, buf);
+ 
+   return iNavresult;
+ }
+@@ -693,11 +689,11 @@ bool CDVDInputStreamNavigator::SetActiveAudioStream(int iId)
+   if (!m_dvdnav)
+     return false;
+ 
+-  dvdnav_status_t ret = m_dll.dvdnav_set_active_stream(m_dvdnav, iId, DVD_AUDIO_STREAM);
++  dvdnav_status_t ret = dvdnav_set_active_stream(m_dvdnav, iId, DVD_AUDIO_STREAM);
+   if (ret == DVDNAV_STATUS_ERR)
+   {
+     CLog::LogF(LOGERROR, "dvdnav_set_active_stream (audio) failed: {}",
+-               m_dll.dvdnav_err_to_string(m_dvdnav));
++               dvdnav_err_to_string(m_dvdnav));
+   }
+ 
+   return ret == DVDNAV_STATUS_OK;
+@@ -710,11 +706,11 @@ bool CDVDInputStreamNavigator::SetActiveSubtitleStream(int iId)
+   if (!m_dvdnav)
+     return false;
+ 
+-  dvdnav_status_t ret = m_dll.dvdnav_set_active_stream(m_dvdnav, iId, DVD_SUBTITLE_STREAM);
++  dvdnav_status_t ret = dvdnav_set_active_stream(m_dvdnav, iId, DVD_SUBTITLE_STREAM);
+   if (ret == DVDNAV_STATUS_ERR)
+   {
+     CLog::LogF(LOGERROR, "dvdnav_set_active_stream (subtitles) failed: {}",
+-               m_dll.dvdnav_err_to_string(m_dvdnav));
++               dvdnav_err_to_string(m_dvdnav));
+   }
+ 
+   return ret == DVDNAV_STATUS_OK;
+@@ -724,14 +720,14 @@ void CDVDInputStreamNavigator::ActivateButton()
+ {
+   if (m_dvdnav)
+   {
+-    m_dll.dvdnav_button_activate(m_dvdnav, m_dll.dvdnav_get_current_nav_pci(m_dvdnav));
++    dvdnav_button_activate(m_dvdnav, dvdnav_get_current_nav_pci(m_dvdnav));
+   }
+ }
+ 
+ void CDVDInputStreamNavigator::SelectButton(int iButton)
+ {
+   if (!m_dvdnav) return;
+-  m_dll.dvdnav_button_select(m_dvdnav, m_dll.dvdnav_get_current_nav_pci(m_dvdnav), iButton);
++  dvdnav_button_select(m_dvdnav, dvdnav_get_current_nav_pci(m_dvdnav), iButton);
+ }
+ 
+ int CDVDInputStreamNavigator::GetCurrentButton()
+@@ -742,10 +738,10 @@ int CDVDInputStreamNavigator::GetCurrentButton()
+   }
+ 
+   int button = 0;
+-  if (m_dll.dvdnav_get_current_highlight(m_dvdnav, &button) == DVDNAV_STATUS_ERR)
++  if (dvdnav_get_current_highlight(m_dvdnav, &button) == DVDNAV_STATUS_ERR)
+   {
+     CLog::LogF(LOGERROR, "dvdnav_get_current_highlight failed: {}",
+-               m_dll.dvdnav_err_to_string(m_dvdnav));
++               dvdnav_err_to_string(m_dvdnav));
+     return -1;
+   }
+   return button;
+@@ -756,7 +752,7 @@ void CDVDInputStreamNavigator::CheckButtons()
+   if (m_dvdnav && m_bCheckButtons)
+   {
+     m_bCheckButtons = false;
+-    pci_t* pci = m_dll.dvdnav_get_current_nav_pci(m_dvdnav);
++    pci_t* pci = dvdnav_get_current_nav_pci(m_dvdnav);
+     int iCurrentButton = GetCurrentButton();
+ 
+     if( iCurrentButton > 0 && iCurrentButton < 37 )
+@@ -782,7 +778,7 @@ void CDVDInputStreamNavigator::CheckButtons()
+       {
+         CLog::Log(LOGWARNING, "CDVDInputStreamNavigator: found invalid button({})", iCurrentButton);
+         CLog::Log(LOGWARNING, "CDVDInputStreamNavigator: switching to button({}) instead", i + 1);
+-        m_dll.dvdnav_button_select(m_dvdnav, pci, i + 1);
++        dvdnav_button_select(m_dvdnav, pci, i + 1);
+         break;
+       }
+     }
+@@ -793,7 +789,7 @@ int CDVDInputStreamNavigator::GetTotalButtons()
+ {
+   if (!m_dvdnav) return 0;
+ 
+-  pci_t* pci = m_dll.dvdnav_get_current_nav_pci(m_dvdnav);
++  pci_t* pci = dvdnav_get_current_nav_pci(m_dvdnav);
+ 
+   int counter = 0;
+   for (const btni_t& buttonInfo : pci->hli.btnit)
+@@ -811,30 +807,30 @@ int CDVDInputStreamNavigator::GetTotalButtons()
+ 
+ void CDVDInputStreamNavigator::OnUp()
+ {
+-  if (m_dvdnav) m_dll.dvdnav_upper_button_select(m_dvdnav, m_dll.dvdnav_get_current_nav_pci(m_dvdnav));
++  if (m_dvdnav) dvdnav_upper_button_select(m_dvdnav, dvdnav_get_current_nav_pci(m_dvdnav));
+ }
+ 
+ void CDVDInputStreamNavigator::OnDown()
+ {
+-  if (m_dvdnav) m_dll.dvdnav_lower_button_select(m_dvdnav, m_dll.dvdnav_get_current_nav_pci(m_dvdnav));
++  if (m_dvdnav) dvdnav_lower_button_select(m_dvdnav, dvdnav_get_current_nav_pci(m_dvdnav));
+ }
+ 
+ void CDVDInputStreamNavigator::OnLeft()
+ {
+-  if (m_dvdnav) m_dll.dvdnav_left_button_select(m_dvdnav, m_dll.dvdnav_get_current_nav_pci(m_dvdnav));
++  if (m_dvdnav) dvdnav_left_button_select(m_dvdnav, dvdnav_get_current_nav_pci(m_dvdnav));
+ }
+ 
+ void CDVDInputStreamNavigator::OnRight()
+ {
+-  if (m_dvdnav) m_dll.dvdnav_right_button_select(m_dvdnav, m_dll.dvdnav_get_current_nav_pci(m_dvdnav));
++  if (m_dvdnav) dvdnav_right_button_select(m_dvdnav, dvdnav_get_current_nav_pci(m_dvdnav));
+ }
+ 
+ bool CDVDInputStreamNavigator::OnMouseMove(const CPoint &point)
+ {
+   if (m_dvdnav)
+   {
+-    pci_t* pci = m_dll.dvdnav_get_current_nav_pci(m_dvdnav);
+-    return (DVDNAV_STATUS_OK == m_dll.dvdnav_mouse_select(m_dvdnav, pci, (int32_t)point.x, (int32_t)point.y));
++    pci_t* pci = dvdnav_get_current_nav_pci(m_dvdnav);
++    return (DVDNAV_STATUS_OK == dvdnav_mouse_select(m_dvdnav, pci, (int32_t)point.x, (int32_t)point.y));
+   }
+   return false;
+ }
+@@ -843,8 +839,8 @@ bool CDVDInputStreamNavigator::OnMouseClick(const CPoint &point)
+ {
+   if (m_dvdnav)
+   {
+-    pci_t* pci = m_dll.dvdnav_get_current_nav_pci(m_dvdnav);
+-    return (DVDNAV_STATUS_OK == m_dll.dvdnav_mouse_activate(m_dvdnav, pci, (int32_t)point.x, (int32_t)point.y));
++    pci_t* pci = dvdnav_get_current_nav_pci(m_dvdnav);
++    return (DVDNAV_STATUS_OK == dvdnav_mouse_activate(m_dvdnav, pci, (int32_t)point.x, (int32_t)point.y));
+   }
+   return false;
+ }
+@@ -856,12 +852,12 @@ bool CDVDInputStreamNavigator::OnMenu()
+     return false;
+   }
+ 
+-  return m_dll.dvdnav_menu_call(m_dvdnav, DVD_MENU_Escape) == DVDNAV_STATUS_OK;
++  return dvdnav_menu_call(m_dvdnav, DVD_MENU_Escape) == DVDNAV_STATUS_OK;
+ }
+ 
+ void CDVDInputStreamNavigator::OnBack()
+ {
+-  if (m_dvdnav) m_dll.dvdnav_go_up(m_dvdnav);
++  if (m_dvdnav) dvdnav_go_up(m_dvdnav);
+ }
+ 
+ // we don't allow skipping in menu's cause it will remove menu overlays
+@@ -869,7 +865,7 @@ void CDVDInputStreamNavigator::OnNext()
+ {
+   if (m_dvdnav && !(IsInMenu() && GetTotalButtons() > 0))
+   {
+-    m_dll.dvdnav_next_pg_search(m_dvdnav);
++    dvdnav_next_pg_search(m_dvdnav);
+   }
+ }
+ 
+@@ -878,7 +874,7 @@ void CDVDInputStreamNavigator::OnPrevious()
+ {
+   if (m_dvdnav && !(IsInMenu() && GetTotalButtons() > 0))
+   {
+-    m_dll.dvdnav_prev_pg_search(m_dvdnav);
++    dvdnav_prev_pg_search(m_dvdnav);
+   }
+ }
+ 
+@@ -886,13 +882,13 @@ void CDVDInputStreamNavigator::SkipStill()
+ {
+   if (!m_dvdnav)
+     return ;
+-  m_dll.dvdnav_still_skip(m_dvdnav);
++  dvdnav_still_skip(m_dvdnav);
+ }
+ 
+ void CDVDInputStreamNavigator::SkipWait()
+ {
+   if (!m_dvdnav) return ;
+-  m_dll.dvdnav_wait_skip(m_dvdnav);
++  dvdnav_wait_skip(m_dvdnav);
+ }
+ 
+ CDVDInputStream::ENextStream CDVDInputStreamNavigator::NextStream()
+@@ -917,7 +913,7 @@ int CDVDInputStreamNavigator::GetActiveSubtitleStream()
+     return activeStream;
+   }
+ 
+-  const int8_t logicalSubStreamId = m_dll.dvdnav_get_active_spu_stream(m_dvdnav);
++  const int8_t logicalSubStreamId = dvdnav_get_active_spu_stream(m_dvdnav);
+   if (logicalSubStreamId < 0)
+   {
+     return activeStream;
+@@ -926,7 +922,7 @@ int CDVDInputStreamNavigator::GetActiveSubtitleStream()
+   int subStreamCount = GetSubTitleStreamCount();
+   for (int subpN = 0; subpN < subStreamCount; subpN++)
+   {
+-    if (m_dll.dvdnav_get_spu_logical_stream(m_dvdnav, subpN) == logicalSubStreamId)
++    if (dvdnav_get_spu_logical_stream(m_dvdnav, subpN) == logicalSubStreamId)
+     {
+       activeStream = subpN;
+       break;
+@@ -944,7 +940,7 @@ SubtitleStreamInfo CDVDInputStreamNavigator::GetSubtitleStreamInfo(const int iId
+ 
+   subp_attr_t subp_attributes;
+ 
+-  if (m_dll.dvdnav_get_spu_attr(m_dvdnav, iId, &subp_attributes) == DVDNAV_STATUS_OK)
++  if (dvdnav_get_spu_attr(m_dvdnav, iId, &subp_attributes) == DVDNAV_STATUS_OK)
+   {
+     SetSubtitleStreamName(info, subp_attributes);
+ 
+@@ -999,7 +995,7 @@ int CDVDInputStreamNavigator::GetSubTitleStreamCount()
+   {
+     return 0;
+   }
+-  return m_dll.dvdnav_get_number_of_streams(m_dvdnav, DVD_SUBTITLE_STREAM);
++  return dvdnav_get_number_of_streams(m_dvdnav, DVD_SUBTITLE_STREAM);
+ }
+ 
+ int CDVDInputStreamNavigator::GetActiveAudioStream()
+@@ -1009,7 +1005,7 @@ int CDVDInputStreamNavigator::GetActiveAudioStream()
+     return -1;
+   }
+ 
+-  const int8_t logicalAudioStreamId = m_dll.dvdnav_get_active_audio_stream(m_dvdnav);
++  const int8_t logicalAudioStreamId = dvdnav_get_active_audio_stream(m_dvdnav);
+   if (logicalAudioStreamId < 0)
+   {
+     return -1;
+@@ -1019,7 +1015,7 @@ int CDVDInputStreamNavigator::GetActiveAudioStream()
+   int audioStreamCount = GetAudioStreamCount();
+   for (int audioN = 0; audioN < audioStreamCount; audioN++)
+   {
+-    if (m_dll.dvdnav_get_audio_logical_stream(m_dvdnav, audioN) == logicalAudioStreamId)
++    if (dvdnav_get_audio_logical_stream(m_dvdnav, audioN) == logicalAudioStreamId)
+     {
+       activeStream = audioN;
+       break;
+@@ -1106,7 +1102,7 @@ AudioStreamInfo CDVDInputStreamNavigator::GetAudioStreamInfo(const int iId)
+ 
+   audio_attr_t audio_attributes;
+ 
+-  if (m_dll.dvdnav_get_audio_attr(m_dvdnav, iId, &audio_attributes) == DVDNAV_STATUS_OK)
++  if (dvdnav_get_audio_attr(m_dvdnav, iId, &audio_attributes) == DVDNAV_STATUS_OK)
+   {
+     SetAudioStreamName(info, audio_attributes);
+ 
+@@ -1127,7 +1123,7 @@ int CDVDInputStreamNavigator::GetAudioStreamCount()
+   {
+     return 0;
+   }
+-  return m_dll.dvdnav_get_number_of_streams(m_dvdnav, DVD_AUDIO_STREAM);
++  return dvdnav_get_number_of_streams(m_dvdnav, DVD_AUDIO_STREAM);
+ }
+ 
+ int CDVDInputStreamNavigator::GetAngleCount()
+@@ -1137,7 +1133,7 @@ int CDVDInputStreamNavigator::GetAngleCount()
+ 
+   int number_of_angles;
+   int current_angle;
+-  dvdnav_status_t status = m_dll.dvdnav_get_angle_info(m_dvdnav, &current_angle, &number_of_angles);
++  dvdnav_status_t status = dvdnav_get_angle_info(m_dvdnav, &current_angle, &number_of_angles);
+ 
+   if (status == DVDNAV_STATUS_OK)
+     return number_of_angles;
+@@ -1152,9 +1148,9 @@ int CDVDInputStreamNavigator::GetActiveAngle()
+ 
+   int number_of_angles;
+   int current_angle;
+-  if (m_dll.dvdnav_get_angle_info(m_dvdnav, &current_angle, &number_of_angles) == DVDNAV_STATUS_ERR)
++  if (dvdnav_get_angle_info(m_dvdnav, &current_angle, &number_of_angles) == DVDNAV_STATUS_ERR)
+   {
+-    CLog::LogF(LOGERROR, "Failed to get current angle: {}", m_dll.dvdnav_err_to_string(m_dvdnav));
++    CLog::LogF(LOGERROR, "Failed to get current angle: {}", dvdnav_err_to_string(m_dvdnav));
+     return -1;
+   }
+   return current_angle;
+@@ -1165,7 +1161,7 @@ bool CDVDInputStreamNavigator::SetAngle(int angle)
+   if (!m_dvdnav)
+     return false;
+ 
+-  dvdnav_status_t status = m_dll.dvdnav_angle_change(m_dvdnav, angle);
++  dvdnav_status_t status = dvdnav_angle_change(m_dvdnav, angle);
+ 
+   return (status == DVDNAV_STATUS_OK);
+ }
+@@ -1188,8 +1184,8 @@ bool CDVDInputStreamNavigator::GetCurrentButtonInfo(CDVDOverlaySpu& pOverlayPict
+     return false;
+   }
+ 
+-  if (DVDNAV_STATUS_OK == m_dll.dvdnav_get_highlight_area(
+-                              m_dll.dvdnav_get_current_nav_pci(m_dvdnav), button, iButtonType, &hl))
++  if (DVDNAV_STATUS_OK == dvdnav_get_highlight_area(
++                              dvdnav_get_current_nav_pci(m_dvdnav), button, iButtonType, &hl))
+   {
+     // button cropping information
+     pOverlayPicture.crop_i_x_start = hl.sx;
+@@ -1237,10 +1233,10 @@ int CDVDInputStreamNavigator::GetTime()
+ 
+ bool CDVDInputStreamNavigator::PosTime(int iTimeInMsec)
+ {
+-  if( m_dll.dvdnav_jump_to_sector_by_time(m_dvdnav, iTimeInMsec * 90, 0) == DVDNAV_STATUS_ERR )
++  if( dvdnav_jump_to_sector_by_time(m_dvdnav, iTimeInMsec * 90, 0) == DVDNAV_STATUS_ERR )
+   {
+     CLog::Log(LOGDEBUG, "dvdnav: dvdnav_jump_to_sector_by_time failed( {} )",
+-              m_dll.dvdnav_err_to_string(m_dvdnav));
++              dvdnav_err_to_string(m_dvdnav));
+     return false;
+   }
+   m_iTime = iTimeInMsec;
+@@ -1267,26 +1263,26 @@ bool CDVDInputStreamNavigator::SeekChapter(int iChapter)
+ 
+   if (iChapter == (m_iPart + 1))
+   {
+-    if (m_dll.dvdnav_next_pg_search(m_dvdnav) == DVDNAV_STATUS_ERR)
++    if (dvdnav_next_pg_search(m_dvdnav) == DVDNAV_STATUS_ERR)
+     {
+       CLog::Log(LOGERROR, "dvdnav: dvdnav_next_pg_search( {} )",
+-                m_dll.dvdnav_err_to_string(m_dvdnav));
++                dvdnav_err_to_string(m_dvdnav));
+       return false;
+     }
+   }
+   else if (iChapter == (m_iPart - 1))
+   {
+-    if (m_dll.dvdnav_prev_pg_search(m_dvdnav) == DVDNAV_STATUS_ERR)
++    if (dvdnav_prev_pg_search(m_dvdnav) == DVDNAV_STATUS_ERR)
+     {
+       CLog::Log(LOGERROR, "dvdnav: dvdnav_prev_pg_search( {} )",
+-                m_dll.dvdnav_err_to_string(m_dvdnav));
++                dvdnav_err_to_string(m_dvdnav));
+       return false;
+     }
+   }
+-  else if (m_dll.dvdnav_part_play(m_dvdnav, m_iTitle, iChapter) == DVDNAV_STATUS_ERR)
++  else if (dvdnav_part_play(m_dvdnav, m_iTitle, iChapter) == DVDNAV_STATUS_ERR)
+   {
+     CLog::Log(LOGERROR, "dvdnav: dvdnav_part_play failed( {} )",
+-              m_dll.dvdnav_err_to_string(m_dvdnav));
++              dvdnav_err_to_string(m_dvdnav));
+     return false;
+   }
+ 
+@@ -1298,8 +1294,8 @@ bool CDVDInputStreamNavigator::SeekChapter(int iChapter)
+ 
+ float CDVDInputStreamNavigator::GetVideoAspectRatio()
+ {
+-  int iAspect = m_dll.dvdnav_get_video_aspect(m_dvdnav);
+-  int iPerm = m_dll.dvdnav_get_video_scale_permission(m_dvdnav);
++  int iAspect = dvdnav_get_video_aspect(m_dvdnav);
++  int iPerm = dvdnav_get_video_scale_permission(m_dvdnav);
+ 
+   //The video scale permissions should give if the source is letterboxed
+   //and such. should be able to give us info that we can zoom in automatically
+@@ -1322,7 +1318,7 @@ void CDVDInputStreamNavigator::EnableSubtitleStream(bool bEnable)
+   if (!m_dvdnav)
+     return;
+ 
+-  m_dll.dvdnav_toggle_spu_stream(m_dvdnav, static_cast<uint8_t>(bEnable));
++  dvdnav_toggle_spu_stream(m_dvdnav, static_cast<uint8_t>(bEnable));
+ }
+ 
+ bool CDVDInputStreamNavigator::IsSubtitleStreamEnabled()
+@@ -1330,7 +1326,7 @@ bool CDVDInputStreamNavigator::IsSubtitleStreamEnabled()
+   if (!m_dvdnav)
+     return false;
+ 
+-  return m_dll.dvdnav_get_active_spu_stream(m_dvdnav) >= 0;
++  return dvdnav_get_active_spu_stream(m_dvdnav) >= 0;
+ }
+ 
+ bool CDVDInputStreamNavigator::FillDVDState(DVDState& dvdState)
+@@ -1340,11 +1336,11 @@ bool CDVDInputStreamNavigator::FillDVDState(DVDState& dvdState)
+     return false;
+   }
+ 
+-  if (m_dll.dvdnav_current_title_program(m_dvdnav, &dvdState.title, &dvdState.pgcn,
++  if (dvdnav_current_title_program(m_dvdnav, &dvdState.title, &dvdState.pgcn,
+                                          &dvdState.pgn) == DVDNAV_STATUS_ERR)
+   {
+     CLog::LogF(LOGERROR, "Failed to get current title info ({})",
+-               m_dll.dvdnav_err_to_string(m_dvdnav));
++               dvdnav_err_to_string(m_dvdnav));
+     return false;
+   }
+ 
+@@ -1370,7 +1366,7 @@ bool CDVDInputStreamNavigator::GetState(std::string& xmlstate)
+   }
+ 
+   // do not save state if we are not playing a title stream (e.g. if we are in menus)
+-  if (!m_dll.dvdnav_is_domain_vts(m_dvdnav))
++  if (!dvdnav_is_domain_vts(m_dvdnav))
+   {
+     return false;
+   }
+@@ -1403,8 +1399,8 @@ bool CDVDInputStreamNavigator::SetState(const std::string& xmlstate)
+     return false;
+   }
+ 
+-  m_dll.dvdnav_program_play(m_dvdnav, dvdState.title, dvdState.pgcn, dvdState.pgn);
+-  m_dll.dvdnav_angle_change(m_dvdnav, dvdState.current_angle);
++  dvdnav_program_play(m_dvdnav, dvdState.title, dvdState.pgcn, dvdState.pgn);
++  dvdnav_angle_change(m_dvdnav, dvdState.current_angle);
+   SetActiveSubtitleStream(dvdState.subp_num);
+   SetActiveAudioStream(dvdState.audio_num);
+   EnableSubtitleStream(dvdState.sub_enabled);
+@@ -1417,7 +1413,7 @@ std::string CDVDInputStreamNavigator::GetDVDTitleString()
+     return "";
+ 
+   const char* str = NULL;
+-  if (m_dll.dvdnav_get_title_string(m_dvdnav, &str) == DVDNAV_STATUS_OK)
++  if (dvdnav_get_title_string(m_dvdnav, &str) == DVDNAV_STATUS_OK)
+     return str;
+   else
+     return "";
+@@ -1429,7 +1425,7 @@ std::string CDVDInputStreamNavigator::GetDVDSerialString()
+     return "";
+ 
+   const char* str = NULL;
+-  if (m_dll.dvdnav_get_serial_string(m_dvdnav, &str) == DVDNAV_STATUS_OK)
++  if (dvdnav_get_serial_string(m_dvdnav, &str) == DVDNAV_STATUS_OK)
+     return str;
+   else
+     return "";
+@@ -1440,7 +1436,7 @@ std::string CDVDInputStreamNavigator::GetDVDVolIdString()
+   if (!m_dvdnav)
+     return "";
+ 
+-  const char* volIdTmp = m_dll.dvdnav_get_volid_string(m_dvdnav);
++  const char* volIdTmp = dvdnav_get_volid_string(m_dvdnav);
+   if (volIdTmp)
+   {
+     std::string volId{volIdTmp};
+@@ -1470,12 +1466,12 @@ void CDVDInputStreamNavigator::GetVideoResolution(uint32_t* width, uint32_t* hei
+   if (!m_dvdnav) return;
+ 
+   // for version <= 5.0.3 this functions returns 0 instead of DVDNAV_STATUS_OK and -1 instead of DVDNAV_STATUS_ERR
+-  int status = m_dll.dvdnav_get_video_resolution(m_dvdnav, width, height);
++  int status = dvdnav_get_video_resolution(m_dvdnav, width, height);
+   if (status == -1)
+   {
+     CLog::Log(LOGWARNING,
+               "CDVDInputStreamNavigator::GetVideoResolution - Failed to get resolution ({})",
+-              m_dll.dvdnav_err_to_string(m_dvdnav));
++              dvdnav_err_to_string(m_dvdnav));
+     *width = 0;
+     *height = 0;
+   }
+diff --git a/xbmc/cores/VideoPlayer/DVDInputStreams/DVDInputStreamNavigator.h b/xbmc/cores/VideoPlayer/DVDInputStreams/DVDInputStreamNavigator.h
+index c7afeb5..98d9a7c 100644
+--- a/xbmc/cores/VideoPlayer/DVDInputStreams/DVDInputStreamNavigator.h
++++ b/xbmc/cores/VideoPlayer/DVDInputStreams/DVDInputStreamNavigator.h
+@@ -14,13 +14,13 @@
+ #include "DVDInputStream.h"
+ #include "DVDInputStreamFile.h"
+ #include "DVDStateSerializer.h"
+-#include "DllDvdNav.h"
+ #include "cores/MenuType.h"
+ #include "threads/CriticalSection.h"
+ #include "utils/Geometry.h"
+ #include "video/VideoInfoTag.h"
+ 
+ #include <chrono>
++#include <dvdnav/dvdnav.h>
+ #include <string>
+ #include <vector>
+ 
+@@ -165,7 +165,6 @@ protected:
+   */
+   bool FillDVDState(DVDState& dvdstate);
+ 
+-  DllDvdNav m_dll;
+   bool m_bCheckButtons;
+   bool m_bEOF;
+ 
+diff --git a/xbmc/cores/VideoPlayer/DVDInputStreams/DllDvdNav.h b/xbmc/cores/VideoPlayer/DVDInputStreams/DllDvdNav.h
+deleted file mode 100644
+index e77569f..0000000
+--- a/xbmc/cores/VideoPlayer/DVDInputStreams/DllDvdNav.h
++++ /dev/null
+@@ -1,303 +0,0 @@
+-/*
+- *  Copyright (C) 2005-2018 Team Kodi
+- *  This file is part of Kodi - https://kodi.tv
+- *
+- *  SPDX-License-Identifier: GPL-2.0-or-later
+- *  See LICENSES/README.md for more information.
+- */
+-
+-#pragma once
+-
+-#include <stdint.h>
+-
+-#include <dvdnav/dvdnav.h>
+-#include <dvdnav/dvd_types.h>
+-
+-#include "DynamicDll.h"
+-
+-class DllDvdNavInterface
+-{
+-public:
+-  virtual ~DllDvdNavInterface() = default;
+-  virtual dvdnav_status_t dvdnav_open(dvdnav_t **dest, const char *path) = 0;
+-  virtual dvdnav_status_t dvdnav_open_stream(dvdnav_t **dest, void *priv, dvdnav_stream_cb *stream_cb) = 0;
+-  virtual dvdnav_status_t dvdnav_open2(dvdnav_t **dest, void *, const dvdnav_logger_cb *, const char *path) = 0;
+-  virtual dvdnav_status_t dvdnav_open_stream2(dvdnav_t **dest, void *priv, const dvdnav_logger_cb *, dvdnav_stream_cb *stream_cb) = 0;
+-  virtual dvdnav_status_t dvdnav_dup(dvdnav_t **dest, dvdnav_t *src) = 0;
+-  virtual dvdnav_status_t dvdnav_free_dup(dvdnav_t * _this) = 0;
+-  virtual dvdnav_status_t dvdnav_close(dvdnav_t *self) = 0;
+-  virtual dvdnav_status_t dvdnav_reset(dvdnav_t *self) = 0;
+-  virtual dvdnav_status_t dvdnav_path(dvdnav_t *self, const char **path) = 0;
+-  virtual const char* dvdnav_err_to_string(dvdnav_t *self) = 0;
+-  virtual const char* dvdnav_version(void) = 0;
+-  virtual dvdnav_status_t dvdnav_set_region_mask(dvdnav_t *self, int32_t region_mask) = 0;
+-  virtual dvdnav_status_t dvdnav_get_region_mask(dvdnav_t *self, int32_t *region_mask) = 0;
+-  virtual dvdnav_status_t dvdnav_set_readahead_flag(dvdnav_t *self, int32_t read_ahead_flag) = 0;
+-  virtual dvdnav_status_t dvdnav_get_readahead_flag(dvdnav_t *self, int32_t *read_ahead_flag) = 0;
+-  virtual dvdnav_status_t dvdnav_set_PGC_positioning_flag(dvdnav_t *self, int32_t pgc_based_flag) = 0;
+-  virtual dvdnav_status_t dvdnav_get_PGC_positioning_flag(dvdnav_t *self, int32_t *pgc_based_flag) = 0;
+-  virtual dvdnav_status_t dvdnav_get_next_block(dvdnav_t *self, uint8_t *buf, int32_t *event, int32_t *len) = 0;
+-  virtual dvdnav_status_t dvdnav_get_next_cache_block(dvdnav_t *self, uint8_t **buf, int32_t *event, int32_t *len) = 0;
+-  virtual dvdnav_status_t dvdnav_free_cache_block(dvdnav_t *self, unsigned char *buf) = 0;
+-  virtual dvdnav_status_t dvdnav_still_skip(dvdnav_t *self) = 0;
+-  virtual dvdnav_status_t dvdnav_wait_skip(dvdnav_t *self) = 0;
+-  virtual uint32_t dvdnav_get_next_still_flag(dvdnav_t *self) = 0;
+-  virtual dvdnav_status_t dvdnav_stop(dvdnav_t *self) = 0;
+-  virtual dvdnav_status_t dvdnav_get_disk_region_mask(dvdnav_t *self, int32_t *region_mask) = 0;
+-  virtual dvdnav_status_t dvdnav_get_number_of_titles(dvdnav_t *self, int32_t *titles) = 0;
+-  virtual dvdnav_status_t dvdnav_get_number_of_parts(dvdnav_t *self, int32_t title, int32_t *parts) = 0;
+-  virtual dvdnav_status_t dvdnav_get_number_of_angles(dvdnav_t *self, int32_t title, int32_t *angles) = 0;
+-  virtual dvdnav_status_t dvdnav_title_play(dvdnav_t *self, int32_t title) = 0;
+-  virtual dvdnav_status_t dvdnav_part_play(dvdnav_t *self, int32_t title, int32_t part) = 0;
+-  virtual dvdnav_status_t dvdnav_program_play(dvdnav_t *self, int32_t title, int32_t pgcn, int32_t pgn) = 0;
+-  virtual uint32_t dvdnav_describe_title_chapters(dvdnav_t *self, int32_t title, uint64_t **times, uint64_t *duration) = 0;
+-  virtual dvdnav_status_t dvdnav_part_play_auto_stop(dvdnav_t *self, int32_t title, int32_t part, int32_t parts_to_play) = 0;
+-  virtual dvdnav_status_t dvdnav_time_play(dvdnav_t *self, int32_t title, uint64_t time) = 0;
+-  virtual dvdnav_status_t dvdnav_menu_call(dvdnav_t *self, DVDMenuID_t menu) = 0;
+-  virtual dvdnav_status_t dvdnav_current_title_info(dvdnav_t *self, int32_t *title, int32_t *part) = 0;
+-  virtual dvdnav_status_t dvdnav_current_title_program(dvdnav_t *self, int32_t *title, int32_t *pgcn, int32_t *pgn) = 0;
+-  virtual dvdnav_status_t dvdnav_get_position_in_title(dvdnav_t *self, uint32_t *pos, uint32_t *len) = 0;
+-  virtual dvdnav_status_t dvdnav_part_search(dvdnav_t *self, int32_t part) = 0;
+-  virtual dvdnav_status_t dvdnav_sector_search(dvdnav_t *self, int64_t offset, int32_t origin) = 0;
+-  virtual int64_t dvdnav_get_current_time(dvdnav_t *self) = 0;
+-  virtual dvdnav_status_t dvdnav_time_search(dvdnav_t *self, uint64_t time) = 0;
+-  virtual dvdnav_status_t dvdnav_jump_to_sector_by_time(dvdnav_t *self, uint64_t time_in_pts_ticks, int32_t mode) = 0;
+-  virtual dvdnav_status_t dvdnav_go_up(dvdnav_t *self) = 0;
+-  virtual dvdnav_status_t dvdnav_prev_pg_search(dvdnav_t *self) = 0;
+-  virtual dvdnav_status_t dvdnav_top_pg_search(dvdnav_t *self) = 0;
+-  virtual dvdnav_status_t dvdnav_next_pg_search(dvdnav_t *self) = 0;
+-  virtual dvdnav_status_t dvdnav_get_position(dvdnav_t *self, uint32_t *pos, uint32_t *len) = 0;
+-  virtual dvdnav_status_t dvdnav_get_current_highlight(dvdnav_t *self, int32_t *button) = 0;
+-  virtual pci_t* dvdnav_get_current_nav_pci(dvdnav_t *self) = 0;
+-  virtual dsi_t* dvdnav_get_current_nav_dsi(dvdnav_t *self) = 0;
+-  virtual dvdnav_status_t dvdnav_get_highlight_area(pci_t *nav_pci , int32_t button, int32_t mode, dvdnav_highlight_area_t *highlight) = 0;
+-  virtual dvdnav_status_t dvdnav_upper_button_select(dvdnav_t *self, pci_t *pci) = 0;
+-  virtual dvdnav_status_t dvdnav_lower_button_select(dvdnav_t *self, pci_t *pci) = 0;
+-  virtual dvdnav_status_t dvdnav_right_button_select(dvdnav_t *self, pci_t *pci) = 0;
+-  virtual dvdnav_status_t dvdnav_left_button_select(dvdnav_t *self, pci_t *pci) = 0;
+-  virtual dvdnav_status_t dvdnav_button_activate(dvdnav_t *self, pci_t *pci) = 0;
+-  virtual dvdnav_status_t dvdnav_button_select(dvdnav_t *self, pci_t *pci, int32_t button) = 0;
+-  virtual dvdnav_status_t dvdnav_button_select_and_activate(dvdnav_t *self, pci_t *pci, int32_t button) = 0;
+-  virtual dvdnav_status_t dvdnav_button_activate_cmd(dvdnav_t *self, int32_t button, vm_cmd_t *cmd) = 0;
+-  virtual dvdnav_status_t dvdnav_mouse_select(dvdnav_t *self, pci_t *pci, int32_t x, int32_t y) = 0;
+-  virtual dvdnav_status_t dvdnav_mouse_activate(dvdnav_t *self, pci_t *pci, int32_t x, int32_t y) = 0;
+-  virtual dvdnav_status_t dvdnav_menu_language_select(dvdnav_t *self, char *code) = 0;
+-  virtual dvdnav_status_t dvdnav_audio_language_select(dvdnav_t *self, char *code) = 0;
+-  virtual dvdnav_status_t dvdnav_spu_language_select(dvdnav_t *self, char *code) = 0;
+-  virtual dvdnav_status_t dvdnav_get_title_string(dvdnav_t *self, const char **title_str) = 0;
+-  virtual dvdnav_status_t dvdnav_get_serial_string(dvdnav_t *self, const char **serial_str) = 0;
+-  virtual const char * dvdnav_get_volid_string(dvdnav_t *self) = 0;
+-  virtual uint8_t dvdnav_get_video_aspect(dvdnav_t *self) = 0;
+-  virtual dvdnav_status_t dvdnav_get_video_resolution(dvdnav_t *self, uint32_t *width, uint32_t *height) = 0;
+-  virtual uint8_t dvdnav_get_video_scale_permission(dvdnav_t *self) = 0;
+-  virtual uint16_t dvdnav_audio_stream_to_lang(dvdnav_t *self, uint8_t stream) = 0;
+-  virtual uint16_t dvdnav_audio_stream_format(dvdnav_t *self, uint8_t stream) = 0;
+-  virtual uint16_t dvdnav_audio_stream_channels(dvdnav_t *self, uint8_t stream) = 0;
+-  virtual uint16_t dvdnav_spu_stream_to_lang(dvdnav_t *self, uint8_t stream) = 0;
+-  virtual int8_t dvdnav_get_audio_logical_stream(dvdnav_t *self, uint8_t audio_num) = 0;
+-  virtual dvdnav_status_t dvdnav_get_audio_attr(dvdnav_t *self, uint8_t audio_mum, audio_attr_t *audio_attr) = 0;
+-  virtual int8_t dvdnav_get_spu_logical_stream(dvdnav_t *self, uint8_t subp_num) = 0;
+-  virtual dvdnav_status_t dvdnav_get_spu_attr(dvdnav_t *self, uint8_t audio_mum, subp_attr_t *subp_attr) = 0;
+-  virtual int8_t dvdnav_get_active_audio_stream(dvdnav_t *self) = 0;
+-  virtual int8_t dvdnav_get_active_spu_stream(dvdnav_t *self) = 0;
+-//  virtual user_ops_t dvdnav_get_restrictions(dvdnav_t *self) = 0;
+-  virtual int8_t dvdnav_get_number_of_streams(dvdnav_t *self, dvdnav_stream_type_t stream_type) = 0;
+-  virtual dvdnav_status_t dvdnav_toggle_spu_stream(dvdnav_t *self, uint8_t visibility) = 0;
+-  virtual dvdnav_status_t dvdnav_set_active_stream(dvdnav_t *self, uint8_t stream_num, dvdnav_stream_type_t stream_type) = 0;
+-  virtual dvdnav_status_t dvdnav_angle_change(dvdnav_t *self, int32_t angle) = 0;
+-  virtual dvdnav_status_t dvdnav_get_angle_info(dvdnav_t *self, int32_t *current_angle, int32_t *number_of_angles) = 0;
+-  virtual int8_t dvdnav_is_domain_fp(dvdnav_t *self) = 0;
+-  virtual int8_t dvdnav_is_domain_vmgm(dvdnav_t *self) = 0;
+-  virtual int8_t dvdnav_is_domain_vtsm(dvdnav_t *self) = 0;
+-  virtual int8_t dvdnav_is_domain_vts(dvdnav_t *self) = 0;
+-};
+-
+-class DllDvdNav : public DllDynamic, DllDvdNavInterface
+-{
+-  DECLARE_DLL_WRAPPER(DllDvdNav, DLL_PATH_LIBDVDNAV)
+-
+-  DEFINE_METHOD2(dvdnav_status_t, dvdnav_open, (dvdnav_t **p1, const char *p2))
+-  DEFINE_METHOD3(dvdnav_status_t, dvdnav_open_stream, (dvdnav_t **p1, void *p2, dvdnav_stream_cb *p3))
+-  DEFINE_METHOD4(dvdnav_status_t, dvdnav_open2, (dvdnav_t **p1, void *p2, const dvdnav_logger_cb *p3, const char *p4))
+-  DEFINE_METHOD4(dvdnav_status_t, dvdnav_open_stream2, (dvdnav_t **p1, void *p2, const dvdnav_logger_cb *p3, dvdnav_stream_cb *p4))
+-  DEFINE_METHOD2(dvdnav_status_t, dvdnav_dup, (dvdnav_t **p1, dvdnav_t *p2))
+-  DEFINE_METHOD1(dvdnav_status_t, dvdnav_free_dup, (dvdnav_t * p1))
+-  DEFINE_METHOD1(dvdnav_status_t, dvdnav_close, (dvdnav_t *p1))
+-  DEFINE_METHOD1(dvdnav_status_t, dvdnav_reset, (dvdnav_t *p1))
+-  DEFINE_METHOD2(dvdnav_status_t, dvdnav_path, (dvdnav_t *p1, const char **p2))
+-  DEFINE_METHOD1(const char*, dvdnav_err_to_string, (dvdnav_t *p1))
+-  DEFINE_METHOD0(const char*, dvdnav_version)
+-  DEFINE_METHOD2(dvdnav_status_t, dvdnav_set_region_mask, (dvdnav_t *p1, int32_t p2))
+-  DEFINE_METHOD2(dvdnav_status_t, dvdnav_get_region_mask, (dvdnav_t *p1, int32_t *p2))
+-  DEFINE_METHOD2(dvdnav_status_t, dvdnav_set_readahead_flag, (dvdnav_t *p1, int32_t p2))
+-  DEFINE_METHOD2(dvdnav_status_t, dvdnav_get_readahead_flag, (dvdnav_t *p1, int32_t *p2))
+-  DEFINE_METHOD2(dvdnav_status_t, dvdnav_set_PGC_positioning_flag, (dvdnav_t *p1, int32_t p2))
+-  DEFINE_METHOD2(dvdnav_status_t, dvdnav_get_PGC_positioning_flag, (dvdnav_t *p1, int32_t *p2))
+-  DEFINE_METHOD4(dvdnav_status_t, dvdnav_get_next_block, (dvdnav_t *p1, uint8_t *p2, int32_t *p3, int32_t *p4))
+-  DEFINE_METHOD4(dvdnav_status_t, dvdnav_get_next_cache_block, (dvdnav_t *p1, uint8_t **p2, int32_t *p3, int32_t *p4))
+-  DEFINE_METHOD2(dvdnav_status_t, dvdnav_free_cache_block, (dvdnav_t *p1, unsigned char *p2))
+-  DEFINE_METHOD1(dvdnav_status_t, dvdnav_still_skip, (dvdnav_t *p1))
+-  DEFINE_METHOD1(dvdnav_status_t, dvdnav_wait_skip, (dvdnav_t *p1))
+-  DEFINE_METHOD1(uint32_t, dvdnav_get_next_still_flag, (dvdnav_t *p1))
+-  DEFINE_METHOD1(dvdnav_status_t, dvdnav_stop, (dvdnav_t *p1))
+-  DEFINE_METHOD2(dvdnav_status_t, dvdnav_get_disk_region_mask, (dvdnav_t *p1, int32_t *p2))
+-  DEFINE_METHOD2(dvdnav_status_t, dvdnav_get_number_of_titles, (dvdnav_t *p1, int32_t *p2))
+-  DEFINE_METHOD3(dvdnav_status_t, dvdnav_get_number_of_parts, (dvdnav_t *p1, int32_t p2, int32_t *p3))
+-  DEFINE_METHOD3(dvdnav_status_t, dvdnav_get_number_of_angles, (dvdnav_t *p1, int32_t p2, int32_t *p3))
+-  DEFINE_METHOD2(dvdnav_status_t, dvdnav_title_play, (dvdnav_t *p1, int32_t p2))
+-  DEFINE_METHOD3(dvdnav_status_t, dvdnav_part_play, (dvdnav_t *p1, int32_t p2, int32_t p3))
+-  DEFINE_METHOD4(dvdnav_status_t, dvdnav_program_play, (dvdnav_t *p1, int32_t p2, int32_t p3, int32_t p4))
+-  DEFINE_METHOD4(uint32_t, dvdnav_describe_title_chapters, (dvdnav_t *p1, int32_t p2, uint64_t **p3, uint64_t *p4))
+-  DEFINE_METHOD4(dvdnav_status_t, dvdnav_part_play_auto_stop, (dvdnav_t *p1, int32_t p2, int32_t p3, int32_t p4))
+-  DEFINE_METHOD3(dvdnav_status_t, dvdnav_time_play, (dvdnav_t *p1, int32_t p2, uint64_t p3))
+-  DEFINE_METHOD2(dvdnav_status_t, dvdnav_menu_call, (dvdnav_t *p1, DVDMenuID_t p2))
+-  DEFINE_METHOD3(dvdnav_status_t, dvdnav_current_title_info, (dvdnav_t *p1, int32_t *p2, int32_t *p3))
+-  DEFINE_METHOD4(dvdnav_status_t, dvdnav_current_title_program, (dvdnav_t *p1, int32_t *p2, int32_t *p3, int32_t *p4))
+-  DEFINE_METHOD3(dvdnav_status_t, dvdnav_get_position_in_title, (dvdnav_t *p1, uint32_t *p2, uint32_t *p3))
+-  DEFINE_METHOD2(dvdnav_status_t, dvdnav_part_search, (dvdnav_t *p1, int32_t p2))
+-  DEFINE_METHOD3(dvdnav_status_t, dvdnav_sector_search, (dvdnav_t *p1, int64_t p2, int32_t p3))
+-  DEFINE_METHOD1(int64_t, dvdnav_get_current_time, (dvdnav_t *p1))
+-  DEFINE_METHOD2(dvdnav_status_t, dvdnav_time_search, (dvdnav_t *p1, uint64_t p2))
+-  DEFINE_METHOD3(dvdnav_status_t, dvdnav_jump_to_sector_by_time, (dvdnav_t *p1, uint64_t p2, int32_t p3))
+-  DEFINE_METHOD1(dvdnav_status_t, dvdnav_go_up, (dvdnav_t *p1))
+-  DEFINE_METHOD1(dvdnav_status_t, dvdnav_prev_pg_search, (dvdnav_t *p1))
+-  DEFINE_METHOD1(dvdnav_status_t, dvdnav_top_pg_search, (dvdnav_t *p1))
+-  DEFINE_METHOD1(dvdnav_status_t, dvdnav_next_pg_search, (dvdnav_t *p1))
+-  DEFINE_METHOD3(dvdnav_status_t, dvdnav_get_position, (dvdnav_t *p1, uint32_t *p2, uint32_t *p3))
+-  DEFINE_METHOD2(dvdnav_status_t, dvdnav_get_current_highlight, (dvdnav_t *p1, int32_t *p2))
+-  DEFINE_METHOD1(pci_t*, dvdnav_get_current_nav_pci, (dvdnav_t *p1))
+-  DEFINE_METHOD1(dsi_t*, dvdnav_get_current_nav_dsi, (dvdnav_t *p1))
+-  DEFINE_METHOD4(dvdnav_status_t, dvdnav_get_highlight_area, (pci_t *p1 , int32_t p2, int32_t p3, dvdnav_highlight_area_t *p4))
+-  DEFINE_METHOD2(dvdnav_status_t, dvdnav_upper_button_select, (dvdnav_t *p1, pci_t *p2))
+-  DEFINE_METHOD2(dvdnav_status_t, dvdnav_lower_button_select, (dvdnav_t *p1, pci_t *p2))
+-  DEFINE_METHOD2(dvdnav_status_t, dvdnav_right_button_select, (dvdnav_t *p1, pci_t *p2))
+-  DEFINE_METHOD2(dvdnav_status_t, dvdnav_left_button_select, (dvdnav_t *p1, pci_t *p2))
+-  DEFINE_METHOD2(dvdnav_status_t, dvdnav_button_activate, (dvdnav_t *p1, pci_t *p2))
+-  DEFINE_METHOD3(dvdnav_status_t, dvdnav_button_select, (dvdnav_t *p1, pci_t *p2, int32_t p3))
+-  DEFINE_METHOD3(dvdnav_status_t, dvdnav_button_select_and_activate, (dvdnav_t *p1, pci_t *p2, int32_t p3))
+-  DEFINE_METHOD3(dvdnav_status_t, dvdnav_button_activate_cmd, (dvdnav_t *p1, int32_t p2, vm_cmd_t *p3))
+-  DEFINE_METHOD4(dvdnav_status_t, dvdnav_mouse_select, (dvdnav_t *p1, pci_t *p2, int32_t p3, int32_t p4))
+-  DEFINE_METHOD4(dvdnav_status_t, dvdnav_mouse_activate, (dvdnav_t *p1, pci_t *p2, int32_t p3, int32_t p4))
+-  DEFINE_METHOD2(dvdnav_status_t, dvdnav_menu_language_select, (dvdnav_t *p1, char *p2))
+-  DEFINE_METHOD2(dvdnav_status_t, dvdnav_audio_language_select, (dvdnav_t *p1, char *p2))
+-  DEFINE_METHOD2(dvdnav_status_t, dvdnav_spu_language_select, (dvdnav_t *p1, char *p2))
+-  DEFINE_METHOD2(dvdnav_status_t, dvdnav_get_title_string, (dvdnav_t *p1, const char **p2))
+-  DEFINE_METHOD2(dvdnav_status_t, dvdnav_get_serial_string, (dvdnav_t *p1, const char **p2))
+-  DEFINE_METHOD1(const char*, dvdnav_get_volid_string, (dvdnav_t *p1))
+-  DEFINE_METHOD1(uint8_t, dvdnav_get_video_aspect, (dvdnav_t *p1))
+-  DEFINE_METHOD3(dvdnav_status_t, dvdnav_get_video_resolution, (dvdnav_t *p1, uint32_t *p2, uint32_t *p3))
+-  DEFINE_METHOD1(uint8_t, dvdnav_get_video_scale_permission, (dvdnav_t *p1))
+-  DEFINE_METHOD2(uint16_t, dvdnav_audio_stream_to_lang, (dvdnav_t *p1, uint8_t p2))
+-  DEFINE_METHOD2(uint16_t, dvdnav_audio_stream_format, (dvdnav_t *p1, uint8_t p2))
+-  DEFINE_METHOD2(uint16_t, dvdnav_audio_stream_channels, (dvdnav_t *p1, uint8_t p2))
+-  DEFINE_METHOD2(uint16_t, dvdnav_spu_stream_to_lang, (dvdnav_t *p1, uint8_t p2))
+-  DEFINE_METHOD2(int8_t, dvdnav_get_audio_logical_stream, (dvdnav_t *p1, uint8_t p2))
+-  DEFINE_METHOD3(dvdnav_status_t, dvdnav_get_audio_attr, (dvdnav_t *p1, uint8_t p2, audio_attr_t *p3))
+-  DEFINE_METHOD2(int8_t, dvdnav_get_spu_logical_stream, (dvdnav_t *p1, uint8_t p2))
+-  DEFINE_METHOD3(dvdnav_status_t, dvdnav_get_spu_attr, (dvdnav_t *p1, uint8_t p2, subp_attr_t *p3))
+-  DEFINE_METHOD1(int8_t, dvdnav_get_active_audio_stream, (dvdnav_t *p1))
+-  DEFINE_METHOD1(int8_t, dvdnav_get_active_spu_stream, (dvdnav_t *p1))
+-//  DEFINE_METHOD1(user_ops_t, dvdnav_get_restrictions, (dvdnav_t *p1))
+-  DEFINE_METHOD2(int8_t, dvdnav_get_number_of_streams, (dvdnav_t *p1, dvdnav_stream_type_t p2))
+-  DEFINE_METHOD2(dvdnav_status_t, dvdnav_toggle_spu_stream, (dvdnav_t *p1, uint8_t p2))
+-  DEFINE_METHOD3(dvdnav_status_t, dvdnav_set_active_stream, (dvdnav_t *p1, uint8_t p2, dvdnav_stream_type_t p3))
+-  DEFINE_METHOD2(dvdnav_status_t, dvdnav_angle_change, (dvdnav_t *p1, int32_t p2))
+-  DEFINE_METHOD3(dvdnav_status_t, dvdnav_get_angle_info, (dvdnav_t *p1, int32_t *p2, int32_t *p3))
+-  DEFINE_METHOD1(int8_t, dvdnav_is_domain_fp, (dvdnav_t *p1))
+-  DEFINE_METHOD1(int8_t, dvdnav_is_domain_vmgm, (dvdnav_t *p1))
+-  DEFINE_METHOD1(int8_t, dvdnav_is_domain_vtsm, (dvdnav_t *p1))
+-  DEFINE_METHOD1(int8_t, dvdnav_is_domain_vts, (dvdnav_t *p1))
+-  BEGIN_METHOD_RESOLVE()
+-    RESOLVE_METHOD(dvdnav_open)
+-    RESOLVE_METHOD(dvdnav_open_stream)
+-    RESOLVE_METHOD(dvdnav_open2)
+-    RESOLVE_METHOD(dvdnav_open_stream2)
+-    RESOLVE_METHOD(dvdnav_dup)
+-    RESOLVE_METHOD(dvdnav_free_dup)
+-    RESOLVE_METHOD(dvdnav_close)
+-    RESOLVE_METHOD(dvdnav_reset)
+-    RESOLVE_METHOD(dvdnav_path)
+-    RESOLVE_METHOD(dvdnav_err_to_string)
+-    RESOLVE_METHOD(dvdnav_version)
+-    RESOLVE_METHOD(dvdnav_set_region_mask)
+-    RESOLVE_METHOD(dvdnav_get_region_mask)
+-    RESOLVE_METHOD(dvdnav_set_readahead_flag)
+-    RESOLVE_METHOD(dvdnav_get_readahead_flag)
+-    RESOLVE_METHOD(dvdnav_set_PGC_positioning_flag)
+-    RESOLVE_METHOD(dvdnav_get_PGC_positioning_flag)
+-    RESOLVE_METHOD(dvdnav_get_next_block)
+-    RESOLVE_METHOD(dvdnav_get_next_cache_block)
+-    RESOLVE_METHOD(dvdnav_free_cache_block)
+-    RESOLVE_METHOD(dvdnav_still_skip)
+-    RESOLVE_METHOD(dvdnav_wait_skip)
+-    RESOLVE_METHOD(dvdnav_get_next_still_flag)
+-    RESOLVE_METHOD(dvdnav_stop)
+-    RESOLVE_METHOD(dvdnav_get_disk_region_mask)
+-    RESOLVE_METHOD(dvdnav_get_number_of_titles)
+-    RESOLVE_METHOD(dvdnav_get_number_of_parts)
+-    RESOLVE_METHOD(dvdnav_get_number_of_angles)
+-    RESOLVE_METHOD(dvdnav_title_play)
+-    RESOLVE_METHOD(dvdnav_part_play)
+-    RESOLVE_METHOD(dvdnav_program_play)
+-    RESOLVE_METHOD(dvdnav_describe_title_chapters)
+-    RESOLVE_METHOD(dvdnav_part_play_auto_stop)
+-    RESOLVE_METHOD(dvdnav_time_play)
+-    RESOLVE_METHOD(dvdnav_menu_call)
+-    RESOLVE_METHOD(dvdnav_current_title_info)
+-    RESOLVE_METHOD(dvdnav_current_title_program)
+-    RESOLVE_METHOD(dvdnav_get_position_in_title)
+-    RESOLVE_METHOD(dvdnav_part_search)
+-    RESOLVE_METHOD(dvdnav_sector_search)
+-    RESOLVE_METHOD(dvdnav_get_current_time)
+-    RESOLVE_METHOD(dvdnav_time_search)
+-    RESOLVE_METHOD(dvdnav_jump_to_sector_by_time)
+-    RESOLVE_METHOD(dvdnav_go_up)
+-    RESOLVE_METHOD(dvdnav_prev_pg_search)
+-    RESOLVE_METHOD(dvdnav_top_pg_search)
+-    RESOLVE_METHOD(dvdnav_next_pg_search)
+-    RESOLVE_METHOD(dvdnav_get_position)
+-    RESOLVE_METHOD(dvdnav_get_current_highlight)
+-    RESOLVE_METHOD(dvdnav_get_current_nav_pci)
+-    RESOLVE_METHOD(dvdnav_get_current_nav_dsi)
+-    RESOLVE_METHOD(dvdnav_get_highlight_area)
+-    RESOLVE_METHOD(dvdnav_upper_button_select)
+-    RESOLVE_METHOD(dvdnav_lower_button_select)
+-    RESOLVE_METHOD(dvdnav_right_button_select)
+-    RESOLVE_METHOD(dvdnav_left_button_select)
+-    RESOLVE_METHOD(dvdnav_button_activate)
+-    RESOLVE_METHOD(dvdnav_button_select)
+-    RESOLVE_METHOD(dvdnav_button_select_and_activate)
+-    RESOLVE_METHOD(dvdnav_button_activate_cmd)
+-    RESOLVE_METHOD(dvdnav_mouse_select)
+-    RESOLVE_METHOD(dvdnav_mouse_activate)
+-    RESOLVE_METHOD(dvdnav_menu_language_select)
+-    RESOLVE_METHOD(dvdnav_audio_language_select)
+-    RESOLVE_METHOD(dvdnav_spu_language_select)
+-    RESOLVE_METHOD(dvdnav_get_title_string)
+-    RESOLVE_METHOD(dvdnav_get_serial_string)
+-    RESOLVE_METHOD(dvdnav_get_volid_string)
+-    RESOLVE_METHOD(dvdnav_get_video_aspect)
+-    RESOLVE_METHOD(dvdnav_get_video_resolution)
+-    RESOLVE_METHOD(dvdnav_get_video_scale_permission)
+-    RESOLVE_METHOD(dvdnav_audio_stream_to_lang)
+-    RESOLVE_METHOD(dvdnav_audio_stream_format)
+-    RESOLVE_METHOD(dvdnav_audio_stream_channels)
+-    RESOLVE_METHOD(dvdnav_spu_stream_to_lang)
+-    RESOLVE_METHOD(dvdnav_get_audio_logical_stream)
+-    RESOLVE_METHOD(dvdnav_get_audio_attr)
+-    RESOLVE_METHOD(dvdnav_get_spu_logical_stream)
+-    RESOLVE_METHOD(dvdnav_get_spu_attr)
+-    RESOLVE_METHOD(dvdnav_get_active_audio_stream)
+-    RESOLVE_METHOD(dvdnav_get_active_spu_stream)
+-//    RESOLVE_METHOD(dvdnav_get_restrictions)
+-    RESOLVE_METHOD(dvdnav_get_number_of_streams)
+-    RESOLVE_METHOD(dvdnav_toggle_spu_stream)
+-    RESOLVE_METHOD(dvdnav_set_active_stream)
+-    RESOLVE_METHOD(dvdnav_angle_change)
+-    RESOLVE_METHOD(dvdnav_get_angle_info)
+-    RESOLVE_METHOD(dvdnav_is_domain_fp)
+-    RESOLVE_METHOD(dvdnav_is_domain_vmgm)
+-    RESOLVE_METHOD(dvdnav_is_domain_vtsm)
+-    RESOLVE_METHOD(dvdnav_is_domain_vts)
+-    END_METHOD_RESOLVE()
+-};
+-- 
+2.55.0
+

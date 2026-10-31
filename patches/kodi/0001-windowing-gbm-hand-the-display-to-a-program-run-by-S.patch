@@ -1,0 +1,152 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Thu, 29 Oct 2026 00:45:16 -0400
+Subject: [PATCH] windowing/gbm: hand the display to a program run by
+ System.ExecWait
+
+On GBM, Kodi stays DRM master and keeps reading input while
+System.ExecWait runs a program, so a program that needs the display,
+such as a browser under a kiosk compositor, cannot take it, and every
+key pressed in it reaches Kodi once it exits.
+
+ReleaseDisplay and AcquireDisplay, window system hooks called around a
+waiting System.ExecWait, suspend libinput, blank the CRTC and drop DRM
+master, then take them back. Other window systems leave them empty, and
+System.Exec, which does not wait, is unchanged.
+---
+ .../ApplicationMessageHandling.cpp            |  9 ++++++++-
+ xbmc/platform/linux/input/LibInputHandler.cpp | 19 +++++++++++++------
+ xbmc/platform/linux/input/LibInputHandler.h   |  2 ++
+ xbmc/windowing/WinSystem.h                    |  7 +++++++
+ xbmc/windowing/gbm/WinSystemGbm.cpp           | 16 ++++++++++++++++
+ xbmc/windowing/gbm/WinSystemGbm.h             |  2 ++
+ 6 files changed, 48 insertions(+), 7 deletions(-)
+
+diff --git a/xbmc/application/ApplicationMessageHandling.cpp b/xbmc/application/ApplicationMessageHandling.cpp
+index 5d11805..4283450 100644
+--- a/xbmc/application/ApplicationMessageHandling.cpp
++++ b/xbmc/application/ApplicationMessageHandling.cpp
+@@ -277,7 +277,14 @@ void CApplicationMessageHandling::OnApplicationMessage(MESSAGING::ThreadMessage*
+ #if defined(TARGET_DARWIN)
+       CLog::Log(LOGINFO, "ExecWait is not implemented on this platform");
+ #elif defined(TARGET_POSIX)
+-      CUtil::RunCommandLine(pMsg->strParam, (pMsg->param1 == 1));
++      if (pMsg->param1 == 1)
++      {
++        CServiceBroker::GetWinSystem()->ReleaseDisplay();
++        CUtil::RunCommandLine(pMsg->strParam, true);
++        CServiceBroker::GetWinSystem()->AcquireDisplay();
++      }
++      else
++        CUtil::RunCommandLine(pMsg->strParam, false);
+ #elif defined(TARGET_WINDOWS)
+       CWIN32Util::XBMCShellExecute(pMsg->strParam, (pMsg->param1 == 1));
+ #endif
+diff --git a/xbmc/platform/linux/input/LibInputHandler.cpp b/xbmc/platform/linux/input/LibInputHandler.cpp
+index 64d0e3e..1faf652 100644
+--- a/xbmc/platform/linux/input/LibInputHandler.cpp
++++ b/xbmc/platform/linux/input/LibInputHandler.cpp
+@@ -124,16 +124,23 @@ void CLibInputHandler::Announce(ANNOUNCEMENT::AnnouncementFlag flag,
+   if (flag & (ANNOUNCEMENT::System))
+   {
+     if (message == "OnSleep")
+-      libinput_suspend(m_li);
++      Suspend();
+     else if (message == "OnWake")
+-    {
+-      auto ret = libinput_resume(m_li);
+-      if (ret < 0)
+-        CLog::Log(LOGERROR, "CLibInputHandler::{} - failed to resume monitoring", __FUNCTION__);
+-    }
++      Resume();
+   }
+ }
+ 
++void CLibInputHandler::Suspend()
++{
++  libinput_suspend(m_li);
++}
++
++void CLibInputHandler::Resume()
++{
++  if (libinput_resume(m_li) < 0)
++    CLog::Log(LOGERROR, "CLibInputHandler::{} - failed to resume monitoring", __FUNCTION__);
++}
++
+ bool CLibInputHandler::SetKeymap(const std::string& layout)
+ {
+   return m_keyboard->SetKeymap(layout);
+diff --git a/xbmc/platform/linux/input/LibInputHandler.h b/xbmc/platform/linux/input/LibInputHandler.h
+index 659d086..b73f840 100644
+--- a/xbmc/platform/linux/input/LibInputHandler.h
++++ b/xbmc/platform/linux/input/LibInputHandler.h
+@@ -34,6 +34,8 @@ public:
+                 const CVariant& data) override;
+ 
+   void Start();
++  void Suspend();
++  void Resume();
+ 
+   bool SetKeymap(const std::string& layout);
+ 
+diff --git a/xbmc/windowing/WinSystem.h b/xbmc/windowing/WinSystem.h
+index 477632d..a3dc142 100644
+--- a/xbmc/windowing/WinSystem.h
++++ b/xbmc/windowing/WinSystem.h
+@@ -130,6 +130,13 @@ public:
+   virtual bool Hide() { return false; }
+   virtual bool Show(bool raise = true) { return false; }
+ 
++  /*!
++   * \brief Hand the display and input devices to a program run by System.ExecWait,
++   * and take them back once it exits
++   */
++  virtual void ReleaseDisplay() {}
++  virtual void AcquireDisplay() {}
++
+   // videosync
+   virtual std::unique_ptr<CVideoSync> GetVideoSync(CVideoReferenceClock* clock) { return nullptr; }
+ 
+diff --git a/xbmc/windowing/gbm/WinSystemGbm.cpp b/xbmc/windowing/gbm/WinSystemGbm.cpp
+index 28c9eb0..b6ac10e 100644
+--- a/xbmc/windowing/gbm/WinSystemGbm.cpp
++++ b/xbmc/windowing/gbm/WinSystemGbm.cpp
+@@ -356,6 +356,22 @@ bool CWinSystemGbm::Show(bool raise)
+   return ret;
+ }
+ 
++void CWinSystemGbm::ReleaseDisplay()
++{
++  m_libinput->Suspend();
++  Hide();
++  if (drmDropMaster(m_DRM->GetFileDescriptor()) < 0)
++    CLog::LogF(LOGERROR, "failed to drop drm master: {}", strerror(errno));
++}
++
++void CWinSystemGbm::AcquireDisplay()
++{
++  if (drmSetMaster(m_DRM->GetFileDescriptor()) < 0)
++    CLog::LogF(LOGERROR, "failed to set drm master: {}", strerror(errno));
++  Show();
++  m_libinput->Resume();
++}
++
+ void CWinSystemGbm::Register(IDispResource* resource)
+ {
+   std::unique_lock lock(m_resourceSection);
+diff --git a/xbmc/windowing/gbm/WinSystemGbm.h b/xbmc/windowing/gbm/WinSystemGbm.h
+index e4d6757..d18f15c 100644
+--- a/xbmc/windowing/gbm/WinSystemGbm.h
++++ b/xbmc/windowing/gbm/WinSystemGbm.h
+@@ -58,6 +58,8 @@ public:
+ 
+   bool Hide() override;
+   bool Show(bool raise = true) override;
++  void ReleaseDisplay() override;
++  void AcquireDisplay() override;
+   void Register(IDispResource* resource) override;
+   void Unregister(IDispResource* resource) override;
+ 
+-- 
+2.55.0
+

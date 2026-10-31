@@ -1,0 +1,66 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Fri, 30 Oct 2026 19:39:35 -0400
+Subject: [PATCH] cmake: apply patches of the caller's to the internal ffmpeg
+
+FFMPEG_PATCHES lists patches, by absolute path, that the internal ffmpeg
+applies before Kodi's own: a distribution carrying its own ffmpeg
+patches builds them into Kodi's static ffmpeg without forking its
+tools/depends.
+---
+ CMakeLists.txt                             | 1 +
+ cmake/modules/FindFFMPEG.cmake             | 2 ++
+ tools/depends/target/ffmpeg/CMakeLists.txt | 9 +++++++--
+ 3 files changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index eba3ff8..d866542 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -155,6 +155,7 @@ endif()
+ # Internal Depends - supported on UNIX platforms
+ if(UNIX)
+   option(FFMPEG_PATH        "Path to external ffmpeg?" "")
++  set(FFMPEG_PATCHES "" CACHE STRING "Patches applied to the internal ffmpeg before Kodi's own")
+   option(ENABLE_INTERNAL_FSTRCMP "Enable internal fstrcmp?" OFF)
+ endif()
+ 
+diff --git a/cmake/modules/FindFFMPEG.cmake b/cmake/modules/FindFFMPEG.cmake
+index f554103..71bd370 100644
+--- a/cmake/modules/FindFFMPEG.cmake
++++ b/cmake/modules/FindFFMPEG.cmake
+@@ -143,7 +143,9 @@ macro(buildFFMPEG)
+       endif()
+     endif()
+ 
++    string(REPLACE ";" "|" ffmpeg_extra_patches "${FFMPEG_PATCHES}")
+     list(APPEND FFMPEG_OPTIONS -DENABLE_CCACHE=${ENABLE_CCACHE}
++                               -DEXTRA_PATCHES=${ffmpeg_extra_patches}
+                                -DCCACHE_PROGRAM=${CCACHE_PROGRAM}
+                                -DENABLE_VAAPI=${FFMPEG_VAAPI}
+                                -DENABLE_VDPAU=${FFMPEG_VDPAU}
+diff --git a/tools/depends/target/ffmpeg/CMakeLists.txt b/tools/depends/target/ffmpeg/CMakeLists.txt
+index 24bc718..e242b02 100644
+--- a/tools/depends/target/ffmpeg/CMakeLists.txt
++++ b/tools/depends/target/ffmpeg/CMakeLists.txt
+@@ -154,10 +154,15 @@ if(CMAKE_GENERATOR STREQUAL Ninja)
+   endif()
+ endif()
+ 
++set(extra_patch PATCH_COMMAND)
++foreach(patch IN LISTS EXTRA_PATCHES)
++  list(APPEND extra_patch patch -p1 -i ${patch} COMMAND)
++endforeach()
++
+ if(NOT DISABLE_FFMPEG_SOURCE_PLUGINS)
+-  set(sourceplugin_patch PATCH_COMMAND /bin/sh -c "patch -p1 -i <SOURCE_DIR>/001-ffmpeg-all-libpostproc-plugin.patch && patch -p1 -i <SOURCE_DIR>/002-ffmpeg-libavutil-common-h-cpp11-constant-macros.patch")
++  set(sourceplugin_patch ${extra_patch} /bin/sh -c "patch -p1 -i <SOURCE_DIR>/001-ffmpeg-all-libpostproc-plugin.patch && patch -p1 -i <SOURCE_DIR>/002-ffmpeg-libavutil-common-h-cpp11-constant-macros.patch")
+ else()
+-  set(sourceplugin_patch PATCH_COMMAND patch -p1 -i <SOURCE_DIR>/002-ffmpeg-libavutil-common-h-cpp11-constant-macros.patch)
++  set(sourceplugin_patch ${extra_patch} patch -p1 -i <SOURCE_DIR>/002-ffmpeg-libavutil-common-h-cpp11-constant-macros.patch)
+ endif()
+ list(APPEND sourceplugin_patch COMMAND patch -p1 -i <SOURCE_DIR>/008-ffmpeg-all-pgssubdec-use-caller-colorspace.patch)
+ 
+-- 
+2.55.0
+
