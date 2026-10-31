@@ -8,7 +8,7 @@ FW=/repo/boards
 . "$FW/$BOARD/board.conf"
 : "${BOARD_FAMILY:?boards/$BOARD/board.conf names no BOARD_FAMILY}"
 # the disk layouts written so far, below; a board of another family waits for its own
-case "$BOARD_FAMILY" in meson-gxl | rk35xx) ;; *) echo "– $BOARD: no image layout for $BOARD_FAMILY yet"; exit 0 ;; esac
+case "$BOARD_FAMILY" in meson-gxl | rk35xx | sunxi-h616) ;; *) echo "– $BOARD: no image layout for $BOARD_FAMILY yet"; exit 0 ;; esac
 SUITE=${TVB_BUILD_SUITE:?}
 DATE=${TVB_BUILD_DATE:-$(date -u +%F)}
 WORK=/work/image/$BOARD
@@ -162,6 +162,20 @@ EOF
       dd if="$ROOT/usr/lib/tvb/u-boot.bin" of="$IMG" bs=512 seek=$((FIT_SEEK + i * FIT_SLOT)) \
         conv=notrunc status=none
     done
+    dd if="$WORK/root.ext4" of="$IMG" bs=1M seek=$((ROOT_SEEK / 2048)) conv=notrunc status=none
+    ;;
+  sunxi-h616)
+    # The BootROM reads the SPL at 8 KiB, where a GPT's entries would sit: an MBR, our U-Boot from
+    # sector 16 up to the unit's secure storage, the rootfs above it.
+    SPL_SEEK=16 ROOT_SEEK=32768
+    UBOOT=$ROOT/usr/lib/tvb/u-boot.bin
+    window=$(sed -n 's/^\([0-9]*\)-.*/\1/p' "$ROOT/usr/lib/tvb/preserve-sectors" | head -1)
+    [ $((SPL_SEEK + ($(stat -c %s "$UBOOT") + 511) / 512)) -le "${window:-$ROOT_SEEK}" ] ||
+      { echo "✗ u-boot.bin runs into the per-unit window at sector $window"; exit 1; }
+    truncate -s $(((ROOT_SEEK + ROOT_COUNT) * 512)) "$IMG"
+    mbr_entry 128 131 "$ROOT_SEEK" "$ROOT_COUNT" | dd of="$IMG" bs=1 seek=446 conv=notrunc status=none
+    bytes 85 170 | dd of="$IMG" bs=1 seek=510 conv=notrunc status=none
+    dd if="$UBOOT" of="$IMG" bs=512 seek="$SPL_SEEK" conv=notrunc status=none
     dd if="$WORK/root.ext4" of="$IMG" bs=1M seek=$((ROOT_SEEK / 2048)) conv=notrunc status=none
     ;;
 esac
