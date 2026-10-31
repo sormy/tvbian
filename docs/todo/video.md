@@ -41,6 +41,10 @@ FFmpeg's, and what no chip has measured yet.
 - [ ] 10-bit encode input.
 - [ ] AFBC and the ½ picture together: MPP stalls asked for both.
 - [ ] The ½ picture against RGA2 scaling a full decode, at 4K HEVC.
+- [ ] RGA in FFmpeg: `jellyfin-ffmpeg`'s `scale_rkrga`, `vpp_rkrga` and `overlay_rkrga` scale and
+      convert on the RGA, not the CPU, for a player the decoder's ½ picture does not fit.
+- [ ] Display: through `fbdev`, every frame a CPU copy, 4K60 HEVC decoded at 51 fps showed 27, CPU
+      at 48%; frames handed to a VOP2 plane with no copy.
 
 ## Amlogic S905L3
 
@@ -58,7 +62,6 @@ FFmpeg's, and what no chip has measured yet.
       `video_ucode.bin` takes the sequence (`CONFIG_REQUEST` twice, `CONFIG_DONE`), then raises no
       interrupt.
 - [ ] JPEG decoder scaling.
-- [ ] VP9 profile 2.
 - [ ] VC-1 Simple and Main, H.263, AVS, RealVideo: microcode in the factory `video_ucode.bin`, no
       codec in `meson_vdec`.
 - [ ] H.264 changing resolution inside the final drain, a client that sends end of stream with the

@@ -25,51 +25,55 @@ came with Android and a promise of updates; one of those two was real. Rockchip 
 |  ✅  | tested here — the number behind it is in the [board doc][doc]        |
 |  🟡  | likely — a proven mechanism backs it and nothing indicates a problem |
 |  ❓  | never tested                                                         |
+|  🟠  | works, measurably short of its siblings or stock                     |
 |  ❌  | broken                                                               |
 |  ➖  | not on this board                                                    |
 
-| Hardware                                  |   H96 Max M20   |
-| ----------------------------------------- | :-------------: |
-| **Storage**                               |                 |
-| USB stick — boot and rootfs               |       ✅        |
-| eMMC — boot and rootfs                    |       ✅        |
-| microSD — boot and rootfs                 |       ➖        |
-| USB 2.0                                   |       ✅        |
-| USB 3.0                                   |       ➖        |
-| **Network**                               |                 |
-| Ethernet, onboard                         |       ➖        |
-| Ethernet, USB adapter                     |       ✅        |
-| Wi-Fi 2.4 GHz — mainline mt76             |       ✅        |
-| Wi-Fi 5 GHz — mainline mt76               |       ✅        |
-| Wi-Fi, another access point — mt76        |       ✅        |
-| Bluetooth                                 |       ✅        |
-| **Display and video**                     |                 |
-| HDMI video, the panel's native mode       |       ✅        |
-| HDMI audio                                |       ✅        |
-| GPU — Mali under lima                     |       ✅        |
-| Video decode — H.264, HEVC, VP9 to 4K     |       ✅        |
-| Video decode — MPEG-1/2 to 1080p          |       ✅        |
-| Video decode — MPEG-4, MJPEG to 1080p     |       ✅        |
-| Video decode — VC-1 to 1080p              |       ✅        |
-| Video decode — AVS, Real                  | not implemented |
-| Video encode — H.264 to 1080p, HEVC to 4K |       ✅        |
-| CMA reservation                           |       ✅        |
-| **Input and indicators**                  |                 |
-| Bundled remote over IR                    |       ➖        |
-| Bundled remote over Bluetooth             |       ✅        |
-| Reset button                              |       ➖        |
-| Power LED                                 |       ✅        |
-| Standby LED                               |       ➖        |
-| **Power and recovery**                    |                 |
-| CPU frequency scaling                     |       ✅        |
-| Thermal zones                             |       ✅        |
-| Hardware watchdog                         |       ❌        |
-| Suspend, woken by the BT remote           |       ❌        |
-| Serial console                            |       ✅        |
-| eMMC backup over USB, burning mode        |       ✅        |
-| Unbrick from the mask ROM                 |       ❓        |
+| Hardware                                                 |   H96 Max M20   |
+| -------------------------------------------------------- | :-------------: |
+| **Storage**                                              |                 |
+| USB stick — boot and rootfs                              |       ✅        |
+| eMMC — boot and rootfs                                   |       ✅        |
+| microSD — boot and rootfs                                |       ➖        |
+| USB 2.0                                                  |       ✅        |
+| USB 3.0                                                  |       ➖        |
+| **Network**                                              |                 |
+| Ethernet, onboard                                        |       ➖        |
+| Ethernet, USB adapter                                    |       ✅        |
+| Wi-Fi 2.4 GHz — mainline mt76                            |       ✅        |
+| Wi-Fi 5 GHz — mainline mt76                              |       ✅        |
+| Wi-Fi, another access point — mt76                       |       ✅        |
+| Bluetooth                                                |       ✅        |
+| **Display and video**                                    |                 |
+| HDMI video, the panel's native mode                      |       ✅        |
+| HDMI audio                                               |       ✅        |
+| GPU — Mali under lima                                    |       ✅        |
+| Hardware decode — H.264, HEVC to 4K                      |       ✅        |
+| Hardware decode — VP9 to 4K, freezes under heavy writes  |       🟠        |
+| Hardware decode — 10-bit HEVC, VP9, 8-bit or compressed  |       🟠        |
+| Hardware decode — MPEG-1/2, MJPEG to 1080p               |       ✅        |
+| Hardware decode — MPEG-4 to 1080p                        |       🟠        |
+| Hardware decode — VC-1 Advanced to 1080p                 |       🟠        |
+| Hardware decode — H.263, VC-1 Simple and Main, AVS, Real | not implemented |
+| Hardware encode — H.264 to 1080p, HEVC to 4K             |       ✅        |
+| CMA reservation                                          |       ✅        |
+| **Input and indicators**                                 |                 |
+| Bundled remote over IR                                   |       ➖        |
+| Bundled remote over Bluetooth                            |       ✅        |
+| Reset button                                             |       ➖        |
+| Power LED                                                |       ✅        |
+| Standby LED                                              |       ➖        |
+| **Power and recovery**                                   |                 |
+| CPU frequency scaling                                    |       ✅        |
+| Thermal zones                                            |       ✅        |
+| Hardware watchdog                                        |       ❌        |
+| Suspend, woken by the BT remote                          |       ❌        |
+| Serial console                                           |       ✅        |
+| eMMC backup over USB, burning mode                       |       ✅        |
+| Unbrick from the mask ROM                                |       ❓        |
 
-AVS and RealVideo are not implemented. If you have RealVideo files to watch, you have other
+H.263, VC-1 Simple and Main, AVS and RealVideo are not implemented: the chip has microcode for
+them, the driver no decoder yet. If you have RealVideo files to watch, you have other
 problems.
 
 ## Get an image

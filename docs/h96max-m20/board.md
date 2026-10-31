@@ -110,17 +110,18 @@ The decoder, `meson-vdec`, is patched into TVBian's kernel; the encoders, `amven
 | --------- | --------------- | --------------- | --------------- | ----------- | ----- | --- |
 | H.264     | ✅              | ✅              | ✅              | ✅          | ✅    | ➖  |
 | HEVC      | ✅              | ✅              | ✅              | ✅          | ✅    | ✅  |
-| VP9       | ✅              | ✅              | ✅              | ➖          | ➖    | ➖  |
+| VP9       | ✅              | ✅              | 🟠              | ➖          | ➖    | ➖  |
 | MPEG-1/2  | ✅              | ✅              | ➖              | ➖          | ➖    | ➖  |
-| MPEG-4    | ✅              | ✅              | ➖              | ➖          | ➖    | ➖  |
-| VC-1      | ✅              | ✅              | ➖              | ➖          | ➖    | ➖  |
+| MPEG-4    | 🟠              | 🟠              | ➖              | ➖          | ➖    | ➖  |
+| VC-1      | 🟠              | 🟠              | ➖              | ➖          | ➖    | ➖  |
 | MJPEG     | ✅              | ✅              | not implemented | ➖          | ➖    | ➖  |
 | AVS, AVS2 | not implemented | not implemented | not implemented | ➖          | ➖    | ➖  |
 | RealVideo | not implemented | not implemented | ➖              | ➖          | ➖    | ➖  |
 
 Decode ✅ is bit-exact against ffmpeg's software decode over every frame, the rest within IDCT
-rounding: MPEG-1/2 61-70 dB, MPEG-4 51-66 dB, MJPEG 63 dB; encode ✅ is the PSNR below. ➖ is beyond
-the hardware: the H.264 encoder stops at 1920x1088.
+rounding: MPEG-1/2 61-70 dB, MPEG-4 51-66 dB, MJPEG 63 dB; encode ✅ is the PSNR below. 🟠 is the
+gaps below, and VP9 at 4K can freeze the box during a large write. ➖ is beyond the hardware: the
+H.264 encoder stops at 1920x1088.
 
 MJPEG decodes to I420 only: its microcode writes three planes. VC-1 is the Advanced profile. A
 skipped picture, a 1-byte P, yields none; at a stream's start the B-pictures after one come out

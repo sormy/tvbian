@@ -104,19 +104,21 @@ are claimed by the capability word but stay 🟡 — no encoder exists to make a
 The R69 measures within noise of every number above — same silicon, so neither box is an outlier.
 
 **Through FFmpeg ✅** — 9.0.2 with `patches/ffmpeg/` on MPP `1.1.0`, `-c:v h264_rkmpp` and the like,
-DRM PRIME out; fps to `-f null`, measured 2026-10-31:
+DRM PRIME out; `tools/validate/video.py`, 2026-10-31, fps the engine's alone at 3840×2160:
 
-| Codec          | 1080p |  4K | Against software          |
-| -------------- | ----: | --: | ------------------------- |
-| H.264          |   378 |  96 | identical, every frame    |
-| H.264 High 10  |     — |   — | identical, NV15           |
-| HEVC, Main10   |   439 | 100 | identical; 10-bit as NV15 |
-| VP9, profile 2 |   355 |   — | identical, 4K too         |
-| VP8            |    57 |  ➖ | identical                 |
-| MPEG-2         |    85 |  ➖ | 74.5 dB                   |
-| MPEG-4         |    84 |  ➖ | 61.5 dB                   |
-| H.264 encode   |    52 |  ➖ | 41.8 dB at 8 Mbit/s       |
-| HEVC encode    |    58 |  ➖ | 44.0 dB at 8 Mbit/s       |
+| Codec         |   Largest | 4K fps | Against software                    |
+| ------------- | --------: | -----: | ----------------------------------- |
+| H.264         | 8192×8192 |     61 | identical                           |
+| H.264 High 10 | 8192×8192 |     57 | frames counted, NV15                |
+| HEVC          | 8192×8192 |    117 | identical                           |
+| HEVC Main10   | 8192×8192 |    106 | frames counted, NV15                |
+| VP9           | 8192×4320 |     76 | identical                           |
+| VP9 profile 2 | 8192×4320 |     67 | frames counted, NV15                |
+| VP8           | 1920×1080 |     ➖ | identical                           |
+| MPEG-1, 2, 4  | 1920×1080 |     ➖ | 75–76 dB                            |
+| H.263         | 1408×1152 |     ➖ | 78 dB                               |
+| H.264 encode  | 8192×8192 |     14 | 41–46 dB at 40 Mbit/s               |
+| HEVC encode   | 8192×8192 |     16 | 40–44 dB; 6144–7936 wide garbled 🟠 |
 
 - `capture_max_height 1080`: 4K H.264 and HEVC as a ½ picture, 93 and 86 fps; 62.8 dB against a
   software decode scaled down.

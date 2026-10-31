@@ -10,8 +10,9 @@ through FFmpeg 9.0.2 with `patches/ffmpeg/`, on TVBian's kernels:
 | Amlogic S905L3  | GXLX2  | `meson_vdec`, `-c:v h264_v4l2m2m` and the like |
 
 Sizes are the largest that worked here, from a ladder of 1920×1080, 2560×1440, 3840×2160, 4096×2160,
-4096×2304, 4080×4080, 5120×2880, 6144×3456, 7680×4320, 8192×4320, 8192×8192 and 16384×8640; the
-S905L3's from clips to 3840×2160 only. A file larger than the size shown plays on the CPU.
+4096×2304, 4080×4080, 5120×2880, 6144×3456, 7680×4320, 8192×4320, 8192×8192 and 16384×8640. A file
+larger than the size shown plays on the CPU where the decoder refuses it; the S905L3's, and the
+H313's for JPEG, take it and decode it broken.
 
 - ✅ works: the picture matches FFmpeg's own decoder, exactly or within the rounding the format
   allows
@@ -40,7 +41,7 @@ the CPU instead, on its own.
 | MPEG-2                 | ✅ 4000×2250   | ✅ 1920×1080    | ✅ 1920×1080    |
 | MPEG-4 (DivX, Xvid)    | 🟠 4080×2160 ¹ | ✅ 1920×1080    | 🟠 1920×1080 ⁸  |
 | H.263                  | 🟠 1408×1152 ² | ✅ 1408×1152    | ❌ ⁹            |
-| VC-1 Advanced          | ✅ 1920×1080   | ❓              | ✅ 1920×1080    |
+| VC-1 Advanced          | ✅ 1920×1080   | ❓              | 🟠 1920×1080 ¹¹ |
 | VC-1 Simple            | 🟡 ⁴           | ❓              | ❌ ⁹            |
 | VC-1 Main (WMV9)       | ❌ ⁵           | ❓              | ❌ ⁹            |
 | JPEG, MJPEG            | ✅ 6000×4000   | ❌ ⁶            | ✅ 1920×1080    |
@@ -59,6 +60,8 @@ the CPU instead, on its own.
 9. The chip's microcode for it is on hand; our driver has no decoder for it yet.
 10. At 3840×2160, decoding while a large file is written can freeze the box, and the first decode
     after a boot fails.
+11. A skipped picture yields none, and a stream's last two stay in the microcode: 9 of 1451 missing
+    on a WMV clip.
 
 ## Hardware decode speed at 3840×2160
 
@@ -84,11 +87,12 @@ playback, not playback itself.
 | Codec        | Allwinner H313 | Rockchip RK3518 | Amlogic S905L3 |
 | ------------ | -------------- | --------------- | -------------- |
 | H.264        | ✅ 4096×4096   | ✅ 8192×8192    | ✅ 1920×1088   |
-| HEVC         | ➖             | ✅ 8192×8192    | ✅ 4096×2304   |
+| HEVC         | ➖             | 🟠 8192×8192 ²  | ✅ 4096×2304   |
 | JPEG, MJPEG  | ✅ 4096×4096   | ❌ ¹            | ➖             |
 | 10-bit input | ➖             | ❓              | ➖             |
 
 1. MPP encodes it; our FFmpeg's `rkmpp` encoders do not take it yet.
+2. Widths between 5120 and 8192 come out garbled in most runs; 5120 and 8192 encode clean.
 
 ## Hardware encode speed at 3840×2160
 
@@ -166,7 +170,8 @@ which counts page cache in the pool too.
 | 10-bit HDMI                        | ❓             | ❓              | ❓             |
 | Decoder to display with no copy    | ✅             | 🟡 ³            | 🟡 ³           |
 
-1. Cleanly to about 1.7×; past that, the decoder shrinks the video instead.
+1. Refused today, the decoder shrinking the video instead; the hardware shrinks them cleanly to
+   about 1.7×.
 2. MPP stalls asked for both, so it is not asked: shrunk frames come uncompressed, with a warning.
 3. Decoded frames reach the display driver; nothing has been shown on a screen yet.
 

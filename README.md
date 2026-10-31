@@ -39,48 +39,52 @@ Rockchip boxes; Amlogic ones are in [README_AMLOGIC.md](README_AMLOGIC.md).
 |  ✅  | tested here — the measured number behind it is in that board's doc   |
 |  🟡  | likely — a proven mechanism backs it and nothing indicates a problem |
 |  ❓  | never tested                                                         |
+|  🟠  | works, measurably short of its siblings or stock                     |
 |  ❌  | broken                                                               |
 |  ➖  | not on this board                                                    |
 
-| Hardware                                    | R69 | H96 Max H313 | H96 Max 3518D |
-| ------------------------------------------- | :-: | :----------: | :-----------: |
-| **Storage**                                 |     |              |               |
-| eMMC — boot and rootfs                      | ✅  |      ✅      |      ✅       |
-| microSD — boot and rootfs                   | ✅  |      ✅      |      ➖       |
-| microSD hotplug                             | 🟡  |      🟡      |      ➖       |
-| microSD SDR104 (UHS)                        | ✅  |      ❌      |      ➖       |
-| USB 2.0                                     | ✅  |      ✅      |      ✅       |
-| USB 3.0 — 5 Gbps, `uas`                     | ✅  |      ✅      |      ➖       |
-| **Network**                                 |     |              |               |
-| Ethernet 10/100                             | ✅  |      ✅      |      ➖       |
-| Wi-Fi 2.4 GHz                               | ✅  |      ✅      |      ✅       |
-| Wi-Fi 5 GHz                                 | ✅  |      ✅      |      ✅       |
-| Bluetooth                                   | ✅  |      ✅      |      ✅       |
-| **Display and video**                       |     |              |               |
-| HDMI video                                  | ✅  |      ✅      |      ✅       |
-| HDMI audio                                  | ✅  |      ✅      |      ✅       |
-| HDMI EDID mode list                         | 🟡  |      🟡      |      ✅       |
-| HDMI hotplug re-detect                      | 🟡  |      🟡      |      ✅       |
-| HDMI 4K60                                   | 🟡  |      🟡      |      ✅       |
-| HDMI-CEC                                    | 🟡  |      🟡      |      ✅       |
-| AV jack — composite video and audio         | 🟡  |      🟡      |      ➖       |
-| GPU — Mali-450 under lima                   | ✅  |      ✅      |      ✅       |
-| Decode H.264 · HEVC · VP9 · MJPEG, to 8K    | ✅  |      ✅      |      ✅       |
-| Decode MPEG-2 · MPEG-4 · VP8 · H.263, 1080p | ✅  |      ✅      |      ✅       |
-| Encode HEVC · MJPEG · H.264, to 8K          | ✅  |      ✅      |      ✅       |
-| **Input and indicators**                    |     |              |               |
-| Bundled remote over IR                      | ✅  |      ✅      |      ➖       |
-| Bundled remote over Bluetooth, air-mouse    | ✅  |      ✅      |      ✅       |
-| Remote voice mic                            | 🟡  |      🟡      |      🟡       |
-| IR-extender jack                            | 🟡  |      ➖      |      ➖       |
-| Recovery button → Maskrom                   | ✅  |      ✅      |      ✅       |
-| Power button on the remote                  | ✅  |      ✅      |      ✅       |
-| Front LEDs                                  | ✅  |      ✅      |      ✅       |
-| **Power and recovery**                      |     |              |               |
-| Sleep/Wake from Remote                      | ✅  |      ✅      |      ❌       |
-| Hardware watchdog                           | ✅  |      ✅      |      ✅       |
-| Serial console                              | ✅  |      ✅      |      ✅       |
-| Maskrom recovery over USB                   | ✅  |      ✅      |      ✅       |
+| Hardware                                          | R69 | H96 Max H313 | H96 Max 3518D |
+| ------------------------------------------------- | :-: | :----------: | :-----------: |
+| **Storage**                                       |     |              |               |
+| eMMC — boot and rootfs                            | ✅  |      ✅      |      ✅       |
+| microSD — boot and rootfs                         | ✅  |      ✅      |      ➖       |
+| microSD hotplug                                   | 🟡  |      🟡      |      ➖       |
+| microSD SDR104 (UHS)                              | ✅  |      ❌      |      ➖       |
+| USB 2.0                                           | ✅  |      ✅      |      ✅       |
+| USB 3.0 — 5 Gbps, `uas`                           | ✅  |      ✅      |      ➖       |
+| **Network**                                       |     |              |               |
+| Ethernet 10/100                                   | ✅  |      ✅      |      ➖       |
+| Wi-Fi 2.4 GHz                                     | ✅  |      ✅      |      ✅       |
+| Wi-Fi 5 GHz                                       | ✅  |      ✅      |      ✅       |
+| Bluetooth                                         | ✅  |      ✅      |      ✅       |
+| **Display and video**                             |     |              |               |
+| HDMI video                                        | ✅  |      ✅      |      ✅       |
+| HDMI audio                                        | ✅  |      ✅      |      ✅       |
+| HDMI EDID mode list                               | 🟡  |      🟡      |      ✅       |
+| HDMI hotplug re-detect                            | 🟡  |      🟡      |      ✅       |
+| HDMI 4K60                                         | 🟡  |      🟡      |      ✅       |
+| HDMI-CEC                                          | 🟡  |      🟡      |      ✅       |
+| AV jack — composite video and audio               | 🟡  |      🟡      |      ➖       |
+| GPU — Mali-450 under lima                         | ✅  |      ✅      |      ✅       |
+| Hardware decode — H.264, HEVC, VP9 to 8K          | ✅  |      ✅      |      ✅       |
+| Hardware decode — MPEG-1/2/4, VP8 to 1080p, H.263 | ✅  |      ✅      |      ✅       |
+| Hardware decode — MJPEG, in FFmpeg                | ❌  |      ❌      |      ❌       |
+| Hardware encode — H.264 to 8K                     | ✅  |      ✅      |      ✅       |
+| Hardware encode — HEVC to 8K, some widths garbled | 🟠  |      🟠      |      🟠       |
+| Hardware encode — MJPEG, in FFmpeg                | ❌  |      ❌      |      ❌       |
+| **Input and indicators**                          |     |              |               |
+| Bundled remote over IR                            | ✅  |      ✅      |      ➖       |
+| Bundled remote over Bluetooth, air-mouse          | ✅  |      ✅      |      ✅       |
+| Remote voice mic                                  | 🟡  |      🟡      |      🟡       |
+| IR-extender jack                                  | 🟡  |      ➖      |      ➖       |
+| Recovery button → Maskrom                         | ✅  |      ✅      |      ✅       |
+| Power button on the remote                        | ✅  |      ✅      |      ✅       |
+| Front LEDs                                        | ✅  |      ✅      |      ✅       |
+| **Power and recovery**                            |     |              |               |
+| Sleep/Wake from Remote                            | ✅  |      ✅      |      ❌       |
+| Hardware watchdog                                 | ✅  |      ✅      |      ✅       |
+| Serial console                                    | ✅  |      ✅      |      ✅       |
+| Maskrom recovery over USB                         | ✅  |      ✅      |      ✅       |
 
 The remote's voice button stays 🟡: nobody here has worked out what to say to a TV box.
 

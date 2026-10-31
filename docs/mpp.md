@@ -86,51 +86,17 @@ kernel ships `CONFIG_ROCKCHIP_MPP_SERVICE` / `CONFIG_ROCKCHIP_MPP_RKVDEC2`, not
 M2M device exists for `h264_v4l2m2m` to bind. Software decode is hopeless — 14 fps for 1080p60
 H.264, 6 fps for 4K60 VP9, on four A53s at 1.4 GHz.
 
-**Use `jellyfin-ffmpeg7`, and take the `trixie` build.** It ships `*_rkmpp` decoders and encoders
-plus the `scale_rkrga` / `vpp_rkrga` / `overlay_rkrga` filters:
+TVBian's FFmpeg, 9.0.2 with `patches/ffmpeg/`, has the `*_rkmpp` decoders and encoders; it is built
+by hand for now. On the box, a decode with its frames left in the decoder's buffers:
 
 ```sh
-curl -LO https://repo.jellyfin.org/files/ffmpeg/debian/latest-7.x/arm64/jellyfin-ffmpeg7_7.1.4-3-trixie_arm64.deb
-sudo apt install -y ./jellyfin-ffmpeg7_7.1.4-3-trixie_arm64.deb
-/usr/lib/jellyfin-ffmpeg/ffmpeg -decoders | grep rkmpp
+ffmpeg -hide_banner -c:v hevc_rkmpp -i clip.mp4 -f null -
 ```
 
-The **bookworm** build of the same version looks identical and is a trap: on trixie it cannot start
-(`libvpx.so.7`, `libx265.so.199` missing). Extracted with `dpkg-deb -x` instead of installed, it
-silently loads Debian's system `libavcodec` and reports no rkmpp decoders at all — which reads
-exactly like "this build has no rkmpp". Check `ldd` for `not found` before believing that.
+No packaged player hands those frames to a display plane yet.
 
-Decode and display, scaling on the RGA rather than the CPU:
+A trap that cost hours:
 
-```sh
-FF=/usr/lib/jellyfin-ffmpeg/ffmpeg
-W=$(cut -d, -f1 /sys/class/graphics/fb0/virtual_size); H=$(cut -d, -f2 /sys/class/graphics/fb0/virtual_size)
-$FF -re -hwaccel rkmpp -hwaccel_output_format drm_prime -c:v hevc_rkmpp -i clip.mp4 -an \
-   -vf "scale_rkrga=w=$W:h=$H:format=bgra,hwdownload,format=bgra" -f fbdev /dev/fb0
-```
-
-Measured on the H96 Max 3518D, 2026-09-07, output scaled to a 2256x1504 framebuffer:
-
-| Clip                      | Software | Hardware decode | Decoded **and displayed** | CPU |
-| ------------------------- | -------- | --------------- | ------------------------- | --- |
-| 1080p60 H.264             | 14 fps   | 157 fps         | ~35 fps                   |     |
-| 4K60 VP9                  | 13 fps   | 44 fps          | 24 fps                    | 43% |
-| 4K60 HEVC                 | —        | 51 fps          | 27 fps                    | 48% |
-| 4K60 HEVC, `mpi_dec_test` | —        | 70 fps          | n/a — decodes to a file   |     |
-
-**Decode is not the bottleneck; `fbdev` is.** Every frame is a full-frame copy into the framebuffer
-— 13.6 MB at 2256x1504 BGRA — which roughly halves the rate and burns most of that CPU. Fixing it
-needs zero-copy KMS: a DRM-prime frame handed straight to a VOP2 overlay plane. No packaged player
-does that here.
-
-**`mpv` is not the answer as packaged.** Debian's `mpv` has no rkmpp hwdec
-(`Unsupported hwdec: rkmpp`). Pointing it at Jellyfin's libraries makes the decoders visible, but it
-still selects software decode, and it is slower than the ffmpeg path.
-
-Two traps that cost hours:
-
-- **`sudo` strips `LD_LIBRARY_PATH`.** `sudo -E mpv …` silently uses Debian's `libavcodec` and falls
-  back to software. The same command without `sudo` behaves completely differently.
 - **`mpv --vo=drm` can leave the display dead.** On exit it logged `Failed to restore previous mode`
   and left CRTC 89 with `fb 0` — mode set, no scanout buffer. Everything written to `/dev/fb0`
   afterwards went nowhere, with no error anywhere. `chvt` and rebinding `vtcon1` did not recover it;
@@ -178,7 +144,7 @@ CRTC outright.
 
 **Not pursued further, and deliberately.** The board's job is hardware decode, and that is proven.
 Which player reaches the panel with which copy is a userspace choice, not board bring-up — a media
-distribution brings its own. `fbdev` via ffmpeg is the working path here, at the copy cost above.
+distribution brings its own.
 
 > Beware measuring this with `modetest` while a KMS client runs — it takes DRM master itself and can
 > mask or disturb the very commit you are looking for. The reliable check is a human looking at the
