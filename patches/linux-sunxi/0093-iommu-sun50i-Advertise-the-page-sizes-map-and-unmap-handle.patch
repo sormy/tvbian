@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Mon, 26 Oct 2026 16:00:00 -0400
+Subject: [PATCH] iommu/sun50i: Advertise the page sizes map and unmap handle
+
+Map and unmap write a run of 4 KiB entries in one call, but the domain
+still advertises 4 KiB alone, so the IOMMU core maps a buffer one page at
+a time, each call flushing a single entry: importing a 25 MB 4K frame
+costs about 4.4 ms, and as much again to unmap it. Advertise every size
+from 4 KiB to 1 MiB, the span of one page table.
+
+---
+ drivers/iommu/sun50i-iommu.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+--- a/drivers/iommu/sun50i-iommu.c
++++ b/drivers/iommu/sun50i-iommu.c
+@@ -725,7 +725,8 @@
+ 
+ 	refcount_set(&sun50i_domain->refcnt, 1);
+ 
+-	sun50i_domain->domain.pgsize_bitmap = SZ_4K;
++	/* runs of 4 KiB entries within one 1 MiB page table, as map and unmap write them */
++	sun50i_domain->domain.pgsize_bitmap = GENMASK(20, 12);
+ 
+ 	sun50i_domain->domain.geometry.aperture_start = 0;
+ 	sun50i_domain->domain.geometry.aperture_end = DMA_BIT_MASK(32);

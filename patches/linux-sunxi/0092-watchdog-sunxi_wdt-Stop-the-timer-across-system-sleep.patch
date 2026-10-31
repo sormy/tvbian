@@ -1,0 +1,65 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 25 Oct 2026 23:00:00 -0400
+Subject: [PATCH] watchdog: sunxi_wdt: Stop the timer across system sleep
+
+The watchdog timer runs on in s2idle, where neither userspace nor the
+watchdog core's worker pings it, so a sleep longer than its 16 s
+hardware maximum resets the system. Stop it on suspend and start it on
+resume when it was running, as meson_gxbb_wdt does.
+
+---
+ drivers/watchdog/sunxi_wdt.c | 28 ++++++++++++++++++++++++++++
+ 1 file changed, 28 insertions(+)
+
+--- a/drivers/watchdog/sunxi_wdt.c
++++ b/drivers/watchdog/sunxi_wdt.c
+@@ -279,6 +279,32 @@
+ 	.wdt_key_val = 0x16aa0000,
+ };
+ 
++/* The timer keeps counting in system sleep, where nothing pings it. */
++static int sunxi_wdt_suspend(struct device *dev)
++{
++	struct sunxi_wdt_dev *sunxi_wdt = dev_get_drvdata(dev);
++
++	if (watchdog_active(&sunxi_wdt->wdt_dev) ||
++	    watchdog_hw_running(&sunxi_wdt->wdt_dev))
++		return sunxi_wdt_stop(&sunxi_wdt->wdt_dev);
++
++	return 0;
++}
++
++static int sunxi_wdt_resume(struct device *dev)
++{
++	struct sunxi_wdt_dev *sunxi_wdt = dev_get_drvdata(dev);
++
++	if (watchdog_active(&sunxi_wdt->wdt_dev) ||
++	    watchdog_hw_running(&sunxi_wdt->wdt_dev))
++		return sunxi_wdt_start(&sunxi_wdt->wdt_dev);
++
++	return 0;
++}
++
++static DEFINE_SIMPLE_DEV_PM_OPS(sunxi_wdt_pm_ops, sunxi_wdt_suspend,
++				sunxi_wdt_resume);
++
+ static const struct of_device_id sunxi_wdt_dt_ids[] = {
+ 	{ .compatible = "allwinner,sun4i-a10-wdt", .data = &sun4i_wdt_reg },
+ 	{ .compatible = "allwinner,sun6i-a31-wdt", .data = &sun6i_wdt_reg },
+@@ -319,6 +345,7 @@
+ 	watchdog_set_restart_priority(&sunxi_wdt->wdt_dev, 128);
+ 
+ 	watchdog_set_drvdata(&sunxi_wdt->wdt_dev, sunxi_wdt);
++	platform_set_drvdata(pdev, sunxi_wdt);
+ 
+ 	if (sunxi_wdt_is_running(&sunxi_wdt->wdt_dev)) {
+ 		running_timeout = sunxi_wdt_get_timeout(&sunxi_wdt->wdt_dev);
+@@ -348,6 +375,7 @@
+ 	.driver		= {
+ 		.name		= DRV_NAME,
+ 		.of_match_table	= sunxi_wdt_dt_ids,
++		.pm		= pm_sleep_ptr(&sunxi_wdt_pm_ops),
+ 	},
+ };
+ 

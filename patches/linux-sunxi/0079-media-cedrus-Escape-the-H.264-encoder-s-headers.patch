@@ -1,0 +1,180 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 25 Oct 2026 14:24:17 +0000
+Subject: [PATCH 79/82] media: cedrus: Escape the H.264 encoder's headers
+
+The engine inserts emulation-prevention bytes only into the slice data it
+writes. The headers are put with the insertion disabled, so any
+0x000000-0x000003 sequence in them went out raw: a VUI timing field
+holding 1 ended the SPS early. Escape the header bytes as they are put.
+---
+ drivers/staging/media/sunxi/cedrus/cedrus.h   |  7 ++
+ .../media/sunxi/cedrus/cedrus_enc_h264.c      | 77 +++++++++++++++----
+ 2 files changed, 70 insertions(+), 14 deletions(-)
+
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus.h b/drivers/staging/media/sunxi/cedrus/cedrus.h
+index 3af63cd..596e271 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus.h
++++ b/drivers/staging/media/sunxi/cedrus/cedrus.h
+@@ -82,6 +82,12 @@ struct cedrus_v4l2 {
+ 	struct v4l2_m2m_dev	*m2m_dev;
+ };
+ 
++struct cedrus_enc_bits {
++	u32		value;
++	unsigned int	count;
++	unsigned int	zeros;
++};
++
+ struct cedrus_device {
+ 	struct device		*dev;
+ 
+@@ -96,6 +102,7 @@ struct cedrus_device {
+ 	struct reset_control	*reset;
+ 
+ 	unsigned int		capabilities;
++	struct cedrus_enc_bits	enc_bits;
+ 
+ 	struct delayed_work	watchdog_work;
+ };
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.c b/drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.c
+index a27d9ca..b2cc3ca 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.c
+@@ -205,8 +205,8 @@ static u8 cedrus_enc_h264_disable_deblocking_filter_idc(int value)
+ 	}
+ }
+ 
+-static void cedrus_enc_h264_coded_append(struct cedrus_device *dev,
+-					 unsigned int value, unsigned int count)
++static void cedrus_enc_h264_coded_put(struct cedrus_device *dev,
++				      unsigned int value, unsigned int count)
+ {
+ 	cedrus_poll(dev, VE_ENC_AVC_STATUS_REG,
+ 		    VE_ENC_AVC_STATUS_PUT_BITS_READY);
+@@ -218,6 +218,58 @@ static void cedrus_enc_h264_coded_append(struct cedrus_device *dev,
+ 		     VE_ENC_AVC_STARTTRIG_TYPE_PUT_BITS);
+ }
+ 
++/* The engine escapes slice data only: headers are escaped here. */
++static void cedrus_enc_h264_coded_byte(struct cedrus_device *dev, u8 byte)
++{
++	struct cedrus_enc_bits *bits = &dev->enc_bits;
++
++	if (bits->zeros >= 2 && byte <= 3) {
++		cedrus_enc_h264_coded_put(dev, 0x3, 8);
++		bits->zeros = 0;
++	}
++
++	cedrus_enc_h264_coded_put(dev, byte, 8);
++	bits->zeros = byte ? 0 : bits->zeros + 1;
++}
++
++static void cedrus_enc_h264_coded_append(struct cedrus_device *dev,
++					 unsigned int value, unsigned int count)
++{
++	struct cedrus_enc_bits *bits = &dev->enc_bits;
++
++	while (count) {
++		unsigned int n = min(count, 8 - bits->count);
++
++		count -= n;
++		bits->value = bits->value << n |
++			      ((value >> count) & GENMASK(n - 1, 0));
++		bits->count += n;
++
++		if (bits->count == 8) {
++			cedrus_enc_h264_coded_byte(dev, bits->value);
++			bits->value = 0;
++			bits->count = 0;
++		}
++	}
++}
++
++static void cedrus_enc_h264_coded_start_code(struct cedrus_device *dev)
++{
++	cedrus_enc_h264_coded_put(dev, 0x0, 16);
++	cedrus_enc_h264_coded_put(dev, 0x1, 16);
++	dev->enc_bits.zeros = 0;
++}
++
++static void cedrus_enc_h264_coded_flush(struct cedrus_device *dev)
++{
++	struct cedrus_enc_bits *bits = &dev->enc_bits;
++
++	if (bits->count)
++		cedrus_enc_h264_coded_put(dev, bits->value, bits->count);
++
++	memset(bits, 0, sizeof(*bits));
++}
++
+ static void cedrus_enc_h264_coded_ue(struct cedrus_device *dev,
+ 				     unsigned int value)
+ {
+@@ -288,16 +340,10 @@ static void cedrus_enc_h264_coded_bit(struct cedrus_device *dev,
+ 
+ static void cedrus_enc_h264_coded_align(struct cedrus_device *dev)
+ {
+-	unsigned int bits_count;
+-	u32 value;
++	unsigned int count = dev->enc_bits.count;
+ 
+-	value = cedrus_read(dev, VE_ENC_AVC_STM_BIT_LEN_REG);
+-
+-	bits_count = value % 8;
+-	if (!bits_count)
+-		return;
+-
+-	cedrus_enc_h264_coded_append(dev, 0, 8 - bits_count);
++	if (count)
++		cedrus_enc_h264_coded_append(dev, 0, 8 - count);
+ }
+ 
+ static void cedrus_enc_h264_coded_eptb(struct cedrus_device *dev, bool enable)
+@@ -765,7 +811,7 @@ static void cedrus_enc_h264_job_configure_sps(struct cedrus_context *cedrus_ctx)
+ 	u8 header;
+ 
+ 	/* Syntax element: Annex-B start code. */
+-	cedrus_enc_h264_coded_u32(dev, 0x1);
++	cedrus_enc_h264_coded_start_code(dev);
+ 
+ 	header = cedrus_enc_h264_nalu_header(CENDRUS_ENC_H264_NALU_TYPE_SPS, 3);
+ 
+@@ -938,7 +984,7 @@ static void cedrus_enc_h264_job_configure_pps(struct cedrus_context *cedrus_ctx)
+ 	u8 header;
+ 
+ 	/* Syntax element: Annex-B start code. */
+-	cedrus_enc_h264_coded_u32(dev, 0x1);
++	cedrus_enc_h264_coded_start_code(dev);
+ 
+ 	header = cedrus_enc_h264_nalu_header(CENDRUS_ENC_H264_NALU_TYPE_PPS, 3);
+ 
+@@ -1008,7 +1054,7 @@ cedrus_enc_h264_job_configure_slice_header(struct cedrus_context *cedrus_ctx)
+ 	u8 header;
+ 
+ 	/* Syntax element: Annex-B start code. */
+-	cedrus_enc_h264_coded_u32(dev, 0x1);
++	cedrus_enc_h264_coded_start_code(dev);
+ 
+ 	if (job->frame_type == CEDRUS_ENC_H264_FRAME_TYPE_IDR)
+ 		nalu_type = CENDRUS_ENC_H264_NALU_TYPE_SLICE_IDR;
+@@ -1100,6 +1146,7 @@ static void cedrus_enc_h264_job_configure_headers(struct cedrus_context *ctx)
+ 
+ 	/* Disable emulation-prevention 0x3 byte. */
+ 	cedrus_enc_h264_coded_eptb(dev, 0);
++	memset(&dev->enc_bits, 0, sizeof(dev->enc_bits));
+ 
+ 	while (active) {
+ 		switch (state->step) {
+@@ -1121,6 +1168,8 @@ static void cedrus_enc_h264_job_configure_headers(struct cedrus_context *ctx)
+ 		}
+ 	}
+ 
++	cedrus_enc_h264_coded_flush(dev);
++
+ 	/* Enable emulation-prevention 0x3 byte. */
+ 	cedrus_enc_h264_coded_eptb(dev, 1);
+ 
+-- 
+2.47.3
+

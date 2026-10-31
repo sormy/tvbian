@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Paul Kocialkowski <paul.kocialkowski@bootlin.com>
+Date: Fri, 23 Jun 2023 15:12:54 +0200
+Subject: [PATCH 69/85] media: cedrus: Increase V3s module clock rate to 402
+ MHz
+
+This is the frequency that the Allwinner BSP seems to generally use
+for the platform.
+
+Signed-off-by: Paul Kocialkowski <paul.kocialkowski@bootlin.com>
+---
+ drivers/staging/media/sunxi/cedrus/cedrus.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus.c b/drivers/staging/media/sunxi/cedrus/cedrus.c
+index 96134a0..587d26a 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus.c
+@@ -684,7 +684,7 @@ static const struct cedrus_variant sun8i_h3_cedrus_variant = {
+ static const struct cedrus_variant sun8i_v3s_cedrus_variant = {
+ 	.capabilities	= CEDRUS_CAPABILITY_UNTILED |
+ 			  CEDRUS_CAPABILITY_H264_DEC,
+-	.mod_rate	= 297000000,
++	.mod_rate	= 402000000,
+ };
+ 
+ static const struct cedrus_variant sun8i_r40_cedrus_variant = {
+-- 
+2.47.3
+

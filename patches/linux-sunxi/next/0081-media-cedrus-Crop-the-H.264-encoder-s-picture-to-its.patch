@@ -1,0 +1,82 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 25 Oct 2026 14:24:18 +0000
+Subject: [PATCH 81/85] media: cedrus: Crop the H.264 encoder's picture to its
+ requested size
+
+The picture format was rounded up to whole macroblocks and the default
+crop taken from it, so a 360-line picture was coded as 368 lines. Keep the
+requested size, pad the stride and buffer only, and crop the SPS from the
+macroblock-aligned size. The engine reads a little past the chroma plane,
+so the buffer also gets a row of slack.
+---
+ drivers/staging/media/sunxi/cedrus/cedrus_enc.c    |  7 +++++--
+ .../staging/media/sunxi/cedrus/cedrus_enc_h264.c   | 14 ++++++--------
+ 2 files changed, 11 insertions(+), 10 deletions(-)
+
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_enc.c b/drivers/staging/media/sunxi/cedrus/cedrus_enc.c
+index b91dcb2..a1401bb 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_enc.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_enc.c
+@@ -109,8 +109,11 @@ static int cedrus_enc_format_picture_prepare(struct cedrus_context *ctx,
+ 		/* Luma plane size. */
+ 		sizeimage = bytesperline * height;
+ 
+-		/* Chroma plane size. */
+-		sizeimage += bytesperline * height / 2;
++		/* Chroma plane size, read up to the macroblock-aligned height. */
++		sizeimage += bytesperline * ALIGN(height, 16) / 2;
++
++		/* The engine reads a little past the chroma plane. */
++		sizeimage += bytesperline;
+ 		break;
+ 	default:
+ 		return -EINVAL;
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.c b/drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.c
+index 391fda5..46441d5 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.c
+@@ -802,8 +802,6 @@ static void cedrus_enc_h264_job_configure_sps(struct cedrus_context *cedrus_ctx)
+ 	struct cedrus_device *dev = cedrus_ctx->proc->dev;
+ 	struct cedrus_enc_h264_job *job = cedrus_ctx->engine_job;
+ 	struct cedrus_enc_h264_context *h264_ctx = cedrus_ctx->engine_ctx;
+-	struct v4l2_pix_format *pix_format =
+-		&cedrus_ctx->v4l2.format_picture.fmt.pix;
+ 	struct v4l2_fract *timeperframe = &cedrus_ctx->v4l2.timeperframe_coded;
+ 	struct v4l2_rect *selection = &cedrus_ctx->v4l2.selection_picture;
+ 	u32 crop_left, crop_right, crop_top, crop_bottom;
+@@ -878,13 +876,13 @@ static void cedrus_enc_h264_job_configure_sps(struct cedrus_context *cedrus_ctx)
+ 	/* Syntax element: direct_8x8_inference_flag. */
+ 	cedrus_enc_h264_coded_bit(dev, 0);
+ 
+-	if (selection->width != pix_format->width ||
+-	    selection->height != pix_format->height) {
++	if (selection->width != h264_ctx->width_mbs * 16 ||
++	    selection->height != h264_ctx->height_mbs * 16) {
+ 		crop_left = selection->left;
+-		crop_right = pix_format->width - selection->width -
++		crop_right = h264_ctx->width_mbs * 16 - selection->width -
+ 			     selection->left;
+ 		crop_top = selection->top;
+-		crop_bottom = pix_format->height - selection->height -
++		crop_bottom = h264_ctx->height_mbs * 16 - selection->height -
+ 			      selection->top;
+ 
+ 		/* Syntax element: frame_cropping_flag. */
+@@ -1651,11 +1649,11 @@ static const struct v4l2_ctrl_config cedrus_enc_h264_ctrl_configs[] = {
+ static const struct v4l2_frmsize_stepwise cedrus_enc_h264_frmsize = {
+ 	.min_width	= 16,
+ 	.max_width	= 4096,
+-	.step_width	= 16,
++	.step_width	= 2,
+ 
+ 	.min_height	= 16,
+ 	.max_height	= 4096,
+-	.step_height	= 16,
++	.step_height	= 2,
+ };
+ 
+ const struct cedrus_engine cedrus_enc_h264 = {
+-- 
+2.47.3
+

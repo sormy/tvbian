@@ -1,0 +1,29 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 25 Oct 2026 05:27:03 +0000
+Subject: [PATCH] media: sun50i-di300: pass copy_frame_flags on 6.18
+
+6.18's v4l2_m2m_buf_copy_metadata() takes copy_frame_flags; the driver
+is written for a kernel whose call has none and copies the flags.
+---
+ drivers/media/platform/sunxi/sun50i-di300/sun50i-di300.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/media/platform/sunxi/sun50i-di300/sun50i-di300.c b/drivers/media/platform/sunxi/sun50i-di300/sun50i-di300.c
+index 98f97cc4f..c995e8b64 100644
+--- a/drivers/media/platform/sunxi/sun50i-di300/sun50i-di300.c
++++ b/drivers/media/platform/sunxi/sun50i-di300/sun50i-di300.c
+@@ -210,8 +210,8 @@ static void deinterlace_device_run(void *priv)
+ 	ctx->dst0 = dst0;
+ 	ctx->dst1 = dst1;
+ 
+-	v4l2_m2m_buf_copy_metadata(src, dst0);
+-	v4l2_m2m_buf_copy_metadata(src, dst1);
++	v4l2_m2m_buf_copy_metadata(src, dst0, true);
++	v4l2_m2m_buf_copy_metadata(src, dst1, true);
+ 
+ 	next = vb2_dma_contig_plane_dma_addr(&src->vb2_buf, 0);
+ 	curr = ctx->prev[0] ?
+-- 
+2.47.3
+

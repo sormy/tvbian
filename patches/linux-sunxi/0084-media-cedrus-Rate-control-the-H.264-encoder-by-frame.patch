@@ -1,0 +1,190 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 25 Oct 2026 15:58:35 +0000
+Subject: [PATCH] media: cedrus: Rate-control the H.264 encoder by frame
+
+ffmpeg and GStreamer ask a stateful encoder for a bitrate, which a fixed
+QP cannot honour: ffmpeg's -b:v was refused. Track how far the coded size
+runs from the bitrate's budget, a second at most, and step the next
+frame's QP while it is more than two frames off. The QP ceiling defaults
+to H.264's 51, so a low bitrate is reachable.
+
+The engine does not clip the chroma QP to 51, and past it the output grows tenfold: the QP stops where QP plus the chroma offset reaches 51.
+---
+ .../media/sunxi/cedrus/cedrus_enc_h264.c      | 94 +++++++++++++++++--
+ .../media/sunxi/cedrus/cedrus_enc_h264.h      |  4 +
+ 2 files changed, 91 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.c b/drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.c
+index 54b153d..076b424 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.c
+@@ -476,6 +476,14 @@ static int cedrus_enc_h264_ctrl_prepare(struct cedrus_context *cedrus_ctx,
+ 	case V4L2_CID_MPEG_VIDEO_H264_P_FRAME_QP:
+ 		h264_ctx->qp_p = ctrl->cur.val;
+ 		break;
++	case V4L2_CID_MPEG_VIDEO_FRAME_RC_ENABLE:
++		h264_ctx->rc_enable = ctrl->cur.val;
++		h264_ctx->rc_qp = h264_ctx->qp_p;
++		h264_ctx->rc_fullness = 0;
++		break;
++	case V4L2_CID_MPEG_VIDEO_BITRATE:
++		h264_ctx->bitrate = ctrl->cur.val;
++		break;
+ 	case V4L2_CID_MPEG_VIDEO_GOP_CLOSURE:
+ 		h264_ctx->gop_closure = ctrl->cur.val;
+ 		break;
+@@ -683,6 +691,52 @@ static void cedrus_enc_h264_cleanup(struct cedrus_context *cedrus_ctx)
+ 
+ /* Job */
+ 
++/*
++ * The engine does not clip the chroma QP to 51: past it, the output grows
++ * tenfold.
++ */
++static int cedrus_enc_h264_qp_max(struct cedrus_enc_h264_context *h264_ctx)
++{
++	return min(h264_ctx->qp_max, 51 - h264_ctx->chroma_qp_index_offset);
++}
++
++/* Rate Control */
++
++static s64 cedrus_enc_h264_rc_frame_bits(struct cedrus_context *ctx)
++{
++	struct cedrus_enc_h264_context *h264_ctx = ctx->engine_ctx;
++	struct v4l2_fract *timeperframe = &ctx->v4l2.timeperframe_coded;
++
++	return div_u64((u64)h264_ctx->bitrate * timeperframe->numerator,
++		       timeperframe->denominator);
++}
++
++/* Steps the QP while the stream runs more than two frames off its budget. */
++static void cedrus_enc_h264_rc_update(struct cedrus_context *ctx)
++{
++	struct cedrus_enc_h264_context *h264_ctx = ctx->engine_ctx;
++	s64 frames = div64_s64(h264_ctx->rc_fullness,
++			       max_t(s64, cedrus_enc_h264_rc_frame_bits(ctx), 1));
++
++	if (frames > 2)
++		h264_ctx->rc_qp += frames > 8 ? 2 : 1;
++	else if (frames < -2)
++		h264_ctx->rc_qp -= frames < -8 ? 2 : 1;
++
++	h264_ctx->rc_qp = clamp_t(int, h264_ctx->rc_qp, h264_ctx->qp_min + 2,
++				  cedrus_enc_h264_qp_max(h264_ctx));
++}
++
++static void cedrus_enc_h264_rc_account(struct cedrus_context *ctx, u32 bytes)
++{
++	struct cedrus_enc_h264_context *h264_ctx = ctx->engine_ctx;
++	s64 limit = h264_ctx->bitrate;
++
++	h264_ctx->rc_fullness += (s64)bytes * 8 -
++				 cedrus_enc_h264_rc_frame_bits(ctx);
++	h264_ctx->rc_fullness = clamp(h264_ctx->rc_fullness, -limit, limit);
++}
++
+ static int cedrus_enc_h264_job_prepare(struct cedrus_context *cedrus_ctx)
+ {
+ 	struct cedrus_enc_h264_context *h264_ctx = cedrus_ctx->engine_ctx;
+@@ -782,20 +836,22 @@ static int cedrus_enc_h264_job_prepare(struct cedrus_context *cedrus_ctx)
+ 
+ 	/* QP */
+ 
++	if (h264_ctx->rc_enable)
++		cedrus_enc_h264_rc_update(cedrus_ctx);
++
+ 	switch (job->frame_type) {
+ 	case CEDRUS_ENC_H264_FRAME_TYPE_IDR:
+ 	case CEDRUS_ENC_H264_FRAME_TYPE_I:
+-		job->qp = h264_ctx->qp_i;
++		job->qp = h264_ctx->rc_enable ? h264_ctx->rc_qp - 2 :
++						h264_ctx->qp_i;
+ 		break;
+ 	case CEDRUS_ENC_H264_FRAME_TYPE_P:
+-		job->qp = h264_ctx->qp_p;
++		job->qp = h264_ctx->rc_enable ? h264_ctx->rc_qp : h264_ctx->qp_p;
+ 		break;
+ 	}
+ 
+-	if (job->qp > h264_ctx->qp_max)
+-		job->qp = h264_ctx->qp_max;
+-	else if (job->qp < h264_ctx->qp_min)
+-		job->qp = h264_ctx->qp_min;
++	job->qp = clamp_t(int, job->qp, h264_ctx->qp_min,
++			  cedrus_enc_h264_qp_max(h264_ctx));
+ 
+ 	/* Set initial QP to current QP with each new PPS. */
+ 	if (state->step < CEDRUS_ENC_H264_STEP_SLICE)
+@@ -1356,6 +1412,7 @@ static void cedrus_enc_h264_job_finish(struct cedrus_context *ctx, int state)
+ 	struct vb2_v4l2_buffer *v4l2_buffer = ctx->job.buffer_coded;
+ 	struct vb2_buffer *vb2_buffer = &v4l2_buffer->vb2_buf;
+ 	struct cedrus_enc_h264_job *job = ctx->engine_job;
++	struct cedrus_enc_h264_context *h264_ctx = ctx->engine_ctx;
+ 	u32 length;
+ 
+ 	if (state != VB2_BUF_STATE_DONE) {
+@@ -1372,6 +1429,9 @@ static void cedrus_enc_h264_job_finish(struct cedrus_context *ctx, int state)
+ 
+ 	vb2_set_plane_payload(vb2_buffer, 0, length);
+ 
++	if (h264_ctx->rc_enable)
++		cedrus_enc_h264_rc_account(ctx, length);
++
+ 	switch (job->frame_type) {
+ 	case CEDRUS_ENC_H264_FRAME_TYPE_IDR:
+ 	case CEDRUS_ENC_H264_FRAME_TYPE_I:
+@@ -1593,7 +1653,7 @@ static const struct v4l2_ctrl_config cedrus_enc_h264_ctrl_configs[] = {
+ 		.step		= 1,
+ 		.min		= 0,
+ 		.max		= 51,
+-		.def		= 40,
++		.def		= 51,
+ 		.ops		= &cedrus_context_ctrl_ops,
+ 	},
+ 	{
+@@ -1612,6 +1672,26 @@ static const struct v4l2_ctrl_config cedrus_enc_h264_ctrl_configs[] = {
+ 		.def		= 28,
+ 		.ops		= &cedrus_context_ctrl_ops,
+ 	},
++	{
++		.id		= V4L2_CID_MPEG_VIDEO_FRAME_RC_ENABLE,
++		.def		= 0,
++		.ops		= &cedrus_context_ctrl_ops,
++	},
++	{
++		.id		= V4L2_CID_MPEG_VIDEO_BITRATE_MODE,
++		.min		= V4L2_MPEG_VIDEO_BITRATE_MODE_VBR,
++		.max		= V4L2_MPEG_VIDEO_BITRATE_MODE_CBR,
++		.def		= V4L2_MPEG_VIDEO_BITRATE_MODE_VBR,
++		.ops		= &cedrus_context_ctrl_ops,
++	},
++	{
++		.id		= V4L2_CID_MPEG_VIDEO_BITRATE,
++		.step		= 1,
++		.min		= 10000,
++		.max		= 100000000,
++		.def		= 10000000,
++		.ops		= &cedrus_context_ctrl_ops,
++	},
+ 	{
+ 		.id		= V4L2_CID_MPEG_VIDEO_GOP_CLOSURE,
+ 		.def		= 1,
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.h b/drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.h
+index fa0e89e..56d52d9 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.h
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.h
+@@ -128,6 +128,10 @@ struct cedrus_enc_h264_context {
+ 	int				qp_max;
+ 	int				qp_i;
+ 	int				qp_p;
++	bool				rc_enable;
++	unsigned int			bitrate;
++	int				rc_qp;
++	s64				rc_fullness;
+ 	int				gop_closure;
+ 	int				gop_size;
+ 	int				gop_open_i_period;
+-- 
+2.47.3
+

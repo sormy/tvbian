@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 25 Oct 2026 17:38:36 +0000
+Subject: [PATCH 85/85] media: cedrus: copy buffer metadata with 7.2's two
+ arguments
+
+7.2's v4l2_m2m_buf_copy_metadata() drops the copy_frame_flags argument.
+---
+ drivers/staging/media/sunxi/cedrus/cedrus_context.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_context.c b/drivers/staging/media/sunxi/cedrus/cedrus_context.c
+index 2f5d5d9..d2bf958 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_context.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_context.c
+@@ -290,7 +290,7 @@ int cedrus_context_job_run(struct cedrus_context *ctx)
+ 
+ 	/* Copy buffer metadata (timestamp). */
+ 
+-	v4l2_m2m_buf_copy_metadata(buffer_src, buffer_dst, true);
++	v4l2_m2m_buf_copy_metadata(buffer_src, buffer_dst);
+ 
+ 	/* Prepare engine job. */
+ 
+-- 
+2.47.3
+

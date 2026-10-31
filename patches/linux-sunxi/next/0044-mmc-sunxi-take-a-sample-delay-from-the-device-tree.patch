@@ -1,0 +1,43 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 24 Oct 2026 16:40:46 +0000
+Subject: [PATCH] mmc: sunxi: take a sample delay from the device tree
+
+On 7.2, LibreELEC's A523 delay-chain tuning brings the member; this sets it.
+
+The driver samples at a fixed delay of 0 on every new-timing host. The
+H616 eMMC on a Tanix TX1 V2.0 gets data errors in DDR52 at that delay,
+then hangs in recovery; its stock firmware tunes the delay per unit and
+runs at 20 cells. Let a board give it as allwinner,sample-delay.
+---
+ drivers/mmc/host/sunxi-mmc.c | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/mmc/host/sunxi-mmc.c b/drivers/mmc/host/sunxi-mmc.c
+index b411a4d..7d3f04d 100644
+--- a/drivers/mmc/host/sunxi-mmc.c
++++ b/drivers/mmc/host/sunxi-mmc.c
+@@ -718,7 +721,7 @@ static int sunxi_mmc_calibrate(struct sunxi_mmc_host *host, int reg_off)
+ 	 * The only mode that doesn't have such a delay is HS400, that
+ 	 * is in itself a TODO.
+ 	 */
+-	writel(SDXC_CAL_DL_SW_EN, host->reg_base + reg_off);
++	writel(SDXC_CAL_DL_SW_EN | host->sample_delay, host->reg_base + reg_off);
+ 
+ 	return 0;
+ }
+@@ -1456,6 +1459,11 @@ static int sunxi_mmc_probe(struct platform_device *pdev)
+ 				     "allwinner,sun50i-h5-emmc"))
+ 		mmc->caps      |= MMC_CAP_1_8V_DDR | MMC_CAP_3_3V_DDR;
+ 
++	/* a board's tuned delay, as its vendor's boot loader measured it */
++	of_property_read_u32(pdev->dev.of_node, "allwinner,sample-delay",
++			     &host->sample_delay);
++	host->sample_delay &= SDXC_CAL_DL_MASK;
++
+ 	ret = mmc_of_parse(mmc);
+ 	if (ret)
+ 		goto error_free_dma;
+-- 
+2.47.3
+

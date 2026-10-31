@@ -1,0 +1,481 @@
+From 18343eb537dff1ecaa799d0536342d27a4c98ed7 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Mon, 26 Oct 2026 18:00:00 -0400
+Subject: [PATCH] media: cedrus: Scale the decoded picture down through the
+ secondary output
+
+At 3840x2160 and 60 fps the display's plane reads 750 MB/s of NV12. The
+video engine's secondary output can write a second picture scaled by 2
+or 4 each way while the engine still reconstructs and references the
+full one.
+
+A client asks as a stateful decoder's does: S_SELECTION with the COMPOSE
+target on CAPTURE, before CAPTURE buffers exist. The ratio is the
+smallest of 1, 2 and 4 whose picture fits the rectangle; G_FMT reports
+the scaled size. The scaled NV12 picture sits at the start of the buffer
+and the full-size reconstruction after it, as P010 already does. 8-bit
+H.264 and H.265 only: SDROT_CTRL at 0x240 with addresses at 0x244 and
+0x248 for H.264, the H.265 engine's SDRT_CTRL for H.265.
+
+The decoder node kept G_SELECTION and S_SELECTION disabled, its
+selection being the encoder's crop; the decoder now answers COMPOSE.
+---
+ drivers/staging/media/sunxi/cedrus/cedrus.h   | 53 +++++++++++--
+ .../media/sunxi/cedrus/cedrus_context.h       |  2 +
+ .../staging/media/sunxi/cedrus/cedrus_dec.c   | 49 ++++++++----
+ .../staging/media/sunxi/cedrus/cedrus_dec.h   |  5 +-
+ .../media/sunxi/cedrus/cedrus_dec_h264.c      | 23 ++++--
+ .../media/sunxi/cedrus/cedrus_dec_h265.c      | 11 ++-
+ .../media/sunxi/cedrus/cedrus_dec_vp9.c       |  2 +-
+ .../staging/media/sunxi/cedrus/cedrus_proc.c  | 79 ++++++++++++++++++-
+ .../staging/media/sunxi/cedrus/cedrus_regs.h  |  7 ++
+ 9 files changed, 193 insertions(+), 38 deletions(-)
+
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus.h b/drivers/staging/media/sunxi/cedrus/cedrus.h
+index 596e271..7e97bbb 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus.h
++++ b/drivers/staging/media/sunxi/cedrus/cedrus.h
+@@ -169,24 +169,59 @@ static inline bool cedrus_picture_is_p010(struct cedrus_context *ctx)
+ 	return ctx->v4l2.format_picture.fmt.pix.pixelformat == V4L2_PIX_FMT_P010;
+ }
+ 
+-/* Size of the visible P010 picture at the start of the buffer. */
+-static inline unsigned int cedrus_picture_p010_size(struct cedrus_context *ctx)
++/* The secondary output scales 8-bit NV12 H.264 and H.265 pictures only. */
++static inline unsigned int cedrus_picture_scale_shift(struct cedrus_context *ctx,
++						      u32 pixelformat)
+ {
+-	struct v4l2_pix_format *pix_format = &ctx->v4l2.format_picture.fmt.pix;
++	u32 coded = ctx->v4l2.format_coded.fmt.pix.pixelformat;
+ 
+-	return pix_format->bytesperline * pix_format->height * 3 / 2;
++	if (pixelformat != V4L2_PIX_FMT_NV12 || ctx->bit_depth_coded > 8 ||
++	    (coded != V4L2_PIX_FMT_H264_SLICE &&
++	     coded != V4L2_PIX_FMT_HEVC_SLICE))
++		return 0;
++
++	return ctx->v4l2.scale_shift;
++}
++
++static inline bool cedrus_picture_is_scaled(struct cedrus_context *ctx)
++{
++	return cedrus_picture_scale_shift(ctx,
++		ctx->v4l2.format_picture.fmt.pix.pixelformat);
++}
++
++/*
++ * The secondary output writes the visible picture, P010 or scaled, at the
++ * start of the buffer; the engine reconstructs into a hidden one after it.
++ */
++static inline bool cedrus_picture_is_secondary(struct cedrus_context *ctx)
++{
++	return cedrus_picture_is_p010(ctx) || cedrus_picture_is_scaled(ctx);
++}
++
++/* Size of the visible picture before the hidden reconstruction. */
++static inline unsigned int cedrus_picture_visible_size(unsigned int bytesperline,
++						       unsigned int height)
++{
++	return ALIGN(bytesperline * height * 3 / 2, 256);
+ }
+ 
+ /*
+  * The 8-bit NV12 picture the engine reconstructs into and references: the
+- * picture itself, or for P010 a hidden one after the visible P010 picture.
++ * picture itself, or a hidden full-size one after the visible picture.
+  */
+ static inline struct v4l2_pix_format
+ cedrus_picture_recon_format(struct cedrus_context *ctx)
+ {
+ 	struct v4l2_pix_format pix_format = ctx->v4l2.format_picture.fmt.pix;
++	struct v4l2_pix_format *pix_format_coded =
++		&ctx->v4l2.format_coded.fmt.pix;
++
++	if (cedrus_picture_is_scaled(ctx)) {
++		pix_format.width = pix_format_coded->width;
++		pix_format.height = ALIGN(pix_format_coded->height, 16);
++	}
+ 
+-	if (cedrus_picture_is_p010(ctx)) {
++	if (cedrus_picture_is_secondary(ctx)) {
+ 		pix_format.pixelformat = V4L2_PIX_FMT_NV12;
+ 		pix_format.bytesperline = ALIGN(pix_format.width, 16);
+ 	}
+@@ -207,12 +242,14 @@ static inline void cedrus_buffer_picture_dma(struct cedrus_context *ctx,
+ 					     dma_addr_t *chroma_addr)
+ {
+ 	struct v4l2_pix_format pix_format = cedrus_picture_recon_format(ctx);
++	struct v4l2_pix_format *visible = &ctx->v4l2.format_picture.fmt.pix;
+ 	struct vb2_buffer *vb2_buffer = &cedrus_buffer->m2m_buffer.vb.vb2_buf;
+ 	dma_addr_t addr;
+ 
+ 	addr = vb2_dma_contig_plane_dma_addr(vb2_buffer, 0);
+-	if (cedrus_picture_is_p010(ctx))
+-		addr += cedrus_picture_p010_size(ctx);
++	if (cedrus_picture_is_secondary(ctx))
++		addr += cedrus_picture_visible_size(visible->bytesperline,
++						    visible->height);
+ 	*luma_addr = addr;
+ 
+ 	addr += pix_format.bytesperline * pix_format.height;
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_context.h b/drivers/staging/media/sunxi/cedrus/cedrus_context.h
+index 24429ba..5c7a41d 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_context.h
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_context.h
+@@ -46,6 +46,8 @@ struct cedrus_context_v4l2 {
+ 	struct v4l2_fract		timeperframe_picture;
+ 
+ 	struct v4l2_rect		selection_picture;
++	/* COMPOSE: the picture scaled down by 1 << scale_shift */
++	unsigned int			scale_shift;
+ };
+ 
+ struct cedrus_context {
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec.c b/drivers/staging/media/sunxi/cedrus/cedrus_dec.c
+index 8b2f698..a2fc3ce 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_dec.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec.c
+@@ -133,9 +133,7 @@ int cedrus_dec_format_coded_configure(struct cedrus_context *ctx)
+ {
+ 	struct cedrus_device *dev = ctx->proc->dev;
+ 	struct v4l2_pix_format *pix_format = &ctx->v4l2.format_coded.fmt.pix;
+-	struct v4l2_pix_format *pix_format_picture =
+-		&ctx->v4l2.format_picture.fmt.pix;
+-	unsigned int width_picture = pix_format_picture->width;
++	unsigned int width_picture = cedrus_picture_recon_format(ctx).width;
+ 	u32 value = 0;
+ 
+ 	/*
+@@ -202,13 +200,15 @@ static int cedrus_dec_format_picture_prepare(struct cedrus_context *ctx,
+ 	struct v4l2_pix_format *pix_format = &format->fmt.pix;
+ 	struct v4l2_pix_format *pix_format_coded =
+ 		&ctx->v4l2.format_coded.fmt.pix;
++	unsigned int shift =
++		cedrus_picture_scale_shift(ctx, pix_format->pixelformat);
+ 	unsigned int width, height;
+ 	unsigned int bytesperline;
+ 	unsigned int sizeimage;
+ 
+ 	/* Picture format dimensions are copied from coded format. */
+-	width = pix_format_coded->width;
+-	height = pix_format_coded->height;
++	width = pix_format_coded->width >> shift;
++	height = pix_format_coded->height >> shift;
+ 
+ 	switch (pix_format->pixelformat) {
+ 	case V4L2_PIX_FMT_NV12_32L32:
+@@ -268,6 +268,12 @@ static int cedrus_dec_format_picture_prepare(struct cedrus_context *ctx,
+ 		return -EINVAL;
+ 	}
+ 
++	/* The full-size NV12 reconstruction follows the scaled picture. */
++	if (shift)
++		sizeimage = cedrus_picture_visible_size(bytesperline, height) +
++			    ALIGN(pix_format_coded->width, 16) *
++			    ALIGN(pix_format_coded->height, 16) * 3 / 2;
++
+ 	pix_format->width = width;
+ 	pix_format->height = height;
+ 	pix_format->bytesperline = bytesperline;
+@@ -350,32 +356,45 @@ int cedrus_dec_format_picture_configure(struct cedrus_context *ctx)
+ }
+ 
+ /*
+- * Program the secondary output to convert the 8-bit NV12 reconstruction into
+- * the visible P010 picture at the start of the buffer. The engine still needs
+- * its 10-bit configuration and its second output enabled.
++ * Program the secondary output to write the visible picture, P010 or scaled
++ * NV12, at the start of the buffer from the NV12 reconstruction after it.
++ * The codec writes the addresses and enables its second output.
+  */
+-void cedrus_dec_picture_p010_output_set(struct cedrus_context *ctx)
++void cedrus_dec_picture_secondary_output_set(struct cedrus_context *ctx,
++					     dma_addr_t *luma_addr,
++					     dma_addr_t *chroma_addr)
+ {
+ 	struct cedrus_device *dev = ctx->proc->dev;
+ 	struct v4l2_pix_format *pix_format = &ctx->v4l2.format_picture.fmt.pix;
+ 	struct cedrus_buffer *buffer = cedrus_job_buffer_picture(ctx);
+ 	u32 stride = pix_format->bytesperline;
++	u32 chroma_stride = cedrus_picture_is_p010(ctx) ? stride : stride / 2;
+ 	u32 chroma_size = stride * pix_format->height / 2;
+-	dma_addr_t luma_addr, chroma_addr;
+ 
+-	luma_addr = vb2_dma_contig_plane_dma_addr(&buffer->m2m_buffer.vb.vb2_buf,
+-						  0);
+-	chroma_addr = luma_addr + stride * pix_format->height;
++	*luma_addr =
++		vb2_dma_contig_plane_dma_addr(&buffer->m2m_buffer.vb.vb2_buf, 0);
++	*chroma_addr = *luma_addr + stride * pix_format->height;
+ 
+ 	cedrus_write(dev, VE_SECONDARY_FB_LINE_STRIDE,
+ 		     VE_PRIMARY_FB_LINE_STRIDE_LUMA(stride) |
+-		     VE_PRIMARY_FB_LINE_STRIDE_CHROMA(stride));
++		     VE_PRIMARY_FB_LINE_STRIDE_CHROMA(chroma_stride));
+ 	cedrus_write(dev, VE_CHROMA_BUF_LEN,
+ 		     VE_SECONDARY_OUT_FMT_EXT |
+ 		     VE_CHROMA_BUF_LEN_SDRT(chroma_size));
+ 	cedrus_write(dev, VE_PRIMARY_OUT_FMT,
+ 		     VE_PRIMARY_OUT_FMT_NV12 | VE_SECONDARY_OUT_FMT_EXT_NV12);
+-	cedrus_write(dev, VE_DEC_SECOND_OUT_CTRL, 0);
++}
++
++/* The secondary output of the H.265 engine, which VP9 shares. */
++void cedrus_dec_picture_second_out_set(struct cedrus_context *ctx)
++{
++	struct cedrus_device *dev = ctx->proc->dev;
++	dma_addr_t luma_addr, chroma_addr;
++
++	cedrus_dec_picture_secondary_output_set(ctx, &luma_addr, &chroma_addr);
++	cedrus_write(dev, VE_DEC_SECOND_OUT_CTRL,
++		     VE_SDRT_SCALE(cedrus_picture_is_scaled(ctx) ?
++				   ctx->v4l2.scale_shift : 0));
+ 	cedrus_write(dev, VE_DEC_SECOND_OUT_LUMA_ADDR, luma_addr >> 8);
+ 	cedrus_write(dev, VE_DEC_SECOND_OUT_CHROMA_ADDR, chroma_addr >> 8);
+ }
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec.h b/drivers/staging/media/sunxi/cedrus/cedrus_dec.h
+index b32d06d..186357a 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_dec.h
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec.h
+@@ -25,7 +25,10 @@ int cedrus_dec_format_picture_configure(struct cedrus_context *ctx);
+ 
+ /* Picture */
+ 
+-void cedrus_dec_picture_p010_output_set(struct cedrus_context *ctx);
++void cedrus_dec_picture_secondary_output_set(struct cedrus_context *ctx,
++					     dma_addr_t *luma_addr,
++					     dma_addr_t *chroma_addr);
++void cedrus_dec_picture_second_out_set(struct cedrus_context *ctx);
+ unsigned int
+ cedrus_dec_picture_10bit_extra_size(struct cedrus_context *ctx,
+ 				    const struct v4l2_pix_format *pix_format);
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec_h264.c b/drivers/staging/media/sunxi/cedrus/cedrus_dec_h264.c
+index 1053dd5..b52b8f1 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_dec_h264.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec_h264.c
+@@ -704,10 +704,12 @@ static void cedrus_set_params(struct cedrus_context *ctx)
+ 
+ 	// enable int
+ 	/* XXX: Add H264 enable bit (0 value) */
+-	cedrus_write(dev, VE_H264_CTRL,
+-		     VE_H264_CTRL_SLICE_DECODE_INT |
+-		     VE_H264_CTRL_DECODE_ERR_INT |
+-		     VE_H264_CTRL_VLD_DATA_REQ_INT);
++	value = VE_H264_CTRL_SLICE_DECODE_INT |
++		VE_H264_CTRL_DECODE_ERR_INT |
++		VE_H264_CTRL_VLD_DATA_REQ_INT;
++	if (cedrus_picture_is_scaled(ctx))
++		value |= VE_H264_CTRL_SDROT_EN;
++	cedrus_write(dev, VE_H264_CTRL, value);
+ }
+ 
+ static int cedrus_dec_h264_job_configure(struct cedrus_context *cedrus_ctx)
+@@ -716,7 +718,18 @@ static int cedrus_dec_h264_job_configure(struct cedrus_context *cedrus_ctx)
+ 	struct cedrus_dec_h264_context *h264_ctx = cedrus_ctx->engine_ctx;
+ 	int ret;
+ 
+-	cedrus_write(dev, VE_H264_SDROT_CTRL, 0);
++	if (cedrus_picture_is_scaled(cedrus_ctx)) {
++		dma_addr_t luma_addr, chroma_addr;
++
++		cedrus_dec_picture_secondary_output_set(cedrus_ctx, &luma_addr,
++							&chroma_addr);
++		cedrus_write(dev, VE_H264_SDROT_LUMA, luma_addr);
++		cedrus_write(dev, VE_H264_SDROT_CHROMA, chroma_addr);
++		cedrus_write(dev, VE_H264_SDROT_CTRL,
++			     VE_SDRT_SCALE(cedrus_ctx->v4l2.scale_shift));
++	} else {
++		cedrus_write(dev, VE_H264_SDROT_CTRL, 0);
++	}
+ 	cedrus_write(dev, VE_H264_EXTRA_BUFFER1,
+ 		     h264_ctx->pic_info_buf_dma);
+ 	cedrus_write(dev, VE_H264_EXTRA_BUFFER2,
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec_h265.c b/drivers/staging/media/sunxi/cedrus/cedrus_dec_h265.c
+index 0a24d8b..22d1c84 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_dec_h265.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec_h265.c
+@@ -1003,16 +1003,15 @@ static int cedrus_dec_h265_job_configure(struct cedrus_context *cedrus_ctx)
+ 	}
+ 
+ 	/*
+-	 * P010 picture: the primary output holds the hidden 8-bit NV12
+-	 * reconstruction, the secondary output converts it to the visible
+-	 * P010 picture.
++	 * P010 or scaled picture: the primary output holds the hidden 8-bit
++	 * NV12 reconstruction, the secondary output writes the visible one.
+ 	 */
+-	if (cedrus_picture_is_p010(cedrus_ctx))
+-		cedrus_dec_picture_p010_output_set(cedrus_ctx);
++	if (cedrus_picture_is_secondary(cedrus_ctx))
++		cedrus_dec_picture_second_out_set(cedrus_ctx);
+ 
+ 	/* Enable relevant interrupts. */
+ 	value = VE_DEC_H265_CTRL_IRQ_MASK;
+-	if (cedrus_picture_is_p010(cedrus_ctx))
++	if (cedrus_picture_is_secondary(cedrus_ctx))
+ 		value |= VE_DEC_H265_CTRL_ROTATE_SCALE_OUT_EN;
+ 	cedrus_write(dev, VE_DEC_H265_CTRL, value);
+ 
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec_vp9.c b/drivers/staging/media/sunxi/cedrus/cedrus_dec_vp9.c
+index 93f73fb..a82ddec 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_dec_vp9.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec_vp9.c
+@@ -1028,7 +1028,7 @@ static int cedrus_vp9_job_configure(struct cedrus_context *ctx)
+ 
+ 	cedrus_write(dev, VE_DEC_VP9_SDRT_CTRL, 0);
+ 	if (p010) {
+-		cedrus_dec_picture_p010_output_set(ctx);
++		cedrus_dec_picture_second_out_set(ctx);
+ 	} else {
+ 		cedrus_write(dev, VE_DEC_VP9_SDRT_LUMA_ADDR, 0);
+ 		cedrus_write(dev, VE_DEC_VP9_SDRT_CHROMA_ADDR, 0);
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_proc.c b/drivers/staging/media/sunxi/cedrus/cedrus_proc.c
+index 8c64db2..1fad2f6 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_proc.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_proc.c
+@@ -420,6 +420,8 @@ static int cedrus_proc_s_fmt(struct file *file, void *private,
+ 
+ 	/* Update the current engine from the coded format. */
+ 	if (format_type == CEDRUS_FORMAT_TYPE_CODED) {
++		ctx->v4l2.scale_shift = 0;
++
+ 		ret = cedrus_context_engine_update(ctx);
+ 		if (ret)
+ 			return ret;
+@@ -511,6 +513,75 @@ static int cedrus_proc_enum_frameintervals(struct file *file, void *private,
+ 	return 0;
+ }
+ 
++/* The decoder's selection: the picture, scaled by COMPOSE. */
++static int cedrus_proc_compose_get(struct cedrus_context *ctx,
++				   struct v4l2_selection *selection)
++{
++	struct v4l2_pix_format *pix_format_coded =
++		&ctx->v4l2.format_coded.fmt.pix;
++	struct v4l2_pix_format *pix_format = &ctx->v4l2.format_picture.fmt.pix;
++
++	selection->r.top = 0;
++	selection->r.left = 0;
++
++	switch (selection->target) {
++	case V4L2_SEL_TGT_COMPOSE_DEFAULT:
++	case V4L2_SEL_TGT_COMPOSE_BOUNDS:
++		selection->r.width = pix_format_coded->width;
++		selection->r.height = pix_format_coded->height;
++		return 0;
++	case V4L2_SEL_TGT_COMPOSE:
++		selection->r.width = pix_format->width;
++		selection->r.height = pix_format->height;
++		return 0;
++	}
++
++	return -EINVAL;
++}
++
++/* ⅛ wrote a partial picture on the H713 */
++#define CEDRUS_SCALE_SHIFT_MAX	2
++
++/*
++ * COMPOSE scales the decoded picture down by 1, 2 or 4 each way, the smallest
++ * ratio that fits it in the rectangle, before picture buffers are allocated.
++ */
++static int cedrus_proc_compose_set(struct cedrus_context *ctx,
++				   struct v4l2_selection *selection)
++{
++	struct v4l2_pix_format *pix_format_coded =
++		&ctx->v4l2.format_coded.fmt.pix;
++	struct v4l2_format *format = &ctx->v4l2.format_picture;
++	unsigned int shift = 0;
++	int ret;
++
++	if (selection->target != V4L2_SEL_TGT_COMPOSE)
++		return -EINVAL;
++
++	if (cedrus_context_queue_busy_check(ctx, selection->type))
++		return -EBUSY;
++
++	while (shift < CEDRUS_SCALE_SHIFT_MAX &&
++	       ((pix_format_coded->width >> shift) > selection->r.width ||
++		(pix_format_coded->height >> shift) > selection->r.height))
++		shift++;
++
++	ctx->v4l2.scale_shift = shift;
++
++	ret = cedrus_proc_format_picture_prepare(ctx, format);
++	if (ret)
++		return ret;
++
++	cedrus_context_selection_picture_reset(ctx);
++
++	selection->r.top = 0;
++	selection->r.left = 0;
++	selection->r.width = format->fmt.pix.width;
++	selection->r.height = format->fmt.pix.height;
++
++	return 0;
++}
++
+ static int cedrus_proc_g_selection(struct file *file, void *private,
+ 				   struct v4l2_selection *selection)
+ {
+@@ -525,6 +596,9 @@ static int cedrus_proc_g_selection(struct file *file, void *private,
+ 	if (format_type != CEDRUS_FORMAT_TYPE_PICTURE)
+ 		return -EINVAL;
+ 
++	if (ctx->proc->role == CEDRUS_ROLE_DECODER)
++		return cedrus_proc_compose_get(ctx, selection);
++
+ 	switch (selection->target) {
+ 	case V4L2_SEL_TGT_CROP_DEFAULT:
+ 	case V4L2_SEL_TGT_CROP_BOUNDS:
+@@ -556,6 +630,9 @@ static int cedrus_proc_s_selection(struct file *file, void *private,
+ 	if (format_type != CEDRUS_FORMAT_TYPE_PICTURE)
+ 		return -EINVAL;
+ 
++	if (ctx->proc->role == CEDRUS_ROLE_DECODER)
++		return cedrus_proc_compose_set(ctx, selection);
++
+ 	switch (selection->target) {
+ 	case V4L2_SEL_TGT_CROP:
+ 		/* Even dimensions are expected by most codecs. */
+@@ -826,8 +903,6 @@ static int cedrus_proc_v4l2_setup(struct cedrus_proc *proc)
+ 
+ 	if (proc->role == CEDRUS_ROLE_DECODER) {
+ 		v4l2_disable_ioctl(video_dev, VIDIOC_ENUM_FRAMEINTERVALS);
+-		v4l2_disable_ioctl(video_dev, VIDIOC_G_SELECTION);
+-		v4l2_disable_ioctl(video_dev, VIDIOC_S_SELECTION);
+ 		v4l2_disable_ioctl(video_dev, VIDIOC_G_PARM);
+ 		v4l2_disable_ioctl(video_dev, VIDIOC_S_PARM);
+ 		v4l2_disable_ioctl(video_dev, VIDIOC_ENCODER_CMD);
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_regs.h b/drivers/staging/media/sunxi/cedrus/cedrus_regs.h
+index 336a34c..0bc41bc 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_regs.h
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_regs.h
+@@ -770,6 +770,7 @@
+ 
+ #define VE_H264_CTRL			0x220
+ #define VE_H264_CTRL_VP8			BIT(29)
++#define VE_H264_CTRL_SDROT_EN			BIT(9)
+ #define VE_H264_CTRL_VLD_DATA_REQ_INT		BIT(2)
+ #define VE_H264_CTRL_DECODE_ERR_INT		BIT(1)
+ #define VE_H264_CTRL_SLICE_DECODE_INT		BIT(0)
+@@ -810,6 +811,8 @@
+ #define VE_H264_VLD_LEN			0x238
+ #define VE_H264_VLD_END			0x23c
+ #define VE_H264_SDROT_CTRL		0x240
++#define VE_H264_SDROT_LUMA		0x244
++#define VE_H264_SDROT_CHROMA		0x248
+ #define VE_H264_OUTPUT_FRAME_IDX	0x24c
+ #define VE_H264_EXTRA_BUFFER1		0x250
+ #define VE_H264_EXTRA_BUFFER2		0x254
+@@ -975,6 +978,10 @@
+ #define VE_DEC_VP9_BITS_END_BASE(a)		((a) >> 8)
+ 
+ #define VE_DEC_SECOND_OUT_CTRL		(VE_ENGINE_DEC_H265 + 0x50)
++
++/* Secondary output scale-down, 1 << shift each way, in SDRT and SDROT_CTRL */
++#define VE_SDRT_SCALE(shift) \
++	(SHIFT_AND_MASK_BITS(shift, 9, 8) | SHIFT_AND_MASK_BITS(shift, 11, 10))
+ #define VE_DEC_SECOND_OUT_LUMA_ADDR	(VE_ENGINE_DEC_H265 + 0x54)
+ #define VE_DEC_SECOND_OUT_CHROMA_ADDR	(VE_ENGINE_DEC_H265 + 0x58)
+ 

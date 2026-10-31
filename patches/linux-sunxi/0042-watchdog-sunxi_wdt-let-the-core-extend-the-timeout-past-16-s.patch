@@ -1,0 +1,53 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 24 Oct 2026 14:44:29 +0000
+Subject: [PATCH] watchdog: sunxi_wdt: let the core extend the timeout past 16
+ s
+
+The hardware counts at most 16 s, and the driver gives that as max_timeout,
+so a longer timeout is refused with -EINVAL: systemd's RuntimeWatchdogSec=80
+leaves the watchdog unarmed. Give it as max_hw_heartbeat_ms instead, as
+meson_gxbb_wdt does, and the core pings the hardware between the user's
+pings; the hardware is programmed with at most 16 s.
+---
+ drivers/watchdog/sunxi_wdt.c | 11 ++++++-----
+ 1 file changed, 6 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/watchdog/sunxi_wdt.c b/drivers/watchdog/sunxi_wdt.c
+index 3db3452..4d67caa 100644
+--- a/drivers/watchdog/sunxi_wdt.c
++++ b/drivers/watchdog/sunxi_wdt.c
+@@ -166,16 +166,17 @@ static int sunxi_wdt_set_timeout(struct watchdog_device *wdt_dev,
+ 	struct sunxi_wdt_dev *sunxi_wdt = watchdog_get_drvdata(wdt_dev);
+ 	void __iomem *wdt_base = sunxi_wdt->wdt_base;
+ 	const struct sunxi_wdt_reg *regs = sunxi_wdt->wdt_regs;
++	unsigned int hw_timeout = min_t(unsigned int, timeout, WDT_MAX_TIMEOUT);
+ 	u32 reg;
+ 
+-	if (wdt_timeout_map[timeout] == 0)
+-		timeout++;
++	if (wdt_timeout_map[hw_timeout] == 0)
++		hw_timeout++;
+ 
+-	sunxi_wdt->wdt_dev.timeout = timeout;
++	sunxi_wdt->wdt_dev.timeout = max(timeout, hw_timeout);
+ 
+ 	reg = readl(wdt_base + regs->wdt_mode);
+ 	reg &= ~(WDT_TIMEOUT_MASK << regs->wdt_timeout_shift);
+-	reg |= wdt_timeout_map[timeout] << regs->wdt_timeout_shift;
++	reg |= wdt_timeout_map[hw_timeout] << regs->wdt_timeout_shift;
+ 	reg |= regs->wdt_key_val;
+ 	writel(reg, wdt_base + regs->wdt_mode);
+ 
+@@ -309,7 +310,7 @@ static int sunxi_wdt_probe(struct platform_device *pdev)
+ 	sunxi_wdt->wdt_dev.info = &sunxi_wdt_info;
+ 	sunxi_wdt->wdt_dev.ops = &sunxi_wdt_ops;
+ 	sunxi_wdt->wdt_dev.timeout = WDT_MAX_TIMEOUT;
+-	sunxi_wdt->wdt_dev.max_timeout = WDT_MAX_TIMEOUT;
++	sunxi_wdt->wdt_dev.max_hw_heartbeat_ms = WDT_MAX_TIMEOUT * 1000;
+ 	sunxi_wdt->wdt_dev.min_timeout = WDT_MIN_TIMEOUT;
+ 	sunxi_wdt->wdt_dev.parent = dev;
+ 
+-- 
+2.47.3
+

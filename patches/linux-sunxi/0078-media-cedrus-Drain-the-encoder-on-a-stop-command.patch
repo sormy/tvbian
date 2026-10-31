@@ -1,0 +1,136 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 25 Oct 2026 14:11:01 +0000
+Subject: [PATCH 78/82] media: cedrus: Drain the encoder on a stop command
+
+ffmpeg and GStreamer drain a stateful encoder with V4L2_ENC_CMD_STOP and
+wait for the buffer flagged LAST. Implement the stop command, the EOS
+event and the last buffer with the mem2mem helpers.
+---
+ .../media/sunxi/cedrus/cedrus_context.c       | 32 ++++++++++++++++++-
+ .../staging/media/sunxi/cedrus/cedrus_proc.c  | 16 +++++++++-
+ 2 files changed, 46 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_context.c b/drivers/staging/media/sunxi/cedrus/cedrus_context.c
+index a8fed23..2f5d5d9 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_context.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_context.c
+@@ -12,6 +12,7 @@
+ #include <linux/videodev2.h>
+ #include <media/v4l2-ctrls.h>
+ #include <media/v4l2-device.h>
++#include <media/v4l2-event.h>
+ #include <media/v4l2-fh.h>
+ #include <media/v4l2-mem2mem.h>
+ #include <media/videobuf2-v4l2.h>
+@@ -213,6 +214,20 @@ int cedrus_context_selection_picture_reset(struct cedrus_context *ctx)
+ 
+ /* Job */
+ 
++static void cedrus_context_drain_check(struct cedrus_context *ctx)
++{
++	static const struct v4l2_event eos = { .type = V4L2_EVENT_EOS };
++	struct v4l2_m2m_ctx *m2m_ctx = ctx->v4l2.fh.m2m_ctx;
++	struct vb2_v4l2_buffer *src = v4l2_m2m_next_src_buf(m2m_ctx);
++
++	if (!src || !v4l2_m2m_is_last_draining_src_buf(m2m_ctx, src))
++		return;
++
++	v4l2_m2m_next_dst_buf(m2m_ctx)->flags |= V4L2_BUF_FLAG_LAST;
++	v4l2_event_queue_fh(&ctx->v4l2.fh, &eos);
++	v4l2_m2m_mark_stopped(m2m_ctx);
++}
++
+ void cedrus_context_job_finish(struct cedrus_context *ctx, int state)
+ {
+ 	struct cedrus_proc *proc = ctx->proc;
+@@ -222,6 +237,9 @@ void cedrus_context_job_finish(struct cedrus_context *ctx, int state)
+ 	cedrus_engine_job_finish(ctx, state);
+ 	memset(&ctx->job, 0, sizeof(ctx->job));
+ 
++	if (proc->role == CEDRUS_ROLE_ENCODER)
++		cedrus_context_drain_check(ctx);
++
+ 	v4l2_m2m_buf_done_and_job_finish(m2m_dev, m2m_ctx, state);
+ }
+ 
+@@ -497,8 +515,16 @@ static void cedrus_context_buffer_queue(struct vb2_buffer *vb2_buffer)
+ {
+ 	struct cedrus_context *ctx = vb2_get_drv_priv(vb2_buffer->vb2_queue);
+ 	struct vb2_v4l2_buffer *v4l2_buffer = to_vb2_v4l2_buffer(vb2_buffer);
++	struct v4l2_m2m_ctx *m2m_ctx = ctx->v4l2.fh.m2m_ctx;
+ 
+-	v4l2_m2m_buf_queue(ctx->v4l2.fh.m2m_ctx, v4l2_buffer);
++	if (V4L2_TYPE_IS_CAPTURE(vb2_buffer->type) &&
++	    vb2_is_streaming(vb2_buffer->vb2_queue) &&
++	    v4l2_m2m_dst_buf_is_last(m2m_ctx)) {
++		v4l2_m2m_last_buffer_done(m2m_ctx, v4l2_buffer);
++		return;
++	}
++
++	v4l2_m2m_buf_queue(m2m_ctx, v4l2_buffer);
+ }
+ 
+ static int cedrus_context_buffer_validate(struct vb2_buffer *vb2_buffer)
+@@ -531,6 +557,8 @@ static int cedrus_context_start_streaming(struct vb2_queue *queue,
+ 	if (WARN_ON(!engine))
+ 		return -ENODEV;
+ 
++	v4l2_m2m_update_start_streaming_state(ctx->v4l2.fh.m2m_ctx, queue);
++
+ 	/* Only start the engine from the coded queue. */
+ 	if (format_type != CEDRUS_FORMAT_TYPE_CODED)
+ 		return 0;
+@@ -593,6 +621,8 @@ static void cedrus_context_stop_streaming(struct vb2_queue *queue)
+ 	if (WARN_ON(!engine))
+ 		return;
+ 
++	v4l2_m2m_update_stop_streaming_state(ctx->v4l2.fh.m2m_ctx, queue);
++
+ 	/* Only stop the engine from the coded queue. */
+ 	if (format_type != CEDRUS_FORMAT_TYPE_CODED)
+ 		return;
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_proc.c b/drivers/staging/media/sunxi/cedrus/cedrus_proc.c
+index 8eec15a..8c64db2 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_proc.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_proc.c
+@@ -646,6 +646,15 @@ static int cedrus_proc_s_parm(struct file *file, void *private,
+ 	return 0;
+ }
+ 
++static int cedrus_proc_subscribe_event(struct v4l2_fh *fh,
++				       const struct v4l2_event_subscription *sub)
++{
++	if (sub->type == V4L2_EVENT_EOS)
++		return v4l2_event_subscribe(fh, sub, 0, NULL);
++
++	return v4l2_ctrl_subscribe_event(fh, sub);
++}
++
+ static const struct v4l2_ioctl_ops cedrus_proc_ioctl_ops = {
+ 	.vidioc_querycap		= cedrus_proc_querycap,
+ 
+@@ -682,7 +691,10 @@ static const struct v4l2_ioctl_ops cedrus_proc_ioctl_ops = {
+ 	.vidioc_decoder_cmd		= v4l2_m2m_ioctl_stateless_decoder_cmd,
+ 	.vidioc_try_decoder_cmd		= v4l2_m2m_ioctl_stateless_try_decoder_cmd,
+ 
+-	.vidioc_subscribe_event		= v4l2_ctrl_subscribe_event,
++	.vidioc_encoder_cmd		= v4l2_m2m_ioctl_encoder_cmd,
++	.vidioc_try_encoder_cmd		= v4l2_m2m_ioctl_try_encoder_cmd,
++
++	.vidioc_subscribe_event		= cedrus_proc_subscribe_event,
+ 	.vidioc_unsubscribe_event	= v4l2_event_unsubscribe,
+ };
+ 
+@@ -818,6 +830,8 @@ static int cedrus_proc_v4l2_setup(struct cedrus_proc *proc)
+ 		v4l2_disable_ioctl(video_dev, VIDIOC_S_SELECTION);
+ 		v4l2_disable_ioctl(video_dev, VIDIOC_G_PARM);
+ 		v4l2_disable_ioctl(video_dev, VIDIOC_S_PARM);
++		v4l2_disable_ioctl(video_dev, VIDIOC_ENCODER_CMD);
++		v4l2_disable_ioctl(video_dev, VIDIOC_TRY_ENCODER_CMD);
+ 	} else {
+ 		v4l2_disable_ioctl(video_dev, VIDIOC_DECODER_CMD);
+ 		v4l2_disable_ioctl(video_dev, VIDIOC_TRY_DECODER_CMD);
+-- 
+2.47.3
+

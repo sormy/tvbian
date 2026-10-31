@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 25 Oct 2026 17:55:37 +0000
+Subject: [PATCH] media: cedrus: Limit VP8 to 2048 wide
+
+Wider, the engine decodes wrong pictures with no error (2304 wide) or
+times each frame out (3840). Advertised only to 2048, a wider stream goes
+to a software decoder at once.
+---
+ drivers/staging/media/sunxi/cedrus/cedrus_dec_vp8.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec_vp8.c b/drivers/staging/media/sunxi/cedrus/cedrus_dec_vp8.c
+index 1df8f20..2657302 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_dec_vp8.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec_vp8.c
+@@ -952,9 +952,10 @@ static const struct v4l2_ctrl_config cedrus_dec_vp8_ctrl_configs[] = {
+ 	},
+ };
+ 
++/* Past 2048 wide the engine decodes wrong pictures, then times out. */
+ static const struct v4l2_frmsize_stepwise cedrus_dec_vp8_frmsize = {
+ 	.min_width	= 16,
+-	.max_width	= 4096,
++	.max_width	= 2048,
+ 	.step_width	= 16,
+ 
+ 	.min_height	= 16,
+-- 
+2.47.3
+

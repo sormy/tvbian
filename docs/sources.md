@@ -10,6 +10,8 @@ source resolves at build time; the release notes name what it resolved to.
 | -------------- | --------------------- | --------------------------------------------- |
 | `meson64`      | kernel.org stable     | newest longterm tag (`FOLLOW`)                |
 | `meson64-next` | kernel.org stable     | newest stable tag; opt-in                     |
+| `sunxi64`      | kernel.org stable     | newest longterm tag (`FOLLOW`)                |
+| `sunxi64-next` | kernel.org stable     | newest stable tag, LibreELEC's series; opt-in |
 | `rk35xx`       | rockchip-linux/kernel | tip of `develop-6.1`, soaked                  |
 | `rk35xx-next`  | rockchip-linux/kernel | tip of the newest `develop-*`, soaked; opt-in |
 

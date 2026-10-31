@@ -1,0 +1,369 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 25 Oct 2026 14:35:17 +0000
+Subject: [PATCH 82/82] media: cedrus: Keep the H.264 encoder's references out
+ of the picture buffers
+
+Each picture buffer carried its own reconstruction, and a P-frame
+referenced the previous buffer's. A client requeueing the buffer it just
+dequeued, as ffmpeg does, had the engine overwrite the reference it was
+reading. Keep two reference slots in the context and alternate them.
+---
+ .../media/sunxi/cedrus/cedrus_enc_h264.c      | 206 +++++++++---------
+ .../media/sunxi/cedrus/cedrus_enc_h264.h      |  30 ++-
+ 2 files changed, 113 insertions(+), 123 deletions(-)
+
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.c b/drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.c
+index 46441d5..54b153d 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.c
+@@ -495,6 +495,67 @@ static int cedrus_enc_h264_ctrl_prepare(struct cedrus_context *cedrus_ctx,
+ 
+ /* Context */
+ 
++static int cedrus_enc_h264_ref_setup(struct device *dev,
++				     struct cedrus_enc_h264_ref *ref,
++				     unsigned int width_mbs,
++				     unsigned int height_mbs)
++{
++	unsigned int subpix_size_width, subpix_size_height;
++	int ret;
++
++	/* Sub-pixel Buffer */
++
++	subpix_size_width = ALIGN_DOWN((width_mbs + 47) * 2 / 3, 32) +
++			    ALIGN(width_mbs, 32) * 2;
++	subpix_size_height = (height_mbs * 16 + 72) / 8;
++
++	ref->subpix_size = subpix_size_width * subpix_size_height;
++
++	ref->subpix = dma_alloc_attrs(dev, ref->subpix_size,
++					      &ref->subpix_dma,
++					      GFP_KERNEL,
++					      DMA_ATTR_NO_KERNEL_MAPPING);
++	if (!ref->subpix)
++		return -ENOMEM;
++
++	/* Reconstruction Buffer */
++
++	ref->rec_luma_size = ALIGN(width_mbs, 2) * 16 *
++				     ALIGN(height_mbs + 1, 4) * 16;
++	ref->rec_chroma_size = ALIGN(width_mbs, 2) * 16 *
++				       ALIGN(DIV_ROUND_UP(height_mbs, 2), 4) *
++				       16;
++
++	ref->rec_size = ALIGN(ref->rec_luma_size +
++				      ref->rec_chroma_size, SZ_4K);
++
++	ref->rec = dma_alloc_attrs(dev, ref->rec_size,
++					   &ref->rec_dma, GFP_KERNEL,
++					   DMA_ATTR_NO_KERNEL_MAPPING);
++	if (!ref->rec) {
++		ret = -ENOMEM;
++		goto error_subpix;
++	}
++
++	return 0;
++
++error_subpix:
++	dma_free_attrs(dev, ref->subpix_size, ref->subpix,
++		       ref->subpix_dma, DMA_ATTR_NO_KERNEL_MAPPING);
++
++	return ret;
++}
++
++static void cedrus_enc_h264_ref_cleanup(struct device *dev,
++					struct cedrus_enc_h264_ref *ref)
++{
++	dma_free_attrs(dev, ref->rec_size, ref->rec,
++		       ref->rec_dma, DMA_ATTR_NO_KERNEL_MAPPING);
++
++	dma_free_attrs(dev, ref->subpix_size, ref->subpix,
++		       ref->subpix_dma, DMA_ATTR_NO_KERNEL_MAPPING);
++}
++
+ static int cedrus_enc_h264_setup(struct cedrus_context *cedrus_ctx)
+ {
+ 	struct device *dev = cedrus_ctx->proc->dev->dev;
+@@ -503,7 +564,7 @@ static int cedrus_enc_h264_setup(struct cedrus_context *cedrus_ctx)
+ 	struct cedrus_enc_h264_state *state = &h264_ctx->state;
+ 	struct v4l2_pix_format *pix_format =
+ 		&cedrus_ctx->v4l2.format_picture.fmt.pix;
+-	unsigned int id;
++	unsigned int id, i;
+ 	int ret;
+ 
+ 	h264_ctx->width_mbs = DIV_ROUND_UP(pix_format->width, 16);
+@@ -540,6 +601,18 @@ static int cedrus_enc_h264_setup(struct cedrus_context *cedrus_ctx)
+ 		goto error_deblk;
+ 	}
+ 
++	/* Reference Buffers */
++
++	for (i = 0; i < ARRAY_SIZE(h264_ctx->refs); i++) {
++		ret = cedrus_enc_h264_ref_setup(dev, &h264_ctx->refs[i],
++						h264_ctx->width_mbs,
++						h264_ctx->height_mbs);
++		if (ret)
++			goto error_refs;
++	}
++
++	h264_ctx->ref_index = 0;
++
+ 	/* State */
+ 
+ 	state->step = CEDRUS_ENC_H264_STEP_START;
+@@ -547,8 +620,6 @@ static int cedrus_enc_h264_setup(struct cedrus_context *cedrus_ctx)
+ 	state->frame_num = 0;
+ 	state->pic_order_cnt_lsb = 0;
+ 
+-	h264_ctx->subpix_last_dma = 0;
+-
+ 	/* Bitstream Parameters */
+ 
+ 	h264_ctx->log2_max_frame_num = 8;
+@@ -573,6 +644,12 @@ static int cedrus_enc_h264_setup(struct cedrus_context *cedrus_ctx)
+ 	return 0;
+ 
+ error_dma:
++	i = ARRAY_SIZE(h264_ctx->refs);
++
++error_refs:
++	while (i--)
++		cedrus_enc_h264_ref_cleanup(dev, &h264_ctx->refs[i]);
++
+ 	dma_free_attrs(dev, h264_ctx->row_info_size, h264_ctx->row_info,
+ 		       h264_ctx->row_info_dma, DMA_ATTR_NO_KERNEL_MAPPING);
+ error_deblk:
+@@ -589,6 +666,10 @@ static void cedrus_enc_h264_cleanup(struct cedrus_context *cedrus_ctx)
+ {
+ 	struct device *dev = cedrus_ctx->proc->dev->dev;
+ 	struct cedrus_enc_h264_context *h264_ctx = cedrus_ctx->engine_ctx;
++	unsigned int i;
++
++	for (i = 0; i < ARRAY_SIZE(h264_ctx->refs); i++)
++		cedrus_enc_h264_ref_cleanup(dev, &h264_ctx->refs[i]);
+ 
+ 	dma_free_attrs(dev, h264_ctx->row_info_size, h264_ctx->row_info,
+ 		       h264_ctx->row_info_dma, DMA_ATTR_NO_KERNEL_MAPPING);
+@@ -600,78 +681,6 @@ static void cedrus_enc_h264_cleanup(struct cedrus_context *cedrus_ctx)
+ 
+ /* Buffer */
+ 
+-static int cedrus_enc_h264_buffer_setup(struct cedrus_context *cedrus_ctx,
+-					struct cedrus_buffer *cedrus_buffer)
+-{
+-	struct device *dev = cedrus_ctx->proc->dev->dev;
+-	struct cedrus_enc_h264_buffer *h264_buffer =
+-		cedrus_buffer->engine_buffer;
+-	struct v4l2_pix_format *pix_format =
+-		&cedrus_ctx->v4l2.format_picture.fmt.pix;
+-	unsigned int width_mbs, height_mbs;
+-	unsigned int subpix_size_width, subpix_size_height;
+-	int ret;
+-
+-	width_mbs = DIV_ROUND_UP(pix_format->width, 16);
+-	height_mbs = DIV_ROUND_UP(pix_format->height, 16);
+-
+-	/* Sub-pixel Buffer */
+-
+-	subpix_size_width = ALIGN_DOWN((width_mbs + 47) * 2 / 3, 32) +
+-			    ALIGN(width_mbs, 32) * 2;
+-	subpix_size_height = (height_mbs * 16 + 72) / 8;
+-
+-	h264_buffer->subpix_size = subpix_size_width * subpix_size_height;
+-
+-	h264_buffer->subpix = dma_alloc_attrs(dev, h264_buffer->subpix_size,
+-					      &h264_buffer->subpix_dma,
+-					      GFP_KERNEL,
+-					      DMA_ATTR_NO_KERNEL_MAPPING);
+-	if (!h264_buffer->subpix)
+-		return -ENOMEM;
+-
+-	/* Reconstruction Buffer */
+-
+-	h264_buffer->rec_luma_size = ALIGN(width_mbs, 2) * 16 *
+-				     ALIGN(height_mbs + 1, 4) * 16;
+-	h264_buffer->rec_chroma_size = ALIGN(width_mbs, 2) * 16 *
+-				       ALIGN(DIV_ROUND_UP(height_mbs, 2), 4) *
+-				       16;
+-
+-	h264_buffer->rec_size = ALIGN(h264_buffer->rec_luma_size +
+-				      h264_buffer->rec_chroma_size, SZ_4K);
+-
+-	h264_buffer->rec = dma_alloc_attrs(dev, h264_buffer->rec_size,
+-					   &h264_buffer->rec_dma, GFP_KERNEL,
+-					   DMA_ATTR_NO_KERNEL_MAPPING);
+-	if (!h264_buffer->rec) {
+-		ret = -ENOMEM;
+-		goto error_subpix;
+-	}
+-
+-	return 0;
+-
+-error_subpix:
+-	dma_free_attrs(dev, h264_buffer->subpix_size, h264_buffer->subpix,
+-		       h264_buffer->subpix_dma, DMA_ATTR_NO_KERNEL_MAPPING);
+-
+-	return ret;
+-}
+-
+-static void cedrus_enc_h264_buffer_cleanup(struct cedrus_context *ctx,
+-					   struct cedrus_buffer *cedrus_buffer)
+-{
+-	struct device *dev = ctx->proc->dev->dev;
+-	struct cedrus_enc_h264_buffer *h264_buffer =
+-		cedrus_buffer->engine_buffer;
+-
+-	dma_free_attrs(dev, h264_buffer->rec_size, h264_buffer->rec,
+-		       h264_buffer->rec_dma, DMA_ATTR_NO_KERNEL_MAPPING);
+-
+-	dma_free_attrs(dev, h264_buffer->subpix_size, h264_buffer->subpix,
+-		       h264_buffer->subpix_dma, DMA_ATTR_NO_KERNEL_MAPPING);
+-}
+-
+ /* Job */
+ 
+ static int cedrus_enc_h264_job_prepare(struct cedrus_context *cedrus_ctx)
+@@ -1182,12 +1191,12 @@ static int cedrus_enc_h264_job_configure(struct cedrus_context *cedrus_ctx)
+ 	struct cedrus_device *dev = cedrus_ctx->proc->dev;
+ 	struct cedrus_enc_h264_job *job = cedrus_ctx->engine_job;
+ 	struct cedrus_enc_h264_context *h264_ctx = cedrus_ctx->engine_ctx;
+-	struct cedrus_enc_h264_buffer *h264_buffer =
+-		cedrus_job_engine_buffer(cedrus_ctx);
++	struct cedrus_enc_h264_ref *rec =
++		&h264_ctx->refs[h264_ctx->ref_index];
++	struct cedrus_enc_h264_ref *ref = rec;
+ 	struct v4l2_pix_format *pix_format =
+ 		&cedrus_ctx->v4l2.format_picture.fmt.pix;
+ 	unsigned int stride_mbs_div_48;
+-	unsigned int luma_size;
+ 	unsigned int size;
+ 	dma_addr_t addr;
+ 	u32 value;
+@@ -1222,40 +1231,26 @@ static int cedrus_enc_h264_job_configure(struct cedrus_context *cedrus_ctx)
+ 
+ 	cedrus_write(dev, VE_ENC_AVC_MV_BUF_ADDR_REG, 0);
+ 
+-	/* Configure reconstruction buffer. */
++	/* Configure reconstruction and reference buffers. */
+ 
+-	cedrus_enc_write_addr(dev, VE_ENC_AVC_REC_ADDR_Y_REG, h264_buffer->rec_dma);
+-	cedrus_enc_write_addr(dev, VE_ENC_AVC_REC_ADDR_C_REG, h264_buffer->rec_dma +
+-		     h264_buffer->rec_luma_size);
++	if (job->frame_type == CEDRUS_ENC_H264_FRAME_TYPE_P)
++		ref = &h264_ctx->refs[!h264_ctx->ref_index];
+ 
+-	if (job->frame_type == CEDRUS_ENC_H264_FRAME_TYPE_P) {
+-		addr = h264_ctx->rec_last_dma;
+-		luma_size = h264_ctx->rec_last_luma_size;
+-	} else {
+-		/* XXX: is this really needed? */
+-		addr = h264_buffer->rec_dma;
+-		luma_size = h264_buffer->rec_luma_size;
+-	}
+-
+-	cedrus_enc_write_addr(dev, VE_ENC_AVC_REF0_ADDR_Y_REG, addr);
+-	cedrus_enc_write_addr(dev, VE_ENC_AVC_REF0_ADDR_C_REG, addr + luma_size);
++	h264_ctx->ref_index ^= 1;
+ 
+-	h264_ctx->rec_last_dma = h264_buffer->rec_dma;
+-	h264_ctx->rec_last_luma_size = h264_buffer->rec_luma_size;
++	cedrus_enc_write_addr(dev, VE_ENC_AVC_REC_ADDR_Y_REG, rec->rec_dma);
++	cedrus_enc_write_addr(dev, VE_ENC_AVC_REC_ADDR_C_REG,
++			      rec->rec_dma + rec->rec_luma_size);
++	cedrus_enc_write_addr(dev, VE_ENC_AVC_REF0_ADDR_Y_REG, ref->rec_dma);
++	cedrus_enc_write_addr(dev, VE_ENC_AVC_REF0_ADDR_C_REG,
++			      ref->rec_dma + ref->rec_luma_size);
+ 
+ 	/* Configure subpixel buffers. */
+ 
+ 	cedrus_enc_write_addr(dev, VE_ENC_AVC_SUBPIX_ADDR_NEW_REG,
+-		     h264_buffer->subpix_dma);
+-
+-	if (!h264_ctx->subpix_last_dma)
+-		h264_ctx->subpix_last_dma = h264_buffer->subpix_dma;
+-
+-	/* XXX: is this for the last reference or the last encoded frame? */
++			      rec->subpix_dma);
+ 	cedrus_enc_write_addr(dev, VE_ENC_AVC_SUBPIX_ADDR_LAST_REG,
+-		     h264_ctx->subpix_last_dma);
+-
+-	h264_ctx->subpix_last_dma = h264_buffer->subpix_dma;
++			      ref->subpix_dma);
+ 
+ 	/* Configure deblocking filter buffer. */
+ 
+@@ -1431,8 +1426,6 @@ static const struct cedrus_engine_ops cedrus_enc_h264_ops = {
+ 	.setup			= cedrus_enc_h264_setup,
+ 	.cleanup		= cedrus_enc_h264_cleanup,
+ 
+-	.buffer_setup		= cedrus_enc_h264_buffer_setup,
+-	.buffer_cleanup		= cedrus_enc_h264_buffer_cleanup,
+ 
+ 	.job_prepare		= cedrus_enc_h264_job_prepare,
+ 	.job_configure		= cedrus_enc_h264_job_configure,
+@@ -1670,5 +1663,4 @@ const struct cedrus_engine cedrus_enc_h264 = {
+ 
+ 	.ctx_size		= sizeof(struct cedrus_enc_h264_context),
+ 	.job_size		= sizeof(struct cedrus_enc_h264_job),
+-	.buffer_size		= sizeof(struct cedrus_enc_h264_buffer),
+ };
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.h b/drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.h
+index 3ef6cbd..fa0e89e 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.h
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.h
+@@ -75,6 +75,18 @@ struct cedrus_enc_h264_state {
+ 	unsigned int	qp_init;
+ };
+ 
++struct cedrus_enc_h264_ref {
++	void		*rec;
++	dma_addr_t	rec_dma;
++	unsigned int	rec_size;
++	unsigned int	rec_luma_size;
++	unsigned int	rec_chroma_size;
++
++	void		*subpix;
++	dma_addr_t	subpix_dma;
++	unsigned int	subpix_size;
++};
++
+ struct cedrus_enc_h264_context {
+ 	struct cedrus_enc_h264_state	state;
+ 
+@@ -90,10 +102,8 @@ struct cedrus_enc_h264_context {
+ 	dma_addr_t			row_info_dma;
+ 	unsigned int			row_info_size;
+ 
+-	dma_addr_t			subpix_last_dma;
+-
+-	dma_addr_t			rec_last_dma;
+-	unsigned int			rec_last_luma_size;
++	struct cedrus_enc_h264_ref	refs[2];
++	unsigned int			ref_index;
+ 
+ 	unsigned int			width_mbs;
+ 	unsigned int			height_mbs;
+@@ -126,18 +136,6 @@ struct cedrus_enc_h264_context {
+ 	struct v4l2_ctrl		*entropy_mode_ctrl;
+ };
+ 
+-struct cedrus_enc_h264_buffer {
+-	void		*rec;
+-	dma_addr_t	rec_dma;
+-	unsigned int	rec_size;
+-	unsigned int	rec_luma_size;
+-	unsigned int	rec_chroma_size;
+-
+-	void		*subpix;
+-	dma_addr_t	subpix_dma;
+-	unsigned int	subpix_size;
+-};
+-
+ extern const struct cedrus_engine cedrus_enc_h264;
+ 
+ static inline u8 cedrus_enc_h264_nalu_header(u8 type, u8 ref_idc)
+-- 
+2.47.3
+

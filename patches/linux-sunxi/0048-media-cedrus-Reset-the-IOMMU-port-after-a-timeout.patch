@@ -1,0 +1,29 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 24 Oct 2026 20:40:00 +0000
+Subject: [PATCH] media: cedrus: Reset the IOMMU port after a timeout
+
+A stream the engine cannot decode makes it read outside its buffers; the
+IOMMU faults, the frame times out, and the watchdog resets the engine.
+Its IOMMU port stays stuck, and later streams decode to garbage until a
+reboot. Reset the port too, once the engine is idle.
+---
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_hw.c b/drivers/staging/media/sunxi/cedrus/cedrus_hw.c
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_hw.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_hw.c
+@@ -22,6 +22,7 @@
+ #include <linux/pm_runtime.h>
+ #include <linux/regmap.h>
+ #include <linux/reset.h>
++#include <linux/soc/sunxi/sun50i_iommu.h>
+ #include <linux/soc/sunxi/sunxi_sram.h>
+ 
+ #include <media/videobuf2-core.h>
+@@ -181,6 +182,7 @@
+ 
+ 	v4l2_err(&dev->v4l2_dev, "frame processing timed out!\n");
+ 	reset_control_reset(dev->rstc);
++	sun50i_iommu_reset_master(dev->dev);
+ 	v4l2_m2m_buf_done_and_job_finish(ctx->dev->m2m_dev, ctx->fh.m2m_ctx,
+ 					 VB2_BUF_STATE_ERROR);
+ }

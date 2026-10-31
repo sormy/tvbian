@@ -1,0 +1,87 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Paul Kocialkowski <paul.kocialkowski@bootlin.com>
+Date: Wed, 19 Apr 2023 13:51:18 +0200
+Subject: [PATCH 71/85] media: cedrus: Remove pdev from cedrus dev
+
+Signed-off-by: Paul Kocialkowski <paul.kocialkowski@bootlin.com>
+---
+ drivers/staging/media/sunxi/cedrus/cedrus.c    | 3 +--
+ drivers/staging/media/sunxi/cedrus/cedrus.h    | 1 -
+ drivers/staging/media/sunxi/cedrus/cedrus_hw.c | 6 +++---
+ drivers/staging/media/sunxi/cedrus/cedrus_hw.h | 2 +-
+ 4 files changed, 5 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus.c b/drivers/staging/media/sunxi/cedrus/cedrus.c
+index 587d26a..ee61b15 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus.c
+@@ -541,9 +541,8 @@ static int cedrus_probe(struct platform_device *pdev)
+ 
+ 	dev->vfd = cedrus_video_device;
+ 	dev->dev = &pdev->dev;
+-	dev->pdev = pdev;
+ 
+-	ret = cedrus_hw_probe(dev);
++	ret = cedrus_hw_probe(dev, pdev);
+ 	if (ret) {
+ 		dev_err(&pdev->dev, "Failed to probe hardware\n");
+ 		return ret;
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus.h b/drivers/staging/media/sunxi/cedrus/cedrus.h
+index b7726d7..d2ba7cb 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus.h
++++ b/drivers/staging/media/sunxi/cedrus/cedrus.h
+@@ -224,7 +224,6 @@ struct cedrus_dev {
+ 	struct v4l2_device	v4l2_dev;
+ 	struct video_device	vfd;
+ 	struct media_device	mdev;
+-	struct platform_device	*pdev;
+ 	struct device		*dev;
+ 	struct v4l2_m2m_dev	*m2m_dev;
+ 
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_hw.c b/drivers/staging/media/sunxi/cedrus/cedrus_hw.c
+index 55da19f..e8e05b9 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_hw.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_hw.c
+@@ -314,7 +314,7 @@ err_rst:
+ 	return ret;
+ }
+ 
+-int cedrus_hw_probe(struct cedrus_dev *dev)
++int cedrus_hw_probe(struct cedrus_dev *dev, struct platform_device *pdev)
+ {
+ 	const struct cedrus_variant *variant;
+ 	int irq_dec;
+@@ -326,7 +326,7 @@ int cedrus_hw_probe(struct cedrus_dev *dev)
+ 
+ 	dev->capabilities = variant->capabilities;
+ 
+-	irq_dec = platform_get_irq(dev->pdev, 0);
++	irq_dec = platform_get_irq(pdev, 0);
+ 	if (irq_dec <= 0)
+ 		return irq_dec;
+ 	ret = devm_request_irq(dev->dev, irq_dec, cedrus_irq,
+@@ -383,7 +383,7 @@ int cedrus_hw_probe(struct cedrus_dev *dev)
+ 		goto err_sram;
+ 	}
+ 
+-	dev->base = devm_platform_ioremap_resource(dev->pdev, 0);
++	dev->base = devm_platform_ioremap_resource(pdev, 0);
+ 	if (IS_ERR(dev->base)) {
+ 		dev_err(dev->dev, "Failed to map registers\n");
+ 
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_hw.h b/drivers/staging/media/sunxi/cedrus/cedrus_hw.h
+index 6f3dea7..f1a10ae 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_hw.h
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_hw.h
+@@ -28,7 +28,7 @@ void cedrus_dst_p010_output_set(struct cedrus_ctx *ctx,
+ int cedrus_hw_suspend(struct device *device);
+ int cedrus_hw_resume(struct device *device);
+ 
+-int cedrus_hw_probe(struct cedrus_dev *dev);
++int cedrus_hw_probe(struct cedrus_dev *dev, struct platform_device *pdev);
+ void cedrus_hw_remove(struct cedrus_dev *dev);
+ 
+ void cedrus_watchdog(struct work_struct *work);
+-- 
+2.47.3
+

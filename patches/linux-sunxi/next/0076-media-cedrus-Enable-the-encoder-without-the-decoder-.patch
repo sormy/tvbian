@@ -1,0 +1,34 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 25 Oct 2026 13:24:12 +0000
+Subject: [PATCH 76/85] media: cedrus: Enable the encoder without the decoder's
+ mode bits
+
+Enabling the encoder or-ed its bits into the mode register, so a mode a
+decode left there, such as VP9's RAMPD and bit 30, stayed set. Write the
+mode outright.
+---
+ drivers/staging/media/sunxi/cedrus/cedrus_enc.c | 7 ++-----
+ 1 file changed, 2 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_enc.c b/drivers/staging/media/sunxi/cedrus/cedrus_enc.c
+index 22ddf29..054b2dc 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_enc.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_enc.c
+@@ -79,11 +79,8 @@ int cedrus_enc_format_coded_configure(struct cedrus_context *ctx)
+ 
+ 	/* Enable encoder. */
+ 
+-	value = cedrus_read(dev, VE_MODE_REG);
+-	value |= VE_MODE_ENC_ENABLE |
+-		 VE_MODE_ENC_ISP_ENABLE |
+-		 VE_MODE_DEC_DISABLED;
+-	cedrus_write(dev, VE_MODE_REG, value);
++	cedrus_write(dev, VE_MODE_REG, VE_MODE_ENC_ENABLE |
++		     VE_MODE_ENC_ISP_ENABLE | VE_MODE_DEC_DISABLED);
+ 
+ 	return 0;
+ }
+-- 
+2.47.3
+

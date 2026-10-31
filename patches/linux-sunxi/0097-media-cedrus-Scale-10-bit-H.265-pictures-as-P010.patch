@@ -1,0 +1,64 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Wed, 28 Oct 2026 18:30:00 -0400
+Subject: [PATCH] media: cedrus: Scale 10-bit H.265 pictures as P010
+
+The secondary output scaled 8-bit NV12 only, so a 10-bit 4K stream on
+a smaller screen was decoded at full size: its 4K P010 copy, 16 bits a
+sample, is what holds the engine to 16-18 fps. The same output already
+converts the reconstruction to P010; let it scale while it does.
+
+A scaled 10-bit picture keeps the full-size hidden reconstruction and
+its low 2 bits plane after the scaled P010 picture: size the plane from
+the coded picture, not the scaled one, and count the hidden NV12 once.
+---
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec.c b/drivers/staging/media/sunxi/cedrus/cedrus_dec.c
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_dec.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec.c
+@@ -414,6 +414,14 @@
+ 	    cedrus_format_is_afbc(pix_format->pixelformat))
+ 		return 0;
+ 
++	/* Scaled, the hidden reconstruction is already counted at full size. */
++	if (cedrus_picture_scale_shift(ctx, pix_format->pixelformat)) {
++		struct v4l2_pix_format *coded = &ctx->v4l2.format_coded.fmt.pix;
++
++		return cedrus_picture_2bit_size(coded->width,
++						ALIGN(coded->height, 16));
++	}
++
+ 	extra = cedrus_picture_2bit_size(pix_format->width, pix_format->height);
+ 
+ 	if (pix_format->pixelformat == V4L2_PIX_FMT_P010)
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus.h b/drivers/staging/media/sunxi/cedrus/cedrus.h
+--- a/drivers/staging/media/sunxi/cedrus/cedrus.h
++++ b/drivers/staging/media/sunxi/cedrus/cedrus.h
+@@ -169,15 +169,22 @@
+ 	return ctx->v4l2.format_picture.fmt.pix.pixelformat == V4L2_PIX_FMT_P010;
+ }
+ 
+-/* The secondary output scales 8-bit NV12 H.264 and H.265 pictures only. */
++/*
++ * The secondary output scales 8-bit NV12 H.264 and H.265 pictures, and
++ * 10-bit H.265 ones as P010.
++ */
+ static inline unsigned int cedrus_picture_scale_shift(struct cedrus_context *ctx,
+ 						      u32 pixelformat)
+ {
+ 	u32 coded = ctx->v4l2.format_coded.fmt.pix.pixelformat;
++	bool nv12 = pixelformat == V4L2_PIX_FMT_NV12 &&
++		    ctx->bit_depth_coded <= 8 &&
++		    (coded == V4L2_PIX_FMT_H264_SLICE ||
++		     coded == V4L2_PIX_FMT_HEVC_SLICE);
++	bool p010 = pixelformat == V4L2_PIX_FMT_P010 &&
++		    coded == V4L2_PIX_FMT_HEVC_SLICE;
+ 
+-	if (pixelformat != V4L2_PIX_FMT_NV12 || ctx->bit_depth_coded > 8 ||
+-	    (coded != V4L2_PIX_FMT_H264_SLICE &&
+-	     coded != V4L2_PIX_FMT_HEVC_SLICE))
++	if (!nv12 && !p010)
+ 		return 0;
+ 
+ 	return ctx->v4l2.scale_shift;
+-- 
+2.55.0

@@ -88,6 +88,7 @@ another, so nothing rots when one is rewritten.
 | `patches/e2tools/README.md`              | the patched `e2tools`; why the stock one corrupts an image on delete |
 | `patches/linux-rockchip/README.md`       | the vendor kernel's patches, their PRs, what Rockchip fixed since    |
 | `patches/linux-meson/README.md`          | mainline kernel patches for Amlogic boards, on their way upstream    |
+| `patches/linux-sunxi/README.md`          | mainline kernel patches for Allwinner boards: the H616 display       |
 | `patches/aic8800/README.md`              | the AIC8800 SDIO driver: Radxa's patches, then ours                  |
 | `patches/seekwave-swt6621s/README.md`    | the H96 Max Wi-Fi driver patches and their PRs                       |
 | `patches/mt76-mt7668/README.md`          | mainline mt76 for the MT7668S: what it does, its gaps, its firmware  |
@@ -99,6 +100,7 @@ another, so nothing rots when one is rewritten.
 | `patches/mesa/README.md`                 | Panfrost fixes on Debian's Mesa, backported from upstream            |
 | `patches/gxlimg/README.md`               | the Amlogic boot-image tool, built on macOS                          |
 | `keyring/README.md`                      | the archive signing key: fingerprint, secret, rotation               |
+| `kernel/regdb-certs/README.md`           | the regulatory database's signing keys our kernels trust             |
 
 # Standing rules
 
@@ -202,6 +204,13 @@ diff. The diff is the record; reasoning belongs in the comment, the doc, or the 
 name, path or claim it touches is left stale elsewhere in the repo.
 
 ## Code
+
+**A `kernel/*.conf` lists every patch it applies, one path a line**: no loops, globs or `$(…)`. A
+`-next` conf may source its base and swap a patch with `${PATCHES/…/…}`. Where a patch comes from is
+its directory's README, never its path.
+
+**A driver refuses what it cannot show** rather than show garbage: an atomic check that fails is a
+player's cue to take another route; a picture that breaks is not.
 
 Less code is better. Communicate through names, not comments: comment a non-obvious _why_ only,
 never what the code already says, and keep it shorter than the code it explains. One responsibility

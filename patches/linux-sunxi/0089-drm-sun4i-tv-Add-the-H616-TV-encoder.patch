@@ -1,0 +1,249 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 25 Oct 2026 16:00:00 -0400
+Subject: [PATCH] drm/sun4i: tv: Add the H616 TV encoder
+
+The H616 pairs the classic encoder with a top block that routes the DAC
+and holds its analog trim and calibration, which Allwinner's driver
+takes from the efuse; the encoder's own calibration registers stay
+unused. Program the top, write Allwinner's PAL and NTSC settings, take
+the encoder's three clocks and two resets. The DAC's load detection
+stays off: armed, it clicks on the AV jack and sensed no cable here.
+
+---
+--- a/drivers/gpu/drm/sun4i/sun4i_tv.c
++++ b/drivers/gpu/drm/sun4i/sun4i_tv.c
+@@ -9,6 +9,7 @@
+ #include <linux/clk.h>
+ #include <linux/component.h>
+ #include <linux/module.h>
++#include <linux/nvmem-consumer.h>
+ #include <linux/of_address.h>
+ #include <linux/of_device.h>
+ #include <linux/platform_device.h>
+@@ -163,14 +164,52 @@
+ struct sun4i_tv_quirks {
+ 	unsigned int calibration;
+ 	unsigned int unknown : 1;
++	/* the H616's TVE top: DAC routing, analog trim and calibration */
++	unsigned int has_top : 1;
++};
++
++#define SUN50I_TVE_TOP_DAC_MAP_REG	0x020
++#define SUN50I_TVE_TOP_DAC_CFG0_REG	0x028
++#define SUN50I_TVE_TOP_DAC_CFG0_EN	BIT(0)
++#define SUN50I_TVE_TOP_DAC_CFG1_REG	0x02c
++#define SUN50I_TVE_TOP_DAC_CFG2_REG	0x030
++/* Allwinner's default when the efuse holds none */
++#define SUN50I_TVE_DAC_CAL_DEFAULT	625
++
++/* Allwinner's H616 encoder settings, as its own driver writes them */
++static const struct reg_sequence sun50i_h616_tve_pal[] = {
++	{ 0x004, 0x07060001 }, { 0x008, 0x00000000 }, { 0x00c, 0x02004000 },
++	{ 0x010, 0x2a098acb }, { 0x014, 0x008a0018 }, { 0x018, 0x00000016 },
++	{ 0x01c, 0x00160271 }, { 0x020, 0x00fc00fc }, { 0x100, 0x00000000 },
++	{ 0x104, 0x00000001 }, { 0x108, 0x00000005 }, { 0x10c, 0x00002929 },
++	{ 0x110, 0x00000000 }, { 0x114, 0x0016447e }, { 0x118, 0x0000a8a8 },
++	{ 0x11c, 0x001000fc }, { 0x124, 0x000005a0 }, { 0x128, 0x00010000 },
++	{ 0x12c, 0x00000101 }, { 0x134, 0x00000000 }, { 0x138, 0x00000000 },
++	{ 0x13c, 0x00000000 }, { 0x3a0, 0x00030001 }, { 0x0f8, 0x00000200 },
++	{ 0x120, 0x01e80320 }, { 0x014, 0x00820020 }, { 0x130, 0x20050013 },
++	{ 0x380, 0x00000300 },
++};
++
++static const struct reg_sequence sun50i_h616_tve_ntsc[] = {
++	{ 0x004, 0x07060000 }, { 0x008, 0x00000000 }, { 0x00c, 0x02004000 },
++	{ 0x010, 0x21f07c1f }, { 0x014, 0x00760020 }, { 0x018, 0x00000016 },
++	{ 0x01c, 0x0016020d }, { 0x020, 0x00f000f0 }, { 0x100, 0x00000001 },
++	{ 0x104, 0x00000000 }, { 0x108, 0x00000002 }, { 0x10c, 0x0000004f },
++	{ 0x110, 0x00000000 }, { 0x114, 0x0016447e }, { 0x118, 0x0000a0a0 },
++	{ 0x11c, 0x001000f0 }, { 0x124, 0x000005a0 }, { 0x128, 0x00000000 },
++	{ 0x12c, 0x00000101 }, { 0x134, 0x00000000 }, { 0x138, 0x00000000 },
++	{ 0x13c, 0x00000001 }, { 0x0f8, 0x00000200 }, { 0x120, 0x01e80320 },
++	{ 0x130, 0x20050364 }, { 0x380, 0x00000300 },
+ };
+ 
+ struct sun4i_tv {
+ 	struct drm_connector	connector;
+ 	struct drm_encoder	encoder;
+ 
+-	struct clk		*clk;
++	struct clk_bulk_data	*clks;
++	int			num_clks;
+ 	struct regmap		*regs;
++	void __iomem		*top;
+ 	struct reset_control	*reset;
+ 
+ 	struct sun4i_drv	*drv;
+@@ -278,9 +317,38 @@
+ 			   SUN4I_TVE_EN_ENABLE,
+ 			   0);
+ 
++	if (tv->top)
++		writel(readl(tv->top + SUN50I_TVE_TOP_DAC_CFG0_REG) &
++		       ~SUN50I_TVE_TOP_DAC_CFG0_EN,
++		       tv->top + SUN50I_TVE_TOP_DAC_CFG0_REG);
++
+ 	sunxi_engine_disable_color_correction(crtc->engine);
+ }
+ 
++static void sun50i_h616_tv_enable(struct sun4i_tv *tv,
++				  const struct tv_mode *tv_mode,
++				  struct sun4i_crtc *crtc)
++{
++	bool pal = tv_mode->tv_mode == DRM_MODE_TV_MODE_PAL;
++
++	regmap_multi_reg_write(tv->regs,
++			       pal ? sun50i_h616_tve_pal : sun50i_h616_tve_ntsc,
++			       pal ? ARRAY_SIZE(sun50i_h616_tve_pal) :
++				     ARRAY_SIZE(sun50i_h616_tve_ntsc));
++
++	sunxi_engine_apply_color_correction(crtc->engine);
++
++	writel(readl(tv->top + SUN50I_TVE_TOP_DAC_CFG0_REG) |
++	       SUN50I_TVE_TOP_DAC_CFG0_EN,
++	       tv->top + SUN50I_TVE_TOP_DAC_CFG0_REG);
++
++	/* the 216 MHz encoder clock, then the encoder */
++	regmap_write(tv->regs, SUN4I_TVE_EN_REG, 0x00300000);
++	regmap_update_bits(tv->regs, SUN4I_TVE_EN_REG, BIT(31), BIT(31));
++	regmap_update_bits(tv->regs, SUN4I_TVE_EN_REG,
++			   SUN4I_TVE_EN_ENABLE, SUN4I_TVE_EN_ENABLE);
++}
++
+ static void sun4i_tv_enable(struct drm_encoder *encoder,
+ 			    struct drm_atomic_commit *state)
+ {
+@@ -297,6 +365,11 @@
+ 
+ 	DRM_DEBUG_DRIVER("Enabling the TV Output\n");
+ 
++	if (tv->top) {
++		sun50i_h616_tv_enable(tv, tv_mode, crtc);
++		return;
++	}
++
+ 	/* Enable and map the DAC to the output */
+ 	regmap_update_bits(tv->regs, SUN4I_TVE_EN_REG,
+ 			   SUN4I_TVE_EN_DAC_MAP_MASK,
+@@ -413,7 +486,24 @@
+ 	drm_atomic_helper_connector_tv_reset(connector);
+ }
+ 
++static enum drm_connector_status
++sun4i_tv_comp_detect(struct drm_connector *connector, bool force)
++{
++	struct sun4i_tv *tv = container_of(connector, struct sun4i_tv,
++					   connector);
++	u32 val;
++
++	if (!tv->top)
++		return connector_status_unknown;
++
++	regmap_read(tv->regs, SUN4I_TVE_DETECT_STA_REG, &val);
++
++	return (val & 3) == 1 ? connector_status_connected :
++				connector_status_disconnected;
++}
++
+ static const struct drm_connector_funcs sun4i_tv_comp_connector_funcs = {
++	.detect			= sun4i_tv_comp_detect,
+ 	.fill_modes		= drm_helper_probe_single_connector_modes,
+ 	.destroy		= drm_connector_cleanup,
+ 	.reset			= sun4i_tv_connector_reset,
+@@ -429,6 +519,22 @@
+ 	.name		= "tv-encoder",
+ };
+ 
++static void sun50i_h616_tv_top_init(struct device *dev, struct sun4i_tv *tv)
++{
++	u32 cal = SUN50I_TVE_DAC_CAL_DEFAULT;
++	u32 efuse;
++
++	if (!nvmem_cell_read_u32(dev, "calibration", &efuse) && efuse >> 16)
++		cal = efuse >> 16;
++
++	/* DAC0 from TVE0, Allwinner's analog trim, the calibration, DAC off */
++	writel(1, tv->top + SUN50I_TVE_TOP_DAC_MAP_REG);
++	writel(0x23a, tv->top + SUN50I_TVE_TOP_DAC_CFG1_REG);
++	writel(0x10, tv->top + SUN50I_TVE_TOP_DAC_CFG2_REG);
++	writel(((0x8000 | (cal & 0x3ff)) << 16) | 0x4200,
++	       tv->top + SUN50I_TVE_TOP_DAC_CFG0_REG);
++}
++
+ static int sun4i_tv_bind(struct device *dev, struct device *master,
+ 			 void *data)
+ {
+@@ -464,7 +570,7 @@
+ 		return PTR_ERR(tv->regs);
+ 	}
+ 
+-	tv->reset = devm_reset_control_get(dev, NULL);
++	tv->reset = devm_reset_control_array_get_exclusive(dev);
+ 	if (IS_ERR(tv->reset)) {
+ 		dev_err(dev, "Couldn't get our reset line\n");
+ 		return PTR_ERR(tv->reset);
+@@ -476,13 +582,24 @@
+ 		return ret;
+ 	}
+ 
+-	tv->clk = devm_clk_get(dev, NULL);
+-	if (IS_ERR(tv->clk)) {
+-		dev_err(dev, "Couldn't get the TV encoder clock\n");
+-		ret = PTR_ERR(tv->clk);
++	tv->num_clks = devm_clk_bulk_get_all(dev, &tv->clks);
++	if (tv->num_clks < 0) {
++		dev_err(dev, "Couldn't get the TV encoder clocks\n");
++		ret = tv->num_clks;
+ 		goto err_assert_reset;
+ 	}
+-	clk_prepare_enable(tv->clk);
++	ret = clk_bulk_prepare_enable(tv->num_clks, tv->clks);
++	if (ret)
++		goto err_assert_reset;
++
++	if (quirks->has_top) {
++		tv->top = devm_platform_ioremap_resource(pdev, 1);
++		if (IS_ERR(tv->top)) {
++			ret = PTR_ERR(tv->top);
++			goto err_disable_clk;
++		}
++		sun50i_h616_tv_top_init(dev, tv);
++	}
+ 
+ 	if (quirks->calibration)
+ 		regmap_write(tv->regs, 0x304, quirks->calibration);
+@@ -536,7 +653,7 @@
+ err_cleanup_encoder:
+ 	drm_encoder_cleanup(&tv->encoder);
+ err_disable_clk:
+-	clk_disable_unprepare(tv->clk);
++	clk_bulk_disable_unprepare(tv->num_clks, tv->clks);
+ err_assert_reset:
+ 	reset_control_assert(tv->reset);
+ 	return ret;
+@@ -549,7 +666,7 @@
+ 
+ 	drm_connector_cleanup(&tv->connector);
+ 	drm_encoder_cleanup(&tv->encoder);
+-	clk_disable_unprepare(tv->clk);
++	clk_bulk_disable_unprepare(tv->num_clks, tv->clks);
+ 	reset_control_assert(tv->reset);
+ }
+ 
+@@ -580,10 +697,15 @@
+ 	.unknown = 1,
+ };
+ 
++static const struct sun4i_tv_quirks h616_quirks = {
++	.has_top = 1,
++};
++
+ static const struct of_device_id sun4i_tv_of_table[] = {
+ 	{ .compatible = "allwinner,sun4i-a10-tv-encoder", .data = &a10_quirks },
+ 	{ .compatible = "allwinner,sun8i-h3-tv-encoder", .data = &h3_quirks },
+ 	{ .compatible = "allwinner,sun50i-h5-tv-encoder", .data = &h5_quirks },
++	{ .compatible = "allwinner,sun50i-h616-tv-encoder", .data = &h616_quirks },
+ 	{ }
+ };
+ MODULE_DEVICE_TABLE(of, sun4i_tv_of_table);

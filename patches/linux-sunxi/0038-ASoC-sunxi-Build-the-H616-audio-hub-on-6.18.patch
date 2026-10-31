@@ -1,0 +1,23 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Mon, 26 Oct 2026 15:00:00 -0400
+Subject: [PATCH] ASoC: sunxi: Build the H616 audio hub on 6.18
+
+7.2 renamed a component's pcm_construct to pcm_new, same signature.
+
+---
+ sound/soc/sunxi/sun50i-h616-ahub.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/sound/soc/sunxi/sun50i-h616-ahub.c b/sound/soc/sunxi/sun50i-h616-ahub.c
+--- a/sound/soc/sunxi/sun50i-h616-ahub.c
++++ b/sound/soc/sunxi/sun50i-h616-ahub.c
+@@ -1149,7 +1149,7 @@ static const struct snd_soc_component_driver sun50i_ahub_component = {
+ 	.hw_params		= sun50i_ahub_pcm_hw_params,
+ 	.pointer		= sun50i_ahub_pcm_pointer,
+ 	.ack			= sun50i_ahub_pcm_ack,
+-	.pcm_new		= sun50i_ahub_pcm_new,
++	.pcm_construct		= sun50i_ahub_pcm_new,
+ };
+ 
+ static const struct regmap_config sun50i_ahub_regmap_config = {

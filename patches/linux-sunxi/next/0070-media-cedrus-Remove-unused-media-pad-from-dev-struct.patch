@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Paul Kocialkowski <paul.kocialkowski@bootlin.com>
+Date: Wed, 19 Apr 2023 13:48:19 +0200
+Subject: [PATCH 70/85] media: cedrus: Remove unused media pad from dev struct
+
+Signed-off-by: Paul Kocialkowski <paul.kocialkowski@bootlin.com>
+---
+ drivers/staging/media/sunxi/cedrus/cedrus.h | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus.h b/drivers/staging/media/sunxi/cedrus/cedrus.h
+index 9bd68e7..b7726d7 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus.h
++++ b/drivers/staging/media/sunxi/cedrus/cedrus.h
+@@ -224,7 +224,6 @@ struct cedrus_dev {
+ 	struct v4l2_device	v4l2_dev;
+ 	struct video_device	vfd;
+ 	struct media_device	mdev;
+-	struct media_pad	pad[2];
+ 	struct platform_device	*pdev;
+ 	struct device		*dev;
+ 	struct v4l2_m2m_dev	*m2m_dev;
+-- 
+2.47.3
+

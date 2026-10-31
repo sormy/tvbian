@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Thu, 29 Oct 2026 01:00:00 -0400
+Subject: [PATCH] drm/sun4i: mixer: Run the H616 display engine at 696 MHz
+
+Allwinner's own tree runs the H616's display engine at 696 MHz (pll-de
+and de, assigned-clock-rates 696000000), and stock firmware reads it
+back at that rate. Mainline set 600 MHz, which cuts the VI scaler's
+throughput by the same proportion. Use the vendor's rate; the DE PLL
+makes it as 24 MHz x 29.
+---
+diff --git a/drivers/gpu/drm/sun4i/sun8i_mixer.c b/drivers/gpu/drm/sun4i/sun8i_mixer.c
+--- a/drivers/gpu/drm/sun4i/sun8i_mixer.c
++++ b/drivers/gpu/drm/sun4i/sun8i_mixer.c
+@@ -1171,7 +1171,8 @@
+ 
+ static const struct sun8i_mixer_cfg sun50i_h616_mixer0_cfg = {
+ 	.de_type	= SUN8I_MIXER_DE33,
+-	.mod_rate	= 600000000,
++	/* Allwinner's own rate, the scaler's headroom */
++	.mod_rate	= 696000000,
+ 	.has_formatter	= 1,
+ };
+ 
+-- 
+2.55.0

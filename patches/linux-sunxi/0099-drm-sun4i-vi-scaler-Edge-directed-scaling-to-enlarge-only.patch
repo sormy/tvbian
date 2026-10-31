@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Thu, 29 Oct 2026 01:00:00 -0400
+Subject: [PATCH] drm/sun4i: vi scaler: Edge-directed scaling to enlarge only
+
+Allwinner's DE33 driver selects the VSU's edge-directed mode only when
+the picture is enlarged (both steps below 1.0), and the normal mode to
+shrink. The edge-detection support selected it the other way round, for
+a downscale, where it costs the scaler the most: a 3840x2160 YUV layer
+shrunk 1.70x onto a 2256x1504@60 screen fell behind and scanned out
+garbage below the top. Select it as the vendor does.
+---
+diff --git a/drivers/gpu/drm/sun4i/sun8i_vi_scaler.c b/drivers/gpu/drm/sun4i/sun8i_vi_scaler.c
+--- a/drivers/gpu/drm/sun4i/sun8i_vi_scaler.c
++++ b/drivers/gpu/drm/sun4i/sun8i_vi_scaler.c
+@@ -1016,9 +1016,10 @@
+ 		    (format->num_planes == 1 && format->hsub == 2 &&
+ 		     format->vsub == 1))
+ 			val = SUN50I_SCALER_VSU_SCALE_MODE_UI;
++		/* edge-directed to enlarge only, as Allwinner's driver: it costs the most */
+ 		else if (type == SUN8I_SCALER_VI_ED &&
+-			 hscale > SUN8I_VI_SCALER_SCALE_UNIT &&
+-			 vscale > SUN8I_VI_SCALER_SCALE_UNIT &&
++			 hscale < SUN8I_VI_SCALER_SCALE_UNIT &&
++			 vscale < SUN8I_VI_SCALER_SCALE_UNIT &&
+ 			 src_w <= layer->cfg->scanline_ed[layer->channel])
+ 			val = SUN50I_SCALER_VSU_SCALE_MODE_ED_SCALE;
+ 		else
+-- 
+2.55.0

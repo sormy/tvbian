@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jernej Skrabec <jernej.skrabec@gmail.com>
+Date: Sat, 24 Oct 2026 22:52:45 +0000
+Subject: [PATCH 45/46] media: cedrus: Add H616 variant
+
+The H616 video engine is the H6's: map its compatible to the H6 variant.
+
+Signed-off-by: Jernej Skrabec <jernej.skrabec@gmail.com>
+---
+ drivers/staging/media/sunxi/cedrus/cedrus.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus.c b/drivers/staging/media/sunxi/cedrus/cedrus.c
+index c3f8a09..755d291 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus.c
+@@ -698,6 +698,10 @@ static const struct of_device_id cedrus_dt_match[] = {
+ 		.compatible = "allwinner,sun50i-h6-video-engine",
+ 		.data = &sun50i_h6_cedrus_variant,
+ 	},
++	{
++		.compatible = "allwinner,sun50i-h616-video-engine",
++		.data = &sun50i_h6_cedrus_variant,
++	},
+ 	{ /* sentinel */ }
+ };
+ MODULE_DEVICE_TABLE(of, cedrus_dt_match);
+-- 
+2.47.3
+

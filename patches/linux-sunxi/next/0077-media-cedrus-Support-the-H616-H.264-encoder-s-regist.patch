@@ -1,0 +1,278 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 25 Oct 2026 13:58:30 +0000
+Subject: [PATCH 77/85] media: cedrus: Support the H616 H.264 encoder's
+ register layout
+
+The H616 encoder takes its buffer addresses in 256-byte units, counts the
+ISP scaler size in 8-pixel units and reads a macroblock row buffer at
+0xb9c; past 2048 pixels it also writes deblocking data to memory and needs
+the mode register's width bits, as decoding does. Without them its first
+read faults.
+---
+ drivers/staging/media/sunxi/cedrus/cedrus.c   |  3 +-
+ drivers/staging/media/sunxi/cedrus/cedrus.h   |  1 +
+ .../staging/media/sunxi/cedrus/cedrus_enc.c   | 27 ++++++++-
+ .../staging/media/sunxi/cedrus/cedrus_enc.h   |  2 +
+ .../media/sunxi/cedrus/cedrus_enc_h264.c      | 59 +++++++++++++++----
+ .../media/sunxi/cedrus/cedrus_enc_h264.h      |  8 +++
+ .../staging/media/sunxi/cedrus/cedrus_regs.h  |  2 +
+ 7 files changed, 89 insertions(+), 13 deletions(-)
+
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus.c b/drivers/staging/media/sunxi/cedrus/cedrus.c
+index a31f2c4..f93ad45 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus.c
+@@ -574,7 +574,8 @@ static const struct cedrus_variant cedrus_variant_sun50i_h616 = {
+ 			  CEDRUS_CAPABILITY_VP8_DEC |
+ 			  CEDRUS_CAPABILITY_VP9_DEC |
+ 			  CEDRUS_CAPABILITY_VC1_DEC |
+-			  CEDRUS_CAPABILITY_H264_ENC,
++			  CEDRUS_CAPABILITY_H264_ENC |
++			  CEDRUS_CAPABILITY_ENC_H616,
+ 	.clock_mod_rate	= 600000000,
+ };
+ 
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus.h b/drivers/staging/media/sunxi/cedrus/cedrus.h
+index 595e2f3..3af63cd 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus.h
++++ b/drivers/staging/media/sunxi/cedrus/cedrus.h
+@@ -56,6 +56,7 @@ enum cedrus_capability {
+ 	CEDRUS_CAPABILITY_VP9_DEC	= BIT(6),
+ 	CEDRUS_CAPABILITY_VC1_DEC	= BIT(7),
+ 	CEDRUS_CAPABILITY_H264_ENC	= BIT(8),
++	CEDRUS_CAPABILITY_ENC_H616	= BIT(9),
+ };
+ 
+ struct cedrus_context;
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_enc.c b/drivers/staging/media/sunxi/cedrus/cedrus_enc.c
+index 054b2dc..b91dcb2 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_enc.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_enc.c
+@@ -125,6 +125,16 @@ static int cedrus_enc_format_picture_prepare(struct cedrus_context *ctx,
+ 	return 0;
+ }
+ 
++void cedrus_enc_write_addr(struct cedrus_device *dev, u32 reg,
++			   dma_addr_t addr)
++{
++	/* The H616 encoder takes its buffer addresses in 256-byte units. */
++	if (dev->capabilities & CEDRUS_CAPABILITY_ENC_H616)
++		addr >>= 8;
++
++	cedrus_write(dev, reg, addr);
++}
++
+ int cedrus_enc_format_picture_configure(struct cedrus_context *ctx)
+ {
+ 	struct cedrus_device *dev = ctx->proc->dev;
+@@ -132,6 +142,8 @@ int cedrus_enc_format_picture_configure(struct cedrus_context *ctx)
+ 	dma_addr_t luma_addr, chroma_addr;
+ 	unsigned int width_mbs, height_mbs;
+ 	unsigned int stride_mbs;
++	unsigned int scaler_unit;
++	u32 mode;
+ 
+ 	/* Dimensions */
+ 
+@@ -142,9 +154,20 @@ int cedrus_enc_format_picture_configure(struct cedrus_context *ctx)
+ 		     VE_ISP_PIC_INFO_WIDTH_MBS(width_mbs) |
+ 		     VE_ISP_PIC_INFO_HEIGHT_MBS(height_mbs));
+ 
++	/* The H616 counts the scaler size in 8-pixel units. */
++	scaler_unit = dev->capabilities & CEDRUS_CAPABILITY_ENC_H616 ? 2 : 1;
++
+ 	cedrus_write(dev, VE_ISP_SCALER_SIZE_REG,
+-		     VE_ISP_SCALER_SIZE_HEIGHT_MBS(height_mbs) |
+-		     VE_ISP_SCALER_SIZE_WIDTH_MBS(width_mbs));
++		     VE_ISP_SCALER_SIZE_HEIGHT_MBS(height_mbs * scaler_unit) |
++		     VE_ISP_SCALER_SIZE_WIDTH_MBS(width_mbs * scaler_unit));
++
++	mode = cedrus_read(dev, VE_MODE_REG);
++	mode &= ~(VE_MODE_PIC_WIDTH_IS_4096 | VE_MODE_PIC_WIDTH_MORE_2048);
++	if (pix_format->width == 4096)
++		mode |= VE_MODE_PIC_WIDTH_IS_4096;
++	if (pix_format->width > 2048)
++		mode |= VE_MODE_PIC_WIDTH_MORE_2048;
++	cedrus_write(dev, VE_MODE_REG, mode);
+ 
+ 	/* Stride */
+ 
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_enc.h b/drivers/staging/media/sunxi/cedrus/cedrus_enc.h
+index f132941..822ed96 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_enc.h
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_enc.h
+@@ -20,6 +20,8 @@ int cedrus_enc_format_coded_prepare(struct cedrus_context *ctx,
+ 				    struct v4l2_format *format);
+ int cedrus_enc_format_coded_configure(struct cedrus_context *ctx);
+ int cedrus_enc_format_picture_configure(struct cedrus_context *ctx);
++void cedrus_enc_write_addr(struct cedrus_device *dev, u32 reg,
++			   dma_addr_t addr);
+ 
+ /* Decoder */
+ 
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.c b/drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.c
+index e307e26..a27d9ca 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.c
+@@ -472,6 +472,28 @@ static int cedrus_enc_h264_setup(struct cedrus_context *cedrus_ctx)
+ 	if (!h264_ctx->mb_info)
+ 		return -ENOMEM;
+ 
++	/* Deblocking Buffer */
++
++	h264_ctx->deblk_size = h264_ctx->width_mbs * 64;
++	h264_ctx->deblk = dma_alloc_attrs(dev, h264_ctx->deblk_size,
++					&h264_ctx->deblk_dma, GFP_KERNEL,
++					DMA_ATTR_NO_KERNEL_MAPPING);
++	if (!h264_ctx->deblk) {
++		ret = -ENOMEM;
++		goto error_mb_info;
++	}
++
++	/* Macroblock Row Information Buffer */
++
++	h264_ctx->row_info_size = h264_ctx->height_mbs * 2;
++	h264_ctx->row_info = dma_alloc_attrs(dev, h264_ctx->row_info_size,
++					&h264_ctx->row_info_dma, GFP_KERNEL,
++					DMA_ATTR_NO_KERNEL_MAPPING);
++	if (!h264_ctx->row_info) {
++		ret = -ENOMEM;
++		goto error_deblk;
++	}
++
+ 	/* State */
+ 
+ 	state->step = CEDRUS_ENC_H264_STEP_START;
+@@ -505,6 +527,12 @@ static int cedrus_enc_h264_setup(struct cedrus_context *cedrus_ctx)
+ 	return 0;
+ 
+ error_dma:
++	dma_free_attrs(dev, h264_ctx->row_info_size, h264_ctx->row_info,
++		       h264_ctx->row_info_dma, DMA_ATTR_NO_KERNEL_MAPPING);
++error_deblk:
++	dma_free_attrs(dev, h264_ctx->deblk_size, h264_ctx->deblk,
++		       h264_ctx->deblk_dma, DMA_ATTR_NO_KERNEL_MAPPING);
++error_mb_info:
+ 	dma_free_attrs(dev, h264_ctx->mb_info_size, h264_ctx->mb_info,
+ 		       h264_ctx->mb_info_dma, DMA_ATTR_NO_KERNEL_MAPPING);
+ 
+@@ -516,6 +544,10 @@ static void cedrus_enc_h264_cleanup(struct cedrus_context *cedrus_ctx)
+ 	struct device *dev = cedrus_ctx->proc->dev->dev;
+ 	struct cedrus_enc_h264_context *h264_ctx = cedrus_ctx->engine_ctx;
+ 
++	dma_free_attrs(dev, h264_ctx->row_info_size, h264_ctx->row_info,
++		       h264_ctx->row_info_dma, DMA_ATTR_NO_KERNEL_MAPPING);
++	dma_free_attrs(dev, h264_ctx->deblk_size, h264_ctx->deblk,
++		       h264_ctx->deblk_dma, DMA_ATTR_NO_KERNEL_MAPPING);
+ 	dma_free_attrs(dev, h264_ctx->mb_info_size, h264_ctx->mb_info,
+ 		       h264_ctx->mb_info_dma, DMA_ATTR_NO_KERNEL_MAPPING);
+ }
+@@ -1121,8 +1153,8 @@ static int cedrus_enc_h264_job_configure(struct cedrus_context *cedrus_ctx)
+ 
+ 	cedrus_job_buffer_coded_dma(cedrus_ctx, &addr, &size);
+ 
+-	cedrus_write(dev, VE_ENC_AVC_STM_START_ADDR_REG, addr);
+-	cedrus_write(dev, VE_ENC_AVC_STM_END_ADDR_REG, addr + size - 1);
++	cedrus_enc_write_addr(dev, VE_ENC_AVC_STM_START_ADDR_REG, addr);
++	cedrus_enc_write_addr(dev, VE_ENC_AVC_STM_END_ADDR_REG, addr + size - 1);
+ 
+ 	cedrus_write(dev, VE_ENC_AVC_STM_BIT_MAX_REG, size * 8);
+ 
+@@ -1136,7 +1168,8 @@ static int cedrus_enc_h264_job_configure(struct cedrus_context *cedrus_ctx)
+ 
+ 	/* Configure macroblock info buffer. */
+ 
+-	cedrus_write(dev, VE_ENC_AVC_MB_INFO_ADDR_REG, h264_ctx->mb_info_dma);
++	cedrus_enc_write_addr(dev, VE_ENC_AVC_MB_INFO_ADDR_REG,
++			      h264_ctx->mb_info_dma);
+ 
+ 	/* Clear motion vector buffer. */
+ 
+@@ -1144,8 +1177,8 @@ static int cedrus_enc_h264_job_configure(struct cedrus_context *cedrus_ctx)
+ 
+ 	/* Configure reconstruction buffer. */
+ 
+-	cedrus_write(dev, VE_ENC_AVC_REC_ADDR_Y_REG, h264_buffer->rec_dma);
+-	cedrus_write(dev, VE_ENC_AVC_REC_ADDR_C_REG, h264_buffer->rec_dma +
++	cedrus_enc_write_addr(dev, VE_ENC_AVC_REC_ADDR_Y_REG, h264_buffer->rec_dma);
++	cedrus_enc_write_addr(dev, VE_ENC_AVC_REC_ADDR_C_REG, h264_buffer->rec_dma +
+ 		     h264_buffer->rec_luma_size);
+ 
+ 	if (job->frame_type == CEDRUS_ENC_H264_FRAME_TYPE_P) {
+@@ -1157,29 +1190,35 @@ static int cedrus_enc_h264_job_configure(struct cedrus_context *cedrus_ctx)
+ 		luma_size = h264_buffer->rec_luma_size;
+ 	}
+ 
+-	cedrus_write(dev, VE_ENC_AVC_REF0_ADDR_Y_REG, addr);
+-	cedrus_write(dev, VE_ENC_AVC_REF0_ADDR_C_REG, addr + luma_size);
++	cedrus_enc_write_addr(dev, VE_ENC_AVC_REF0_ADDR_Y_REG, addr);
++	cedrus_enc_write_addr(dev, VE_ENC_AVC_REF0_ADDR_C_REG, addr + luma_size);
+ 
+ 	h264_ctx->rec_last_dma = h264_buffer->rec_dma;
+ 	h264_ctx->rec_last_luma_size = h264_buffer->rec_luma_size;
+ 
+ 	/* Configure subpixel buffers. */
+ 
+-	cedrus_write(dev, VE_ENC_AVC_SUBPIX_ADDR_NEW_REG,
++	cedrus_enc_write_addr(dev, VE_ENC_AVC_SUBPIX_ADDR_NEW_REG,
+ 		     h264_buffer->subpix_dma);
+ 
+ 	if (!h264_ctx->subpix_last_dma)
+ 		h264_ctx->subpix_last_dma = h264_buffer->subpix_dma;
+ 
+ 	/* XXX: is this for the last reference or the last encoded frame? */
+-	cedrus_write(dev, VE_ENC_AVC_SUBPIX_ADDR_LAST_REG,
++	cedrus_enc_write_addr(dev, VE_ENC_AVC_SUBPIX_ADDR_LAST_REG,
+ 		     h264_ctx->subpix_last_dma);
+ 
+ 	h264_ctx->subpix_last_dma = h264_buffer->subpix_dma;
+ 
+ 	/* Configure deblocking filter buffer. */
+ 
+-	cedrus_write(dev, VE_ENC_AVC_DEBLK_ADDR_REG, 0);
++	cedrus_enc_write_addr(dev, VE_ENC_AVC_DEBLK_ADDR_REG, h264_ctx->deblk_dma);
++
++	/* Configure macroblock row info buffer. */
++
++	if (dev->capabilities & CEDRUS_CAPABILITY_ENC_H616)
++		cedrus_enc_write_addr(dev, VE_ENC_AVC_ROW_INFO_ADDR_REG,
++				      h264_ctx->row_info_dma);
+ 
+ 	/* Configure cyclic intra refresh. */
+ 
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.h b/drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.h
+index 44b759a..3ef6cbd 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.h
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.h
+@@ -82,6 +82,14 @@ struct cedrus_enc_h264_context {
+ 	dma_addr_t			mb_info_dma;
+ 	unsigned int			mb_info_size;
+ 
++	void				*deblk;
++	dma_addr_t			deblk_dma;
++	unsigned int			deblk_size;
++
++	void				*row_info;
++	dma_addr_t			row_info_dma;
++	unsigned int			row_info_size;
++
+ 	dma_addr_t			subpix_last_dma;
+ 
+ 	dma_addr_t			rec_last_dma;
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_regs.h b/drivers/staging/media/sunxi/cedrus/cedrus_regs.h
+index 003b6f5..336a34c 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_regs.h
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_regs.h
+@@ -1223,6 +1223,8 @@ static inline u32 cedrus_vp9_tile_offset(u32 tile_no, u32 mis,
+ #define VE_ENC_AVC_STM_BIT_MAX_REG		(VE_ENGINE_ENC_H264_BASE + 0x8c)
+ #define VE_ENC_AVC_STM_BIT_LEN_REG		(VE_ENGINE_ENC_H264_BASE + 0x90)
+ 
++#define VE_ENC_AVC_ROW_INFO_ADDR_REG		(VE_ENGINE_ENC_H264_BASE + 0x9c)
++
+ #define VE_ENC_AVC_REF0_ADDR_Y_REG		(VE_ENGINE_ENC_H264_BASE + 0xa0)
+ #define VE_ENC_AVC_REF0_ADDR_C_REG		(VE_ENGINE_ENC_H264_BASE + 0xa4)
+ #define VE_ENC_AVC_REF1_ADDR_Y_REG		(VE_ENGINE_ENC_H264_BASE + 0xa8)
+-- 
+2.47.3
+

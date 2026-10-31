@@ -67,12 +67,12 @@ cp "/repo/$CONFIG" .config
 # shellcheck disable=SC2086  # FRAGMENT lists its files
 step merge-config scripts/kconfig/merge_config.sh -m .config $(printf "/repo/%s " $FRAGMENT)
 step olddefconfig make CC="$CC" olddefconfig
-while read -r want; do  # olddefconfig silently drops what a dependency forbids
+while read -r want; do  # olddefconfig silently drops what a dependency forbids; a later fragment wins
   case $want in
     "# CONFIG_"*" is not set") opt=${want#\# } && ! grep -q "^${opt%% *}=" .config ;;
     CONFIG_*) grep -qxF "$want" .config ;;
   esac || { echo "✗ config: '$want' did not survive olddefconfig"; exit 1; }
-done < <(cd /repo && cat $FRAGMENT)
+done < <(cd /repo && cat $FRAGMENT | tac | awk '{ k = /^# CONFIG_/ ? $2 : /^CONFIG_/ ? substr($0, 1, index($0, "=") - 1) : NR } !seen[k]++' | tac)
 echo "✓ config matches the fragment"
 
 # fixed metadata, so modules come out byte-identical on every host

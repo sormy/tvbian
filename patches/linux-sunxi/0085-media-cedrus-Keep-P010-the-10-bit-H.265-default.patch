@@ -1,0 +1,51 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 25 Oct 2026 17:18:51 +0000
+Subject: [PATCH] media: cedrus: Keep P010 the 10-bit H.265 default
+
+AFBC as the default left a consumer taking the driver's format, as
+ffmpeg does, with frames it cannot read in software. P010 is readable by
+every consumer; a display that scans AFBC out asks for it.
+---
+ drivers/staging/media/sunxi/cedrus/cedrus_dec.c | 14 +++++++-------
+ 1 file changed, 7 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec.c b/drivers/staging/media/sunxi/cedrus/cedrus_dec.c
+index 6b8f0a4..8b2f698 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_dec.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec.c
+@@ -27,24 +27,24 @@
+ /* Format */
+ 
+ static const struct cedrus_format cedrus_dec_formats[] = {
+-	/*
+-	 * 10-bit H.265 defaults to AFBC output, which the display engine
+-	 * scans out directly and which saves memory bandwidth.
+-	 */
+ 	{
+-		.pixelformat		= V4L2_PIX_FMT_YUV420_10_AFBC_16X16_SPLIT,
++		.pixelformat		= V4L2_PIX_FMT_P010,
+ 		.capabilities		= CEDRUS_CAPABILITY_UNTILED |
+ 					  CEDRUS_CAPABILITY_H265_10_DEC,
+ 		.type			= CEDRUS_FORMAT_TYPE_PICTURE,
+ 		.depth			= 10,
+-		.pixelformat_coded	= V4L2_PIX_FMT_HEVC_SLICE,
+ 	},
++	/*
++	 * 10-bit H.265 AFBC output, on request: a display engine scans it out
++	 * directly, a software consumer cannot read it.
++	 */
+ 	{
+-		.pixelformat		= V4L2_PIX_FMT_P010,
++		.pixelformat		= V4L2_PIX_FMT_YUV420_10_AFBC_16X16_SPLIT,
+ 		.capabilities		= CEDRUS_CAPABILITY_UNTILED |
+ 					  CEDRUS_CAPABILITY_H265_10_DEC,
+ 		.type			= CEDRUS_FORMAT_TYPE_PICTURE,
+ 		.depth			= 10,
++		.pixelformat_coded	= V4L2_PIX_FMT_HEVC_SLICE,
+ 	},
+ 	{
+ 		.pixelformat	= V4L2_PIX_FMT_NV12,
+-- 
+2.47.3
+

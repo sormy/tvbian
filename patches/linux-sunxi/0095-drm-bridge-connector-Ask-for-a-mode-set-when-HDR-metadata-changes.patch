@@ -1,0 +1,60 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Fri, 30 Oct 2026 12:00:00 -0400
+Subject: [PATCH] drm/bridge-connector: Ask for a mode set when HDR metadata changes
+
+A bridge outside the HDMI connector framework, such as dw-hdmi, writes
+its HDR metadata InfoFrame only on a mode set. Its own connector forces
+one when HDR_OUTPUT_METADATA changes; a bridge connector does not, so a
+player setting the metadata at the same mode leaves the sink on the last
+mode set's values: HDR over a menu, or SDR over a film.
+
+Forcing it from a bridge's atomic_check comes too late: that runs in
+mode_fixup(), after the helpers added a mode-setting CRTC's planes and
+connectors to the commit. Force it here, as dw_hdmi_connector_atomic_check()
+does.
+
+---
+diff --git a/drivers/gpu/drm/display/drm_bridge_connector.c b/drivers/gpu/drm/display/drm_bridge_connector.c
+--- a/drivers/gpu/drm/display/drm_bridge_connector.c
++++ b/drivers/gpu/drm/display/drm_bridge_connector.c
+@@ -10,6 +10,7 @@
+ #include <linux/property.h>
+ #include <linux/slab.h>
+ 
++#include <drm/drm_atomic.h>
+ #include <drm/drm_atomic_state_helper.h>
+ #include <drm/drm_bridge.h>
+ #include <drm/drm_bridge_connector.h>
+@@ -375,10 +376,29 @@
+ {
+ 	struct drm_bridge_connector *bridge_connector =
+ 		to_drm_bridge_connector(connector);
++	struct drm_connector_state *old_state =
++		drm_atomic_get_old_connector_state(state, connector);
++	struct drm_connector_state *new_state =
++		drm_atomic_get_new_connector_state(state, connector);
++	struct drm_crtc_state *crtc_state;
+ 
+ 	if (bridge_connector->bridge_hdmi)
+ 		return drm_atomic_helper_connector_hdmi_check(connector, state);
+ 
++	/*
++	 * A bridge outside the HDMI connector framework sends its HDR metadata
++	 * InfoFrame only on a mode set: ask for one when the metadata changes,
++	 * before the helpers add the CRTC's planes and connectors to it.
++	 */
++	if (new_state->crtc &&
++	    !drm_connector_atomic_hdr_metadata_equal(old_state, new_state)) {
++		crtc_state = drm_atomic_get_crtc_state(state, new_state->crtc);
++		if (IS_ERR(crtc_state))
++			return PTR_ERR(crtc_state);
++
++		crtc_state->mode_changed = true;
++	}
++
+ 	return 0;
+ }
+ 
+-- 
+2.47.0

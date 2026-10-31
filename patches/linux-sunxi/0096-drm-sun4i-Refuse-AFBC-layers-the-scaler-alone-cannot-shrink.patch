@@ -1,0 +1,131 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Tue, 28 Oct 2026 09:00:00 -0400
+Subject: [PATCH] drm/sun4i: Refuse AFBC layers the scaler alone cannot shrink
+
+When the VI scaler cannot keep up with a downscale in the current mode,
+atomic_update falls back on the fetcher's coarse scaling, by the BSP's
+estimate of the scaler's throughput: the mixer clock, the mode's lines
+and rate, and the wider of the source and destination. AFBC bypasses
+the coarse stage, so an AFBC layer past that estimate, or wider than the
+channel's line buffer, is programmed anyway: the scaler falls behind,
+the picture is clean at the top and garbage below, and the planes log
+"RCQ sync timed out".
+
+Check it in atomic_check instead, with the same estimate, so a commit
+the hardware cannot scan out fails and userspace can fall back to a
+linear buffer. A 1:1 AFBC layer still passes: only a downscale is held
+to the estimate.
+---
+ drivers/gpu/drm/sun4i/sun8i_vi_layer.c | 80 ++++++++++++++++++++++++++++++++++++++++----------
+ 1 file changed, 67 insertions(+), 13 deletions(-)
+
+diff --git a/drivers/gpu/drm/sun4i/sun8i_vi_layer.c b/drivers/gpu/drm/sun4i/sun8i_vi_layer.c
+--- a/drivers/gpu/drm/sun4i/sun8i_vi_layer.c
++++ b/drivers/gpu/drm/sun4i/sun8i_vi_layer.c
+@@ -64,6 +64,60 @@
+ 	}
+ }
+ 
++/* How far the scaler alone shrinks vertically in this mode, in percent */
++static u32 sun8i_vi_layer_scale_ability(struct sun8i_mixer *mixer,
++					const struct drm_display_mode *mode,
++					u32 src_w, u32 dst_w)
++{
++	u32 fps = (mode->clock * 1000) / (mode->vtotal * mode->htotal);
++	u64 ability = clk_get_rate(mixer->mod_clk);
++
++	/* BSP algorithm assumes 80% efficiency of VI scaler unit */
++	ability *= 80;
++	do_div(ability, mode->vdisplay * fps * max(src_w, dst_w));
++
++	return ability;
++}
++
++/*
++ * AFBC bypasses the coarse scaling atomic_update falls back on: refuse what
++ * the scaler alone cannot keep up with, so userspace picks a linear buffer.
++ */
++static int sun8i_vi_layer_check_afbc_scale(struct sun8i_layer *layer,
++					   struct drm_plane_state *state,
++					   struct drm_crtc_state *crtc_state)
++{
++	struct sun4i_crtc *scrtc = drm_crtc_to_sun4i_crtc(state->crtc);
++	struct sun8i_mixer *mixer = engine_to_sun8i_mixer(scrtc->engine);
++	const struct drm_format_info *format = state->fb->format;
++	u32 src_w = drm_rect_width(&state->src) >> 16;
++	u32 src_h = drm_rect_height(&state->src) >> 16;
++	u32 dst_w = drm_rect_width(&state->dst);
++	u32 dst_h = drm_rect_height(&state->dst);
++	unsigned int scanline;
++
++	if (format->hsub > 1 || format->vsub > 1)
++		scanline = layer->cfg->scanline_yuv[layer->channel];
++	else
++		scanline = layer->cfg->scanline_rgb[layer->channel];
++
++	if (src_w > scanline) {
++		DRM_DEBUG_DRIVER("AFBC: %u wide past the %u-pixel line buffer\n",
++				 src_w, scanline);
++		return -EINVAL;
++	}
++
++	if (src_h > dst_h &&
++	    sun8i_vi_layer_scale_ability(mixer, &crtc_state->mode, src_w, dst_w) <
++	    src_h * 100 / dst_h) {
++		DRM_DEBUG_DRIVER("AFBC: %u to %u lines past the scaler alone\n",
++				 src_h, dst_h);
++		return -EINVAL;
++	}
++
++	return 0;
++}
++
+ static void sun8i_vi_layer_update_coord(struct sun8i_layer *layer,
+ 					struct drm_plane *plane, bool afbc)
+ {
+@@ -129,18 +183,13 @@
+ 
+ 	if (insize != outsize || subsampled || hphase || vphase) {
+ 		unsigned int scanline, required;
+-		struct drm_display_mode *mode;
+-		u32 hscale, vscale, fps;
+-		u64 ability;
++		u32 hscale, vscale, ability;
+ 
+ 		DRM_DEBUG_DRIVER("HW scaling is enabled\n");
+ 
+-		mode = &plane->state->crtc->state->mode;
+-		fps = (mode->clock * 1000) / (mode->vtotal * mode->htotal);
+-		ability = clk_get_rate(mixer->mod_clk);
+-		/* BSP algorithm assumes 80% efficiency of VI scaler unit */
+-		ability *= 80;
+-		do_div(ability, mode->vdisplay * fps * max(src_w, dst_w));
++		ability = sun8i_vi_layer_scale_ability(mixer,
++					&plane->state->crtc->state->mode,
++					src_w, dst_w);
+ 
+ 		required = src_h * 100 / dst_h;
+ 
+@@ -282,10 +331,15 @@
+ 		max_scale = SUN8I_VI_SCALER_SCALE_MAX;
+ 	}
+ 
+-	return drm_atomic_helper_check_plane_state(new_plane_state,
+-						   crtc_state,
+-						   min_scale, max_scale,
+-						   true, true);
++	ret = drm_atomic_helper_check_plane_state(new_plane_state, crtc_state,
++						  min_scale, max_scale,
++						  true, true);
++	if (ret || !new_plane_state->visible ||
++	    !drm_is_afbc(new_plane_state->fb->modifier))
++		return ret;
++
++	return sun8i_vi_layer_check_afbc_scale(layer, new_plane_state,
++					       crtc_state);
+ }
+ 
+ static void sun8i_vi_layer_atomic_disable(struct drm_plane *plane,
+-- 
+2.55.0

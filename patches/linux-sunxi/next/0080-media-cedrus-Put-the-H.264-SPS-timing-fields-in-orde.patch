@@ -1,0 +1,32 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 25 Oct 2026 14:24:17 +0000
+Subject: [PATCH 80/85] media: cedrus: Put the H.264 SPS timing fields in order
+
+num_units_in_tick is the frame period's numerator and time_scale twice
+its denominator. They were swapped, so a 30 fps stream announced 1/30 fps.
+---
+ drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.c b/drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.c
+index b2cc3ca..391fda5 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.c
+@@ -948,11 +948,11 @@ static void cedrus_enc_h264_job_configure_sps(struct cedrus_context *cedrus_ctx)
+ 	cedrus_enc_h264_coded_bit(dev, 1);
+ 
+ 	/* Syntax element: num_units_in_tick. */
+-	cedrus_enc_h264_coded_u32(dev, timeperframe->denominator);
++	cedrus_enc_h264_coded_u32(dev, timeperframe->numerator);
+ 
+ 	/* A frame requires two ticks in H.264. */
+ 	/* Syntax element: time_scale. */
+-	cedrus_enc_h264_coded_u32(dev, timeperframe->numerator * 2);
++	cedrus_enc_h264_coded_u32(dev, timeperframe->denominator * 2);
+ 
+ 	/* Syntax element: fixed_frame_rate_flag. */
+ 	cedrus_enc_h264_coded_bit(dev, 1);
+-- 
+2.47.3
+

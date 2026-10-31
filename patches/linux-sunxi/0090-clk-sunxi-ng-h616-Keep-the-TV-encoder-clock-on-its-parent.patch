@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 25 Oct 2026 16:30:00 -0400
+Subject: [PATCH] clk: sunxi-ng: h616: Keep the TV encoder clock on its parent
+
+Asked for 216 MHz, the TV encoder clock picked PLL-VIDEO0, which could
+give it by changing rate; HDMI holds PLL-VIDEO0, the change is refused,
+and the encoder is left at PLL-VIDEO0's rate halved. The encoder wants
+PLL-VIDEO1, as Allwinner's driver sets it: keep the parent the device
+tree assigns.
+
+---
+diff --git a/drivers/clk/sunxi-ng/ccu-sun50i-h616.c b/drivers/clk/sunxi-ng/ccu-sun50i-h616.c
+--- a/drivers/clk/sunxi-ng/ccu-sun50i-h616.c
++++ b/drivers/clk/sunxi-ng/ccu-sun50i-h616.c
+@@ -687,7 +687,8 @@ static SUNXI_CCU_MP_WITH_MUX_GATE(tve0_clk, "tve0",
+ 				  8, 2,		/* P */
+ 				  24, 3,	/* mux */
+ 				  BIT(31),	/* gate */
+-				  CLK_SET_RATE_PARENT);
++				  CLK_SET_RATE_PARENT |
++				  CLK_SET_RATE_NO_REPARENT);
+ 
+ static SUNXI_CCU_GATE(bus_tve_top_clk, "bus-tve-top", "ahb3",
+ 		      0xb20, BIT(0), 0);

@@ -1,0 +1,469 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 25 Oct 2026 21:00:00 -0400
+Subject: [PATCH] drm/sun4i: Build 7.2's display drivers on 6.18
+
+What 7.2's display drivers use that 6.18 lacks: struct drm_atomic_state
+under its 7.2 name, drm_atomic_commit; the color_formats bits;
+HDMI_1_3_TMDS_CHAR_RATE_MAX_HZ; of_drm_find_and_get_bridge(); the
+connector argument of hpd_notify(); field_prep() and field_get() for
+non-constant masks; and <linux/mod_devicetable.h> in sun6i_drc.c, which
+6.18's headers leave out.
+
+---
+ drivers/gpu/drm/bridge/synopsys/dw-hdmi.c | 27 +++++++++++++++------------
+ drivers/gpu/drm/sun4i/sun4i_backend.c     |  4 ++--
+ drivers/gpu/drm/sun4i/sun4i_crtc.c        | 10 +++++-----
+ drivers/gpu/drm/sun4i/sun4i_framebuffer.c |  8 ++++----
+ drivers/gpu/drm/sun4i/sun4i_hdmi_enc.c    |  4 ++--
+ drivers/gpu/drm/sun4i/sun4i_layer.c       |  4 ++--
+ drivers/gpu/drm/sun4i/sun4i_tv.c          |  4 ++--
+ drivers/gpu/drm/sun4i/sun50i_wb.c         |  2 +-
+ drivers/gpu/drm/sun4i/sun6i_drc.c         |  1 +
+ drivers/gpu/drm/sun4i/sun8i_dw_hdmi.c     |  3 +--
+ drivers/gpu/drm/sun4i/sun8i_mixer.c       |  2 +-
+ drivers/gpu/drm/sun4i/sun8i_tcon_top.c    |  5 +++++
+ drivers/gpu/drm/sun4i/sun8i_ui_layer.c    |  6 +++---
+ drivers/gpu/drm/sun4i/sun8i_vi_layer.c    |  6 +++---
+ drivers/gpu/drm/sun4i/sunxi_engine.h      |  4 ++--
+ 15 files changed, 49 insertions(+), 41 deletions(-)
+
+diff --git a/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c b/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
+index c5f6e35..e459fd6 100644
+--- a/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
++++ b/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
+@@ -7,6 +7,9 @@
+  * Copyright (C) 2010, Guennadi Liakhovetski <g.liakhovetski@gmx.de>
+  */
+ 
++#ifndef HDMI_1_3_TMDS_CHAR_RATE_MAX_HZ
++#define HDMI_1_3_TMDS_CHAR_RATE_MAX_HZ 340000000
++#endif
+ #include <linux/cleanup.h>
+ #include <linux/clk.h>
+ #include <linux/delay.h>
+@@ -2581,7 +2584,7 @@ static int dw_hdmi_connector_get_modes(struct drm_connector *connector)
+ }
+ 
+ static int dw_hdmi_connector_atomic_check(struct drm_connector *connector,
+-					  struct drm_atomic_commit *state)
++					  struct drm_atomic_state *state)
+ {
+ 	struct drm_connector_state *old_state =
+ 		drm_atomic_get_old_connector_state(state, connector);
+@@ -2720,7 +2723,7 @@ static u32 *dw_hdmi_bridge_atomic_get_output_bus_fmts(struct drm_bridge *bridge,
+ 	struct drm_display_mode *mode = &crtc_state->mode;
+ 	u8 max_bpc = conn_state->max_requested_bpc;
+ 	bool is_hdmi2_sink = info->hdmi.scdc.supported ||
+-			     (info->color_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR420));
++			     (info->color_formats & DRM_COLOR_FORMAT_YCBCR420);
+ 	u32 *output_fmts;
+ 	unsigned int i = 0;
+ 
+@@ -2779,36 +2782,36 @@ static u32 *dw_hdmi_bridge_atomic_get_output_bus_fmts(struct drm_bridge *bridge,
+ 	output_fmts[i++] = MEDIA_BUS_FMT_RGB888_1X24;
+ 
+ 	if (max_bpc >= 16 && info->bpc == 16) {
+-		if (info->color_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR444))
++		if (info->color_formats & DRM_COLOR_FORMAT_YCBCR444)
+ 			output_fmts[i++] = MEDIA_BUS_FMT_YUV16_1X48;
+ 
+ 		output_fmts[i++] = MEDIA_BUS_FMT_RGB161616_1X48;
+ 	}
+ 
+ 	if (max_bpc >= 12 && info->bpc >= 12) {
+-		if (info->color_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR422))
++		if (info->color_formats & DRM_COLOR_FORMAT_YCBCR422)
+ 			output_fmts[i++] = MEDIA_BUS_FMT_UYVY12_1X24;
+ 
+-		if (info->color_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR444))
++		if (info->color_formats & DRM_COLOR_FORMAT_YCBCR444)
+ 			output_fmts[i++] = MEDIA_BUS_FMT_YUV12_1X36;
+ 
+ 		output_fmts[i++] = MEDIA_BUS_FMT_RGB121212_1X36;
+ 	}
+ 
+ 	if (max_bpc >= 10 && info->bpc >= 10) {
+-		if (info->color_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR422))
++		if (info->color_formats & DRM_COLOR_FORMAT_YCBCR422)
+ 			output_fmts[i++] = MEDIA_BUS_FMT_UYVY10_1X20;
+ 
+-		if (info->color_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR444))
++		if (info->color_formats & DRM_COLOR_FORMAT_YCBCR444)
+ 			output_fmts[i++] = MEDIA_BUS_FMT_YUV10_1X30;
+ 
+ 		output_fmts[i++] = MEDIA_BUS_FMT_RGB101010_1X30;
+ 	}
+ 
+-	if (info->color_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR422))
++	if (info->color_formats & DRM_COLOR_FORMAT_YCBCR422)
+ 		output_fmts[i++] = MEDIA_BUS_FMT_UYVY8_1X16;
+ 
+-	if (info->color_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR444))
++	if (info->color_formats & DRM_COLOR_FORMAT_YCBCR444)
+ 		output_fmts[i++] = MEDIA_BUS_FMT_YUV8_1X24;
+ 
+ 	*num_output_fmts = i;
+@@ -2978,7 +2981,7 @@ static int dw_hdmi_bridge_attach(struct drm_bridge *bridge,
+ 			return -ENODEV;
+ 
+ 		struct drm_bridge *next_bridge __free(drm_bridge_put) =
+-			of_drm_find_and_get_bridge(remote);
++			drm_bridge_get(of_drm_find_bridge(remote));
+ 		if (!next_bridge)
+ 			return -EPROBE_DEFER;
+ 
+@@ -3033,7 +3036,7 @@ static void dw_hdmi_bridge_mode_set(struct drm_bridge *bridge,
+ }
+ 
+ static void dw_hdmi_bridge_atomic_disable(struct drm_bridge *bridge,
+-					  struct drm_atomic_commit *state)
++					  struct drm_atomic_state *state)
+ {
+ 	struct dw_hdmi *hdmi = bridge->driver_private;
+ 
+@@ -3047,7 +3050,7 @@ static void dw_hdmi_bridge_atomic_disable(struct drm_bridge *bridge,
+ }
+ 
+ static void dw_hdmi_bridge_atomic_enable(struct drm_bridge *bridge,
+-					 struct drm_atomic_commit *state)
++					 struct drm_atomic_state *state)
+ {
+ 	struct dw_hdmi *hdmi = bridge->driver_private;
+ 	struct drm_connector *connector;
+diff --git a/drivers/gpu/drm/sun4i/sun4i_backend.c b/drivers/gpu/drm/sun4i/sun4i_backend.c
+index adf5b6e..c9ec5fc 100644
+--- a/drivers/gpu/drm/sun4i/sun4i_backend.c
++++ b/drivers/gpu/drm/sun4i/sun4i_backend.c
+@@ -72,7 +72,7 @@ static void sun4i_backend_disable_color_correction(struct sunxi_engine *engine)
+ 
+ static void sun4i_backend_commit(struct sunxi_engine *engine,
+ 				 struct drm_crtc *crtc,
+-				 struct drm_atomic_commit *state)
++				 struct drm_atomic_state *state)
+ {
+ 	DRM_DEBUG_DRIVER("Committing changes\n");
+ 
+@@ -472,7 +472,7 @@ static int sun4i_backend_atomic_check(struct sunxi_engine *engine,
+ {
+ 	struct drm_plane_state *plane_states[SUN4I_BACKEND_NUM_LAYERS] = { 0 };
+ 	struct sun4i_backend *backend = engine_to_sun4i_backend(engine);
+-	struct drm_atomic_commit *state = crtc_state->state;
++	struct drm_atomic_state *state = crtc_state->state;
+ 	struct drm_device *drm = state->dev;
+ 	struct drm_plane *plane;
+ 	unsigned int num_planes = 0;
+diff --git a/drivers/gpu/drm/sun4i/sun4i_crtc.c b/drivers/gpu/drm/sun4i/sun4i_crtc.c
+index 7300571..8955c10 100644
+--- a/drivers/gpu/drm/sun4i/sun4i_crtc.c
++++ b/drivers/gpu/drm/sun4i/sun4i_crtc.c
+@@ -66,7 +66,7 @@ void sun4i_crtc_finish_page_flip(struct drm_crtc *crtc)
+ EXPORT_SYMBOL_GPL(sun4i_crtc_finish_page_flip);
+ 
+ static int sun4i_crtc_atomic_check(struct drm_crtc *crtc,
+-				    struct drm_atomic_commit *state)
++				    struct drm_atomic_state *state)
+ {
+ 	struct drm_crtc_state *crtc_state = drm_atomic_get_new_crtc_state(state,
+ 									  crtc);
+@@ -87,7 +87,7 @@ static int sun4i_crtc_atomic_check(struct drm_crtc *crtc,
+ }
+ 
+ static void sun4i_crtc_atomic_begin(struct drm_crtc *crtc,
+-				    struct drm_atomic_commit *state)
++				    struct drm_atomic_state *state)
+ {
+ 	struct drm_crtc_state *old_state = drm_atomic_get_old_crtc_state(state,
+ 									 crtc);
+@@ -110,7 +110,7 @@ static void sun4i_crtc_atomic_begin(struct drm_crtc *crtc,
+ }
+ 
+ static void sun4i_crtc_atomic_flush(struct drm_crtc *crtc,
+-				    struct drm_atomic_commit *state)
++				    struct drm_atomic_state *state)
+ {
+ 	struct sun4i_crtc *scrtc = drm_crtc_to_sun4i_crtc(crtc);
+ 	struct drm_pending_vblank_event *event = crtc->state->event;
+@@ -134,7 +134,7 @@ static void sun4i_crtc_atomic_flush(struct drm_crtc *crtc,
+ }
+ 
+ static void sun4i_crtc_atomic_disable(struct drm_crtc *crtc,
+-				      struct drm_atomic_commit *state)
++				      struct drm_atomic_state *state)
+ {
+ 	struct drm_crtc_state *old_state = drm_atomic_get_old_crtc_state(state,
+ 									 crtc);
+@@ -167,7 +167,7 @@ static void sun4i_crtc_atomic_disable(struct drm_crtc *crtc,
+ }
+ 
+ static void sun4i_crtc_atomic_enable(struct drm_crtc *crtc,
+-				     struct drm_atomic_commit *state)
++				     struct drm_atomic_state *state)
+ {
+ 	struct drm_encoder *encoder = sun4i_crtc_get_encoder(crtc);
+ 	struct sun4i_crtc *scrtc = drm_crtc_to_sun4i_crtc(crtc);
+diff --git a/drivers/gpu/drm/sun4i/sun4i_framebuffer.c b/drivers/gpu/drm/sun4i/sun4i_framebuffer.c
+index 8fb44f0..e5c9057 100644
+--- a/drivers/gpu/drm/sun4i/sun4i_framebuffer.c
++++ b/drivers/gpu/drm/sun4i/sun4i_framebuffer.c
+@@ -19,7 +19,7 @@
+ #include "sunxi_engine.h"
+ 
+ static int sun4i_de_check_writebacks(struct drm_device *dev,
+-				     struct drm_atomic_commit *state)
++				     struct drm_atomic_state *state)
+ {
+ 	struct drm_connector_state *new_conn_state;
+ 	struct drm_connector *connector;
+@@ -99,7 +99,7 @@ sun4i_fb_create(struct drm_device *dev, struct drm_file *file,
+ }
+ 
+ static int sun4i_de_atomic_check(struct drm_device *dev,
+-				 struct drm_atomic_commit *state)
++				 struct drm_atomic_state *state)
+ {
+ 	int ret;
+ 
+@@ -125,7 +125,7 @@ static const struct drm_mode_config_funcs sun4i_de_mode_config_funcs = {
+ };
+ 
+ static bool
+-sun4i_de_crtc_needs_scanout_wait(struct drm_atomic_commit *state,
++sun4i_de_crtc_needs_scanout_wait(struct drm_atomic_state *state,
+ 				 struct drm_crtc *crtc)
+ {
+ 	struct drm_plane_state *old_plane_state;
+@@ -144,7 +144,7 @@ sun4i_de_crtc_needs_scanout_wait(struct drm_atomic_commit *state,
+ 	return false;
+ }
+ 
+-static void sun4i_de_atomic_commit_tail(struct drm_atomic_commit *state)
++static void sun4i_de_atomic_commit_tail(struct drm_atomic_state *state)
+ {
+ 	struct drm_crtc_state *new_crtc_state;
+ 	struct drm_device *dev = state->dev;
+diff --git a/drivers/gpu/drm/sun4i/sun4i_hdmi_enc.c b/drivers/gpu/drm/sun4i/sun4i_hdmi_enc.c
+index a27d394..51b10df 100644
+--- a/drivers/gpu/drm/sun4i/sun4i_hdmi_enc.c
++++ b/drivers/gpu/drm/sun4i/sun4i_hdmi_enc.c
+@@ -76,7 +76,7 @@ static int sun4i_hdmi_write_hdmi_infoframe(struct drm_connector *connector,
+ }
+ 
+ static void sun4i_hdmi_disable(struct drm_encoder *encoder,
+-			       struct drm_atomic_commit *state)
++			       struct drm_atomic_state *state)
+ {
+ 	struct sun4i_hdmi *hdmi = drm_encoder_to_sun4i_hdmi(encoder);
+ 	u32 val;
+@@ -91,7 +91,7 @@ static void sun4i_hdmi_disable(struct drm_encoder *encoder,
+ }
+ 
+ static void sun4i_hdmi_enable(struct drm_encoder *encoder,
+-			      struct drm_atomic_commit *state)
++			      struct drm_atomic_state *state)
+ {
+ 	struct drm_display_mode *mode = &encoder->crtc->state->adjusted_mode;
+ 	struct sun4i_hdmi *hdmi = drm_encoder_to_sun4i_hdmi(encoder);
+diff --git a/drivers/gpu/drm/sun4i/sun4i_layer.c b/drivers/gpu/drm/sun4i/sun4i_layer.c
+index d65587d..63cb8c7 100644
+--- a/drivers/gpu/drm/sun4i/sun4i_layer.c
++++ b/drivers/gpu/drm/sun4i/sun4i_layer.c
+@@ -61,7 +61,7 @@ static void sun4i_backend_layer_destroy_state(struct drm_plane *plane,
+ }
+ 
+ static void sun4i_backend_layer_atomic_disable(struct drm_plane *plane,
+-					       struct drm_atomic_commit *state)
++					       struct drm_atomic_state *state)
+ {
+ 	struct drm_plane_state *old_state = drm_atomic_get_old_plane_state(state,
+ 									   plane);
+@@ -81,7 +81,7 @@ static void sun4i_backend_layer_atomic_disable(struct drm_plane *plane,
+ }
+ 
+ static void sun4i_backend_layer_atomic_update(struct drm_plane *plane,
+-					      struct drm_atomic_commit *state)
++					      struct drm_atomic_state *state)
+ {
+ 	struct drm_plane_state *new_state = drm_atomic_get_new_plane_state(state,
+ 									   plane);
+diff --git a/drivers/gpu/drm/sun4i/sun4i_tv.c b/drivers/gpu/drm/sun4i/sun4i_tv.c
+index c2c85db..e81baca 100644
+--- a/drivers/gpu/drm/sun4i/sun4i_tv.c
++++ b/drivers/gpu/drm/sun4i/sun4i_tv.c
+@@ -306,7 +306,7 @@ sun4i_tv_find_tv_by_mode(unsigned int mode)
+ }
+ 
+ static void sun4i_tv_disable(struct drm_encoder *encoder,
+-			    struct drm_atomic_commit *state)
++			    struct drm_atomic_state *state)
+ {
+ 	struct sun4i_tv *tv = drm_encoder_to_sun4i_tv(encoder);
+ 	struct sun4i_crtc *crtc = drm_crtc_to_sun4i_crtc(encoder->crtc);
+@@ -350,7 +350,7 @@ static void sun50i_h616_tv_enable(struct sun4i_tv *tv,
+ }
+ 
+ static void sun4i_tv_enable(struct drm_encoder *encoder,
+-			    struct drm_atomic_commit *state)
++			    struct drm_atomic_state *state)
+ {
+ 	struct sun4i_tv *tv = drm_encoder_to_sun4i_tv(encoder);
+ 	struct sun4i_crtc *crtc = drm_crtc_to_sun4i_crtc(encoder->crtc);
+diff --git a/drivers/gpu/drm/sun4i/sun50i_wb.c b/drivers/gpu/drm/sun4i/sun50i_wb.c
+index 9e26767..803b281 100644
+--- a/drivers/gpu/drm/sun4i/sun50i_wb.c
++++ b/drivers/gpu/drm/sun4i/sun50i_wb.c
+@@ -596,7 +596,7 @@ static const struct drm_encoder_helper_funcs sun50i_wb_encoder_helper_funcs = {
+ };
+ 
+ static void sun50i_wb_atomic_commit(struct drm_connector *conn,
+-				    struct drm_atomic_commit *state)
++				    struct drm_atomic_state *state)
+ {
+ 	struct drm_connector_state *conn_state =
+ 		drm_atomic_get_new_connector_state(state, conn);
+diff --git a/drivers/gpu/drm/sun4i/sun6i_drc.c b/drivers/gpu/drm/sun4i/sun6i_drc.c
+index 0050c1b..5826881 100644
+--- a/drivers/gpu/drm/sun4i/sun6i_drc.c
++++ b/drivers/gpu/drm/sun4i/sun6i_drc.c
+@@ -5,6 +5,7 @@
+  * Maxime Ripard <maxime.ripard@free-electrons.com>
+  */
+ 
++#include <linux/mod_devicetable.h>
+ #include <linux/clk.h>
+ #include <linux/component.h>
+ #include <linux/module.h>
+diff --git a/drivers/gpu/drm/sun4i/sun8i_dw_hdmi.c b/drivers/gpu/drm/sun4i/sun8i_dw_hdmi.c
+index 9a959be..fa5625d 100644
+--- a/drivers/gpu/drm/sun4i/sun8i_dw_hdmi.c
++++ b/drivers/gpu/drm/sun4i/sun8i_dw_hdmi.c
+@@ -47,7 +47,6 @@ static void sun8i_hdmi_enc_detach(struct drm_bridge *bridge)
+ }
+ 
+ static void sun8i_hdmi_enc_hpd_notify(struct drm_bridge *bridge,
+-				      struct drm_connector *connector,
+ 				      enum drm_connector_status status)
+ {
+ 	struct sun8i_dw_hdmi *hdmi = bridge_to_sun8i_dw_hdmi(bridge);
+@@ -285,7 +284,7 @@ static int sun8i_dw_hdmi_bind(struct device *dev, struct device *master,
+ 	if (!remote)
+ 		return -ENODEV;
+ 
+-	next_bridge = of_drm_find_and_get_bridge(remote);
++	next_bridge = drm_bridge_get(of_drm_find_bridge(remote));
+ 	of_node_put(remote);
+ 	if (!next_bridge)
+ 		return dev_err_probe(dev, -EPROBE_DEFER,
+diff --git a/drivers/gpu/drm/sun4i/sun8i_mixer.c b/drivers/gpu/drm/sun4i/sun8i_mixer.c
+index 8bfba9a..15a883a 100644
+--- a/drivers/gpu/drm/sun4i/sun8i_mixer.c
++++ b/drivers/gpu/drm/sun4i/sun8i_mixer.c
+@@ -303,7 +303,7 @@ int sun8i_mixer_drm_format_to_hw(u32 format, u32 *hw_format)
+ 
+ static void sun8i_mixer_commit(struct sunxi_engine *engine,
+ 			       struct drm_crtc *crtc,
+-			       struct drm_atomic_commit *state)
++			       struct drm_atomic_state *state)
+ {
+ 	struct sun8i_mixer *mixer = engine_to_sun8i_mixer(engine);
+ 	struct drm_plane_state *plane_state;
+diff --git a/drivers/gpu/drm/sun4i/sun8i_tcon_top.c b/drivers/gpu/drm/sun4i/sun8i_tcon_top.c
+index b9aea4f..0999c2e 100644
+--- a/drivers/gpu/drm/sun4i/sun8i_tcon_top.c
++++ b/drivers/gpu/drm/sun4i/sun8i_tcon_top.c
+@@ -2,6 +2,11 @@
+ /* Copyright (c) 2018 Jernej Skrabec <jernej.skrabec@siol.net> */
+ 
+ 
++#include <linux/bitfield.h>
++#ifndef field_prep
++#define field_prep(_m, _v) (((typeof(_m))(_v) << __bf_shf(_m)) & (_m))
++#define field_get(_m, _r) (((_r) & (_m)) >> __bf_shf(_m))
++#endif
+ #include <linux/bitfield.h>
+ #include <linux/component.h>
+ #include <linux/device.h>
+diff --git a/drivers/gpu/drm/sun4i/sun8i_ui_layer.c b/drivers/gpu/drm/sun4i/sun8i_ui_layer.c
+index 4f19196..8e10ef9 100644
+--- a/drivers/gpu/drm/sun4i/sun8i_ui_layer.c
++++ b/drivers/gpu/drm/sun4i/sun8i_ui_layer.c
+@@ -140,7 +140,7 @@ static void sun8i_ui_layer_update_buffer(struct sun8i_layer *layer,
+ }
+ 
+ static int sun8i_ui_layer_atomic_check(struct drm_plane *plane,
+-				       struct drm_atomic_commit *state)
++				       struct drm_atomic_state *state)
+ {
+ 	struct drm_plane_state *new_plane_state = drm_atomic_get_new_plane_state(state,
+ 										 plane);
+@@ -181,7 +181,7 @@ static int sun8i_ui_layer_atomic_check(struct drm_plane *plane,
+ 
+ 
+ static void sun8i_ui_layer_atomic_disable(struct drm_plane *plane,
+-					  struct drm_atomic_commit *state)
++					  struct drm_atomic_state *state)
+ {
+ 	struct sun8i_layer *layer = plane_to_sun8i_layer(plane);
+ 
+@@ -189,7 +189,7 @@ static void sun8i_ui_layer_atomic_disable(struct drm_plane *plane,
+ }
+ 
+ static void sun8i_ui_layer_atomic_update(struct drm_plane *plane,
+-					 struct drm_atomic_commit *state)
++					 struct drm_atomic_state *state)
+ {
+ 	struct drm_plane_state *new_state = drm_atomic_get_new_plane_state(state,
+ 									   plane);
+diff --git a/drivers/gpu/drm/sun4i/sun8i_vi_layer.c b/drivers/gpu/drm/sun4i/sun8i_vi_layer.c
+index 1f4e71a..4d394a3 100644
+--- a/drivers/gpu/drm/sun4i/sun8i_vi_layer.c
++++ b/drivers/gpu/drm/sun4i/sun8i_vi_layer.c
+@@ -239,7 +239,7 @@ static void sun8i_vi_layer_update_buffer(struct sun8i_layer *layer,
+ }
+ 
+ static int sun8i_vi_layer_atomic_check(struct drm_plane *plane,
+-				       struct drm_atomic_commit *state)
++				       struct drm_atomic_state *state)
+ {
+ 	struct drm_plane_state *new_plane_state = drm_atomic_get_new_plane_state(state,
+ 										 plane);
+@@ -289,7 +289,7 @@ static int sun8i_vi_layer_atomic_check(struct drm_plane *plane,
+ }
+ 
+ static void sun8i_vi_layer_atomic_disable(struct drm_plane *plane,
+-					  struct drm_atomic_commit *state)
++					  struct drm_atomic_state *state)
+ {
+ 	struct sun8i_layer *layer = plane_to_sun8i_layer(plane);
+ 
+@@ -297,7 +297,7 @@ static void sun8i_vi_layer_atomic_disable(struct drm_plane *plane,
+ }
+ 
+ static void sun8i_vi_layer_atomic_update(struct drm_plane *plane,
+-					 struct drm_atomic_commit *state)
++					 struct drm_atomic_state *state)
+ {
+ 	struct drm_plane_state *new_state = drm_atomic_get_new_plane_state(state,
+ 									   plane);
+diff --git a/drivers/gpu/drm/sun4i/sunxi_engine.h b/drivers/gpu/drm/sun4i/sunxi_engine.h
+index c4ca604..fec355e 100644
+--- a/drivers/gpu/drm/sun4i/sunxi_engine.h
++++ b/drivers/gpu/drm/sun4i/sunxi_engine.h
+@@ -88,7 +88,7 @@ struct sunxi_engine_ops {
+ 	 */
+ 	void (*commit)(struct sunxi_engine *engine,
+ 		       struct drm_crtc *crtc,
+-		       struct drm_atomic_commit *state);
++		       struct drm_atomic_state *state);
+ 
+ 	/**
+ 	 * @layers_init:
+@@ -216,7 +216,7 @@ sunxi_engine_wait_for_scanout(struct sunxi_engine *engine,
+ static inline void
+ sunxi_engine_commit(struct sunxi_engine *engine,
+ 		    struct drm_crtc *crtc,
+-		    struct drm_atomic_commit *state)
++		    struct drm_atomic_state *state)
+ {
+ 	if (engine->ops && engine->ops->commit)
+ 		engine->ops->commit(engine, crtc, state);

@@ -1,0 +1,53 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 24 Oct 2026 15:43:30 +0000
+Subject: [PATCH] mmc: sunxi: set the output phase for DDR on new-timing hosts
+
+Writing in DDR52 on the H616 eMMC controller leaves a request uncompleted
+after a while: a data error, or none, then the status command in recovery
+never returns. Allwinner's own driver drives the command line at 180
+degrees and, in DDR, the data lines at 180 too; this driver never touched
+the drive delay register. Set it as the vendor driver does.
+---
+ drivers/mmc/host/sunxi-mmc.c | 18 ++++++++++++++++++
+ 1 file changed, 18 insertions(+)
+
+diff --git a/drivers/mmc/host/sunxi-mmc.c b/drivers/mmc/host/sunxi-mmc.c
+index 8dbcff5..b411a4d 100644
+--- a/drivers/mmc/host/sunxi-mmc.c
++++ b/drivers/mmc/host/sunxi-mmc.c
+@@ -222,6 +222,10 @@
+ 
+ #define SDXC_2X_TIMING_MODE	BIT(31)
+ 
++/* Drive delay control */
++#define SDXC_CMD_DRV_PH_180	BIT(16)
++#define SDXC_DAT_DRV_PH_180	BIT(17)
++
+ #define SDXC_CAL_START		BIT(15)
+ #define SDXC_CAL_DONE		BIT(14)
+ #define SDXC_CAL_DL_SHIFT	8
+@@ -839,6 +843,20 @@ static int sunxi_mmc_clk_set_rate(struct sunxi_mmc_host *host,
+ 		mmc_writel(host, REG_SD_NTSR, rval);
+ 	}
+ 
++	/*
++	 * The output phase of Allwinner's own driver: command at 180 degrees,
++	 * data at 180 in DDR and 90 otherwise.
++	 */
++	if (host->use_new_timings) {
++		rval = mmc_readl(host, REG_DRV_DL) | SDXC_CMD_DRV_PH_180;
++		if (ios->timing == MMC_TIMING_MMC_DDR52 ||
++		    ios->timing == MMC_TIMING_UHS_DDR50)
++			rval |= SDXC_DAT_DRV_PH_180;
++		else
++			rval &= ~SDXC_DAT_DRV_PH_180;
++		mmc_writel(host, REG_DRV_DL, rval);
++	}
++
+ 	/* sunxi_mmc_clk_set_phase expects the actual card clock rate */
+ 	ret = sunxi_mmc_clk_set_phase(host, ios, rate);
+ 	if (ret)
+-- 
+2.47.3
+

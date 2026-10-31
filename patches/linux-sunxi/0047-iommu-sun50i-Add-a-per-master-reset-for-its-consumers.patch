@@ -1,0 +1,67 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 24 Oct 2026 20:40:00 +0000
+Subject: [PATCH] iommu/sun50i: Add a per-master reset for its consumers
+
+The fault handler resets the faulting master's port while the master may
+still be transferring. On the H616 the video engine's port stays stuck
+after that, and every later decode reads wrong data until a reboot. A
+consumer that has just reset its device can now reset its port again,
+with nothing in flight, as the vendor BSP's sunxi_reset_device_iommu().
+---
+diff --git a/include/linux/soc/sunxi/sun50i_iommu.h b/include/linux/soc/sunxi/sun50i_iommu.h
+--- a/include/linux/soc/sunxi/sun50i_iommu.h
++++ b/include/linux/soc/sunxi/sun50i_iommu.h
+@@ -0,0 +1,13 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++#ifndef _SUN50I_IOMMU_H_
++#define _SUN50I_IOMMU_H_
++
++struct device;
++
++#if IS_ENABLED(CONFIG_SUN50I_IOMMU)
++void sun50i_iommu_reset_master(struct device *dev);
++#else
++static inline void sun50i_iommu_reset_master(struct device *dev) {}
++#endif
++
++#endif
+diff --git a/drivers/iommu/sun50i-iommu.c b/drivers/iommu/sun50i-iommu.c
+--- a/drivers/iommu/sun50i-iommu.c
++++ b/drivers/iommu/sun50i-iommu.c
+@@ -23,6 +23,7 @@
+ #include <linux/reset.h>
+ #include <linux/sizes.h>
+ #include <linux/slab.h>
++#include <linux/soc/sunxi/sun50i_iommu.h>
+ #include <linux/spinlock.h>
+ #include <linux/types.h>
+ 
+@@ -996,6 +997,27 @@
+ 	return IRQ_HANDLED;
+ }
+ 
++/*
++ * The fault handler resets a master's port while the master may still be
++ * transferring, which can leave the port stuck. A driver that has just reset
++ * its device resets the port again, with nothing in flight.
++ */
++void sun50i_iommu_reset_master(struct device *dev)
++{
++	struct iommu_fwspec *fwspec = dev_iommu_fwspec_get(dev);
++	struct sun50i_iommu *iommu = sun50i_iommu_from_dev(dev);
++	unsigned long flags;
++
++	if (!iommu || !fwspec || !fwspec->num_ids)
++		return;
++
++	spin_lock_irqsave(&iommu->iommu_lock, flags);
++	iommu_write(iommu, IOMMU_RESET_REG, ~BIT(fwspec->ids[0]));
++	iommu_write(iommu, IOMMU_RESET_REG, IOMMU_RESET_RELEASE_ALL);
++	spin_unlock_irqrestore(&iommu->iommu_lock, flags);
++}
++EXPORT_SYMBOL_GPL(sun50i_iommu_reset_master);
++
+ static int sun50i_iommu_probe(struct platform_device *pdev)
+ {
+ 	struct sun50i_iommu *iommu;
