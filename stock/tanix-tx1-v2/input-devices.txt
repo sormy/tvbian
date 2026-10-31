@@ -1,0 +1,33 @@
+I: Bus=0019 Vendor=0001 Product=0001 Version=0100
+N: Name="sunxi-keyboard"
+P: Phys=sunxikbd/input0
+S: Sysfs=/devices/virtual/input/input0
+U: Uniq=
+H: Handlers=event0 
+B: PROP=0
+B: EV=3
+B: KEY=1000 800 c0000 0 0 10000000
+
+I: Bus=0019 Vendor=0001 Product=0001 Version=0100
+N: Name="sunxi-ir"
+P: Phys=sunxi-ir/input0
+S: Sysfs=/devices/platform/soc/7040000.s_cir/rc/rc0/input1
+U: Uniq=
+H: Handlers=event1 
+B: PROP=0
+B: EV=100013
+B: KEY=2
+B: MSC=10
+
+I: Bus=0019 Vendor=0000 Product=0000 Version=0004
+N: Name="sunxi-ir-uinput"
+P: Phys=
+S: Sysfs=/devices/virtual/input/input2
+U: Uniq=
+H: Handlers=event2 
+B: PROP=0
+B: EV=100017
+B: KEY=1fff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff fffffffe
+B: REL=3
+B: MSC=0
+

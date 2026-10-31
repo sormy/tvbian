@@ -1,0 +1,21 @@
+== /sys/class/thermal/thermal_zone0
+/sys/class/thermal/thermal_zone0/type:cpu_thermal_zone
+/sys/class/thermal/thermal_zone0/temp:49229
+/sys/class/thermal/thermal_zone0/trip_point_0_hyst:0
+/sys/class/thermal/thermal_zone0/trip_point_0_temp:60000
+/sys/class/thermal/thermal_zone0/trip_point_0_type:passive
+/sys/class/thermal/thermal_zone0/trip_point_1_hyst:0
+/sys/class/thermal/thermal_zone0/trip_point_1_temp:70000
+/sys/class/thermal/thermal_zone0/trip_point_1_type:passive
+/sys/class/thermal/thermal_zone0/trip_point_2_hyst:0
+/sys/class/thermal/thermal_zone0/trip_point_2_temp:115000
+/sys/class/thermal/thermal_zone0/trip_point_2_type:critical
+== /sys/class/thermal/thermal_zone1
+/sys/class/thermal/thermal_zone1/type:gpu_thermal_zone
+/sys/class/thermal/thermal_zone1/temp:48743
+== /sys/class/thermal/thermal_zone2
+/sys/class/thermal/thermal_zone2/type:ve_thermal_zone
+/sys/class/thermal/thermal_zone2/temp:49472
+== /sys/class/thermal/thermal_zone3
+/sys/class/thermal/thermal_zone3/type:ddr_thermal_zone
+/sys/class/thermal/thermal_zone3/temp:48824

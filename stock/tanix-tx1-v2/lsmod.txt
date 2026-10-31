@@ -1,0 +1,8 @@
+Module                  Size  Used by
+atbm613x_wifi_sdio    770048  0 
+uvcvideo              102400  0 
+videobuf2_v4l2         28672  1 uvcvideo
+videobuf2_vmalloc      16384  1 uvcvideo
+videobuf2_memops       16384  1 videobuf2_vmalloc
+videobuf2_core         49152  2 uvcvideo,videobuf2_v4l2
+mali_kbase            536576  7 

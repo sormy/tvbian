@@ -1,0 +1,28 @@
+ regulator                      use open bypass voltage current     min     max
+-------------------------------------------------------------------------------
+ regulator-dummy                  0   10      0     0mV     0mA     0mV     0mV 
+    6000000.hdmi                                                    0mV     0mV
+    6000000.hdmi                                                    0mV     0mV
+    7040000.s_cir                                                   0mV     0mV
+    reg-virt-consumer.5                                             0mV     0mV
+    reg-virt-consumer.4                                             0mV     0mV
+    reg-virt-consumer.3                                             0mV     0mV
+    reg-virt-consumer.2                                             0mV     0mV
+    reg-virt-consumer.1                                             0mV     0mV
+    twi5                                                            0mV     0mV
+    twi3                                                            0mV     0mV
+ axp1530-dcdc1                    0    0      0   960mV     0mA   500mV  3400mV 
+ axp1530-dcdc2                    0    1      0  1120mV     0mA   500mV  1540mV 
+    cpu0                                                         1120mV  1120mV
+ axp1530-dcdc3                    0    0      0  1200mV     0mA   500mV  1540mV 
+ axp1530-aldo1                    0    4      0  1800mV     0mA   500mV  3500mV 
+    codec                                                           0mV     0mV
+    sdc0                                                            0mV     0mV
+    sdc0                                                            0mV     0mV
+    sdc2                                                            0mV     0mV
+ axp1530-dldo1                    0    5      0  3300mV     0mA   500mV  3500mV 
+    codec                                                           0mV     0mV
+    sdc0                                                            0mV     0mV
+    sdc0                                                            0mV     0mV
+    sdc0                                                            0mV     0mV
+    sdc2                                                            0mV     0mV

@@ -1,0 +1,145 @@
+== /sys/kernel/debug/pinctrl/pio/pinmux-pins
+Pinmux settings per pin
+Format: pin (name): mux_owner gpio_owner hog?
+pin 0 (PA0): gmac1 (GPIO UNCLAIMED) function gmac1 group PA0
+pin 1 (PA1): gmac1 (GPIO UNCLAIMED) function gmac1 group PA1
+pin 2 (PA2): gmac1 (GPIO UNCLAIMED) function gmac1 group PA2
+pin 3 (PA3): gmac1 (GPIO UNCLAIMED) function gmac1 group PA3
+pin 4 (PA4): gmac1 (GPIO UNCLAIMED) function gmac1 group PA4
+pin 5 (PA5): gmac1 (GPIO UNCLAIMED) function gmac1 group PA5
+pin 6 (PA6): gmac1 (GPIO UNCLAIMED) function gmac1 group PA6
+pin 7 (PA7): gmac1 (GPIO UNCLAIMED) function gmac1 group PA7
+pin 8 (PA8): gmac1 (GPIO UNCLAIMED) function gmac1 group PA8
+pin 9 (PA9): gmac1 (GPIO UNCLAIMED) function gmac1 group PA9
+pin 10 (PA10): twi3 (GPIO UNCLAIMED) function io_disabled group PA10
+pin 11 (PA11): twi3 (GPIO UNCLAIMED) function io_disabled group PA11
+pin 12 (PA12): soc@03000000:pwm5@0300a000 (GPIO UNCLAIMED) function pwm5 group PA12
+pin 64 (PC0): sdc2 (GPIO UNCLAIMED) function sdc2 group PC0
+pin 65 (PC1): sdc2 (GPIO UNCLAIMED) function sdc2 group PC1
+pin 66 (PC2): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 67 (PC3): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 68 (PC4): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 69 (PC5): sdc2 (GPIO UNCLAIMED) function sdc2 group PC5
+pin 70 (PC6): sdc2 (GPIO UNCLAIMED) function sdc2 group PC6
+pin 71 (PC7): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 72 (PC8): sdc2 (GPIO UNCLAIMED) function sdc2 group PC8
+pin 73 (PC9): sdc2 (GPIO UNCLAIMED) function sdc2 group PC9
+pin 74 (PC10): sdc2 (GPIO UNCLAIMED) function sdc2 group PC10
+pin 75 (PC11): sdc2 (GPIO UNCLAIMED) function sdc2 group PC11
+pin 76 (PC12): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 77 (PC13): sdc2 (GPIO UNCLAIMED) function sdc2 group PC13
+pin 78 (PC14): sdc2 (GPIO UNCLAIMED) function sdc2 group PC14
+pin 79 (PC15): sdc2 (GPIO UNCLAIMED) function sdc2 group PC15
+pin 80 (PC16): sdc2 (GPIO UNCLAIMED) function sdc2 group PC16
+pin 96 (PD0): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 97 (PD1): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 98 (PD2): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 99 (PD3): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 100 (PD4): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 101 (PD5): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 102 (PD6): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 103 (PD7): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 104 (PD8): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 105 (PD9): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 106 (PD10): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 107 (PD11): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 108 (PD12): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 109 (PD13): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 110 (PD14): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 111 (PD15): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 112 (PD16): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 113 (PD17): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 114 (PD18): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 115 (PD19): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 116 (PD20): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 117 (PD21): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 118 (PD22): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 119 (PD23): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 120 (PD24): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 121 (PD25): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 122 (PD26): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 123 (PD27): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 124 (PD28): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 128 (PE0): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 129 (PE1): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 130 (PE2): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 131 (PE3): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 132 (PE4): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 133 (PE5): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 134 (PE6): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 135 (PE7): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 136 (PE8): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 137 (PE9): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 138 (PE10): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 139 (PE11): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 140 (PE12): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 141 (PE13): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 142 (PE14): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 143 (PE15): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 144 (PE16): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 145 (PE17): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 146 (PE18): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 147 (PE19): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 148 (PE20): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 149 (PE21): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 150 (PE22): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 160 (PF0): sdc0 (GPIO UNCLAIMED) function io_disabled group PF0
+pin 161 (PF1): sdc0 (GPIO UNCLAIMED) function io_disabled group PF1
+pin 162 (PF2): sdc0 (GPIO UNCLAIMED) function io_disabled group PF2
+pin 163 (PF3): sdc0 (GPIO UNCLAIMED) function io_disabled group PF3
+pin 164 (PF4): sdc0 (GPIO UNCLAIMED) function io_disabled group PF4
+pin 165 (PF5): sdc0 (GPIO UNCLAIMED) function io_disabled group PF5
+pin 166 (PF6): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 192 (PG0): sdc1 (GPIO UNCLAIMED) function sdc1 group PG0
+pin 193 (PG1): sdc1 (GPIO UNCLAIMED) function sdc1 group PG1
+pin 194 (PG2): sdc1 (GPIO UNCLAIMED) function sdc1 group PG2
+pin 195 (PG3): sdc1 (GPIO UNCLAIMED) function sdc1 group PG3
+pin 196 (PG4): sdc1 (GPIO UNCLAIMED) function sdc1 group PG4
+pin 197 (PG5): sdc1 (GPIO UNCLAIMED) function sdc1 group PG5
+pin 198 (PG6): uart1 (GPIO UNCLAIMED) function uart1 group PG6
+pin 199 (PG7): uart1 (GPIO UNCLAIMED) function uart1 group PG7
+pin 200 (PG8): uart1 (GPIO UNCLAIMED) function uart1 group PG8
+pin 201 (PG9): uart1 (GPIO UNCLAIMED) function uart1 group PG9
+pin 202 (PG10): soc@03000000:wlan (GPIO UNCLAIMED) function x32kfout group PG10
+pin 203 (PG11): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 204 (PG12): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 205 (PG13): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 206 (PG14): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 207 (PG15): (MUX UNCLAIMED) pio:207
+pin 208 (PG16): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 209 (PG17): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 210 (PG18): (MUX UNCLAIMED) pio:210
+pin 211 (PG19): (MUX UNCLAIMED) pio:211
+pin 224 (PH0): uart0 (GPIO UNCLAIMED) function uart0 group PH0
+pin 225 (PH1): uart0 (GPIO UNCLAIMED) function uart0 group PH1
+pin 226 (PH2): spdif (GPIO UNCLAIMED) function io_disabled group PH2
+pin 227 (PH3): spdif (GPIO UNCLAIMED) function io_disabled group PH3
+pin 228 (PH4): spdif (GPIO UNCLAIMED) function io_disabled group PH4
+pin 229 (PH5): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 230 (PH6): (MUX UNCLAIMED) pio:230
+pin 231 (PH7): (MUX UNCLAIMED) pio:231
+pin 232 (PH8): (MUX UNCLAIMED) pio:232
+pin 233 (PH9): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 234 (PH10): 7040000.s_cir (GPIO UNCLAIMED) function ir group PH10
+pin 256 (PI0): ahub_daudio0 (GPIO UNCLAIMED) function io_disabled group PI0
+pin 257 (PI1): ahub_daudio0 (GPIO UNCLAIMED) function io_disabled group PI1
+pin 258 (PI2): ahub_daudio0 (GPIO UNCLAIMED) function io_disabled group PI2
+pin 259 (PI3): ahub_daudio0 (GPIO UNCLAIMED) function io_disabled group PI3
+pin 260 (PI4): ahub_daudio0 (GPIO UNCLAIMED) function io_disabled group PI4
+pin 261 (PI5): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 262 (PI6): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 263 (PI7): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 264 (PI8): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 265 (PI9): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 266 (PI10): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 267 (PI11): (MUX UNCLAIMED) pio:267
+pin 268 (PI12): (MUX UNCLAIMED) pio:268
+pin 269 (PI13): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 270 (PI14): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 271 (PI15): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+pin 272 (PI16): (MUX UNCLAIMED) pio:272
+== /sys/kernel/debug/pinctrl/r_pio/pinmux-pins
+Pinmux settings per pin
+Format: pin (name): mux_owner gpio_owner hog?
+pin 352 (PL0): twi5 (GPIO UNCLAIMED) function s_twi0 group PL0
+pin 353 (PL1): twi5 (GPIO UNCLAIMED) function s_twi0 group PL1

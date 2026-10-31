@@ -1,0 +1,12 @@
+gpiochip1: GPIOs 0-287, parent: platform/pio, pio:
+ gpio-207 (                    |wlan_hostwake       ) in  hi    
+ gpio-210 (                    |wlan_regon          ) out hi    
+ gpio-211 (                    |chip_en             ) out hi    
+ gpio-230 (                    |?                   ) out hi    
+ gpio-231 (                    |?                   ) out lo    
+ gpio-232 (                    |?                   ) out hi    
+ gpio-267 (                    |fd650_clk           ) out hi    
+ gpio-268 (                    |fd650_dat           ) in  hi    
+ gpio-272 (                    |cd                  ) in  hi    
+
+gpiochip0: GPIOs 352-383, parent: platform/r_pio, r_pio:

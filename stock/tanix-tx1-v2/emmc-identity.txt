@@ -1,0 +1,12 @@
+type: MMC
+name: Q316BB
+manfid: 0x000015
+oemid: 0x0100
+date: 05/2018
+rev: 0x7
+hwrev: 0x0
+fwrev: 0x0300000000000000
+cid: 15010051333136424203729e00325535
+csd: d02701320f5903fff6dbffef8e40400d
+life_time: 0x01 0x01
+pre_eol_info: 01

@@ -1,0 +1,384 @@
+[    6.677571] [atbm_log]:get chip id [834][10][0] 
+[    6.677597] [atbm_log]:current chiptype 6031-X 
+[    6.677604] [atbm_log]:[atbm_wtd]:set wtd_probe = 1
+[    6.681839] [atbm_log]:[phy0-ble_xmit] start
+[    6.700888] init: Created socket '/dev/socket/tombstoned_intercept', mode 666, user 1000, group 1000
+[    6.725321] init: Created socket '/dev/socket/tombstoned_java_trace', mode 666, user 1000, group 1000
+[    6.758644] init: starting service 'usbd'...
+[    6.789807] init: Command 'class_start late_start' action=nonencrypted (/init.rc:762) took 248ms and succeeded
+[    6.791629] init: Received control message 'start' for 'mdnsd' from pid: 1816 (/system/bin/adbd --root_seclabel=u:r:su:s0)
+[    6.793600] init: starting service 'mdnsd'...
+[    7.261576] random: crng init done
+[    7.261589] random: 6 urandom warning(s) missed due to ratelimiting
+[    7.589868] read descriptors
+[    7.589900] read strings
+[    7.799115] sunxi-bt soc@03000000:bt: set block: 1
+[    9.311268] input: sunxi-ir-uinput as /devices/virtual/input/input2
+[   10.088719] type=1400 audit(9.316:13): avc: denied { write } for comm="setprop" name="property_service" dev="tmpfs" ino=2331 scontext=u:r:toolbox:s0 tcontext=u:object_r:property_socket:s0 tclass=sock_file permissive=1
+[   10.088806] type=1400 audit(13.550:14): avc: denied { read } for comm="app_process" name="u:object_r:device_config_runtime_native_boot_prop:s0" dev="tmpfs" ino=2242 scontext=u:r:shell:s0 tcontext=u:object_r:device_config_runtime_native_boot_prop:s0 tclass=file permissive=1
+[   10.089455] type=1400 audit(13.550:14): avc: denied { read } for comm="app_process" name="u:object_r:device_config_runtime_native_boot_prop:s0" dev="tmpfs" ino=2242 scontext=u:r:shell:s0 tcontext=u:object_r:device_config_runtime_native_boot_prop:s0 tclass=file permissive=1
+[   10.089513] type=1400 audit(13.550:15): avc: denied { open } for comm="app_process" path="/dev/__properties__/u:object_r:device_config_runtime_native_boot_prop:s0" dev="tmpfs" ino=2242 scontext=u:r:shell:s0 tcontext=u:object_r:device_config_runtime_native_boot_prop:s0 tclass=file permissive=1
+[   10.122213] type=1400 audit(13.550:15): avc: denied { open } for comm="app_process" path="/dev/__properties__/u:object_r:device_config_runtime_native_boot_prop:s0" dev="tmpfs" ino=2242 scontext=u:r:shell:s0 tcontext=u:object_r:device_config_runtime_native_boot_prop:s0 tclass=file permissive=1
+[   10.122277] type=1400 audit(13.550:16): avc: denied { getattr } for comm="app_process" path="/dev/__properties__/u:object_r:device_config_runtime_native_boot_prop:s0" dev="tmpfs" ino=2242 scontext=u:r:shell:s0 tcontext=u:object_r:device_config_runtime_native_boot_prop:s0 tclass=file permissive=1
+[   12.173903] init: Received control message 'interface_start' for 'android.hardware.light@2.0::ILight/default' from pid: 1647 (/system/bin/hwservicemanager)
+[   12.176291] init: starting service 'vendor.light-hal-2-0'...
+[   12.181609] init: Received control message 'interface_start' for 'android.hardware.light@2.0::ILight/default' from pid: 1647 (/system/bin/hwservicemanager)
+[   13.505984] healthd: battery none chg=
+[   16.270711] healthd: battery none chg=
+[   16.271469] healthd: battery none chg=
+[   17.202932] init: processing action (sys.sysctl.extra_free_kbytes=*) from (/init.rc:806)
+[   17.906445] binder: undelivered transaction 6042, process died.
+[   17.909083] init: Service 'vendor.light-hal-2-0' (pid 2141) exited with status 0
+[   19.025483] acc_open
+[   19.025521] acc_release
+[   19.282013] [CEC]cec_CfgLogicAddr failed
+[   19.282578] [CEC]cec_CfgLogicAddr failed
+[   19.609324] init: Received control message 'interface_start' for 'android.hardware.wifi@1.0::IWifi/default' from pid: 1647 (/system/bin/hwservicemanager)
+[   19.610869] init: starting service 'vendor.wifi_hal_legacy'...
+[   19.617746] init: Received control message 'interface_start' for 'android.hardware.wifi@1.0::IWifi/default' from pid: 1647 (/system/bin/hwservicemanager)
+[   20.560104] init: Received control message 'interface_start' for 'android.hardware.wifi.supplicant@1.0::ISupplicant/default' from pid: 1647 (/system/bin/hwservicemanager)
+[   20.581604] init: starting service 'wpa_supplicant'...
+[   20.607318] init: Created socket '/dev/socket/wpa_wlan0', mode 660, user 1010, group 1010
+[   20.725056] init: Received control message 'interface_start' for 'android.hardware.light@2.0::ILight/default' from pid: 1647 (/system/bin/hwservicemanager)
+[   20.733264] init: starting service 'vendor.light-hal-2-0'...
+[   20.875444] capability: warning: `wpa_supplicant' uses 32-bit capabilities (legacy support in use)
+[   20.949901] libphy: gmac1: probed
+[   21.024811] sunxi-gmac gmac1 eth0: eth0: Type(6) PHY ID 00441400 at 0 IRQ poll (gmac1-0:00)
+[   21.041008] [atbm_log]:atbm_setup_mac:addr(5414e9d973d1)
+[   21.042295] [atbm_log]:\x013 !!! atbm_vif_setup_params: enabling priv
+[   21.072074] [atbm_log]:[STA] Interface ID:0 of type:2 added
+[   21.072558] [atbm_log]:atbm_set_uapsd_param:uapsdFlags(0)
+[   21.075105] [atbm_log]:br0_netdev_open()-1199: dev_get_by_name(br0)
+[   21.083215] [atbm_log]:atbm_set_uapsd_param:uapsdFlags(0)
+[   21.086119] [atbm_log]:atbm_set_uapsd_param:uapsdFlags(0)
+[   21.087764] [atbm_log]:atbm_set_uapsd_param:uapsdFlags(0)
+[   21.090113] [atbm_log]:atbm_set_uapsd_param:uapsdFlags(0)
+[   21.091363] IPv6: ADDRCONF(NETDEV_UP): wlan0: link is not ready
+[   21.806822] logd: logdr: UID=1036 GID=1023 PID=1968 b tail=0 logMask=19 pid=0 start=19187845000ns timeout=0ns
+[   21.924384] [CEC]cec_CfgLogicAddr failed
+[   22.295442] type=1400 audit(13.550:16): avc: denied { getattr } for comm="app_process" path="/dev/__properties__/u:object_r:device_config_runtime_native_boot_prop:s0" dev="tmpfs" ino=2242 scontext=u:r:shell:s0 tcontext=u:object_r:device_config_runtime_native_boot_prop:s0 tclass=file permissive=1
+[   22.295518] type=1400 audit(1784028820.610:17): avc: denied { read } for comm="omx@1.0-service" name="u:object_r:system_prop:s0" dev="tmpfs" ino=2308 scontext=u:r:mediacodec:s0 tcontext=u:object_r:system_prop:s0 tclass=file permissive=1
+[   22.296059] type=1400 audit(1784028820.610:17): avc: denied { read } for comm="omx@1.0-service" name="u:object_r:system_prop:s0" dev="tmpfs" ino=2308 scontext=u:r:mediacodec:s0 tcontext=u:object_r:system_prop:s0 tclass=file permissive=1
+[   22.299435] type=1400 audit(1784028820.610:18): avc: denied { open } for comm="omx@1.0-service" path="/dev/__properties__/u:object_r:system_prop:s0" dev="tmpfs" ino=2308 scontext=u:r:mediacodec:s0 tcontext=u:object_r:system_prop:s0 tclass=file permissive=1
+[   22.300896] type=1400 audit(1784028820.610:18): avc: denied { open } for comm="omx@1.0-service" path="/dev/__properties__/u:object_r:system_prop:s0" dev="tmpfs" ino=2308 scontext=u:r:mediacodec:s0 tcontext=u:object_r:system_prop:s0 tclass=file permissive=1
+[   22.300965] type=1400 audit(1784028820.610:19): avc: denied { getattr } for comm="omx@1.0-service" path="/dev/__properties__/u:object_r:system_prop:s0" dev="tmpfs" ino=2308 scontext=u:r:mediacodec:s0 tcontext=u:object_r:system_prop:s0 tclass=file permissive=1
+[   23.116723] [atbm_log]:\x013 !!! atbm_vif_setup_params: enabling priv
+[   23.145613] [atbm_log]:[STA] Interface ID:1 of type:2 added
+[   23.146829] [atbm_log]:atbm_set_uapsd_param:uapsdFlags(0)
+[   23.163146] [atbm_log]:br0_netdev_open()-1199: dev_get_by_name(br0)
+[   23.163428] IPv6: ADDRCONF(NETDEV_UP): p2p0: link is not ready
+[   23.296621] [atbm_log]:ieee80211_netdev_cmd_handle_default
+[   23.309917] [atbm_log]:ieee80211_netdev_cmd_handle_default
+[   23.313684] [atbm_log]:ieee80211_netdev_cmd_handle_default
+[   23.317036] [atbm_log]:ieee80211_netdev_cmd_handle_default
+[   23.319934] [atbm_log]:ieee80211_netdev_cmd_handle_default
+[   23.321201] [atbm_log]:ieee80211_netdev_cmd_handle_default
+[   23.323003] [atbm_log]:ieee80211_netdev_cmd_handle_default
+[   23.325665] [atbm_log]:ieee80211_netdev_cmd_handle_default
+[   23.842949] init: processing action (sys.usb.config=none && sys.usb.configfs=1) from (/vendor/etc/init/hw/init.sun50iw9p1.usb.rc:64)
+[   23.846858] init: processing action (sys.usb.config=none && sys.usb.configfs=1) from (/init.usb.configfs.rc:1)
+[   23.849609] android_work: did not send uevent (0 0           (null))
+[   23.851464] init: Sending signal 9 to service 'adbd' (pid 1816) process group...
+[   23.869183] sdcardfs version 2.0
+[   23.869196] sdcardfs: dev_name -> /data/media
+[   23.869201] sdcardfs: options -> fsuid=1023,fsgid=1023,multiuser,derive_gid,default_normal,unshared_obb,mask=6,userid=0,gid=1015
+[   23.869207] sdcardfs: mnt -> ffffffc057a418a0
+[   23.869304] sdcardfs: mounted on top of /data/media type f2fs
+[   23.870878] Remount options were mask=23,gid=9997 for vfsmnt ffffffc02abacc60.
+[   23.870897] sdcardfs : options - debug:1
+[   23.870902] sdcardfs : options - gid:9997
+[   23.870906] sdcardfs : options - mask:23
+[   23.871422] Remount options were mask=7,gid=9997 for vfsmnt ffffffc02abad520.
+[   23.871438] sdcardfs : options - debug:1
+[   23.871442] sdcardfs : options - gid:9997
+[   23.871446] sdcardfs : options - mask:7
+[   23.872091] Remount options were mask=7,gid=9997 for vfsmnt ffffffc02abadde0.
+[   23.872111] sdcardfs : options - debug:1
+[   23.872114] sdcardfs : options - gid:9997
+[   23.872118] sdcardfs : options - mask:7
+[   23.888785] libprocessgroup: Successfully killed process cgroup uid 0 pid 1816 in 37ms
+[   23.902684] [atbm_log]:__ieee80211_start_scan:channels[29]
+[   23.902961] init: Service 'adbd' (pid 1816) received signal 9
+[   23.912756] selinux: SELinux: Skipping restorecon on directory(/data/system_ce/0)\x0a
+[   23.917419] init: processing action (sys.boot_completed=1) from (/init.rc:800)
+[   23.918114] init: Async property child exited with status 0
+[   23.918556] init: processing action (sys.boot_completed=1) from (/vendor/etc/init/hw/init.device.rc:64)
+[   23.926196] selinux: SELinux: Skipping restorecon on directory(/data/vendor_ce/0)\x0a
+[   23.928307] [atbm_log]:ieee80211_prep_hw_scan:n_chans(13),space(29),index(0),scaned(0)
+[   23.928350] [atbm_log]:atbm_hw_scan:if_id(0)
+[   23.929766] [atbm_log]:atbm_hw_scan:scan, delay suspend
+[   23.929819] [atbm_log]:scan start band(0),(13)
+[   23.931273] type=1400 audit(1784028820.610:19): avc: denied { getattr } for comm="omx@1.0-service" path="/dev/__properties__/u:object_r:system_prop:s0" dev="tmpfs" ino=2308 scontext=u:r:mediacodec:s0 tcontext=u:object_r:system_prop:s0 tclass=file permissive=1
+[   23.931352] type=1400 audit(1784028822.246:20): avc: denied { setattr } for comm="init" name="user_persist" dev="mmcblk0p17" ino=1895 scontext=u:r:vendor_init:s0 tcontext=u:object_r:system_data_file:s0 tclass=dir permissive=1
+[   23.937644] type=1400 audit(1784028822.246:20): avc: denied { setattr } for comm="init" name="user_persist" dev="mmcblk0p17" ino=1895 scontext=u:r:vendor_init:s0 tcontext=u:object_r:system_data_file:s0 tclass=dir permissive=1
+[   24.689411] init (1251): drop_caches: 3
+[   24.870796] [atbm_log]:hw_priv->scan.status 0
+[   24.870843] [atbm_log]:atbm_scan_work:end(0)
+[   24.885242] [atbm_log]:ieee80211_prep_hw_scan:n_chans(16),space(29),index(0),scaned(0)
+[   24.885271] [atbm_log]:atbm_hw_scan:if_id(0)
+[   24.885888] [atbm_log]:atbm_hw_scan:scan, delay suspend
+[   24.885915] [atbm_log]:__ieee80211_scan_completed:1634
+[   24.885930] [atbm_log]:scan start band(1),(14)
+[   24.954405] read descriptors
+[   24.954433] read strings
+[   27.039957] [atbm_log]:hw_priv->scan.status 0
+[   27.040016] [atbm_log]:scan start band(1),(2)
+[   27.350319] [atbm_log]:hw_priv->scan.status 0
+[   27.350391] [atbm_log]:atbm_scan_work:end(0)
+[   27.391734] [atbm_log]:5G_ir channel(36) skip no ir
+[   27.391926] [atbm_log]:5G_ir channel(38) skip no ir
+[   27.391934] [atbm_log]:5G_ir channel(40) skip no ir
+[   27.391938] [atbm_log]:5G_ir channel(42) skip no ir
+[   27.391951] [atbm_log]:5G_ir channel(44) skip no ir
+[   27.391955] [atbm_log]:5G_ir channel(46) skip no ir
+[   27.391959] [atbm_log]:5G_ir channel(48) skip no ir
+[   27.391964] [atbm_log]:5G_ir channel(52) skip no ir
+[   27.391968] [atbm_log]:5G_ir channel(56) skip no ir
+[   27.391972] [atbm_log]:5G_ir channel(60) skip no ir
+[   27.391977] [atbm_log]:5G_ir channel(64) skip no ir
+[   27.391981] [atbm_log]:5G_ir channel(149) skip no ir
+[   27.391985] [atbm_log]:5G_ir channel(153) skip no ir
+[   27.391989] [atbm_log]:5G_ir channel(157) skip no ir
+[   27.391993] [atbm_log]:5G_ir channel(161) skip no ir
+[   27.391998] [atbm_log]:5G_ir channel(165) skip no ir
+[   27.392003] [atbm_log]:stop scan:policy empty 
+[   27.928103] binder: undelivered transaction 23474, process died.
+[   28.028980] [atbm_log]:[RX]:need sw decrypted?
+[   28.260240] [atbm_log]:[RX]:need sw decrypted?
+[   28.263514] [atbm_log]:[RX]:need sw decrypted?
+[   28.263562] [atbm_log]:[RX]:need sw decrypted?
+[   28.263573] [atbm_log]:[RX]:need sw decrypted?
+[   28.354683] [atbm_log]:__ieee80211_start_scan:1745: offch runing ,so delay scanning
+[   28.560194] [atbm_log]:[RX]:need sw decrypted?
+[   28.743050] type=1400 audit(1784028823.273:22): avc: denied { module_request } for comm=73657276657220736F636B6574 kmod="net-pf-40" scontext=u:r:adbd:s0 tcontext=u:r:kernel:s0 tclass=system permissive=1
+[   28.743122] type=1400 audit(1784028827.060:23): avc: denied { execute_no_trans } for comm="init" path="/system/bin/preinstall.sh" dev="dm-0" ino=803 scontext=u:r:init:s0 tcontext=u:object_r:system_file:s0 tclass=file permissive=1
+[   29.038608] [atbm_log]:atbm_disable_listening++++++++
+[   29.041255] [atbm_log]:__ieee80211_start_scan:channels[29]
+[   29.071885] [atbm_log]:ieee80211_prep_hw_scan:n_chans(13),space(29),index(0),scaned(0)
+[   29.071917] [atbm_log]:atbm_hw_scan:if_id(0)
+[   29.072320] [atbm_log]:atbm_hw_scan:scan, delay suspend
+[   29.072368] [atbm_log]:scan start band(0),(13)
+[   29.273229] type=1400 audit(1784028827.060:23): avc: denied { execute_no_trans } for comm="init" path="/system/bin/preinstall.sh" dev="dm-0" ino=803 scontext=u:r:init:s0 tcontext=u:object_r:system_file:s0 tclass=file permissive=1
+[   29.273296] type=1400 audit(1784028827.590:24): avc: denied { call } for comm="cmd" scontext=u:r:init:s0 tcontext=u:r:system_server:s0 tclass=binder permissive=1
+[   29.288217] type=1400 audit(1784028827.590:24): avc: denied { call } for comm="cmd" scontext=u:r:init:s0 tcontext=u:r:system_server:s0 tclass=binder permissive=1
+[   29.288295] type=1400 audit(1784028827.590:25): avc: denied { transfer } for comm="cmd" scontext=u:r:init:s0 tcontext=u:r:system_server:s0 tclass=binder permissive=1
+[   29.292880] type=1400 audit(1784028827.590:25): avc: denied { transfer } for comm="cmd" scontext=u:r:init:s0 tcontext=u:r:system_server:s0 tclass=binder permissive=1
+[   29.292945] type=1400 audit(1784028827.593:26): avc: denied { call } for comm="Binder:2035_3" scontext=u:r:system_server:s0 tcontext=u:r:init:s0 tclass=binder permissive=1
+[   29.924898] [atbm_log]:hw_priv->scan.status 0
+[   29.924972] [atbm_log]:atbm_scan_work:end(0)
+[   29.943364] [atbm_log]:ieee80211_prep_hw_scan:n_chans(16),space(29),index(0),scaned(0)
+[   29.943407] [atbm_log]:atbm_hw_scan:if_id(0)
+[   29.944471] [atbm_log]:atbm_hw_scan:scan, delay suspend
+[   29.944528] [atbm_log]:__ieee80211_scan_completed:1634
+[   29.944550] [atbm_log]:scan start band(1),(14)
+[   30.299381] type=1400 audit(1784028827.593:26): avc: denied { call } for comm="Binder:2035_3" scontext=u:r:system_server:s0 tcontext=u:r:init:s0 tclass=binder permissive=1
+[   30.299446] type=1400 audit(1784028828.593:27): avc: denied { execute_no_trans } for comm="preinstall.sh" path="/system/bin/settings" dev="dm-0" ino=843 scontext=u:r:init:s0 tcontext=u:object_r:system_file:s0 tclass=file permissive=1
+[   31.216948] binder: undelivered transaction 26107, process died.
+[   31.377961] FD650: fd650_dev_open:::open fd650 dev success
+[   31.771981] init: Service 'preinstall' (pid 2803) exited with status 0
+[   32.107127] [atbm_log]:hw_priv->scan.status 0
+[   32.107231] [atbm_log]:scan start band(1),(2)
+[   32.416573] [atbm_log]:hw_priv->scan.status 0
+[   32.416639] [atbm_log]:atbm_scan_work:end(0)
+[   32.442141] [atbm_log]:5G_ir channel(36) skip no ir
+[   32.442155] [atbm_log]:5G_ir channel(38) skip no ir
+[   32.442160] [atbm_log]:5G_ir channel(40) skip no ir
+[   32.442164] [atbm_log]:5G_ir channel(42) skip no ir
+[   32.442169] [atbm_log]:5G_ir channel(44) skip no ir
+[   32.442173] [atbm_log]:5G_ir channel(46) skip no ir
+[   32.442178] [atbm_log]:5G_ir channel(48) skip no ir
+[   32.442182] [atbm_log]:5G_ir channel(52) skip no ir
+[   32.442187] [atbm_log]:5G_ir channel(56) skip no ir
+[   32.442191] [atbm_log]:5G_ir channel(60) skip no ir
+[   32.442196] [atbm_log]:5G_ir channel(64) skip no ir
+[   32.442201] [atbm_log]:5G_ir channel(149) skip no ir
+[   32.442205] [atbm_log]:5G_ir channel(153) skip no ir
+[   32.442210] [atbm_log]:5G_ir channel(157) skip no ir
+[   32.442214] [atbm_log]:5G_ir channel(161) skip no ir
+[   32.442218] [atbm_log]:5G_ir channel(165) skip no ir
+[   32.442223] [atbm_log]:stop scan:policy empty 
+[   32.590100] apexd: Can't open /product/apex for reading : No such file or directory
+[   32.874076] init: Received control message 'start' for 'gsid' from pid: 2035 (system_server)
+[   32.876489] init: starting service 'gsid'...
+[   33.090691] init: Received control message 'stop' for 'gsid' from pid: 2035 (system_server)
+[   33.090759] init: Sending signal 9 to service 'gsid' (pid 3085) process group...
+[   33.109584] libprocessgroup: Successfully killed process cgroup uid 0 pid 3085 in 16ms
+[   33.114741] init: Service 'gsid' (pid 3085) received signal 9
+[   33.167762] [atbm_log]:[RX]:need sw decrypted?
+[   33.171148] [atbm_log]:[RX]:need sw decrypted?
+[   33.174491] [atbm_log]:[RX]:need sw decrypted?
+[   33.179664] [atbm_log]:[RX]:need sw decrypted?
+[   33.180755] [atbm_log]:[RX]:need sw decrypted?
+[   33.185627] [atbm_log]:[RX]:need sw decrypted?
+[   33.191873] [atbm_log]:[RX]:need sw decrypted?
+[   33.572461] [atbm_log]:atbm_disable_listening++++++++
+[   34.706380] [atbm_log]:[STA] Cancel remain on channel
+[   34.706474] [atbm_log]:atbm_disable_listening++++++++
+[   43.892110] [atbm_log]:__ieee80211_start_scan:channels[29]
+[   43.908519] [atbm_log]:ieee80211_prep_hw_scan:n_chans(13),space(29),index(0),scaned(0)
+[   43.908558] [atbm_log]:atbm_hw_scan:if_id(0)
+[   43.909101] [atbm_log]:atbm_hw_scan:scan, delay suspend
+[   43.909163] [atbm_log]:scan start band(0),(13)
+[   44.811562] [atbm_log]:hw_priv->scan.status 0
+[   44.811734] [atbm_log]:atbm_scan_work:end(0)
+[   44.828501] [atbm_log]:ieee80211_prep_hw_scan:n_chans(16),space(29),index(0),scaned(0)
+[   44.828540] [atbm_log]:atbm_hw_scan:if_id(0)
+[   44.829248] [atbm_log]:atbm_hw_scan:scan, delay suspend
+[   44.829304] [atbm_log]:scan start band(1),(14)
+[   44.829332] [atbm_log]:__ieee80211_scan_completed:1634
+[   46.983393] [atbm_log]:hw_priv->scan.status 0
+[   46.983557] [atbm_log]:scan start band(1),(2)
+[   47.294041] [atbm_log]:hw_priv->scan.status 0
+[   47.294211] [atbm_log]:atbm_scan_work:end(0)
+[   47.308497] [atbm_log]:5G_ir channel(36) skip no ir
+[   47.308513] [atbm_log]:5G_ir channel(38) skip no ir
+[   47.308526] [atbm_log]:5G_ir channel(40) skip no ir
+[   47.308537] [atbm_log]:5G_ir channel(42) skip no ir
+[   47.308548] [atbm_log]:5G_ir channel(44) skip no ir
+[   47.308559] [atbm_log]:5G_ir channel(46) skip no ir
+[   47.308571] [atbm_log]:5G_ir channel(48) skip no ir
+[   47.308582] [atbm_log]:5G_ir channel(52) skip no ir
+[   47.308593] [atbm_log]:5G_ir channel(56) skip no ir
+[   47.308605] [atbm_log]:5G_ir channel(60) skip no ir
+[   47.308616] [atbm_log]:5G_ir channel(64) skip no ir
+[   47.308628] [atbm_log]:5G_ir channel(149) skip no ir
+[   47.308639] [atbm_log]:5G_ir channel(153) skip no ir
+[   47.308650] [atbm_log]:5G_ir channel(157) skip no ir
+[   47.308662] [atbm_log]:5G_ir channel(161) skip no ir
+[   47.308673] [atbm_log]:5G_ir channel(165) skip no ir
+[   47.308684] [atbm_log]:stop scan:policy empty 
+[   48.220563] [atbm_log]:[RX]:need sw decrypted?
+[   48.223994] [atbm_log]:[RX]:need sw decrypted?
+[   48.227092] [atbm_log]:[RX]:need sw decrypted?
+[   48.228058] [atbm_log]:[RX]:need sw decrypted?
+[   48.229166] [atbm_log]:[RX]:need sw decrypted?
+[   48.233184] [atbm_log]:[RX]:need sw decrypted?
+[   48.235951] [atbm_log]:[RX]:need sw decrypted?
+[   48.478576] [atbm_log]:atbm_disable_listening++++++++
+[   49.377523] [atbm_log]:[STA] Cancel remain on channel
+[   49.377611] [atbm_log]:atbm_disable_listening++++++++
+[   65.999187] binder: undelivered transaction 31984, process died.
+[   66.295827] type=1400 audit(1784028830.063:35): avc: denied { connectto } for comm="setprop" path="/dev/socket/property_service" scontext=u:r:toolbox:s0 tcontext=u:r:init:s0 tclass=unix_stream_socket permissive=1
+[   66.295879] type=1400 audit(1784028864.610:36): avc: denied { read } for comm="eviceinforeport" name="sys_info" dev="sysfs" ino=14830 scontext=u:r:system_app:s0 tcontext=u:object_r:sysfs:s0 tclass=file permissive=1
+[   66.296348] type=1400 audit(1784028864.610:36): avc: denied { read } for comm="eviceinforeport" name="sys_info" dev="sysfs" ino=14830 scontext=u:r:system_app:s0 tcontext=u:object_r:sysfs:s0 tclass=file permissive=1
+[   66.296394] type=1400 audit(1784028864.610:37): avc: denied { open } for comm="eviceinforeport" path="/sys/class/sunxi_info/sys_info" dev="sysfs" ino=14830 scontext=u:r:system_app:s0 tcontext=u:object_r:sysfs:s0 tclass=file permissive=1
+[   66.296788] type=1400 audit(1784028864.610:37): avc: denied { open } for comm="eviceinforeport" path="/sys/class/sunxi_info/sys_info" dev="sysfs" ino=14830 scontext=u:r:system_app:s0 tcontext=u:object_r:sysfs:s0 tclass=file permissive=1
+[   66.296838] type=1400 audit(1784028864.610:38): avc: denied { getattr } for comm="eviceinforeport" path="/sys/class/sunxi_info/sys_info" dev="sysfs" ino=14830 scontext=u:r:system_app:s0 tcontext=u:object_r:sysfs:s0 tclass=file permissive=1
+[   83.896706] [atbm_log]:__ieee80211_start_scan:channels[29]
+[   83.918571] [atbm_log]:ieee80211_prep_hw_scan:n_chans(13),space(29),index(0),scaned(0)
+[   83.918609] [atbm_log]:atbm_hw_scan:if_id(0)
+[   83.919165] [atbm_log]:atbm_hw_scan:scan, delay suspend
+[   83.919319] [atbm_log]:scan start band(0),(13)
+[   84.772851] [atbm_log]:hw_priv->scan.status 0
+[   84.772992] [atbm_log]:atbm_scan_work:end(0)
+[   84.795163] [atbm_log]:ieee80211_prep_hw_scan:n_chans(16),space(29),index(0),scaned(0)
+[   84.795191] [atbm_log]:atbm_hw_scan:if_id(0)
+[   84.795530] [atbm_log]:atbm_hw_scan:scan, delay suspend
+[   84.795557] [atbm_log]:__ieee80211_scan_completed:1634
+[   84.795574] [atbm_log]:scan start band(1),(14)
+[   86.225930] type=1400 audit(1784028864.610:38): avc: denied { getattr } for comm="eviceinforeport" path="/sys/class/sunxi_info/sys_info" dev="sysfs" ino=14830 scontext=u:r:system_app:s0 tcontext=u:object_r:sysfs:s0 tclass=file permissive=1
+[   86.225983] type=1400 audit(1784028884.540:39): avc: denied { read } for comm="cat" name="compatible" dev="sysfs" ino=79 scontext=u:r:shell:s0 tcontext=u:object_r:sysfs:s0 tclass=file permissive=1
+[   86.226384] type=1400 audit(1784028884.540:39): avc: denied { read } for comm="cat" name="compatible" dev="sysfs" ino=79 scontext=u:r:shell:s0 tcontext=u:object_r:sysfs:s0 tclass=file permissive=1
+[   86.226436] type=1400 audit(1784028884.543:40): avc: denied { open } for comm="cat" path="/sys/firmware/devicetree/base/compatible" dev="sysfs" ino=79 scontext=u:r:shell:s0 tcontext=u:object_r:sysfs:s0 tclass=file permissive=1
+[   86.949126] [atbm_log]:hw_priv->scan.status 0
+[   86.949297] [atbm_log]:scan start band(1),(2)
+[   87.259476] [atbm_log]:hw_priv->scan.status 0
+[   87.259638] [atbm_log]:atbm_scan_work:end(0)
+[   87.275180] [atbm_log]:5G_ir channel(36) skip no ir
+[   87.275198] [atbm_log]:5G_ir channel(38) skip no ir
+[   87.275210] [atbm_log]:5G_ir channel(40) skip no ir
+[   87.275222] [atbm_log]:5G_ir channel(42) skip no ir
+[   87.275233] [atbm_log]:5G_ir channel(44) skip no ir
+[   87.275244] [atbm_log]:5G_ir channel(46) skip no ir
+[   87.275256] [atbm_log]:5G_ir channel(48) skip no ir
+[   87.275267] [atbm_log]:5G_ir channel(52) skip no ir
+[   87.275278] [atbm_log]:5G_ir channel(56) skip no ir
+[   87.275289] [atbm_log]:5G_ir channel(60) skip no ir
+[   87.275300] [atbm_log]:5G_ir channel(64) skip no ir
+[   87.275312] [atbm_log]:5G_ir channel(149) skip no ir
+[   87.275323] [atbm_log]:5G_ir channel(153) skip no ir
+[   87.275334] [atbm_log]:5G_ir channel(157) skip no ir
+[   87.275346] [atbm_log]:5G_ir channel(161) skip no ir
+[   87.275357] [atbm_log]:5G_ir channel(165) skip no ir
+[   87.275367] [atbm_log]:stop scan:policy empty 
+[   88.425200] [atbm_log]:atbm_disable_listening++++++++
+[   94.584970] \x0armmod_host_driver\x0a
+[   94.584982] [ehci0-controller]: sunxi_usb_disable_ehci
+[   94.584994] [sunxi-ehci0]: remove, pdev->name: 5101000.ehci0-controller, sunxi_ehci: 0xffffff80092c4778
+[   94.585026] sunxi-ehci 5101000.ehci0-controller: remove, state 4
+[   94.585053] usb usb1: USB disconnect, device number 1
+[   94.586861] sunxi-ehci 5101000.ehci0-controller: USB bus 1 deregistered
+[   94.586929] [ohci0-controller]: sunxi_usb_disable_ohci
+[   94.586936] [sunxi-ohci0]: remove, pdev->name: 5101000.ohci0-controller, sunxi_ohci: 0xffffff80092c3a58
+[   94.586945] sunxi-ohci 5101000.ohci0-controller: remove, state 4
+[   94.586973] usb usb5: USB disconnect, device number 1
+[   94.588798] sunxi-ohci 5101000.ohci0-controller: USB bus 5 deregistered
+[   94.588866] \x0ainsmod_host_driver\x0a
+[   94.588871] [ehci0-controller]: sunxi_usb_enable_ehci
+[   94.588879] [sunxi-ehci0]: probe, pdev->name: 5101000.ehci0-controller, sunxi_ehci: 0xffffff80092c4778, 0x:ffffff8009ea3000, irq_no:11d
+[   94.588930] sunxi-ehci 5101000.ehci0-controller: SW USB2.0 'Enhanced' Host Controller (EHCI) Driver
+[   94.588962] sunxi-ehci 5101000.ehci0-controller: new USB bus registered, assigned bus number 1
+[   94.589512] sunxi-ehci 5101000.ehci0-controller: irq 285, io mem 0xffffff800911f000
+[   94.601798] sunxi-ehci 5101000.ehci0-controller: USB 0.0 started, EHCI 1.00
+[   94.604196] hub 1-0:1.0: USB hub found
+[   94.604296] hub 1-0:1.0: 1 port detected
+[   94.604757] [ohci0-controller]: sunxi_usb_enable_ohci
+[   94.604767] [sunxi-ohci0]: probe, pdev->name: 5101000.ohci0-controller, sunxi_ohci: 0xffffff80092c3a58
+[   94.604822] sunxi-ohci 5101000.ohci0-controller: SW USB2.0 'Open' Host Controller (OHCI) Driver
+[   94.604846] sunxi-ohci 5101000.ohci0-controller: new USB bus registered, assigned bus number 5
+[   94.604901] sunxi-ohci 5101000.ohci0-controller: irq 286, io mem 0xffffff800911f000
+[   94.667667] hub 5-0:1.0: USB hub found
+[   94.667768] hub 5-0:1.0: 1 port detected
+[   96.470699] type=1400 audit(1784028884.543:40): avc: denied { open } for comm="cat" path="/sys/firmware/devicetree/base/compatible" dev="sysfs" ino=79 scontext=u:r:shell:s0 tcontext=u:object_r:sysfs:s0 tclass=file permissive=1
+[   96.470803] type=1400 audit(1784028894.786:41): avc: denied { read } for comm="eviceinforeport" name="sys_info" dev="sysfs" ino=14830 scontext=u:r:system_app:s0 tcontext=u:object_r:sysfs:s0 tclass=file permissive=1
+[   96.471227] type=1400 audit(1784028894.786:41): avc: denied { read } for comm="eviceinforeport" name="sys_info" dev="sysfs" ino=14830 scontext=u:r:system_app:s0 tcontext=u:object_r:sysfs:s0 tclass=file permissive=1
+[   96.471322] type=1400 audit(1784028894.786:42): avc: denied { open } for comm="eviceinforeport" path="/sys/class/sunxi_info/sys_info" dev="sysfs" ino=14830 scontext=u:r:system_app:s0 tcontext=u:object_r:sysfs:s0 tclass=file permissive=1
+[   96.471700] type=1400 audit(1784028894.786:42): avc: denied { open } for comm="eviceinforeport" path="/sys/class/sunxi_info/sys_info" dev="sysfs" ino=14830 scontext=u:r:system_app:s0 tcontext=u:object_r:sysfs:s0 tclass=file permissive=1
+[   96.471949] type=1400 audit(1784028894.786:43): avc: denied { getattr } for comm="eviceinforeport" path="/sys/class/sunxi_info/sys_info" dev="sysfs" ino=14830 scontext=u:r:system_app:s0 tcontext=u:object_r:sysfs:s0 tclass=file permissive=1
+[  106.046970] \x0armmod_host_driver\x0a
+[  106.046982] [ehci0-controller]: sunxi_usb_disable_ehci
+[  106.046992] [sunxi-ehci0]: remove, pdev->name: 5101000.ehci0-controller, sunxi_ehci: 0xffffff80092c4778
+[  106.047022] sunxi-ehci 5101000.ehci0-controller: remove, state 4
+[  106.047050] usb usb1: USB disconnect, device number 1
+[  106.048880] sunxi-ehci 5101000.ehci0-controller: USB bus 1 deregistered
+[  106.048952] [ohci0-controller]: sunxi_usb_disable_ohci
+[  106.048961] [sunxi-ohci0]: remove, pdev->name: 5101000.ohci0-controller, sunxi_ohci: 0xffffff80092c3a58
+[  106.048970] sunxi-ohci 5101000.ohci0-controller: remove, state 4
+[  106.049000] usb usb5: USB disconnect, device number 1
+[  106.050829] sunxi-ohci 5101000.ohci0-controller: USB bus 5 deregistered
+[  106.050903] \x0ainsmod_device_driver\x0a
+[  163.897910] [atbm_log]:__ieee80211_start_scan:channels[29]
+[  163.911873] [atbm_log]:ieee80211_prep_hw_scan:n_chans(13),space(29),index(0),scaned(0)
+[  163.911919] [atbm_log]:atbm_hw_scan:if_id(0)
+[  163.912969] [atbm_log]:atbm_hw_scan:scan, delay suspend
+[  163.913044] [atbm_log]:scan start band(0),(13)
+[  164.788619] [atbm_log]:hw_priv->scan.status 0
+[  164.788687] [atbm_log]:atbm_scan_work:end(0)
+[  164.805157] [atbm_log]:ieee80211_prep_hw_scan:n_chans(16),space(29),index(0),scaned(0)
+[  164.805196] [atbm_log]:atbm_hw_scan:if_id(0)
+[  164.806012] [atbm_log]:atbm_hw_scan:scan, delay suspend
+[  164.806071] [atbm_log]:__ieee80211_scan_completed:1634
+[  164.806079] [atbm_log]:scan start band(1),(14)
+[  166.960284] [atbm_log]:hw_priv->scan.status 0
+[  166.960431] [atbm_log]:scan start band(1),(2)
+[  167.270952] [atbm_log]:hw_priv->scan.status 0
+[  167.271107] [atbm_log]:atbm_scan_work:end(0)
+[  167.285166] [atbm_log]:5G_ir channel(36) skip no ir
+[  167.285183] [atbm_log]:5G_ir channel(38) skip no ir
+[  167.285195] [atbm_log]:5G_ir channel(40) skip no ir
+[  167.285206] [atbm_log]:5G_ir channel(42) skip no ir
+[  167.285218] [atbm_log]:5G_ir channel(44) skip no ir
+[  167.285229] [atbm_log]:5G_ir channel(46) skip no ir
+[  167.285241] [atbm_log]:5G_ir channel(48) skip no ir
+[  167.285253] [atbm_log]:5G_ir channel(52) skip no ir
+[  167.285264] [atbm_log]:5G_ir channel(56) skip no ir
+[  167.285275] [atbm_log]:5G_ir channel(60) skip no ir
+[  167.285287] [atbm_log]:5G_ir channel(64) skip no ir
+[  167.285298] [atbm_log]:5G_ir channel(149) skip no ir
+[  167.285310] [atbm_log]:5G_ir channel(153) skip no ir
+[  167.285321] [atbm_log]:5G_ir channel(157) skip no ir
+[  167.285333] [atbm_log]:5G_ir channel(161) skip no ir
+[  167.285344] [atbm_log]:5G_ir channel(165) skip no ir
+[  167.285355] [atbm_log]:stop scan:policy empty 
+[  167.338577] [atbm_log]:[STA] Cancel remain on channel
+[  167.345146] [atbm_log]:atbm_disable_listening++++++++

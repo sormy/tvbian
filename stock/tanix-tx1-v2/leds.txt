@@ -1,0 +1,1 @@
+/sys/class/leds/fd650_dev: 0 [none] rc-feedback rfkill0 mmc0 mmc1 mmc2 rfkill1
