@@ -1,0 +1,39 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 31 Oct 2026 08:20:00 -0400
+Subject: [PATCH] media: meson: vdec: a CAPTURE plane holds the canvas the decoder writes
+
+Codecs without a canvas height alignment sized a plane as width times
+height rounded to 64 KiB, but the decoder writes 64-byte aligned lines down
+the canvas: at 544x352 that is 202752 bytes into a 196608-byte plane. The
+decoder wrote past the buffer, and a client reading a plane at its pitch
+read past its mapping, an ffmpeg segfault on 544x352 and 720x540 DivX.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ vdec/vdec.c | 8 +++-----
+ 1 file changed, 3 insertions(+), 5 deletions(-)
+
+diff -ruN a/vdec/vdec.c b/vdec/vdec.c
+--- a/vdec/vdec.c
++++ b/vdec/vdec.c
+@@ -46,14 +46,12 @@ module_param_named(capture_max_height, amvdec_capture_max_height, uint, 0644);
+ MODULE_PARM_DESC(capture_max_height,
+ 		 "HEVC, VP9: CAPTURE scaled by 2 or 4 to fit this height unless a COMPOSE selection asks; 0 off");
+ 
++/* a plane holds the canvas the decoder writes, its pitch times its height */
+ static u32 get_output_size(const struct amvdec_codec_ops *codec_ops,
+ 			   u32 width, u32 height)
+ {
+-	if (codec_ops->canvas_height_align)
+-		return ALIGN(width, 64) *
+-			ALIGN(height, codec_ops->canvas_height_align);
+-
+-	return ALIGN(width * height, SZ_64K);
++	return ALIGN(width, 64) *
++		ALIGN(height, codec_ops->canvas_height_align ?: 64);
+ }
+ 
+ u32 amvdec_get_output_size(struct amvdec_session *sess)
+-- 
+2.47.3

@@ -1,0 +1,247 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 31 Oct 2026 08:40:00 -0400
+Subject: [PATCH] media: meson: vdec: HEVC and VP9 CAPTURE as Amlogic's compressed picture
+
+GXLX2's HEVC core writes its references compressed and gives CAPTURE an
+uncompressed copy, cut to 8 bits for 10-bit streams. The display's video
+plane reads Amlogic's compressed picture as is, in its scatter layout: a
+header that maps the body pages. Two CAPTURE formats, AMF8 and AMFA, hand
+the client the header of the reference itself, with no second write: 10-bit
+reaches the display at 10 bits, and a 4K picture costs the plane a fraction
+of its NV12 bandwidth. The body pages stay with the decoder per buffer.
+
+The driver answers a request for either with the stream's bit depth, and a
+CAPTURE queue of the wrong depth is not ready for the stream: the client
+learns it from the source change. bytesperline is 0: the layout has no
+pitch, and a header-sized buffer passes DRM's size check only so.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ vdec/codec_hevc_common.c |  5 ++---
+ vdec/codec_hevc_common.h |  6 +++---
+ vdec/codec_vp9.c         |  7 +++++--
+ vdec/vdec.c              | 27 +++++++++++++++++++++++++++
+ vdec/vdec.h              | 14 ++++++++++++++
+ vdec/vdec_helpers.c      | 10 +++++++++-
+ vdec/vdec_platform.c     |  6 ++++--
+ 7 files changed, 64 insertions(+), 11 deletions(-)
+
+diff -ruN a/vdec/codec_hevc_common.c b/vdec/codec_hevc_common.c
+--- a/vdec/codec_hevc_common.c
++++ b/vdec/codec_hevc_common.c
+@@ -12,7 +12,6 @@
+ #include "vdec_helpers.h"
+ #include "hevc_regs.h"
+ 
+-#define MMU_COMPRESS_HEADER_SIZE 0x48000
+ #define MMU_MAP_SIZE 0x4800
+ 
+ const u16 vdec_hevc_parser_cmd[] = {
+@@ -191,7 +190,7 @@ void codec_hevc_free_mmu_headers(struct amvdec_session *sess,
+ 
+ 	for (i = 0; i < MAX_REF_PIC_NUM; ++i) {
+ 		if (comm->mmu_header_vaddr[i]) {
+-			dma_free_coherent(dev, MMU_COMPRESS_HEADER_SIZE,
++			dma_free_coherent(dev, AMVDEC_FBC_HEADER_SIZE,
+ 					  comm->mmu_header_vaddr[i],
+ 					  comm->mmu_header_paddr[i]);
+ 			comm->mmu_header_vaddr[i] = NULL;
+@@ -214,7 +213,7 @@ static int codec_hevc_alloc_mmu_headers(struct amvdec_session *sess,
+ 		if (comm->mmu_header_vaddr[idx])
+ 			continue;
+ 
+-		vaddr = dma_alloc_coherent(dev, MMU_COMPRESS_HEADER_SIZE,
++		vaddr = dma_alloc_coherent(dev, AMVDEC_FBC_HEADER_SIZE,
+ 					   &paddr, GFP_KERNEL);
+ 		if (!vaddr) {
+ 			codec_hevc_free_mmu_headers(sess, comm);
+diff -ruN a/vdec/codec_hevc_common.h b/vdec/codec_hevc_common.h
+--- a/vdec/codec_hevc_common.h
++++ b/vdec/codec_hevc_common.h
+@@ -36,17 +36,17 @@ struct codec_hevc_common {
+ 	u32 ref_buffer_count;
+ };
+ 
+-/* Returns 1 if references are compressed: 10-bit, or a downscaled CAPTURE */
++/* Returns 1 if references are compressed: 10-bit, a downscaled or a compressed CAPTURE */
+ static inline int codec_hevc_use_fbc(struct amvdec_session *sess, int is_10bit)
+ {
+-	return is_10bit || sess->dw_ratio > 1;
++	return is_10bit || sess->dw_ratio > 1 || amvdec_fbc_capture(sess);
+ }
+ 
+ /* Returns 1 if CAPTURE gets the decoder's second, uncompressed write */
+ static inline int codec_hevc_use_downsample(struct amvdec_session *sess,
+ 					    int is_10bit)
+ {
+-	return codec_hevc_use_fbc(sess, is_10bit);
++	return codec_hevc_use_fbc(sess, is_10bit) && !amvdec_fbc_capture(sess);
+ }
+ 
+ /* Returns 1 if we are decoding using the IOMMU */
+diff -ruN a/vdec/codec_vp9.c b/vdec/codec_vp9.c
+--- a/vdec/codec_vp9.c
++++ b/vdec/codec_vp9.c
+@@ -960,8 +960,11 @@ static void codec_vp9_set_sao(struct amvdec_session *sess,
+ 
+ 	if (codec_hevc_use_mmu(core->platform->revision, sess,
+ 			       vp9->is_10bit)) {
+-		amvdec_write_dos(core, HEVC_CM_HEADER_START_ADDR,
+-				 vp9->common.mmu_header_paddr[vb->index]);
++		dma_addr_t header_adr = vb2_dma_contig_plane_dma_addr(vb, 0);
++
++		if (codec_hevc_use_downsample(sess, vp9->is_10bit))
++			header_adr = vp9->common.mmu_header_paddr[vb->index];
++		amvdec_write_dos(core, HEVC_CM_HEADER_START_ADDR, header_adr);
+ 		/* use HEVC_CM_HEADER_START_ADDR */
+ 		amvdec_write_dos_bits(core, HEVC_SAO_CTRL5, BIT(10));
+ 	}
+diff -ruN a/vdec/vdec.c b/vdec/vdec.c
+--- a/vdec/vdec.c
++++ b/vdec/vdec.c
+@@ -627,6 +627,12 @@ static int vdec_queue_setup(struct vb2_queue *q, unsigned int *num_buffers,
+ 				    sizes[0] < output_size + output_size / 2)
+ 					return -EINVAL;
+ 				break;
++			case V4L2_PIX_FMT_AM_FBC8:
++			case V4L2_PIX_FMT_AM_FBC10:
++				if (*num_planes != 1 ||
++				    sizes[0] < AMVDEC_FBC_HEADER_SIZE)
++					return -EINVAL;
++				break;
+ 			case V4L2_PIX_FMT_NV12M:
+ 				if (*num_planes != 2 ||
+ 				    sizes[0] < output_size ||
+@@ -662,6 +668,11 @@ static int vdec_queue_setup(struct vb2_queue *q, unsigned int *num_buffers,
+ 			sizes[0] = output_size + output_size / 2;
+ 			*num_planes = 1;
+ 			break;
++		case V4L2_PIX_FMT_AM_FBC8:
++		case V4L2_PIX_FMT_AM_FBC10:
++			sizes[0] = AMVDEC_FBC_HEADER_SIZE;
++			*num_planes = 1;
++			break;
+ 		case V4L2_PIX_FMT_NV12M:
+ 			sizes[0] = output_size;
+ 			sizes[1] = output_size / 2;
+@@ -1065,6 +1076,16 @@ vdec_try_fmt_common(struct amvdec_session *sess, u32 size,
+ 			pfmt[0].sizeimage = output_size + output_size / 2;
+ 			pfmt[0].bytesperline = ALIGN(pixmp->width, 64);
+ 			pixmp->num_planes = 1;
++		} else if (pixmp->pixelformat == V4L2_PIX_FMT_AM_FBC8 ||
++			   pixmp->pixelformat == V4L2_PIX_FMT_AM_FBC10) {
++			/* the picture comes at the stream's bit depth */
++			if (sess->bitdepth)
++				pixmp->pixelformat = sess->bitdepth > 8 ?
++					V4L2_PIX_FMT_AM_FBC10 :
++					V4L2_PIX_FMT_AM_FBC8;
++			pfmt[0].sizeimage = AMVDEC_FBC_HEADER_SIZE;
++			pfmt[0].bytesperline = 0;
++			pixmp->num_planes = 1;
+ 		} else if (pixmp->pixelformat == V4L2_PIX_FMT_NV12M) {
+ 			pfmt[0].sizeimage = output_size;
+ 			pfmt[0].bytesperline = ALIGN(pixmp->width, 64);
+@@ -1254,6 +1275,12 @@ static int vdec_enum_fmt(struct file *file, void *fh, struct v4l2_fmtdesc *f)
+ 			return -EINVAL;
+ 
+ 		f->pixelformat = fmt_out->pixfmts_cap[f->index];
++		if (f->pixelformat == V4L2_PIX_FMT_AM_FBC8)
++			strscpy(f->description, "Amlogic FBC 8-bit",
++				sizeof(f->description));
++		else if (f->pixelformat == V4L2_PIX_FMT_AM_FBC10)
++			strscpy(f->description, "Amlogic FBC 10-bit",
++				sizeof(f->description));
+ 	} else {
+ 		return -EINVAL;
+ 	}
+diff -ruN a/vdec/vdec.h b/vdec/vdec.h
+--- a/vdec/vdec.h
++++ b/vdec/vdec.h
+@@ -18,6 +18,14 @@
+ 
+ #include "vdec_platform.h"
+ 
++/*
++ * Amlogic's compressed picture in its scatter layout: the buffer holds the
++ * header, which maps the body pages the decoder keeps per buffer
++ */
++#define V4L2_PIX_FMT_AM_FBC8	v4l2_fourcc('A', 'M', 'F', '8')
++#define V4L2_PIX_FMT_AM_FBC10	v4l2_fourcc('A', 'M', 'F', 'A')
++#define AMVDEC_FBC_HEADER_SIZE	0x48000
++
+ /* 32 buffers in 3-plane YUV420 */
+ #define MAX_CANVAS (32 * 3)
+ #define MAX_CANVAS_REGS 32
+@@ -439,6 +447,12 @@ void amvdec_m2m_job_finish(struct amvdec_session *sess);
+ void amvdec_m2m_job_yield(struct amvdec_session *sess);
+ void amvdec_m2m_retry_job(struct amvdec_session *sess);
+ 
++static inline bool amvdec_fbc_capture(struct amvdec_session *sess)
++{
++	return sess->pixfmt_cap == V4L2_PIX_FMT_AM_FBC8 ||
++	       sess->pixfmt_cap == V4L2_PIX_FMT_AM_FBC10;
++}
++
+ /* the decoded picture's visible size, which CAPTURE divides by dw_ratio */
+ static inline u32 amvdec_ref_width(struct amvdec_session *sess)
+ {
+diff -ruN a/vdec/vdec_helpers.c b/vdec/vdec_helpers.c
+--- a/vdec/vdec_helpers.c
++++ b/vdec/vdec_helpers.c
+@@ -453,6 +453,10 @@ static void dst_buf_done(struct amvdec_session *sess,
+ 				      min_t(unsigned long, output_size / 4,
+ 					    vb2_plane_size(&vbuf->vb2_buf, 2)));
+ 		break;
++	case V4L2_PIX_FMT_AM_FBC8:
++	case V4L2_PIX_FMT_AM_FBC10:
++		vb2_set_plane_payload(&vbuf->vb2_buf, 0, AMVDEC_FBC_HEADER_SIZE);
++		break;
+ 	}
+ 
+ 	vbuf->vb2_buf.timestamp = timestamp;
+@@ -712,7 +716,7 @@ u32 amvdec_dw_ratio(struct amvdec_session *sess, u32 width, u32 height)
+ 	u32 max_height = requested ? sess->dw_request_height : amvdec_capture_max_height;
+ 	u32 ratio = 1;
+ 
+-	if (!sess->fmt_out->codec_ops->downscale)
++	if (!sess->fmt_out->codec_ops->downscale || amvdec_fbc_capture(sess))
+ 		return 1;
+ 	max_width = max_width ?: UINT_MAX;
+ 	max_height = max_height ?: UINT_MAX;
+@@ -733,6 +737,10 @@ void amvdec_src_change(struct amvdec_session *sess, u32 width,
+ 	capture_ready = sess->width == width && sess->height == height &&
+ 			(!sess->bitdepth || sess->bitdepth == bitdepth) &&
+ 			dpb_size <= sess->num_dst_bufs;
++	/* a compressed CAPTURE names its bit depth: the client must learn it */
++	if (amvdec_fbc_capture(sess) &&
++	    (sess->pixfmt_cap == V4L2_PIX_FMT_AM_FBC10) != (bitdepth > 8))
++		capture_ready = false;
+ 	sess->bitdepth = bitdepth;
+ 
+ 	/* Keep decoding if the active capture queue can hold the new format. */
+diff -ruN a/vdec/vdec_platform.c b/vdec/vdec_platform.c
+--- a/vdec/vdec_platform.c
++++ b/vdec/vdec_platform.c
+@@ -117,7 +117,8 @@ static const struct amvdec_format vdec_formats_gxlx[] = {
+ 		.vdec_ops = &vdec_hevc_ops,
+ 		.codec_ops = &codec_hevc_g12a_ops,
+ 		.firmware_path = "meson/vdec/g12a_hevc_mmu.bin",
+-		.pixfmts_cap = { V4L2_PIX_FMT_NV12M, 0 },
++		.pixfmts_cap = { V4L2_PIX_FMT_NV12M, V4L2_PIX_FMT_AM_FBC8,
++				 V4L2_PIX_FMT_AM_FBC10, 0 },
+ 		.flags = V4L2_FMT_FLAG_COMPRESSED |
+ 			 V4L2_FMT_FLAG_DYN_RESOLUTION,
+ 	}, {
+@@ -129,7 +130,8 @@ static const struct amvdec_format vdec_formats_gxlx[] = {
+ 		.vdec_ops = &vdec_hevc_ops,
+ 		.codec_ops = &codec_vp9_ops,
+ 		.firmware_path = "meson/vdec/g12a_vp9.bin",
+-		.pixfmts_cap = { V4L2_PIX_FMT_NV12M, 0 },
++		.pixfmts_cap = { V4L2_PIX_FMT_NV12M, V4L2_PIX_FMT_AM_FBC8,
++				 V4L2_PIX_FMT_AM_FBC10, 0 },
+ 		.flags = V4L2_FMT_FLAG_COMPRESSED |
+ 			 V4L2_FMT_FLAG_DYN_RESOLUTION,
+ 	}, {
+-- 
+2.47.3

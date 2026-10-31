@@ -1,0 +1,64 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 31 Oct 2026 08:10:00 -0400
+Subject: [PATCH] media: meson: vdec: the end-of-stream drain waits while the VIFIFO drains
+
+A client queues the whole stream into the 16 MiB VIFIFO long before the
+decoder gets through it, at the pace CAPTURE buffers come back, and then
+stops. The drain gave the decoder 1 s at most and ended the stream with a
+LAST buffer while pictures were still decoding: an Xvid AVI gave 348 of
+591 frames, VC-1 1193 of 1451.
+
+The drain now waits while the VIFIFO level falls, until only the sequence
+it queued is left, and gives up after 1 s without progress.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ vdec/vdec.c | 26 +++++++++++++++++++++++++-
+ 1 file changed, 25 insertions(+), 1 deletion(-)
+
+diff -ruN a/vdec/vdec.c b/vdec/vdec.c
+--- a/vdec/vdec.c
++++ b/vdec/vdec.c
+@@ -257,6 +257,30 @@ static void vdec_wait_inactive(struct amvdec_session *sess)
+ 			 VDEC_INACTIVE_TIMEOUT_MS);
+ }
+ 
++/*
++ * After the end-of-stream sequence the decoder works through the VIFIFO at the
++ * pace CAPTURE buffers come back, which can take longer than a stop may wait:
++ * wait while it consumes input, until only the sequence is left.
++ */
++static void vdec_wait_eos_decoded(struct amvdec_session *sess, u32 eos_len)
++{
++	struct amvdec_ops *vdec_ops = sess->fmt_out->vdec_ops;
++	u32 level = vdec_ops->vififo_level(sess);
++	u64 progress = get_jiffies_64();
++
++	while (level > eos_len &&
++	       time_before64(get_jiffies_64(), progress +
++			     msecs_to_jiffies(VDEC_INACTIVE_TIMEOUT_MS))) {
++		u32 last_level = level;
++
++		msleep(25);
++		level = vdec_ops->vififo_level(sess);
++		if (level < last_level)
++			progress = get_jiffies_64();
++	}
++	vdec_wait_inactive(sess);
++}
++
+ static void vdec_codec_drain(struct amvdec_session *sess)
+ {
+ 	mutex_lock(&sess->drain_lock);
+@@ -441,7 +465,7 @@ static bool vdec_m2m_finish_drain(struct amvdec_session *sess)
+ 		esparser_queue_eos(sess->core, data, len);
+ 		if (codec_ops->eos_queued)
+ 			codec_ops->eos_queued(sess);
+-		vdec_wait_inactive(sess);
++		vdec_wait_eos_decoded(sess, len);
+ 	}
+ 	if (codec_ops->drain) {
+ 		sess->eos_drain = true;
+-- 
+2.47.3

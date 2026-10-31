@@ -1,0 +1,110 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 31 Oct 2026 08:00:00 -0400
+Subject: [PATCH] media: meson: vdec: run one drain at a time
+
+The end-of-stream drain runs from a worker; a STREAMOFF on CAPTURE drains
+again from stop_streaming. Woken by the LAST buffer, a client streamed off
+while the worker still walked the frames: both completed the same buffer,
+videobuf2 warned, and HEVC's frame list was freed under the other, an
+oops on a poisoned list entry that left the decoder hung until a reboot.
+A per-session mutex runs every drain alone.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ vdec/vdec.c | 19 ++++++++++++++-----
+ vdec/vdec.h |  2 ++
+ 2 files changed, 16 insertions(+), 5 deletions(-)
+
+diff -ruN a/vdec/vdec.c b/vdec/vdec.c
+--- a/vdec/vdec.c
++++ b/vdec/vdec.c
+@@ -257,6 +257,13 @@ static void vdec_wait_inactive(struct amvdec_session *sess)
+ 			 VDEC_INACTIVE_TIMEOUT_MS);
+ }
+ 
++static void vdec_codec_drain(struct amvdec_session *sess)
++{
++	mutex_lock(&sess->drain_lock);
++	sess->fmt_out->codec_ops->drain(sess);
++	mutex_unlock(&sess->drain_lock);
++}
++
+ static void vdec_poweroff(struct amvdec_session *sess)
+ {
+ 	struct amvdec_codec_ops *codec_ops = sess->fmt_out->codec_ops;
+@@ -264,7 +271,7 @@ static void vdec_poweroff(struct amvdec_session *sess)
+ 	sess->should_stop = 1;
+ 	vdec_wait_inactive(sess);
+ 	if (codec_ops->drain)
+-		codec_ops->drain(sess);
++		vdec_codec_drain(sess);
+ 
+ 	vdec_stop_hardware(sess);
+ 	if (codec_ops->release && sess->priv)
+@@ -277,7 +284,7 @@ static void vdec_poweroff_suspended(struct amvdec_session *sess)
+ 
+ 	sess->should_stop = 1;
+ 	if (codec_ops->drain)
+-		codec_ops->drain(sess);
++		vdec_codec_drain(sess);
+ 	vdec_stop_suspended_hardware(sess);
+ 	if (codec_ops->release && sess->priv)
+ 		codec_ops->release(sess);
+@@ -438,7 +445,7 @@ static bool vdec_m2m_finish_drain(struct amvdec_session *sess)
+ 	}
+ 	if (codec_ops->drain) {
+ 		sess->eos_drain = true;
+-		codec_ops->drain(sess);
++		vdec_codec_drain(sess);
+ 		sess->eos_drain = false;
+ 	}
+ 	v4l2_m2m_mark_stopped(sess->m2m_ctx);
+@@ -923,7 +930,7 @@ static void vdec_stop_streaming(struct vb2_queue *q)
+ 	} else {
+ 		/* Drain remaining refs if was still running */
+ 		if (sess->status >= STATUS_RUNNING && codec_ops->drain)
+-			codec_ops->drain(sess);
++			vdec_codec_drain(sess);
+ 
+ 		while ((buf = v4l2_m2m_dst_buf_remove(sess->m2m_ctx)))
+ 			v4l2_m2m_buf_done(buf, VB2_BUF_STATE_ERROR);
+@@ -1302,7 +1309,7 @@ vdec_decoder_cmd(struct file *file, void *fh, struct v4l2_decoder_cmd *cmd)
+ 
+ 	if (codec_ops->drain) {
+ 		vdec_wait_inactive(sess);
+-		codec_ops->drain(sess);
++		vdec_codec_drain(sess);
+ 	} else if (codec_ops->eos_sequence) {
+ 		u32 len;
+ 		const u8 *data = codec_ops->eos_sequence(&len);
+@@ -1559,6 +1566,7 @@ static int vdec_open(struct file *file)
+ 	INIT_WORK(&sess->drain_work, vdec_m2m_drain_work);
+ 	atomic_set(&sess->m2m_job_running, AMVDEC_M2M_JOB_IDLE);
+ 	mutex_init(&sess->lock);
++	mutex_init(&sess->drain_lock);
+ 	mutex_init(&sess->bufs_recycle_lock);
+ 	spin_lock_init(&sess->ts_spinlock);
+ 
+@@ -1589,6 +1597,7 @@ static int vdec_close(struct file *file)
+ 	v4l2_fh_exit(&sess->fh);
+ 
+ 	mutex_destroy(&sess->lock);
++	mutex_destroy(&sess->drain_lock);
+ 	mutex_destroy(&sess->bufs_recycle_lock);
+ 
+ 	kfree(sess);
+diff -ruN a/vdec/vdec.h b/vdec/vdec.h
+--- a/vdec/vdec.h
++++ b/vdec/vdec.h
+@@ -367,6 +367,8 @@ struct amvdec_session {
+ 	u32 es_frames;
+ 	struct work_struct esparser_queue_work;
+ 	struct work_struct drain_work;
++	/* the end-of-stream drain and a stop's drain walk the same frames */
++	struct mutex drain_lock;
+ 	/* CAPTURE is the decoded picture divided by this each way: 1, 2 or 4 */
+ 	u32 dw_ratio;
+ 	/* a COMPOSE selection's rectangle; 0x0 takes the module parameters */
+-- 
+2.47.3

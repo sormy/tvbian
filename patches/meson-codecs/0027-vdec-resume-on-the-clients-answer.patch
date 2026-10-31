@@ -1,0 +1,85 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 31 Oct 2026 09:00:00 -0400
+Subject: [PATCH] media: meson: vdec: resume on the client's answer to a source change
+
+A client that streams CAPTURE on before the first headers are parsed
+raced its own source change: STREAMON resumed the decoder, the event still
+queued then made the client reallocate, and a STREAMOFF of a running
+decoder powers it off. HEVC stopped after three pictures, intermittently.
+
+With the event unread, STREAMON leaves the decoder waiting; the client
+answers with STREAMOFF and STREAMON, or keeps its buffers with
+V4L2_DEC_CMD_START, which now resumes.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ vdec/vdec.c | 36 ++++++++++++++++++++++++++++--------
+ 1 file changed, 28 insertions(+), 8 deletions(-)
+
+diff -ruN a/vdec/vdec.c b/vdec/vdec.c
+--- a/vdec/vdec.c
++++ b/vdec/vdec.c
+@@ -736,6 +736,21 @@ static void vdec_vb2_buf_queue(struct vb2_buffer *vb)
+ 
+ }
+ 
++static int vdec_resume_capture(struct amvdec_session *sess)
++{
++	int ret;
++
++	v4l2_m2m_clear_state(sess->m2m_ctx);
++	ret = sess->fmt_out->codec_ops->resume(sess);
++	if (ret)
++		return ret;
++	/* STREAMOFF/STREAMON starts a new capture sequence. */
++	sess->sequence_cap = 0;
++	sess->status = STATUS_RUNNING;
++	WRITE_ONCE(sess->source_change_pending, false);
++	return 0;
++}
++
+ static int vdec_start_streaming(struct vb2_queue *q, unsigned int count)
+ {
+ 	struct amvdec_session *sess = vb2_get_drv_priv(q);
+@@ -759,17 +774,17 @@ static int vdec_start_streaming(struct vb2_queue *q, unsigned int count)
+ 	if (!sess->streamon_out)
+ 		goto unlock_ok;
+ 
++	/*
++	 * A source change the client has not read yet may still make it
++	 * reallocate: STREAMOFF of a running decoder powers it off. It answers
++	 * with this STREAMON again, or keeps the queue with DEC_CMD_START.
++	 */
+ 	if (sess->status == STATUS_NEEDS_RESUME &&
+ 	    q->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE &&
+-	    sess->changed_format) {
+-		v4l2_m2m_clear_state(sess->m2m_ctx);
+-		ret = codec_ops->resume(sess);
++	    sess->changed_format && !v4l2_event_pending(&sess->fh)) {
++		ret = vdec_resume_capture(sess);
+ 		if (ret)
+ 			goto bufs_done;
+-		/* STREAMOFF/STREAMON starts a new capture sequence. */
+-		sess->sequence_cap = 0;
+-		sess->status = STATUS_RUNNING;
+-		WRITE_ONCE(sess->source_change_pending, false);
+ 		goto unlock_ok;
+ 	}
+ 
+@@ -1334,7 +1349,12 @@ vdec_decoder_cmd(struct file *file, void *fh, struct v4l2_decoder_cmd *cmd)
+ 		sess->should_stop = 0;
+ 		sess->last_pending = false;
+ 		sess->draining = false;
+-		return 0;
++		/* the client keeps its CAPTURE queue across a source change */
++		mutex_lock(&sess->core->hw_lock);
++		if (sess->status == STATUS_NEEDS_RESUME && sess->changed_format)
++			ret = vdec_resume_capture(sess);
++		mutex_unlock(&sess->core->hw_lock);
++		return ret;
+ 	}
+ 
+ 	/* Should not happen */
+-- 
+2.47.3

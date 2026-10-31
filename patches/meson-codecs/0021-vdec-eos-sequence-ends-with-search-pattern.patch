@@ -1,0 +1,51 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 31 Oct 2026 08:00:00 -0400
+Subject: [PATCH] media: meson: vdec: end the end-of-stream sequence with the search pattern
+
+The parser raises its interrupt once it finds 00 00 01 ff behind the data
+it wrote; esparser_queue_eos() wrote the codec's sequence without it, and
+every end of stream and every stop waited the parser's full 200 ms timeout
+first.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ vdec/esparser.c | 10 ++++++----
+ 1 file changed, 6 insertions(+), 4 deletions(-)
+
+diff -ruN a/vdec/esparser.c b/vdec/esparser.c
+--- a/vdec/esparser.c
++++ b/vdec/esparser.c
+@@ -183,6 +183,9 @@ static int vp9_update_header(struct amvdec_core *core, struct vb2_buffer *buf,
+ 	return new_frame_size;
+ }
+ 
++/* the parser raises its interrupt once it finds this behind the data */
++static const u8 search_pattern[] = { 0x00, 0x00, 0x01, 0xff };
++
+ /* Pad the packet to at least 4KiB bytes otherwise the VDEC unit won't trigger
+  * ISRs.
+  * Also append a start code 000001ff at the end to trigger
+@@ -209,10 +212,8 @@ static u32 esparser_pad_start_code(struct amvdec_core *core,
+ 	}
+ 
+ 	memset(vaddr + payload_size + pad_size, 0, SEARCH_PATTERN_LEN);
+-	vaddr[payload_size + pad_size]     = 0x00;
+-	vaddr[payload_size + pad_size + 1] = 0x00;
+-	vaddr[payload_size + pad_size + 2] = 0x01;
+-	vaddr[payload_size + pad_size + 3] = 0xff;
++	memcpy(vaddr + payload_size + pad_size, search_pattern,
++	       sizeof(search_pattern));
+ 
+ 	return pad_size;
+ }
+@@ -272,6 +273,7 @@ int esparser_queue_eos(struct amvdec_core *core, const u8 *data, u32 len)
+ 		return -ENOMEM;
+ 
+ 	memcpy(eos_vaddr, data, len);
++	memcpy(eos_vaddr + len, search_pattern, sizeof(search_pattern));
+ 	mutex_lock(&core->parser_lock);
+ 	ret = esparser_write_data(core, eos_paddr, len);
+ 	mutex_unlock(&core->parser_lock);
+-- 
+2.47.3

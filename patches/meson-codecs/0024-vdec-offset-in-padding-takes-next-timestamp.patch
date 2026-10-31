@@ -1,0 +1,101 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 31 Oct 2026 08:30:00 -0400
+Subject: [PATCH] media: meson: vdec: an offset in padding belongs to the next packet
+
+A picture's timestamp is the one of the last packet written at or before
+the VIFIFO offset the microcode reports for it. MPEG-4 and VC-1 report an
+offset in the zero padding behind the previous packet now and then, some
+dozen to a few hundred bytes before the picture's own packet; it matched
+the previous packet's record, gone already, or an older one left behind,
+and frames came out with repeated or stale timestamps.
+
+A record now knows where its payload ends: an offset past it belongs to
+the next packet.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ vdec/esparser.c     |  3 ++-
+ vdec/vdec.h         |  2 ++
+ vdec/vdec_helpers.c | 11 ++++++++++-
+ vdec/vdec_helpers.h |  3 ++-
+ 4 files changed, 16 insertions(+), 3 deletions(-)
+
+diff -ruN a/vdec/esparser.c b/vdec/esparser.c
+--- a/vdec/esparser.c
++++ b/vdec/esparser.c
+@@ -357,7 +357,8 @@ esparser_queue_locked(struct amvdec_session *sess,
+ 
+ 	offset = esparser_get_offset(sess);
+ 
+-	ret = amvdec_add_ts(sess, vb->timestamp, vbuf->timecode, offset, vbuf->flags);
++	ret = amvdec_add_ts(sess, vb->timestamp, vbuf->timecode, offset,
++			    payload_size, vbuf->flags);
+ 	if (ret) {
+ 		dev_warn_ratelimited(core->dev,
+ 				     "esparser: no timestamp slot (%d), packet dropped\n",
+diff -ruN a/vdec/vdec.h b/vdec/vdec.h
+--- a/vdec/vdec.h
++++ b/vdec/vdec.h
+@@ -42,6 +42,8 @@ struct amvdec_timestamp {
+ 	struct v4l2_timecode tc;
+ 	u64 ts;
+ 	u32 offset;
++	/* where the packet's payload ends, its padding starts */
++	u32 end;
+ 	u32 flags;
+ 	u32 used_count;
+ };
+diff -ruN a/vdec/vdec_helpers.c b/vdec/vdec_helpers.c
+--- a/vdec/vdec_helpers.c
++++ b/vdec/vdec_helpers.c
+@@ -365,7 +365,7 @@ void amvdec_restore_canvases(struct amvdec_session *sess)
+ EXPORT_SYMBOL_GPL(amvdec_restore_canvases);
+ 
+ int amvdec_add_ts(struct amvdec_session *sess, u64 ts,
+-		  struct v4l2_timecode tc, u32 offset, u32 vbuf_flags)
++		  struct v4l2_timecode tc, u32 offset, u32 size, u32 vbuf_flags)
+ {
+ 	struct amvdec_timestamp *new_ts;
+ 	unsigned long flags;
+@@ -377,6 +377,7 @@ int amvdec_add_ts(struct amvdec_session *sess, u64 ts,
+ 	new_ts->ts = ts;
+ 	new_ts->tc = tc;
+ 	new_ts->offset = offset;
++	new_ts->end = offset + size;
+ 	new_ts->flags = vbuf_flags;
+ 
+ 	spin_lock_irqsave(&sess->ts_spinlock, flags);
+@@ -617,6 +618,14 @@ void amvdec_dst_buf_done_offset(struct amvdec_session *sess,
+ 	/* Look for our vififo offset to get the corresponding timestamp. */
+ 	list_for_each_entry_safe(tmp, n, &sess->timestamps, list) {
+ 		if (tmp->offset > offset) {
++			/*
++			 * The decoder can report an offset in the padding
++			 * behind the previous packet: it is this packet's.
++			 */
++			if (!match || offset >= match->end) {
++				match = tmp;
++				break;
++			}
+ 			/*
+ 			 * Delete any record that remained unused for 32 match
+ 			 * checks
+diff -ruN a/vdec/vdec_helpers.h b/vdec/vdec_helpers.h
+--- a/vdec/vdec_helpers.h
++++ b/vdec/vdec_helpers.h
+@@ -70,10 +70,11 @@ void amvdec_dst_buf_done_offset(struct amvdec_session *sess,
+  * @ts: timestamp to add
+  * @tc: timecode to add
+  * @offset: offset in the VIFIFO where the associated packet was written
++ * @size: the packet's payload size
+  * @flags: the vb2_v4l2_buffer flags
+  */
+ int amvdec_add_ts(struct amvdec_session *sess, u64 ts,
+-		  struct v4l2_timecode tc, u32 offset, u32 flags);
++		  struct v4l2_timecode tc, u32 offset, u32 size, u32 flags);
+ int amvdec_take_ts(struct amvdec_session *sess,
+ 		   struct amvdec_timestamp_info *timestamp);
+ void amvdec_remove_ts(struct amvdec_session *sess, u64 ts);
+-- 
+2.47.3

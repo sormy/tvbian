@@ -1,0 +1,48 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 31 Oct 2026 18:00:00 -0400
+Subject: [PATCH] media: meson: vdec: hevc: an IDR or BLA picture releases every earlier reference
+
+References are marked by POC alone, and every IDR has POC 0: the pictures
+after an IDR reference the new one, and with it every earlier IDR still in
+the list. Each IDR's CAPTURE buffer stayed referenced until a picture's set
+no longer named POC 0; with GOPs that short, never. One buffer leaked per
+IDR and the decode stalled once all were gone: 4K clips of three pictures
+back to back gave 40 of 60 frames and never ended the stream.
+
+An IDR or BLA picture leaves every earlier picture unused for reference,
+as the specification has it.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ vdec/codec_hevc.c | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff -ruN a/vdec/codec_hevc.c b/vdec/codec_hevc.c
+--- a/vdec/codec_hevc.c
++++ b/vdec/codec_hevc.c
+@@ -671,6 +671,13 @@ static void codec_hevc_update_referenced(struct amvdec_session *sess)
+ 	union rpm_param *param = &hevc->rpm_param;
+ 	struct hevc_frame *frame;
+ 	u32 rps_used_bit = hevc->rps_used_bit;
++	u32 nal_unit_type = param->p.m_nalUnitType;
++	/* an IDR or BLA picture leaves every earlier picture unused for reference */
++	bool irap_reset = nal_unit_type == NAL_UNIT_CODED_SLICE_IDR ||
++			  nal_unit_type == NAL_UNIT_CODED_SLICE_IDR_N_LP ||
++			  nal_unit_type == NAL_UNIT_CODED_SLICE_BLA ||
++			  nal_unit_type == NAL_UNIT_CODED_SLICE_BLANT ||
++			  nal_unit_type == NAL_UNIT_CODED_SLICE_BLA_N_LP;
+ 	int i;
+ 	u32 curr_poc = hevc->curr_poc;
+ 
+@@ -681,7 +688,7 @@ static void codec_hevc_update_referenced(struct amvdec_session *sess)
+ 		if (!frame->referenced)
+ 			continue;
+ 
+-		for (i = 0; i < MAX_REF_ACTIVE; i++) {
++		for (i = 0; !irap_reset && i < MAX_REF_ACTIVE; i++) {
+ 			int delt;
+ 
+ 			if (param->p.CUR_RPS[i] & 0x8000)
+-- 
+2.47.3

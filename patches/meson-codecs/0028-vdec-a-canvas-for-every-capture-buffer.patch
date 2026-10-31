@@ -1,0 +1,101 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 31 Oct 2026 09:10:00 -0400
+Subject: [PATCH] media: meson: vdec: a canvas for every CAPTURE buffer, kept across a seek
+
+The VDEC_1 codecs mapped canvases to the CAPTURE buffers queued at the
+time, in queue order, and recycled buffers by their vb2 index; after a seek
+the client still held some, the numbers no longer matched, and MPEG-4 and
+MJPEG decoded nothing more. Every allocated buffer now gets its canvas in
+vb2 order, and the canvases last as long as the CAPTURE buffers: a seek's
+restart restores them.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ vdec/vdec.c         |  1 -
+ vdec/vdec_helpers.c | 23 +++++++++++++++--------
+ 2 files changed, 15 insertions(+), 9 deletions(-)
+
+diff -ruN a/vdec/vdec.c b/vdec/vdec.c
+--- a/vdec/vdec.c
++++ b/vdec/vdec.c
+@@ -961,7 +961,6 @@ static void vdec_stop_streaming(struct vb2_queue *q)
+ 		else
+ 			core->exclusive_sess = NULL;
+ 
+-		amvdec_free_canvases(sess);
+ 		dma_free_coherent(sess->core->dev, sess->vififo_size,
+ 				  sess->vififo_vaddr, sess->vififo_paddr);
+ 		vdec_reset_timestamps(sess);
+diff -ruN a/vdec/vdec_helpers.c b/vdec/vdec_helpers.c
+--- a/vdec/vdec_helpers.c
++++ b/vdec/vdec_helpers.c
+@@ -251,10 +251,16 @@ static int set_canvas_nv12(struct amvdec_session *sess,
+ 	return 0;
+ }
+ 
++/*
++ * Every CAPTURE buffer gets its canvas, queued or held by the client: the
++ * microcode numbers them as vb2 does, which recycling relies on. They last
++ * as long as the CAPTURE buffers, across a seek's restart.
++ */
+ int amvdec_set_canvases(struct amvdec_session *sess,
+ 			u32 reg_base[], u32 reg_num[])
+ {
+-	struct v4l2_m2m_buffer *buf;
++	struct vb2_queue *q = v4l2_m2m_get_dst_vq(sess->m2m_ctx);
++	struct vb2_buffer *vb;
+ 	u32 pixfmt = sess->pixfmt_cap;
+ 	u32 height_align = sess->fmt_out->codec_ops->canvas_height_align ?: 64;
+ 	u32 width = ALIGN(sess->width, 64);
+@@ -262,12 +268,13 @@ int amvdec_set_canvases(struct amvdec_session *sess,
+ 	u32 reg_cur;
+ 	u32 reg_num_cur = 0;
+ 	u32 reg_base_cur = 0;
+-	int i = 0;
++	int i;
+ 	int ret;
+ 
+-	sess->canvas_reg_count = 0;
++	amvdec_free_canvases(sess);
+ 
+-	v4l2_m2m_for_each_dst_buf(sess->m2m_ctx, buf) {
++	for (i = 0; i < vb2_get_num_buffers(q); i++) {
++		vb = vb2_get_buffer(q, i);
+ 		if (!reg_base[reg_base_cur]) {
+ 			ret = -EINVAL;
+ 			goto free_canvases;
+@@ -281,19 +288,19 @@ int amvdec_set_canvases(struct amvdec_session *sess,
+ 
+ 		switch (pixfmt) {
+ 		case V4L2_PIX_FMT_NV12:
+-			ret = set_canvas_nv12(sess, &buf->vb.vb2_buf, width,
++			ret = set_canvas_nv12(sess, vb, width,
+ 					      height, reg_cur);
+ 			if (ret)
+ 				goto free_canvases;
+ 			break;
+ 		case V4L2_PIX_FMT_NV12M:
+-			ret = set_canvas_nv12m(sess, &buf->vb.vb2_buf, width,
++			ret = set_canvas_nv12m(sess, vb, width,
+ 					       height, reg_cur);
+ 			if (ret)
+ 				goto free_canvases;
+ 			break;
+ 		case V4L2_PIX_FMT_YUV420M:
+-			ret = set_canvas_yuv420m(sess, &buf->vb.vb2_buf, width,
++			ret = set_canvas_yuv420m(sess, vb, width,
+ 						 height, reg_cur);
+ 			if (ret)
+ 				goto free_canvases;
+@@ -311,7 +318,7 @@ int amvdec_set_canvases(struct amvdec_session *sess,
+ 			reg_num_cur = 0;
+ 		}
+ 
+-		sess->fw_idx_to_vb2_idx[i++] = buf->vb.vb2_buf.index;
++		sess->fw_idx_to_vb2_idx[i] = i;
+ 		sess->canvas_regs[sess->canvas_reg_count] = reg_cur;
+ 		sess->canvas_values[sess->canvas_reg_count] =
+ 			amvdec_read_dos(sess->core, reg_cur);
+-- 
+2.47.3

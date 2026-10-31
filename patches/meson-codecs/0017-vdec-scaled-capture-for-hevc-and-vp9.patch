@@ -14,7 +14,8 @@ exist. The rectangle is kept, and the ratio is the smallest of 1, 2 and
 4 whose picture fits it, worked out again from the stream's own visible
 size once its headers are parsed. G_FMT reports the scaled size, and
 G_SELECTION the visible picture as CROP and COMPOSE_BOUNDS. A client
-that never asks gets capture_max_height, off by default.
+that never asks gets capture_max_width and capture_max_height, both off
+by default.
 
 With a ratio, HEVC and VP9 decode to compressed references at 8-bit too,
 CAPTURE is allocated at the scaled size, rounded down, the compressed
@@ -34,7 +35,204 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
  vdec/vdec_helpers.c      |   19 ++++++++++
  7 files changed, 226 insertions(+), 62 deletions(-)
 
-diff -ruN a/vdec/codec_hevc.c b/vdec/codec_hevc.c
+diff --color -ruN a/vdec/codec_hevc_common.c b/vdec/codec_hevc_common.c
+--- a/vdec/codec_hevc_common.c
++++ b/vdec/codec_hevc_common.c
+@@ -33,12 +33,14 @@
+ {
+ 	struct amvdec_core *core = sess->core;
+ 	u32 use_mmu = codec_hevc_use_mmu(core->platform->revision,
+-					 sess->pixfmt_cap, is_10bit);
+-	u32 body_size = amvdec_amfbc_body_size(sess->width, sess->height,
++					 sess, is_10bit);
++	u32 body_size = amvdec_amfbc_body_size(amvdec_ref_width(sess),
++					       amvdec_ref_height(sess),
+ 					       is_10bit, use_mmu);
+-	u32 head_size = amvdec_amfbc_head_size(sess->width, sess->height);
++	u32 head_size = amvdec_amfbc_head_size(amvdec_ref_width(sess),
++					       amvdec_ref_height(sess));
+ 
+-	if (!codec_hevc_use_fbc(sess->pixfmt_cap, is_10bit)) {
++	if (!codec_hevc_use_fbc(sess, is_10bit)) {
+ 		/* Enable 2-plane reference read mode */
+ 		amvdec_write_dos(core, HEVCD_MPP_DECOMP_CTL1, BIT(31));
+ 		return;
+@@ -51,7 +53,7 @@
+ 		amvdec_clear_dos_bits(core, HEVC_SAO_CTRL5, BIT(9));
+ 
+ 	if (codec_hevc_use_mmu(core->platform->revision,
+-			       sess->pixfmt_cap, is_10bit))
++			       sess, is_10bit))
+ 		amvdec_write_dos(core, HEVCD_MPP_DECOMP_CTL1, BIT(4));
+ 	else if (!is_10bit)
+ 		amvdec_write_dos(core, HEVCD_MPP_DECOMP_CTL1, BIT(3));
+@@ -86,12 +88,12 @@
+ 
+ 		idx = vb->index;
+ 
+-		if (codec_hevc_use_fbc(sess->pixfmt_cap, is_10bit))
++		if (codec_hevc_use_fbc(sess, is_10bit))
+ 			buf_y_paddr = comm->fbc_buffer_paddr[idx];
+ 		else
+ 			buf_y_paddr = vb2_dma_contig_plane_dma_addr(vb, 0);
+ 
+-		if (codec_hevc_use_fbc(sess->pixfmt_cap, is_10bit)) {
++		if (codec_hevc_use_fbc(sess, is_10bit)) {
+ 			val = buf_y_paddr | (idx << 8) | 1;
+ 			amvdec_write_dos(core, HEVCD_MPP_ANC2AXI_TBL_CMD_ADDR,
+ 					 val);
+@@ -106,7 +108,7 @@
+ 		}
+ 	}
+ 
+-	if (codec_hevc_use_fbc(sess->pixfmt_cap, is_10bit))
++	if (codec_hevc_use_fbc(sess, is_10bit))
+ 		val = buf_y_paddr | (idx << 8) | 1;
+ 	else
+ 		val = buf_y_paddr | ((idx * 2) << 8) | 1;
+@@ -127,7 +129,6 @@
+ {
+ 	struct amvdec_core *core = sess->core;
+ 	struct v4l2_m2m_buffer *buf;
+-	u32 pixfmt_cap = sess->pixfmt_cap;
+ 	const u32 revision = core->platform->revision;
+ 	int i;
+ 
+@@ -140,8 +141,8 @@
+ 		dma_addr_t buf_uv_paddr = 0;
+ 		u32 idx = vb->index;
+ 
+-		if (codec_hevc_use_downsample(pixfmt_cap, is_10bit)) {
+-			if (codec_hevc_use_mmu(revision, pixfmt_cap, is_10bit))
++		if (codec_hevc_use_downsample(sess, is_10bit)) {
++			if (codec_hevc_use_mmu(revision, sess, is_10bit))
+ 				buf_y_paddr = comm->mmu_header_paddr[idx];
+ 			else
+ 				buf_y_paddr = comm->fbc_buffer_paddr[idx];
+@@ -150,7 +151,7 @@
+ 		}
+ 		comm->ref_buffer_paddr[idx][0] = buf_y_paddr;
+ 
+-		if (!codec_hevc_use_fbc(pixfmt_cap, is_10bit)) {
++		if (!codec_hevc_use_fbc(sess, is_10bit)) {
+ 			buf_uv_paddr = vb2_dma_contig_plane_dma_addr(vb, 1);
+ 			comm->ref_buffer_paddr[idx][1] = buf_uv_paddr;
+ 		}
+@@ -160,7 +161,7 @@
+ 	for (i = 0; i < comm->ref_buffer_count; i++) {
+ 		amvdec_write_dos(core, HEVCD_MPP_ANC2AXI_TBL_DATA,
+ 				 comm->ref_buffer_paddr[i][0] >> 5);
+-		if (!codec_hevc_use_fbc(pixfmt_cap, is_10bit))
++		if (!codec_hevc_use_fbc(sess, is_10bit))
+ 			amvdec_write_dos(core, HEVCD_MPP_ANC2AXI_TBL_DATA,
+ 					 comm->ref_buffer_paddr[i][1] >> 5);
+ 	}
+@@ -329,10 +330,11 @@
+ 	const u32 revision = sess->core->platform->revision;
+ 	int ret;
+ 
+-	use_mmu = codec_hevc_use_mmu(revision, sess->pixfmt_cap,
++	use_mmu = codec_hevc_use_mmu(revision, sess,
+ 				     is_10bit);
+ 
+-	am21_size = amvdec_amfbc_size(sess->width, sess->height,
++	am21_size = amvdec_amfbc_size(amvdec_ref_width(sess),
++				      amvdec_ref_height(sess),
+ 				      is_10bit, use_mmu);
+ 	comm->fbc_buffer_size = am21_size;
+ 
+@@ -363,8 +365,8 @@
+ 		comm->fbc_buffer_paddr[idx] = paddr;
+ 	}
+ 
+-	if (codec_hevc_use_mmu(revision, sess->pixfmt_cap, is_10bit) &&
+-	    codec_hevc_use_downsample(sess->pixfmt_cap, is_10bit)) {
++	if (codec_hevc_use_mmu(revision, sess, is_10bit) &&
++	    codec_hevc_use_downsample(sess, is_10bit)) {
+ 		ret = codec_hevc_alloc_mmu_headers(sess, comm);
+ 		if (ret) {
+ 			codec_hevc_free_fbc_buffers(sess, comm);
+@@ -387,11 +389,12 @@
+ 	int ret;
+ 
+ 	use_mmu = codec_hevc_use_mmu(core->platform->revision,
+-				     sess->pixfmt_cap, is_10bit);
++				     sess, is_10bit);
+ 	use_fbc = use_mmu ||
+-		  codec_hevc_use_downsample(sess->pixfmt_cap, is_10bit);
++		  codec_hevc_use_downsample(sess, is_10bit);
+ 	if (use_fbc)
+-		fbc_size = amvdec_amfbc_size(sess->width, sess->height,
++		fbc_size = amvdec_amfbc_size(amvdec_ref_width(sess),
++					     amvdec_ref_height(sess),
+ 					     is_10bit, use_mmu);
+ 
+ 	if (comm->fbc_buffer_size != fbc_size ||
+@@ -435,9 +438,10 @@
+ 		return -EINVAL;
+ 
+ 	use_mmu = codec_hevc_use_mmu(sess->core->platform->revision,
+-				     sess->pixfmt_cap, is_10bit);
++				     sess, is_10bit);
+ 
+-	size = amvdec_amfbc_size(sess->width, sess->height, is_10bit,
++	size = amvdec_amfbc_size(amvdec_ref_width(sess),
++				 amvdec_ref_height(sess), is_10bit,
+ 				 use_mmu);
+ 
+ 	nb_pages = PAGE_ALIGN(size) >> PAGE_SHIFT;
+diff --color -ruN a/vdec/codec_hevc_common.h b/vdec/codec_hevc_common.h
+--- a/vdec/codec_hevc_common.h
++++ b/vdec/codec_hevc_common.h
+@@ -36,24 +36,38 @@
+ 	u32 ref_buffer_count;
+ };
+ 
+-/* Returns 1 if we must use framebuffer compression */
+-static inline int codec_hevc_use_fbc(u32 pixfmt, int is_10bit)
++/* Returns 1 if references are compressed: 10-bit, or a downscaled CAPTURE */
++static inline int codec_hevc_use_fbc(struct amvdec_session *sess, int is_10bit)
+ {
+-	/* TOFIX: Handle Amlogic Compressed buffer for 8bit also */
+-	return is_10bit;
++	return is_10bit || sess->dw_ratio > 1;
+ }
+ 
+-/* Returns 1 if we are decoding 10-bit but outputting 8-bit NV12 */
+-static inline int codec_hevc_use_downsample(u32 pixfmt, int is_10bit)
++/* Returns 1 if CAPTURE gets the decoder's second, uncompressed write */
++static inline int codec_hevc_use_downsample(struct amvdec_session *sess,
++					    int is_10bit)
+ {
+-	return is_10bit;
++	return codec_hevc_use_fbc(sess, is_10bit);
+ }
+ 
+ /* Returns 1 if we are decoding using the IOMMU */
+-static inline int codec_hevc_use_mmu(u32 revision, u32 pixfmt, int is_10bit)
++static inline int codec_hevc_use_mmu(u32 revision, struct amvdec_session *sess,
++				     int is_10bit)
+ {
+ 	return revision >= VDEC_REVISION_G12A &&
+-	       codec_hevc_use_fbc(pixfmt, is_10bit);
++	       codec_hevc_use_fbc(sess, is_10bit);
++}
++
++/* HEVC_SAO_CTRL5[23:16], the double write's scaler: h0, h1, v0, v1 */
++static inline u32 codec_hevc_dw_scale(u32 dw_ratio)
++{
++	switch (dw_ratio) {
++	case 2:
++		return 0x33 << 16;
++	case 4:
++		return 0xff << 16;
++	default:
++		return 0;
++	}
+ }
+ 
+ /* Configure decode head read mode */
+diff --color -ruN a/vdec/codec_hevc.c b/vdec/codec_hevc.c
 --- a/vdec/codec_hevc.c
 +++ b/vdec/codec_hevc.c
 @@ -789,7 +789,7 @@
@@ -186,204 +384,7 @@ diff -ruN a/vdec/codec_hevc.c b/vdec/codec_hevc.c
  	.stop = codec_hevc_keep_context,
  	.release = codec_hevc_release,
  	.irq = AMVDEC_IRQ_MBOX0,
-diff -ruN a/vdec/codec_hevc_common.c b/vdec/codec_hevc_common.c
---- a/vdec/codec_hevc_common.c
-+++ b/vdec/codec_hevc_common.c
-@@ -33,12 +33,14 @@
- {
- 	struct amvdec_core *core = sess->core;
- 	u32 use_mmu = codec_hevc_use_mmu(core->platform->revision,
--					 sess->pixfmt_cap, is_10bit);
--	u32 body_size = amvdec_amfbc_body_size(sess->width, sess->height,
-+					 sess, is_10bit);
-+	u32 body_size = amvdec_amfbc_body_size(amvdec_ref_width(sess),
-+					       amvdec_ref_height(sess),
- 					       is_10bit, use_mmu);
--	u32 head_size = amvdec_amfbc_head_size(sess->width, sess->height);
-+	u32 head_size = amvdec_amfbc_head_size(amvdec_ref_width(sess),
-+					       amvdec_ref_height(sess));
- 
--	if (!codec_hevc_use_fbc(sess->pixfmt_cap, is_10bit)) {
-+	if (!codec_hevc_use_fbc(sess, is_10bit)) {
- 		/* Enable 2-plane reference read mode */
- 		amvdec_write_dos(core, HEVCD_MPP_DECOMP_CTL1, BIT(31));
- 		return;
-@@ -51,7 +53,7 @@
- 		amvdec_clear_dos_bits(core, HEVC_SAO_CTRL5, BIT(9));
- 
- 	if (codec_hevc_use_mmu(core->platform->revision,
--			       sess->pixfmt_cap, is_10bit))
-+			       sess, is_10bit))
- 		amvdec_write_dos(core, HEVCD_MPP_DECOMP_CTL1, BIT(4));
- 	else if (!is_10bit)
- 		amvdec_write_dos(core, HEVCD_MPP_DECOMP_CTL1, BIT(3));
-@@ -86,12 +88,12 @@
- 
- 		idx = vb->index;
- 
--		if (codec_hevc_use_fbc(sess->pixfmt_cap, is_10bit))
-+		if (codec_hevc_use_fbc(sess, is_10bit))
- 			buf_y_paddr = comm->fbc_buffer_paddr[idx];
- 		else
- 			buf_y_paddr = vb2_dma_contig_plane_dma_addr(vb, 0);
- 
--		if (codec_hevc_use_fbc(sess->pixfmt_cap, is_10bit)) {
-+		if (codec_hevc_use_fbc(sess, is_10bit)) {
- 			val = buf_y_paddr | (idx << 8) | 1;
- 			amvdec_write_dos(core, HEVCD_MPP_ANC2AXI_TBL_CMD_ADDR,
- 					 val);
-@@ -106,7 +108,7 @@
- 		}
- 	}
- 
--	if (codec_hevc_use_fbc(sess->pixfmt_cap, is_10bit))
-+	if (codec_hevc_use_fbc(sess, is_10bit))
- 		val = buf_y_paddr | (idx << 8) | 1;
- 	else
- 		val = buf_y_paddr | ((idx * 2) << 8) | 1;
-@@ -127,7 +129,6 @@
- {
- 	struct amvdec_core *core = sess->core;
- 	struct v4l2_m2m_buffer *buf;
--	u32 pixfmt_cap = sess->pixfmt_cap;
- 	const u32 revision = core->platform->revision;
- 	int i;
- 
-@@ -140,8 +141,8 @@
- 		dma_addr_t buf_uv_paddr = 0;
- 		u32 idx = vb->index;
- 
--		if (codec_hevc_use_downsample(pixfmt_cap, is_10bit)) {
--			if (codec_hevc_use_mmu(revision, pixfmt_cap, is_10bit))
-+		if (codec_hevc_use_downsample(sess, is_10bit)) {
-+			if (codec_hevc_use_mmu(revision, sess, is_10bit))
- 				buf_y_paddr = comm->mmu_header_paddr[idx];
- 			else
- 				buf_y_paddr = comm->fbc_buffer_paddr[idx];
-@@ -150,7 +151,7 @@
- 		}
- 		comm->ref_buffer_paddr[idx][0] = buf_y_paddr;
- 
--		if (!codec_hevc_use_fbc(pixfmt_cap, is_10bit)) {
-+		if (!codec_hevc_use_fbc(sess, is_10bit)) {
- 			buf_uv_paddr = vb2_dma_contig_plane_dma_addr(vb, 1);
- 			comm->ref_buffer_paddr[idx][1] = buf_uv_paddr;
- 		}
-@@ -160,7 +161,7 @@
- 	for (i = 0; i < comm->ref_buffer_count; i++) {
- 		amvdec_write_dos(core, HEVCD_MPP_ANC2AXI_TBL_DATA,
- 				 comm->ref_buffer_paddr[i][0] >> 5);
--		if (!codec_hevc_use_fbc(pixfmt_cap, is_10bit))
-+		if (!codec_hevc_use_fbc(sess, is_10bit))
- 			amvdec_write_dos(core, HEVCD_MPP_ANC2AXI_TBL_DATA,
- 					 comm->ref_buffer_paddr[i][1] >> 5);
- 	}
-@@ -329,10 +330,11 @@
- 	const u32 revision = sess->core->platform->revision;
- 	int ret;
- 
--	use_mmu = codec_hevc_use_mmu(revision, sess->pixfmt_cap,
-+	use_mmu = codec_hevc_use_mmu(revision, sess,
- 				     is_10bit);
- 
--	am21_size = amvdec_amfbc_size(sess->width, sess->height,
-+	am21_size = amvdec_amfbc_size(amvdec_ref_width(sess),
-+				      amvdec_ref_height(sess),
- 				      is_10bit, use_mmu);
- 	comm->fbc_buffer_size = am21_size;
- 
-@@ -363,8 +365,8 @@
- 		comm->fbc_buffer_paddr[idx] = paddr;
- 	}
- 
--	if (codec_hevc_use_mmu(revision, sess->pixfmt_cap, is_10bit) &&
--	    codec_hevc_use_downsample(sess->pixfmt_cap, is_10bit)) {
-+	if (codec_hevc_use_mmu(revision, sess, is_10bit) &&
-+	    codec_hevc_use_downsample(sess, is_10bit)) {
- 		ret = codec_hevc_alloc_mmu_headers(sess, comm);
- 		if (ret) {
- 			codec_hevc_free_fbc_buffers(sess, comm);
-@@ -387,11 +389,12 @@
- 	int ret;
- 
- 	use_mmu = codec_hevc_use_mmu(core->platform->revision,
--				     sess->pixfmt_cap, is_10bit);
-+				     sess, is_10bit);
- 	use_fbc = use_mmu ||
--		  codec_hevc_use_downsample(sess->pixfmt_cap, is_10bit);
-+		  codec_hevc_use_downsample(sess, is_10bit);
- 	if (use_fbc)
--		fbc_size = amvdec_amfbc_size(sess->width, sess->height,
-+		fbc_size = amvdec_amfbc_size(amvdec_ref_width(sess),
-+					     amvdec_ref_height(sess),
- 					     is_10bit, use_mmu);
- 
- 	if (comm->fbc_buffer_size != fbc_size ||
-@@ -435,9 +438,10 @@
- 		return -EINVAL;
- 
- 	use_mmu = codec_hevc_use_mmu(sess->core->platform->revision,
--				     sess->pixfmt_cap, is_10bit);
-+				     sess, is_10bit);
- 
--	size = amvdec_amfbc_size(sess->width, sess->height, is_10bit,
-+	size = amvdec_amfbc_size(amvdec_ref_width(sess),
-+				 amvdec_ref_height(sess), is_10bit,
- 				 use_mmu);
- 
- 	nb_pages = PAGE_ALIGN(size) >> PAGE_SHIFT;
-diff -ruN a/vdec/codec_hevc_common.h b/vdec/codec_hevc_common.h
---- a/vdec/codec_hevc_common.h
-+++ b/vdec/codec_hevc_common.h
-@@ -36,24 +36,38 @@
- 	u32 ref_buffer_count;
- };
- 
--/* Returns 1 if we must use framebuffer compression */
--static inline int codec_hevc_use_fbc(u32 pixfmt, int is_10bit)
-+/* Returns 1 if references are compressed: 10-bit, or a downscaled CAPTURE */
-+static inline int codec_hevc_use_fbc(struct amvdec_session *sess, int is_10bit)
- {
--	/* TOFIX: Handle Amlogic Compressed buffer for 8bit also */
--	return is_10bit;
-+	return is_10bit || sess->dw_ratio > 1;
- }
- 
--/* Returns 1 if we are decoding 10-bit but outputting 8-bit NV12 */
--static inline int codec_hevc_use_downsample(u32 pixfmt, int is_10bit)
-+/* Returns 1 if CAPTURE gets the decoder's second, uncompressed write */
-+static inline int codec_hevc_use_downsample(struct amvdec_session *sess,
-+					    int is_10bit)
- {
--	return is_10bit;
-+	return codec_hevc_use_fbc(sess, is_10bit);
- }
- 
- /* Returns 1 if we are decoding using the IOMMU */
--static inline int codec_hevc_use_mmu(u32 revision, u32 pixfmt, int is_10bit)
-+static inline int codec_hevc_use_mmu(u32 revision, struct amvdec_session *sess,
-+				     int is_10bit)
- {
- 	return revision >= VDEC_REVISION_G12A &&
--	       codec_hevc_use_fbc(pixfmt, is_10bit);
-+	       codec_hevc_use_fbc(sess, is_10bit);
-+}
-+
-+/* HEVC_SAO_CTRL5[23:16], the double write's scaler: h0, h1, v0, v1 */
-+static inline u32 codec_hevc_dw_scale(u32 dw_ratio)
-+{
-+	switch (dw_ratio) {
-+	case 2:
-+		return 0x33 << 16;
-+	case 4:
-+		return 0xff << 16;
-+	default:
-+		return 0;
-+	}
- }
- 
- /* Configure decode head read mode */
-diff -ruN a/vdec/codec_vp9.c b/vdec/codec_vp9.c
+diff --color -ruN a/vdec/codec_vp9.c b/vdec/codec_vp9.c
 --- a/vdec/codec_vp9.c
 +++ b/vdec/codec_vp9.c
 @@ -772,7 +772,7 @@
@@ -498,13 +499,51 @@ diff -ruN a/vdec/codec_vp9.c b/vdec/codec_vp9.c
  	.drain = codec_vp9_drain,
  	.eos_sequence = codec_vp9_eos_sequence,
  	.eos_queued = codec_vp9_eos_queued,
-diff -ruN a/vdec/vdec.c b/vdec/vdec.c
+diff --color -ruN a/vdec/vdec_helpers.c b/vdec/vdec_helpers.c
+--- a/vdec/vdec_helpers.c
++++ b/vdec/vdec_helpers.c
+@@ -691,6 +691,29 @@
+ 	.u.src_change.changes = V4L2_EVENT_SRC_CH_RESOLUTION,
+ };
+ 
++/*
++ * The CAPTURE ratio for a picture: the smallest of 1, 2 and 4 that fits it
++ * in a COMPOSE selection's rectangle, else in capture_max_width and
++ * capture_max_height.
++ */
++u32 amvdec_dw_ratio(struct amvdec_session *sess, u32 width, u32 height)
++{
++	bool requested = sess->dw_request_width;
++	u32 max_width = requested ? sess->dw_request_width : amvdec_capture_max_width;
++	u32 max_height = requested ? sess->dw_request_height : amvdec_capture_max_height;
++	u32 ratio = 1;
++
++	if (!sess->fmt_out->codec_ops->downscale)
++		return 1;
++	max_width = max_width ?: UINT_MAX;
++	max_height = max_height ?: UINT_MAX;
++	while (ratio < VDEC_MAX_DW_RATIO &&
++	       (width / ratio > max_width || height / ratio > max_height))
++		ratio *= 2;
++	return ratio;
++}
++EXPORT_SYMBOL_GPL(amvdec_dw_ratio);
++
+ void amvdec_src_change(struct amvdec_session *sess, u32 width,
+ 		       u32 height, u32 dpb_size, u8 bitdepth)
+ {
+diff --color -ruN a/vdec/vdec.c b/vdec/vdec.c
 --- a/vdec/vdec.c
 +++ b/vdec/vdec.c
-@@ -36,6 +36,11 @@
+@@ -36,6 +36,16 @@
  #define VDEC_FHD_PIXELS (1920 * 1088)
  #define VDEC_MAX_BUFFERS_UHD 16
  
++unsigned int amvdec_capture_max_width;
++module_param_named(capture_max_width, amvdec_capture_max_width, uint, 0644);
++MODULE_PARM_DESC(capture_max_width,
++		 "HEVC, VP9: CAPTURE scaled by 2 or 4 to fit this width unless a COMPOSE selection asks; 0 off");
++
 +unsigned int amvdec_capture_max_height;
 +module_param_named(capture_max_height, amvdec_capture_max_height, uint, 0644);
 +MODULE_PARM_DESC(capture_max_height,
@@ -513,7 +552,7 @@ diff -ruN a/vdec/vdec.c b/vdec/vdec.c
  static u32 get_output_size(const struct amvdec_codec_ops *codec_ops,
  			   u32 width, u32 height)
  {
-@@ -554,7 +559,7 @@
+@@ -554,7 +564,7 @@
  		buffers_total = max(buffers_total, fmt_out->min_buffers);
  	buffers_total = min(buffers_total, fmt_out->max_buffers);
  	/* past 1080p, more leaves the CMA pool short of the decoder's workspace */
@@ -522,7 +561,7 @@ diff -ruN a/vdec/vdec.c b/vdec/vdec.c
  		buffers_total = min(buffers_total, VDEC_MAX_BUFFERS_UHD);
  	*num_buffers = buffers_total - q_num_bufs;
  
-@@ -1138,8 +1143,20 @@
+@@ -1138,8 +1148,20 @@
  	format.fmt.pix_mp.height = orig_pixmp.height;
  	vdec_try_fmt_common(sess, num_formats, &format);
  
@@ -545,7 +584,7 @@ diff -ruN a/vdec/vdec.c b/vdec/vdec.c
  
  	if (f->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
  		sess->fmt_out = fmt_out;
-@@ -1345,6 +1362,68 @@
+@@ -1345,6 +1367,68 @@
  	return v4l2_m2m_ioctl_create_bufs(file, priv, cb);
  }
  
@@ -614,7 +653,7 @@ diff -ruN a/vdec/vdec.c b/vdec/vdec.c
  static const struct v4l2_ioctl_ops vdec_ioctl_ops = {
  	.vidioc_querycap = vdec_querycap,
  	.vidioc_enum_fmt_vid_cap = vdec_enum_fmt,
-@@ -1370,6 +1449,8 @@
+@@ -1370,6 +1454,8 @@
  	.vidioc_try_decoder_cmd = v4l2_m2m_ioctl_try_decoder_cmd,
  	.vidioc_decoder_cmd = vdec_decoder_cmd,
  	.vidioc_g_pixelaspect = vdec_g_pixelaspect,
@@ -623,7 +662,7 @@ diff -ruN a/vdec/vdec.c b/vdec/vdec.c
  };
  
  static int m2m_queue_init(void *priv, struct vb2_queue *src_vq,
-@@ -1462,6 +1543,7 @@
+@@ -1462,6 +1548,7 @@
  	sess->fmt_out = &formats[0];
  	sess->width = 1280;
  	sess->height = 720;
@@ -631,7 +670,7 @@ diff -ruN a/vdec/vdec.c b/vdec/vdec.c
  	sess->pixelaspect.numerator = 1;
  	sess->pixelaspect.denominator = 1;
  	sess->src_buffer_size = SZ_1M;
-diff -ruN a/vdec/vdec.h b/vdec/vdec.h
+diff --color -ruN a/vdec/vdec.h b/vdec/vdec.h
 --- a/vdec/vdec.h
 +++ b/vdec/vdec.h
 @@ -168,6 +168,7 @@
@@ -656,7 +695,7 @@ diff -ruN a/vdec/vdec.h b/vdec/vdec.h
  	struct work_struct drain_work;
 +	/* CAPTURE is the decoded picture divided by this each way: 1, 2 or 4 */
 +	u32 dw_ratio;
-+	/* a COMPOSE selection's rectangle; 0x0 takes capture_max_height */
++	/* a COMPOSE selection's rectangle; 0x0 takes the module parameters */
 +	u32 dw_request_width;
 +	u32 dw_request_height;
 +	/* the decoded picture's visible size, before dw_ratio */
@@ -665,11 +704,10 @@ diff -ruN a/vdec/vdec.h b/vdec/vdec.h
  	atomic_t m2m_job_running;
  
  	unsigned int streamon_cap, streamon_out;
-@@ -424,5 +434,22 @@
- void amvdec_m2m_job_finish(struct amvdec_session *sess);
+@@ -425,4 +435,22 @@
  void amvdec_m2m_job_yield(struct amvdec_session *sess);
  void amvdec_m2m_retry_job(struct amvdec_session *sess);
-+
+ 
 +/* the decoded picture's visible size, which CAPTURE divides by dw_ratio */
 +static inline u32 amvdec_ref_width(struct amvdec_session *sess)
 +{
@@ -683,37 +721,9 @@ diff -ruN a/vdec/vdec.h b/vdec/vdec.h
 +
 +u32 amvdec_dw_ratio(struct amvdec_session *sess, u32 width, u32 height);
 +
++extern unsigned int amvdec_capture_max_width;
 +extern unsigned int amvdec_capture_max_height;
 +
 +#define VDEC_MAX_DW_RATIO 4
- 
++
  #endif
-diff -ruN a/vdec/vdec_helpers.c b/vdec/vdec_helpers.c
---- a/vdec/vdec_helpers.c
-+++ b/vdec/vdec_helpers.c
-@@ -691,6 +691,25 @@
- 	.u.src_change.changes = V4L2_EVENT_SRC_CH_RESOLUTION,
- };
- 
-+/*
-+ * The CAPTURE ratio for a picture: the smallest of 1, 2 and 4 that fits it
-+ * in a COMPOSE selection's rectangle, else in capture_max_height.
-+ */
-+u32 amvdec_dw_ratio(struct amvdec_session *sess, u32 width, u32 height)
-+{
-+	u32 max_width = sess->dw_request_width ?: UINT_MAX;
-+	u32 max_height = sess->dw_request_height ?: amvdec_capture_max_height;
-+	u32 ratio = 1;
-+
-+	if (!sess->fmt_out->codec_ops->downscale || !max_height)
-+		return 1;
-+	while (ratio < VDEC_MAX_DW_RATIO &&
-+	       (width / ratio > max_width || height / ratio > max_height))
-+		ratio *= 2;
-+	return ratio;
-+}
-+EXPORT_SYMBOL_GPL(amvdec_dw_ratio);
-+
- void amvdec_src_change(struct amvdec_session *sess, u32 width,
- 		       u32 height, u32 dpb_size, u8 bitdepth)
- {

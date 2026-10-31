@@ -1,0 +1,71 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 31 Oct 2026 08:50:00 -0400
+Subject: [PATCH] media: meson: vdec: a seek's drained pictures end nothing with LAST
+
+A seek streams OUTPUT off and on. The decoder powers off in between and
+completes the pictures it held, and with should_stop set the last of them
+went out flagged LAST: the client's next DQBUF returned EPIPE for good,
+and decoding never resumed after the seek.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ vdec/vdec.c         | 2 ++
+ vdec/vdec.h         | 2 ++
+ vdec/vdec_helpers.c | 4 +++-
+ 3 files changed, 7 insertions(+), 1 deletion(-)
+
+diff -ruN a/vdec/vdec.c b/vdec/vdec.c
+--- a/vdec/vdec.c
++++ b/vdec/vdec.c
+@@ -897,6 +897,7 @@ static void vdec_stop_streaming(struct vb2_queue *q)
+ 	int irq = vdec_session_irq(sess);
+ 
+ 	hw_slot = &core->hw_sess[sess->fmt_out->vdec_ops->hw];
++	sess->output_flush = q->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
+ 
+ 	decoder_active = sess->status == STATUS_RUNNING ||
+ 			 sess->status == STATUS_INIT ||
+@@ -972,6 +973,7 @@ static void vdec_stop_streaming(struct vb2_queue *q)
+ 		sess->streamon_cap = 0;
+ 	}
+ 
++	sess->output_flush = false;
+ 	mutex_unlock(&core->hw_lock);
+ 	if (irq_disabled)
+ 		enable_irq(irq);
+diff -ruN a/vdec/vdec.h b/vdec/vdec.h
+--- a/vdec/vdec.h
++++ b/vdec/vdec.h
+@@ -377,6 +377,8 @@ struct amvdec_session {
+ 	u32 es_frames;
+ 	struct work_struct esparser_queue_work;
+ 	struct work_struct drain_work;
++	/* OUTPUT streams off, a seek: the frames it drains end nothing */
++	bool output_flush;
+ 	/* the end-of-stream drain and a stop's drain walk the same frames */
+ 	struct mutex drain_lock;
+ 	/* CAPTURE is the decoded picture divided by this each way: 1, 2 or 4 */
+diff -ruN a/vdec/vdec_helpers.c b/vdec/vdec_helpers.c
+--- a/vdec/vdec_helpers.c
++++ b/vdec/vdec_helpers.c
+@@ -471,7 +471,7 @@ static void dst_buf_done(struct amvdec_session *sess,
+ 	else if (type == 3)
+ 		vbuf->flags |= V4L2_BUF_FLAG_BFRAME;
+ 
+-	if (sess->should_stop &&
++	if (sess->should_stop && !sess->output_flush &&
+ 	    atomic_read(&sess->esparser_queued_bufs) <= 1) {
+ 		dev_dbg(dev, "Signaling EOS, sequence_cap = %u\n",
+ 			sess->sequence_cap - 1);
+@@ -557,6 +557,8 @@ bool amvdec_dst_buf_done_empty_last(struct amvdec_session *sess)
+ 	struct vb2_v4l2_buffer *vbuf;
+ 	unsigned int plane;
+ 
++	if (sess->output_flush)
++		return true;
+ 	vbuf = v4l2_m2m_dst_buf_remove(sess->m2m_ctx);
+ 	/* none free: the next queued CAPTURE buffer carries the LAST */
+ 	WRITE_ONCE(sess->last_pending, !vbuf);
+-- 
+2.47.3
