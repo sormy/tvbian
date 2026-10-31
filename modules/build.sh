@@ -38,6 +38,8 @@ for script in postinst postrm; do
   printf '#!/bin/sh\nset -e\n[ ! -d /usr/lib/modules/%s/kernel ] || depmod -a %s\n' "$KREL" "$KREL" >"$ROOT/DEBIAN/$script"
   chmod 0755 "$ROOT/DEBIAN/$script"
 done
+# the kernel package ships a modules.dep without these drivers: reindex whenever it is rewritten
+echo "interest-noawait /lib/modules/$KREL/modules.dep" >"$ROOT/DEBIAN/triggers"
 cat >"$ROOT/DEBIAN/control" <<CONTROL
 Package: tvb-$NAME-modules-$KREL
 Version: $VERSION
