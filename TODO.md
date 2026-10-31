@@ -56,6 +56,11 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
       environment; `run` does not pass it into the container, and the driver packages must follow
       the new release.
 
+- [ ] **Allwinner kernels: one series per subsystem, on both.** LibreELEC's taken whole where it is
+      better maintained (audio, the video engine, `sunxi-mmc`), other boards' and SoCs' patches
+      (AC200, other trees, SCPI) out of 7.2; a per-kernel copy only where the API forces it. A fix
+      proven on `sunxi64-next` comes back to `sunxi64`.
+
 - [ ] **`patches/linux-sunxi/`: folders by subsystem.** 255 patches in one list, ours squeezed into
       the gaps of LibreELEC's numbering, `0099` against its `0100`. Split by the files a patch
       touches into `soc/`, `mmc/`, `sound/`, `drm/`, `media/`, `dts/`, numbered per folder, applied
@@ -64,31 +69,6 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
 
 - [ ] **Every board: the Test report keyed by checklist ID.** `docs/bring-up/` asks for it; no
       board's report is, so a line never run stays invisible. The Tanix TX1 V2.0 first.
-
-- [ ] **H96 Max M20: VC-1 needs GStreamer 1.26.6.** 1.26.2, trixie's, maps no caps to
-      `V4L2_PIX_FMT_VC1_ANNEX_G`: `v4l2vc1dec` registers and fails "Invalid caps". By hand until
-      trixie moves: `patches/gst-plugins-good/README.md`. TVBian replaces no Debian package, so it
-      waits for trixie or upstream.
-
-- [ ] **H96 Max M20: the decoder leaves CAPTURE buffers active on STREAMOFF.** Four `WARN`s, buffers
-      0-13, all from fuseamp's `fuseamp-flips` and `fuseamp-quality`; ffmpeg stopped early on H.264,
-      HEVC 8- and 10-bit, VP9 to 4K does not reproduce it. Next: that client's ioctl sequence around
-      the stop.
-
-- [ ] **H96 Max M20: Wi-Fi stays on 2.4 GHz.** Not mt76: both bands join, and `0013` reloads the
-      firmware for a switch between the access point's two BSSIDs. The box's network pins `bssid=`
-      to the 2.4 GHz radio, and with no `bgscan` nothing re-picks once joined. Next: the SSID alone
-      plus `bgscan`, then time a band switch, which `0013` costs about 6 s.
-
-- [ ] **H96 Max M20: GStreamer's `v4l2h264enc` crashes.** `videotestsrc ! v4l2h264enc` dies with
-      `SIGSEGV` in `gst_memory_unmap`, in the plugin's input pool; `v4l2h265enc` and ffmpeg's
-      `h264_v4l2m2m` encode.
-
-- [ ] **RK35xx boards: size CMA for 4K at 60 fps.** The M20 needed 768 MiB, not 384, to decode 4K at
-      60 fps and copy it into render buffers. The H313's factory tree reserves 8 MiB, its video
-      engines behind an IOMMU; ours is `cma=256M`. Measure `CmaFree` during 4K decode on each board.
-- [ ] **H96 Max M20: sluggish.** Idle, zram and CMA sat unused for 8 h 26 min, 2026-10-20, which
-      says nothing about load. Play 4K and watch `vmstat 1` and `CmaFree` together.
 
 - [ ] **RK3518 boards: revisit the GPU against the H96 Max M20.** Same Mali-450 and the same BOE
       2256x1504 panel: the M20 scores glmark2 **64** at it native; the RK3528 boards scored 41 at
@@ -118,19 +98,6 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
       then `env export -t` `ethaddr` to fixed RAM for `boot.scr` to `env import` in the chained
       U-Boot, which sets `local-mac-address`. ❓ `env export` in this U-Boot; a RAM address neither
       relocates over.
-- [ ] **H96 Max M20: unbrick from the mask ROM.** Needed only once the eMMC's bootloader is gone;
-      the factory U-Boot's burning gadget covers every other path. A USB-boot BL2 from
-      `stock/h96max-m20/loader-stages/bl2.sign` and `acs.bin` (format v3), repacked with `gxlimg`
-      and committed beside the board as Rockchip's `maskrom_loader.bin` is; then `amlcmd` loads it
-      and U-Boot, which takes bulk writes and BL2's USB stage — `pyamlboot` has both. Safe to try:
-      `amlcmd set_usb_boot 2` enters the ROM, a power cut leaves it.
-- [ ] **Close the known gaps** listed in `patches/mt76-mt7668/README.md` and
-      `docs/h96max-m20/board.md`.
-- [ ] **Wake the H96 Max M20 from `s2idle` on its Bluetooth remote**, its only remote. The SDIO
-      interrupt carries the wake but `meson-gx-mmc` never arms it as a wake source, and `btmtksdio`
-      keeps the card powered only in runtime suspend. The other route is the combo chip's host-wake
-      GPIO 100, which needs the chip-side pin for the low-power command. Until one works, the M20's
-      keys ignore suspend and poweroff.
 - [ ] **No kernel self-tests in meson64.** 146 of its 4433 modules are KUnit and test modules, from
       Armbian's config: off in `kernel/meson64.fragment` (`CONFIG_KUNIT`), then a boot on the M20.
       The rest of its breadth stays: USB Wi-Fi, tuners and cameras are why a box is general.
@@ -150,13 +117,6 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
 - [ ] **R69 and H313: their IR tables onto the canonical keymap** in `docs/remote-keymap.md`. Each
       `ir_keyN` table in `board.patch` gives its own keys today (OK is `KEY_ENTER` on the R69,
       `KEY_REPLY` on the H313); then its pass over both transports, once a box has the remote.
-- [ ] **Rename the R69 to `r69-1`.** `r69` names boxes of several designs, against
-      `docs/bring-up/`'s board identity. `boards/`, `stock/` and `docs/` move; a last `tvb-r69`
-      depends on `tvb-r69-1`, which `Replaces` and `Breaks` it, so an installed box upgrades into
-      it; `/usr/lib/tvb/board-id` changes with it.
-- [ ] **Rename the H96 Max H313's board ID to the H96 Max 3518's.** Its name already is; the ID, its
-      directories and its image still say `h96max-h313`. The same move as the R69's rename above.
-
 - [ ] **A board package refuses the wrong box.** `tvb-<board>` ships loaders that brick a box of
       another SoC: `apt install tvb-tanix-tx1-v2` on an RK3518 writes Allwinner loaders. A `preinst`
       compares the running SoC, `/proc/device-tree/compatible`, with `BOARD_FAMILY` and aborts on a
@@ -172,11 +132,6 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
 - [ ] **Sealed TVBian:** image-based A/B updates, an option for any flavour, plain or Kodi. Levels:
       a read-only root, a volatile root, then A/B with `systemd-sysupdate`, two roots plus a data
       partition and a fallback at boot.
-
-- [ ] **H96 Max M20: the watchdog left a hard hang standing.** A VP9 4K decode hung the SoC at 13:51
-      on 2026-10-31; no reset followed, the box stayed down until power-cycled at 13:58. No hang
-      that day reset: each was a power cycle. `meson_gxbb_wdt` is active, 80 s, petted by systemd.
-      The previous boot's journal stops with no oops.
 
 - [ ] **`tools/validate/`: one script a component, one runner.** `validate.sh` becomes components
       beside `video.py` (boot, watchdog, Wi-Fi and Bluetooth, storage, USB, HDMI and CEC, audio,
@@ -196,6 +151,9 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
 | `docs/todo/rk35xx-sd-uhs-warm-reset.md` | `dwmmc` first init after a warm reset       |
 | `docs/todo/rk35xx-uboot-usb.md`         | USB in our U-Boot                           |
 | `docs/todo/tanix-tx1-v2.md`             | the Tanix TX1 V2.0: what is left            |
+| `docs/todo/h96max-m20.md`               | the H96 Max M20: what is left               |
+| `docs/todo/h96max-h313.md`              | the H96 Max H313: what is left              |
+| `docs/todo/r69.md`                      | the R69: what is left                       |
 | `docs/todo/tvb-install-bootloader.md`   | an install that keeps the box bootable      |
 | `docs/todo/website.md`                  | tvbian.com: one page on GitHub Pages        |
 | `docs/todo/repo-layout.md`              | folders, patches, tools and docs, regrouped |
