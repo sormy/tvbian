@@ -6,40 +6,44 @@ level is the current kernel's series, 6.18's; `next/` holds what only `-next` do
 for its API, and rewrites of top-level ones it takes in their place (`0103`, `0246`, `0257`, `0263`,
 `0265`, for 7.3).
 
-| Patch         | Holds                                           |
-| ------------- | ----------------------------------------------- |
-| `0034`        | 7.2.12's display drivers                        |
-| `0035`        | `drm_gem_dma`: through the DRM DMA device       |
-| `0036`        | 7.2's display drivers on 6.18's API             |
-| `0037`        | 7.2's IEC958 subframe definitions               |
-| `0038`        | the H616 audio hub on 6.18's ASoC API           |
-| `0001`–`0033` | LibreELEC's: MMC, clocks, SCPI, wake, Bluetooth |
-| `0100`–`0903` | LibreELEC's: HDMI, display, video, audio, AC200 |
-| `0041`        | the H616 display pipeline in `sun50i-h616.dtsi` |
-| `0042`        | `sunxi_wdt`: timeouts past its 16 s             |
-| `0043`        | `sunxi-mmc`: the vendor's output phase in DDR   |
-| `0044`        | `sunxi-mmc`: the sample delay from the tree     |
-| `0045`        | Cedrus: the H616 on the H6 variant              |
-| `0046`        | SRAM C1 for the H616 video engine               |
-| `0047`        | `sun50i-iommu`: a master's port reset, exported |
-| `0048`        | Cedrus: reset its IOMMU port after a timeout    |
-| `0052`–`0063` | Cedrus: VP9, P010 10-bit, AFBC out on the H616  |
-| `0064`–`0065` | VC-1: parsed-slice uAPI and Cedrus decoding     |
-| `0066`        | Cedrus: AFBC out for HEVC                       |
-| `0067`        | the DI300 deinterlacer                          |
-| `0068`        | `0067` on 6.18's `v4l2_m2m_buf_copy_metadata()` |
-| `0069`–`0074` | Cedrus: Bootlin's H.264 encoder, for the V3s    |
-| `0075`–`0088` | Cedrus encode, P010, VP8; IR wake, the remote   |
-| `0089`        | `sun4i_tv`: the H616 TV encoder                 |
-| `0090`        | `tve0` kept on its assigned parent              |
-| `0091`        | mixer: the H616 display engine at 696 MHz       |
-| `0092`        | `sunxi_wdt`: stopped across system sleep        |
-| `0093`        | `sun50i-iommu`: page sizes to 1 MiB advertised  |
-| `0094`        | Cedrus: CAPTURE scaled by 2 or 4 via COMPOSE    |
-| `0095`        | bridge connector: a mode set on HDR change      |
-| `0096`        | planes: AFBC past the scaler alone refused      |
-| `0097`        | Cedrus: 10-bit H.265 scaled as P010             |
-| `0099`        | VI scaler: edge-directed only to enlarge        |
+| Patch         | Holds                                            |
+| ------------- | ------------------------------------------------ |
+| `0034`        | 7.2.12's display drivers                         |
+| `0035`        | `drm_gem_dma`: through the DRM DMA device        |
+| `0036`        | 7.2's display drivers on 6.18's API              |
+| `0037`        | 7.2's IEC958 subframe definitions                |
+| `0038`        | the H616 audio hub on 6.18's ASoC API            |
+| `0001`–`0033` | LibreELEC's: MMC, clocks, SCPI, wake, Bluetooth  |
+| `0100`–`0903` | LibreELEC's: HDMI, display, video, audio, AC200  |
+| `0041`        | the H616 display pipeline in `sun50i-h616.dtsi`  |
+| `0042`        | `sunxi_wdt`: timeouts past its 16 s              |
+| `0043`        | `sunxi-mmc`: the vendor's output phase in DDR    |
+| `0044`        | `sunxi-mmc`: the sample delay from the tree      |
+| `0045`        | Cedrus: the H616 on the H6 variant               |
+| `0046`        | SRAM C1 for the H616 video engine                |
+| `0047`        | `sun50i-iommu`: a master's port reset, exported  |
+| `0048`        | Cedrus: reset its IOMMU port after a timeout     |
+| `0052`–`0063` | Cedrus: VP9, P010 10-bit, AFBC out on the H616   |
+| `0064`–`0065` | VC-1: parsed-slice uAPI and Cedrus decoding      |
+| `0066`        | Cedrus: AFBC out for HEVC                        |
+| `0067`        | the DI300 deinterlacer                           |
+| `0068`        | `0067` on 6.18's `v4l2_m2m_buf_copy_metadata()`  |
+| `0069`–`0074` | Cedrus: Bootlin's H.264 encoder, for the V3s     |
+| `0075`–`0088` | Cedrus encode, P010; IR wake, the remote         |
+| `0089`        | `sun4i_tv`: the H616 TV encoder                  |
+| `0090`        | `tve0` kept on its assigned parent               |
+| `0091`        | mixer: the H616 display engine at 696 MHz        |
+| `0092`        | `sunxi_wdt`: stopped across system sleep         |
+| `0093`        | `sun50i-iommu`: page sizes to 1 MiB advertised   |
+| `0094`        | Cedrus: CAPTURE scaled by 2 or 4 via COMPOSE     |
+| `0095`        | bridge connector: a mode set on HDR change       |
+| `0096`        | planes: AFBC past the scaler alone refused       |
+| `0097`        | Cedrus: 10-bit H.265 scaled as P010              |
+| `0099`        | VI scaler: edge-directed only to enlarge         |
+| `0800`–`0804` | Cedrus: VP8 to 4096 wide, JPEG both ways         |
+| `0805`–`0806` | Cedrus: MPEG-4 Part 2 and H.263 decode           |
+| `0807`        | Cedrus: a coded format sized by its own engine   |
+| `0808`        | Cedrus: each decoder's largest picture, measured |
 
 The display stack is 7.2's on both kernels. `0034` takes 7.2.12's `drivers/gpu/drm/sun4i`,
 `bridge/synopsys`, `ccu-sun8i-de2.c`, `sun50i-iommu.c` and `dw_hdmi.h` as they are; LibreELEC's
@@ -79,7 +83,8 @@ dividers expected and left the analog codec at half speed, is retired.
 `0052`–`0066` are Jernej Škrabec's, LibreELEC's `projects/Allwinner/patches/linux` `0410`–`0425`
 (LibreELEC.tv `96d9f0f`), less `0424`, a tree change, and `0406`, which is `0045`. `0053`'s hunk
 adding blank lines to the watchdog is left out against `0048`. VP9 runs in the H616 video engine's
-HEVC slot; VC-1 takes Simple and Advanced profiles, Main is refused. Not upstream.
+HEVC slot; VC-1 takes Simple and Advanced profiles; Main is refused, its P pictures drifting against
+the SMPTE conformance streams. Not upstream.
 
 `0067` is Jernej Škrabec's, LibreELEC's `0426`; `0068` is ours, for 6.18's API. The tree needs
 LibreELEC's node, `0435`.
@@ -94,8 +99,8 @@ in 8-pixel units and a macroblock row buffer at `0xb9c`, and past 2048 wide writ
 to memory. On top: the stop command ffmpeg and GStreamer drain with, escaped headers, the SPS timing
 and cropping, references kept out of the picture buffers, and frame rate control. `0083` lets
 `sunxi-cir` wake the system; `0085` keeps P010 the 10-bit default over `0066`'s AFBC, which a
-software consumer cannot read; `0086` advertises VP8 only to 2048 wide, past which it decodes wrong;
-`0088` is the TX1's remote keymap, `rc-tanix-tx1`, on the canonical keys. Not yet submitted.
+software consumer cannot read; `0088` is the TX1's remote keymap, `rc-tanix-tx1`, on the canonical
+keys. Not yet submitted.
 
 ## `next/`: `sunxi64-next`
 
@@ -133,7 +138,32 @@ took 8.7 ms, 3.7 ms with every size to 1 MiB advertised. Not yet submitted.
 while the engine reconstructs and references the full one, hidden after it in the same buffer as
 P010's. A client asks with `S_SELECTION`, `V4L2_SEL_TGT_COMPOSE` on CAPTURE, before CAPTURE buffers
 exist; the decoder node's selection ioctls, disabled until now, answer COMPOSE. 8-bit H.264 and
-H.265; `ffmpeg/0017` asks. Applied last on both kernels. Not yet submitted.
+H.265; `ffmpeg/0017` asks. Not yet submitted.
+
+`0800`–`0802` are ours. Past 2048 wide VP8 keeps the deblocking and intra prediction rows in DRAM,
+as H.264 does, and reads 0x5400 bytes of probabilities, the vendor library's size. A stopped picture
+queue returns its buffers, and the empty last buffer a drain ends on carries no payload. `0803` is
+Emmanuel Gil Peyrot's JPEG decoder from his v1 series, ported to Bootlin's rework: baseline JPEG and
+Motion JPEG, as NV12, the Annex K tables standing in for missing ones; the engine parses the headers
+itself, so it takes no request and drains as a stateful decoder. `0804` is ours, the H616 encoder's
+JPEG mode after the vendor library: the Annex K Huffman tables fixed in the engine, the quantisation
+tables loaded at `0xe0`/`0xe4`, the headers put through the engine and the end marker by the CPU.
+`0800`–`0808` apply last on both kernels, in order. Not yet submitted.
+
+`0805`–`0806` are ours. `0805` adds private stateless MPEG-4 Part 2 controls, as `0064` does VC-1's:
+VOL, VOP, quantisation matrices and a slice. `0806` decodes Simple and Advanced Simple profile and
+H.263 baseline in the MPEG engine after the vendor library's register map: a request per video
+packet or H.263 GOB, the engine parsing no packet header; GMC from the sprite trajectory; the DivX
+chroma-rounding bugs as the engine's own modes. Refused: interlaced B-VOPs, whose field direct mode
+the engine gets wrong, static sprites, data partitioning, RVLC. `ffmpeg/0019` drives it. Not yet
+submitted.
+
+`0807` is ours: `S_FMT` sized a coded format by the engine it replaced, the MPEG-2 engine the
+context opens with, so JPEG took MPEG-2's 4096x2304 in place of its own. Not yet submitted.
+
+`0808` is ours: each decoder's largest picture, as measured. HEVC and VP9 to 8192x4320, 8192x8192
+hanging the SoC; 10-bit to 6144x3456, 7680x4320 hanging; MPEG-4 to the 4080 its 8-bit macroblock
+count holds; JPEG to 6000x4000, 6144x6144 hanging. Not yet submitted.
 
 `0089` adds the H616 TV encoder to `sun4i_tv`, on both kernels, its DAC load detection left off:
 armed, it clicks on the AV jack, and it sensed no cable here; `0090` keeps the encoder's clock on

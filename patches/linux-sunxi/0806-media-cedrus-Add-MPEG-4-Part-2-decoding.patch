@@ -1,0 +1,1071 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 31 Oct 2026 03:14:31 -0400
+Subject: [PATCH] media: cedrus: Add MPEG-4 Part 2 decoding
+
+MPEG-4 Part 2 Simple and Advanced Simple profile and H.263 baseline on
+the H616, in the MPEG engine: I, P, B and GMC S-VOPs, half and quarter
+sample, both quantisation types, interlaced coding. The engine decodes
+one run of macroblocks at a time and parses no packet header, so a
+request is a video packet, an H.263 GOB with a header or a whole VOP.
+
+The GMC warp is computed from the sprite trajectory in the vendor
+library's form. The DivX encoder bugs that change the chroma vectors
+select the engine's own chroma rounding modes.
+
+A B-VOP reads the co-located macroblocks the last I, P or S-VOP left in
+one buffer: a B-VOP whose backward reference is any other picture is
+refused. So are interlaced B-VOPs, whose direct mode the engine
+predicts without the field distances, static sprites, sprite
+brightness change, data partitioning, reversible VLC and pictures over
+2048 wide or high.
+---
+ drivers/staging/media/sunxi/cedrus/Makefile   |   1 +
+ drivers/staging/media/sunxi/cedrus/cedrus.c   |   1 +
+ drivers/staging/media/sunxi/cedrus/cedrus.h   |   2 +
+ .../staging/media/sunxi/cedrus/cedrus_dec.c   |   5 +-
+ .../media/sunxi/cedrus/cedrus_dec_mpeg2.c     |   8 +-
+ .../media/sunxi/cedrus/cedrus_dec_mpeg2.h     |   6 +
+ .../media/sunxi/cedrus/cedrus_dec_mpeg4.c     | 745 ++++++++++++++++++
+ .../media/sunxi/cedrus/cedrus_dec_mpeg4.h     |  20 +
+ .../staging/media/sunxi/cedrus/cedrus_regs.h  |  72 ++
+ 9 files changed, 855 insertions(+), 5 deletions(-)
+ create mode 100644 drivers/staging/media/sunxi/cedrus/cedrus_dec_mpeg4.c
+ create mode 100644 drivers/staging/media/sunxi/cedrus/cedrus_dec_mpeg4.h
+
+diff --git a/drivers/staging/media/sunxi/cedrus/Makefile b/drivers/staging/media/sunxi/cedrus/Makefile
+index c70d632e9..26c17dea0 100644
+--- a/drivers/staging/media/sunxi/cedrus/Makefile
++++ b/drivers/staging/media/sunxi/cedrus/Makefile
+@@ -8,6 +8,7 @@ sunxi-cedrus-y = cedrus.o \
+ 		 cedrus_dec_h265.o \
+ 		 cedrus_dec_jpeg.o \
+ 		 cedrus_dec_mpeg2.o \
++		 cedrus_dec_mpeg4.o \
+ 		 cedrus_dec_vc1.o \
+ 		 cedrus_dec_vp8.o \
+ 		 cedrus_dec_vp9.o \
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus.c b/drivers/staging/media/sunxi/cedrus/cedrus.c
+index 77e60b1b2..5dadffa06 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus.c
+@@ -576,6 +576,7 @@ static const struct cedrus_variant cedrus_variant_sun50i_h616 = {
+ 			  CEDRUS_CAPABILITY_VC1_DEC |
+ 			  CEDRUS_CAPABILITY_JPEG_DEC |
+ 			  CEDRUS_CAPABILITY_JPEG_ENC |
++			  CEDRUS_CAPABILITY_MPEG4_DEC |
+ 			  CEDRUS_CAPABILITY_H264_ENC |
+ 			  CEDRUS_CAPABILITY_ENC_H616,
+ 	.clock_mod_rate	= 600000000,
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus.h b/drivers/staging/media/sunxi/cedrus/cedrus.h
+index bf98f9f2c..4c6ea040f 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus.h
++++ b/drivers/staging/media/sunxi/cedrus/cedrus.h
+@@ -39,6 +39,7 @@ enum cedrus_codec {
+ 	CEDRUS_CODEC_VP9,
+ 	CEDRUS_CODEC_VC1,
+ 	CEDRUS_CODEC_JPEG,
++	CEDRUS_CODEC_MPEG4,
+ };
+ 
+ enum cedrus_irq_status {
+@@ -60,6 +61,7 @@ enum cedrus_capability {
+ 	CEDRUS_CAPABILITY_ENC_H616	= BIT(9),
+ 	CEDRUS_CAPABILITY_JPEG_DEC	= BIT(10),
+ 	CEDRUS_CAPABILITY_JPEG_ENC	= BIT(11),
++	CEDRUS_CAPABILITY_MPEG4_DEC	= BIT(12),
+ };
+ 
+ struct cedrus_context;
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec.c b/drivers/staging/media/sunxi/cedrus/cedrus_dec.c
+index 987054826..85468c232 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_dec.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec.c
+@@ -18,6 +18,7 @@
+ #include "cedrus_dec_h264.h"
+ #include "cedrus_dec_h265.h"
+ #include "cedrus_dec_jpeg.h"
++#include "cedrus_dec_mpeg4.h"
+ #include "cedrus_dec_vc1.h"
+ #include "cedrus_dec_vp8.h"
+ #include "cedrus_dec_vp9.h"
+@@ -145,8 +146,9 @@ int cedrus_dec_format_coded_configure(struct cedrus_context *ctx)
+ 	value |= VE_MODE_DDR_MODE_BW_128;
+ 
+ 	switch (pix_format->pixelformat) {
+-	/* JPEG runs in the MPEG engine. */
++	/* JPEG and MPEG-4 run in the MPEG engine. */
+ 	case V4L2_PIX_FMT_MPEG2_SLICE:
++	case V4L2_PIX_FMT_MPEG4_SLICE:
+ 	case V4L2_PIX_FMT_JPEG:
+ 	case V4L2_PIX_FMT_MJPEG:
+ 		value |= VE_MODE_DEC_MPEG;
+@@ -571,6 +573,7 @@ static const struct cedrus_engine *cedrus_dec_engines[] = {
+ 	&cedrus_dec_vc1,
+ 	&cedrus_dec_jpeg,
+ 	&cedrus_dec_mjpeg,
++	&cedrus_dec_mpeg4,
+ };
+ 
+ /* Decoder */
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec_mpeg2.c b/drivers/staging/media/sunxi/cedrus/cedrus_dec_mpeg2.c
+index 76aecbcaa..c2139dde2 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_dec_mpeg2.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec_mpeg2.c
+@@ -184,9 +184,9 @@ static void cedrus_dec_mpeg2_job_trigger(struct cedrus_context *ctx)
+ 		     VE_DEC_MPEG_TRIGGER_MB_BOUNDARY);
+ }
+ 
+-/* IRQ */
++/* IRQ, shared with MPEG-4 */
+ 
+-static int cedrus_dec_mpeg2_irq_status(struct cedrus_context *ctx)
++int cedrus_dec_mpeg2_irq_status(struct cedrus_context *ctx)
+ {
+ 	struct cedrus_device *dev = ctx->proc->dev;
+ 	u32 status;
+@@ -204,14 +204,14 @@ static int cedrus_dec_mpeg2_irq_status(struct cedrus_context *ctx)
+ 	return CEDRUS_IRQ_SUCCESS;
+ }
+ 
+-static void cedrus_dec_mpeg2_irq_clear(struct cedrus_context *ctx)
++void cedrus_dec_mpeg2_irq_clear(struct cedrus_context *ctx)
+ {
+ 	struct cedrus_device *dev = ctx->proc->dev;
+ 
+ 	cedrus_write(dev, VE_DEC_MPEG_STATUS, VE_DEC_MPEG_STATUS_CHECK_MASK);
+ }
+ 
+-static void cedrus_dec_mpeg2_irq_disable(struct cedrus_context *ctx)
++void cedrus_dec_mpeg2_irq_disable(struct cedrus_context *ctx)
+ {
+ 	struct cedrus_device *dev = ctx->proc->dev;
+ 	u32 value;
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec_mpeg2.h b/drivers/staging/media/sunxi/cedrus/cedrus_dec_mpeg2.h
+index 9e937a87b..b92cbc098 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_dec_mpeg2.h
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec_mpeg2.h
+@@ -19,6 +19,12 @@ struct cedrus_dec_mpeg2_job {
+ 	const struct v4l2_ctrl_mpeg2_quantisation	*quantisation;
+ };
+ 
++struct cedrus_context;
++
++int cedrus_dec_mpeg2_irq_status(struct cedrus_context *ctx);
++void cedrus_dec_mpeg2_irq_clear(struct cedrus_context *ctx);
++void cedrus_dec_mpeg2_irq_disable(struct cedrus_context *ctx);
++
+ extern const struct cedrus_engine cedrus_dec_mpeg2;
+ 
+ #endif
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec_mpeg4.c b/drivers/staging/media/sunxi/cedrus/cedrus_dec_mpeg4.c
+new file mode 100644
+index 000000000..a2fb1d93c
+--- /dev/null
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec_mpeg4.c
+@@ -0,0 +1,745 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Cedrus Video Engine Driver
++ *
++ * MPEG-4 Part 2 Simple and Advanced Simple profile and H.263 baseline
++ * decoding in the MPEG engine, one run of macroblocks a request.
++ */
++
++#include <linux/log2.h>
++#include <linux/math64.h>
++#include <linux/types.h>
++#include <linux/videodev2.h>
++#include <media/v4l2-ctrls.h>
++
++#include "cedrus.h"
++#include "cedrus_context.h"
++#include "cedrus_dec.h"
++#include "cedrus_dec_mpeg2.h"
++#include "cedrus_dec_mpeg4.h"
++#include "cedrus_engine.h"
++#include "cedrus_proc.h"
++#include "cedrus_regs.h"
++
++#define CEDRUS_MPEG4_MAX_SIZE		2048
++#define CEDRUS_MPEG4_MAX_MBS		(CEDRUS_MPEG4_MAX_SIZE / 16)
++
++/* Scratch sizes for the largest picture: the vendor's or libvdpau's, larger */
++#define CEDRUS_MPEG4_MBH_SIZE		(CEDRUS_MPEG4_MAX_MBS * SZ_2K)
++#define CEDRUS_MPEG4_DCAC_SIZE		(CEDRUS_MPEG4_MAX_MBS * CEDRUS_MPEG4_MAX_MBS * 2)
++#define CEDRUS_MPEG4_NCF_SIZE		(CEDRUS_MPEG4_MAX_MBS * SZ_2K)
++#define CEDRUS_MPEG4_MBH_OFFSET		0
++#define CEDRUS_MPEG4_DCAC_OFFSET	CEDRUS_MPEG4_MBH_SIZE
++#define CEDRUS_MPEG4_NCF_OFFSET		(CEDRUS_MPEG4_DCAC_OFFSET + \
++					 CEDRUS_MPEG4_DCAC_SIZE)
++#define CEDRUS_MPEG4_SCRATCH_SIZE	(CEDRUS_MPEG4_NCF_OFFSET + \
++					 CEDRUS_MPEG4_NCF_SIZE)
++
++#define CEDRUS_MPEG4_FCODE_MAX		7
++#define CEDRUS_MPEG4_INTRA_DC_VLC_THR_MAX	7
++#define CEDRUS_MPEG4_FIELD_TIME_MAX	255
++#define CEDRUS_MPEG4_QUANT_SCALE_MAX	31
++#define CEDRUS_MPEG4_WARPING_POINTS_MAX	3
++#define CEDRUS_MPEG4_WARPING_ACCURACY_MAX	3
++#define CEDRUS_MPEG4_GMC_MV_SHIFT	3
++#define CEDRUS_MPEG4_SPRITE_DELTAS	4
++
++#define CEDRUS_MPEG4_VOL_FLAGS_UNSUPPORTED \
++	(V4L2_MPEG4_VOL_FLAG_DATA_PARTITIONED | \
++	 V4L2_MPEG4_VOL_FLAG_REVERSIBLE_VLC | \
++	 V4L2_MPEG4_VOL_FLAG_SPRITE_BRIGHTNESS_CHANGE)
++
++/* The co-located VOP type a B-VOP reads the NCF buffer as */
++static const u8 cedrus_dec_mpeg4_co_located_type[] = {
++	[V4L2_MPEG4_VOP_TYPE_I] = 0,
++	[V4L2_MPEG4_VOP_TYPE_P] = 1,
++	[V4L2_MPEG4_VOP_TYPE_S] = 3,
++};
++
++struct cedrus_dec_mpeg4_context {
++	void		*scratch;
++	dma_addr_t	scratch_addr;
++	/* The NCF buffer holds the last I, P or S-VOP's macroblock data. */
++	u64		ref_ts;
++	u8		ref_type;
++	bool		ref_valid;
++};
++
++/* Ctrl */
++
++static int cedrus_dec_mpeg4_vol_validate(const struct v4l2_ctrl_mpeg4_vol *vol)
++{
++	if (vol->flags & CEDRUS_MPEG4_VOL_FLAGS_UNSUPPORTED)
++		return -EINVAL;
++
++	if (vol->sprite_enable > V4L2_MPEG4_SPRITE_GMC ||
++	    vol->sprite_enable == V4L2_MPEG4_SPRITE_STATIC ||
++	    vol->no_of_sprite_warping_points > CEDRUS_MPEG4_WARPING_POINTS_MAX ||
++	    vol->sprite_warping_accuracy > CEDRUS_MPEG4_WARPING_ACCURACY_MAX)
++		return -EINVAL;
++
++	if (!vol->width || vol->width > CEDRUS_MPEG4_MAX_SIZE ||
++	    !vol->height || vol->height > CEDRUS_MPEG4_MAX_SIZE)
++		return -EINVAL;
++
++	return 0;
++}
++
++static int cedrus_dec_mpeg4_vop_validate(const struct v4l2_ctrl_mpeg4_vop *vop)
++{
++	if (vop->vop_coding_type > V4L2_MPEG4_VOP_TYPE_S ||
++	    vop->vop_fcode_forward > CEDRUS_MPEG4_FCODE_MAX ||
++	    vop->vop_fcode_backward > CEDRUS_MPEG4_FCODE_MAX ||
++	    vop->intra_dc_vlc_thr > CEDRUS_MPEG4_INTRA_DC_VLC_THR_MAX ||
++	    vop->trb_field > CEDRUS_MPEG4_FIELD_TIME_MAX ||
++	    vop->trd_field > CEDRUS_MPEG4_FIELD_TIME_MAX)
++		return -EINVAL;
++
++	return 0;
++}
++
++static int
++cedrus_dec_mpeg4_slice_validate(const struct v4l2_ctrl_mpeg4_slice *slice)
++{
++	if (slice->data_bit_offset >= slice->bit_size ||
++	    !slice->num_macroblocks ||
++	    !slice->quant_scale ||
++	    slice->quant_scale > CEDRUS_MPEG4_QUANT_SCALE_MAX)
++		return -EINVAL;
++
++	return 0;
++}
++
++static int cedrus_dec_mpeg4_ctrl_validate(struct cedrus_context *ctx,
++					  struct v4l2_ctrl *ctrl)
++{
++	switch (ctrl->id) {
++	case V4L2_CID_STATELESS_MPEG4_VOL:
++		return cedrus_dec_mpeg4_vol_validate(ctrl->p_new.p);
++	case V4L2_CID_STATELESS_MPEG4_VOP:
++		return cedrus_dec_mpeg4_vop_validate(ctrl->p_new.p);
++	case V4L2_CID_STATELESS_MPEG4_SLICE:
++		return cedrus_dec_mpeg4_slice_validate(ctrl->p_new.p);
++	}
++
++	return 0;
++}
++
++/* Context */
++
++static int cedrus_dec_mpeg4_setup(struct cedrus_context *ctx)
++{
++	struct cedrus_dec_mpeg4_context *mpeg4 = ctx->engine_ctx;
++	struct cedrus_device *dev = ctx->proc->dev;
++
++	mpeg4->scratch = dma_alloc_coherent(dev->dev, CEDRUS_MPEG4_SCRATCH_SIZE,
++					    &mpeg4->scratch_addr, GFP_KERNEL);
++	if (!mpeg4->scratch)
++		return -ENOMEM;
++
++	mpeg4->ref_valid = false;
++
++	return 0;
++}
++
++static void cedrus_dec_mpeg4_cleanup(struct cedrus_context *ctx)
++{
++	struct cedrus_dec_mpeg4_context *mpeg4 = ctx->engine_ctx;
++	struct cedrus_device *dev = ctx->proc->dev;
++
++	dma_free_coherent(dev->dev, CEDRUS_MPEG4_SCRATCH_SIZE, mpeg4->scratch,
++			  mpeg4->scratch_addr);
++}
++
++/* GMC */
++
++/*
++ * A global motion warp, as the engine takes it: a sample's position is
++ * (offset << shift + delta . (x, y)) >> shift for luma, with the rounding
++ * the engine adds; (offset + delta . (2x, 2y)) >> shift for chroma, the
++ * rounding in the offset.
++ */
++struct cedrus_dec_mpeg4_warp {
++	s64		offset[2];
++	s64		delta[CEDRUS_MPEG4_SPRITE_DELTAS];	/* dxx, dxy, dyx, dyy */
++	unsigned int	shift;
++};
++
++static s64 cedrus_dec_mpeg4_div_round(s64 n, s64 d)
++{
++	return div64_s64(n >= 0 ? n + d / 2 : n - d / 2, d);
++}
++
++/* Drops the powers of two the deltas, the rounding and the chroma offset share */
++static void cedrus_dec_mpeg4_warp_reduce(struct cedrus_dec_mpeg4_warp *warp,
++					 bool chroma)
++{
++	s64 round = 1LL << (warp->shift - 1);
++	unsigned int i;
++
++	while (warp->shift) {
++		s64 bits = round;
++
++		for (i = 0; i < CEDRUS_MPEG4_SPRITE_DELTAS; i++)
++			bits |= warp->delta[i];
++		if (chroma)
++			bits |= warp->offset[0] | warp->offset[1];
++		if (bits & 1)
++			break;
++
++		for (i = 0; i < CEDRUS_MPEG4_SPRITE_DELTAS; i++)
++			warp->delta[i] >>= 1;
++		if (chroma) {
++			warp->offset[0] >>= 1;
++			warp->offset[1] >>= 1;
++		}
++		round >>= 1;
++		warp->shift--;
++	}
++}
++
++/* The luma and chroma warps of ISO/IEC 14496-2 7.8.4 from the trajectory */
++static void cedrus_dec_mpeg4_warps(const struct v4l2_ctrl_mpeg4_vol *vol,
++				   const struct v4l2_ctrl_mpeg4_vop *vop,
++				   struct cedrus_dec_mpeg4_warp *luma,
++				   struct cedrus_dec_mpeg4_warp *chroma)
++{
++	const s16 *du = vop->sprite_trajectory_du;
++	const s16 *dv = vop->sprite_trajectory_dv;
++	bool unscaled = vol->bugs & V4L2_MPEG4_BUG_SPRITE_UNSCALED;
++	s64 w = vol->width, h = vol->height;
++	s64 a = 2 << vol->sprite_warping_accuracy;
++	s64 half = unscaled ? 1 : a / 2;
++	unsigned int rho = 3 - vol->sprite_warping_accuracy;
++	unsigned int alpha = order_base_2(w), beta = order_base_2(h);
++	s64 r = 1 << rho, wp = 1LL << alpha, hp = 1LL << beta;
++	s64 i0 = half * du[0], j0 = half * dv[0];
++	s64 i1, j1, i2, j2, i1v, j1v, i2v, j2v, scale;
++	unsigned int i;
++
++	*luma = (struct cedrus_dec_mpeg4_warp) {
++		.offset = { i0, j0 },
++		.delta = { a, 0, 0, a },
++	};
++
++	if (vol->no_of_sprite_warping_points <= 1) {
++		*chroma = *luma;
++		chroma->offset[0] = (i0 >> 1) | (i0 & 1);
++		chroma->offset[1] = (j0 >> 1) | (j0 & 1);
++		return;
++	}
++
++	if (unscaled) {
++		i1 = a * w + du[0] + du[1];
++		j2 = a * h + dv[0] + dv[2];
++	} else {
++		i1 = half * (2 * w + du[0] + du[1]);
++		j2 = half * (2 * h + dv[0] + dv[2]);
++	}
++	j1 = half * (dv[0] + dv[1]);
++	i2 = half * (du[0] + du[2]);
++
++	i1v = 16 * wp + cedrus_dec_mpeg4_div_round((w - wp) * r * i0 +
++						   wp * (r * i1 - 16 * w), w);
++	j1v = cedrus_dec_mpeg4_div_round((w - wp) * r * j0 + wp * r * j1, w);
++
++	if (vol->no_of_sprite_warping_points == 2) {
++		luma->delta[0] = i1v - r * i0;
++		luma->delta[1] = r * j0 - j1v;
++		luma->delta[2] = j1v - r * j0;
++		luma->delta[3] = luma->delta[0];
++		luma->shift = alpha + rho;
++		scale = 2 * wp;
++	} else {
++		i2v = cedrus_dec_mpeg4_div_round((h - hp) * r * i0 +
++						 hp * r * i2, h);
++		j2v = 16 * hp +
++		      cedrus_dec_mpeg4_div_round((h - hp) * r * j0 +
++						 hp * (r * j2 - 16 * h), h);
++		luma->delta[0] = (i1v - r * i0) << beta;
++		luma->delta[1] = (i2v - r * i0) << alpha;
++		luma->delta[2] = (j1v - r * j0) << beta;
++		luma->delta[3] = (j2v - r * j0) << alpha;
++		luma->shift = alpha + beta + rho;
++		scale = 2 * wp * hp;
++	}
++
++	/* Chroma samples sit between luma pairs: the warp at (1/2, 1/2) */
++	*chroma = *luma;
++	chroma->shift = luma->shift + 2;
++	for (i = 0; i < 2; i++)
++		chroma->offset[i] = scale * (r * luma->offset[i] - 8) +
++				    luma->delta[2 * i] + luma->delta[2 * i + 1] +
++				    (1LL << (chroma->shift - 1));
++
++	cedrus_dec_mpeg4_warp_reduce(luma, false);
++	cedrus_dec_mpeg4_warp_reduce(chroma, true);
++}
++
++static bool
++cedrus_dec_mpeg4_warp_fits(const struct cedrus_dec_mpeg4_warp *warp)
++{
++	unsigned int i;
++
++	for (i = 0; i < CEDRUS_MPEG4_SPRITE_DELTAS; i++)
++		if (warp->delta[i] != (s16)warp->delta[i])
++			return false;
++
++	return true;
++}
++
++/* Halves the deltas, their low bits into the shift register, in register order */
++static u32 cedrus_dec_mpeg4_warp_halve(struct cedrus_dec_mpeg4_warp *warp,
++				       unsigned int first)
++{
++	static const unsigned int order[] = { 0, 2, 1, 3 };
++	u32 lsbs = 0;
++	unsigned int i;
++
++	for (i = 0; i < CEDRUS_MPEG4_SPRITE_DELTAS; i++) {
++		s64 *delta = &warp->delta[order[i]];
++
++		if (*delta & 1)
++			lsbs |= VE_DEC_MPEG_SPRITE_SHIFT_DELTA_LSB(first + i);
++		*delta >>= 1;
++	}
++
++	return lsbs;
++}
++
++/* Warping points left once the trailing zero vectors are dropped */
++static unsigned int
++cedrus_dec_mpeg4_warping_points(const struct v4l2_ctrl_mpeg4_vol *vol,
++				const struct v4l2_ctrl_mpeg4_vop *vop)
++{
++	unsigned int n = vol->no_of_sprite_warping_points;
++
++	while (n && !vop->sprite_trajectory_du[n - 1] &&
++	       !vop->sprite_trajectory_dv[n - 1])
++		n--;
++
++	return n;
++}
++
++static void cedrus_dec_mpeg4_gmc_write(struct cedrus_device *dev,
++				       const struct v4l2_ctrl_mpeg4_vol *vol,
++				       const struct v4l2_ctrl_mpeg4_vop *vop)
++{
++	unsigned int mv_shift = CEDRUS_MPEG4_GMC_MV_SHIFT -
++				vol->sprite_warping_accuracy;
++	struct cedrus_dec_mpeg4_warp luma, chroma;
++	s64 mv_x = 0, mv_y = 0;
++	u32 shift;
++
++	cedrus_dec_mpeg4_warps(vol, vop, &luma, &chroma);
++
++	if (vol->no_of_sprite_warping_points <= 1) {
++		mv_x = chroma.offset[0];
++		mv_y = chroma.offset[1];
++	} else {
++		mv_x = chroma.offset[0] >> chroma.shift;
++		mv_y = chroma.offset[1] >> chroma.shift;
++	}
++
++	cedrus_write(dev, VE_DEC_MPEG_GMC_LUMA_MV,
++		     VE_DEC_MPEG_GMC_MV(luma.offset[0] << mv_shift,
++					luma.offset[1] << mv_shift));
++	cedrus_write(dev, VE_DEC_MPEG_GMC_CHROMA_MV,
++		     VE_DEC_MPEG_GMC_MV(mv_x << mv_shift, mv_y << mv_shift));
++
++	shift = VE_DEC_MPEG_SPRITE_SHIFT_LUMA(luma.shift) |
++		VE_DEC_MPEG_SPRITE_SHIFT_CHROMA(chroma.shift);
++
++	if (!cedrus_dec_mpeg4_warp_fits(&luma) ||
++	    !cedrus_dec_mpeg4_warp_fits(&chroma))
++		shift |= VE_DEC_MPEG_SPRITE_SHIFT_DELTA_HALVED |
++			 cedrus_dec_mpeg4_warp_halve(&luma, 0) |
++			 cedrus_dec_mpeg4_warp_halve(&chroma,
++						     CEDRUS_MPEG4_SPRITE_DELTAS);
++
++	cedrus_write(dev, VE_DEC_MPEG_SPRITE_SHIFT, shift);
++	cedrus_write(dev, VE_DEC_MPEG_SPRITE_LUMA_OFFSET,
++		     VE_DEC_MPEG_SPRITE_PAIR(luma.offset[0], luma.offset[1]));
++	cedrus_write(dev, VE_DEC_MPEG_SPRITE_LUMA_DELTA_X,
++		     VE_DEC_MPEG_SPRITE_PAIR(luma.delta[0], luma.delta[2]));
++	cedrus_write(dev, VE_DEC_MPEG_SPRITE_LUMA_DELTA_Y,
++		     VE_DEC_MPEG_SPRITE_PAIR(luma.delta[1], luma.delta[3]));
++	cedrus_write(dev, VE_DEC_MPEG_SPRITE_CHROMA_OFFSET_X, chroma.offset[0]);
++	cedrus_write(dev, VE_DEC_MPEG_SPRITE_CHROMA_OFFSET_Y, chroma.offset[1]);
++	cedrus_write(dev, VE_DEC_MPEG_SPRITE_CHROMA_DELTA_X,
++		     VE_DEC_MPEG_SPRITE_PAIR(chroma.delta[0], chroma.delta[2]));
++	cedrus_write(dev, VE_DEC_MPEG_SPRITE_CHROMA_DELTA_Y,
++		     VE_DEC_MPEG_SPRITE_PAIR(chroma.delta[1], chroma.delta[3]));
++}
++
++/* Job */
++
++static int cedrus_dec_mpeg4_job_prepare(struct cedrus_context *ctx)
++{
++	struct cedrus_dec_mpeg4_job *job = ctx->engine_job;
++
++	job->vol = cedrus_context_ctrl_data(ctx, V4L2_CID_STATELESS_MPEG4_VOL);
++	job->vop = cedrus_context_ctrl_data(ctx, V4L2_CID_STATELESS_MPEG4_VOP);
++	job->quantisation =
++		cedrus_context_ctrl_data(ctx,
++					 V4L2_CID_STATELESS_MPEG4_QUANTISATION);
++	job->slice = cedrus_context_ctrl_data(ctx,
++					      V4L2_CID_STATELESS_MPEG4_SLICE);
++
++	return 0;
++}
++
++/* B-VOPs read the co-located macroblocks of the last I, P or S-VOP only. */
++static int cedrus_dec_mpeg4_reference_update(struct cedrus_context *ctx,
++					     const struct v4l2_ctrl_mpeg4_vop *vop,
++					     u8 *co_located_type)
++{
++	struct cedrus_dec_mpeg4_context *mpeg4 = ctx->engine_ctx;
++
++	if (vop->vop_coding_type == V4L2_MPEG4_VOP_TYPE_B) {
++		if (!mpeg4->ref_valid || mpeg4->ref_ts != vop->backward_ref_ts)
++			return -EINVAL;
++
++		*co_located_type =
++			cedrus_dec_mpeg4_co_located_type[mpeg4->ref_type];
++		return 0;
++	}
++
++	mpeg4->ref_ts = ctx->job.buffer_coded->vb2_buf.timestamp;
++	mpeg4->ref_type = vop->vop_coding_type;
++	mpeg4->ref_valid = true;
++	*co_located_type = 0;
++
++	return 0;
++}
++
++static void cedrus_dec_mpeg4_reference_write(struct cedrus_context *ctx,
++					     u64 timestamp, dma_addr_t luma,
++					     dma_addr_t chroma, u32 luma_reg,
++					     u32 chroma_reg)
++{
++	struct cedrus_device *dev = ctx->proc->dev;
++	dma_addr_t ref_luma, ref_chroma;
++
++	cedrus_job_buffer_picture_ref_dma(ctx, timestamp, &ref_luma,
++					  &ref_chroma);
++	if (!ref_luma) {
++		ref_luma = luma;
++		ref_chroma = chroma;
++	}
++
++	cedrus_write(dev, luma_reg, ref_luma);
++	cedrus_write(dev, chroma_reg, ref_chroma);
++}
++
++static u32 cedrus_dec_mpeg4_vop_header(const struct v4l2_ctrl_mpeg4_vol *vol,
++				       const struct v4l2_ctrl_mpeg4_vop *vop,
++				       u8 co_located_type)
++{
++	unsigned int points;
++	u32 value;
++
++	if (vol->flags & V4L2_MPEG4_VOL_FLAG_SHORT_VIDEO_HEADER)
++		return VE_DEC_MPEG_MP4VOPHDR_SHORT_VIDEO_HEADER |
++		       VE_DEC_MPEG_MP4VOPHDR_RESYNC_MARKER_DIS |
++		       VE_DEC_MPEG_MP4VOPHDR_H263_ESCAPE |
++		       VE_DEC_MPEG_MP4VOPHDR_CODING_TYPE(vop->vop_coding_type) |
++		       VE_DEC_MPEG_MP4VOPHDR_FCODE_F(1);
++
++	value = VE_DEC_MPEG_MP4VOPHDR_CODING_TYPE(vop->vop_coding_type) |
++		VE_DEC_MPEG_MP4VOPHDR_INTRA_DC_VLC_THR(vop->intra_dc_vlc_thr) |
++		VE_DEC_MPEG_MP4VOPHDR_CO_LOCATED_TYPE(co_located_type);
++
++	if (vop->vop_coding_type != V4L2_MPEG4_VOP_TYPE_I)
++		value |= VE_DEC_MPEG_MP4VOPHDR_FCODE_F(vop->vop_fcode_forward);
++	if (vop->vop_coding_type == V4L2_MPEG4_VOP_TYPE_B)
++		value |= VE_DEC_MPEG_MP4VOPHDR_FCODE_B(vop->vop_fcode_backward);
++
++	if ((vop->vop_coding_type == V4L2_MPEG4_VOP_TYPE_P ||
++	     vop->vop_coding_type == V4L2_MPEG4_VOP_TYPE_S) &&
++	    vop->flags & V4L2_MPEG4_VOP_FLAG_ROUNDING_TYPE)
++		value |= VE_DEC_MPEG_MP4VOPHDR_ROUNDING_TYPE;
++
++	if (vol->flags & V4L2_MPEG4_VOL_FLAG_INTERLACED) {
++		value |= VE_DEC_MPEG_MP4VOPHDR_INTERLACED;
++		if (vop->flags & V4L2_MPEG4_VOP_FLAG_TOP_FIELD_FIRST)
++			value |= VE_DEC_MPEG_MP4VOPHDR_TOP_FIELD_FIRST;
++		if (vop->flags & V4L2_MPEG4_VOP_FLAG_ALTERNATE_VERTICAL_SCAN)
++			value |= VE_DEC_MPEG_MP4VOPHDR_ALT_VERTICAL_SCAN;
++	}
++
++	if (vop->vop_coding_type == V4L2_MPEG4_VOP_TYPE_S) {
++		points = cedrus_dec_mpeg4_warping_points(vol, vop);
++		value |= VE_DEC_MPEG_MP4VOPHDR_WARPING_POINTS(points) |
++			 VE_DEC_MPEG_MP4VOPHDR_SPRITE_ACCURACY(vol->sprite_warping_accuracy);
++	}
++
++	if (vol->flags & V4L2_MPEG4_VOL_FLAG_QUANT_TYPE)
++		value |= VE_DEC_MPEG_MP4VOPHDR_QUANT_TYPE;
++	if (vol->flags & V4L2_MPEG4_VOL_FLAG_QUARTER_SAMPLE)
++		value |= VE_DEC_MPEG_MP4VOPHDR_QUARTER_SAMPLE;
++	if (vol->flags & V4L2_MPEG4_VOL_FLAG_RESYNC_MARKER_DISABLE)
++		value |= VE_DEC_MPEG_MP4VOPHDR_RESYNC_MARKER_DIS;
++
++	return value;
++}
++
++/* Chroma vector rounding from quarter-sample vectors, as the vendor sets it */
++static u32 cedrus_dec_mpeg4_qpel_chroma(const struct v4l2_ctrl_mpeg4_vol *vol,
++					const struct v4l2_ctrl_mpeg4_vop *vop)
++{
++	if (!(vol->flags & V4L2_MPEG4_VOL_FLAG_QUARTER_SAMPLE))
++		return 0;
++
++	if (!(vol->bugs & (V4L2_MPEG4_BUG_QPEL_CHROMA |
++			   V4L2_MPEG4_BUG_QPEL_CHROMA2)))
++		return VE_DEC_MPEG_CTRL_FLD_QM(1);
++
++	if (vop->vop_coding_type == V4L2_MPEG4_VOP_TYPE_B)
++		return VE_DEC_MPEG_CTRL_FLD_QM(1) |
++		       VE_DEC_MPEG_CTRL_MV1_QM(1) |
++		       VE_DEC_MPEG_CTRL_MV4_QM(2);
++
++	if (vol->bugs & V4L2_MPEG4_BUG_QPEL_CHROMA2)
++		return VE_DEC_MPEG_CTRL_FLD_QM(2) |
++		       VE_DEC_MPEG_CTRL_MV1_QM(2) |
++		       VE_DEC_MPEG_CTRL_MV4_QM(1);
++
++	return VE_DEC_MPEG_CTRL_FLD_QM(2) |
++	       VE_DEC_MPEG_CTRL_MV1_QM(1) |
++	       VE_DEC_MPEG_CTRL_MV4_QM(1);
++}
++
++static void
++cedrus_dec_mpeg4_matrices_write(struct cedrus_device *dev,
++				const struct v4l2_ctrl_mpeg4_quantisation *quant)
++{
++	unsigned int i;
++
++	for (i = 0; i < 64; i++)
++		cedrus_write(dev, VE_DEC_MPEG_IQMINPUT,
++			     VE_DEC_MPEG_IQMINPUT_WEIGHT(i,
++					quant->intra_quantiser_matrix[i]) |
++			     VE_DEC_MPEG_IQMINPUT_FLAG_INTRA);
++
++	for (i = 0; i < 64; i++)
++		cedrus_write(dev, VE_DEC_MPEG_IQMINPUT,
++			     VE_DEC_MPEG_IQMINPUT_WEIGHT(i,
++					quant->non_intra_quantiser_matrix[i]) |
++			     VE_DEC_MPEG_IQMINPUT_FLAG_NON_INTRA);
++}
++
++static int cedrus_dec_mpeg4_job_configure(struct cedrus_context *ctx)
++{
++	struct cedrus_dec_mpeg4_context *mpeg4 = ctx->engine_ctx;
++	struct cedrus_dec_mpeg4_job *job = ctx->engine_job;
++	struct cedrus_device *dev = ctx->proc->dev;
++	const struct v4l2_ctrl_mpeg4_vol *vol = job->vol;
++	const struct v4l2_ctrl_mpeg4_vop *vop = job->vop;
++	const struct v4l2_ctrl_mpeg4_slice *slice = job->slice;
++	struct v4l2_pix_format *pix_format = &ctx->v4l2.format_coded.fmt.pix;
++	unsigned int mb_width = DIV_ROUND_UP(vol->width, 16);
++	unsigned int mb_height = DIV_ROUND_UP(vol->height, 16);
++	unsigned int bound_width, bound_height;
++	dma_addr_t luma_addr, chroma_addr, coded_addr;
++	unsigned int coded_size;
++	u8 co_located_type;
++	u32 value;
++	int ret;
++
++	cedrus_job_buffer_coded_dma(ctx, &coded_addr, &coded_size);
++
++	if (vol->width > pix_format->width || vol->height > pix_format->height ||
++	    slice->macroblock_number + slice->num_macroblocks >
++	    mb_width * mb_height ||
++	    slice->bit_size > coded_size * 8)
++		return -EINVAL;
++
++	/*
++	 * The engine's direct mode ignores the field distances of an
++	 * interlaced co-located macroblock.
++	 */
++	if (vol->flags & V4L2_MPEG4_VOL_FLAG_INTERLACED &&
++	    vop->vop_coding_type == V4L2_MPEG4_VOP_TYPE_B)
++		return -EINVAL;
++
++	ret = cedrus_dec_mpeg4_reference_update(ctx, vop, &co_located_type);
++	if (ret)
++		return ret;
++
++	if (vol->flags & V4L2_MPEG4_VOL_FLAG_QUANT_TYPE)
++		cedrus_dec_mpeg4_matrices_write(dev, job->quantisation);
++
++	cedrus_write(dev, VE_DEC_MPEG_MP4VOPHDR,
++		     cedrus_dec_mpeg4_vop_header(vol, vop, co_located_type));
++
++	cedrus_write(dev, VE_DEC_MPEG_PICCODEDSIZE,
++		     VE_DEC_MPEG_PICCODEDSIZE_STORE_MBS(ALIGN(mb_width, 2)) |
++		     VE_DEC_MPEG_PICCODEDSIZE_WIDTH_MBS(mb_width) |
++		     VE_DEC_MPEG_PICCODEDSIZE_HEIGHT_MBS(mb_height));
++
++	/* Old encoders predicted from beyond the picture's own edge. */
++	if (vol->bugs & V4L2_MPEG4_BUG_EDGE) {
++		bound_width = vol->width;
++		bound_height = vol->height;
++	} else {
++		bound_width = mb_width * 16;
++		bound_height = mb_height * 16;
++	}
++
++	cedrus_write(dev, VE_DEC_MPEG_PICBOUNDSIZE,
++		     VE_DEC_MPEG_PICBOUNDSIZE_WIDTH(bound_width) |
++		     VE_DEC_MPEG_PICBOUNDSIZE_HEIGHT(bound_height));
++
++	cedrus_write(dev, VE_DEC_MPEG_MBADDR,
++		     VE_DEC_MPEG_MBADDR_X(slice->macroblock_number % mb_width) |
++		     VE_DEC_MPEG_MBADDR_Y(slice->macroblock_number / mb_width));
++
++	value = VE_DEC_MPEG_CTRL_IRQ_MASK |
++		VE_DEC_MPEG_CTRL_MC_NO_WRITEBACK |
++		VE_DEC_MPEG_CTRL_QP_AC_DC_OUT_EN |
++		VE_DEC_MPEG_CTRL_MC_CACHE_EN |
++		cedrus_dec_mpeg4_qpel_chroma(vol, vop);
++	if (vop->vop_coding_type == V4L2_MPEG4_VOP_TYPE_P)
++		value |= VE_DEC_MPEG_CTRL_NC_FLAG_OUT_EN;
++	/* DivX derives field chroma vectors as it does frame ones */
++	if (vol->bugs & V4L2_MPEG4_BUG_HPEL_CHROMA)
++		value |= VE_DEC_MPEG_CTRL_FLD_HM;
++
++	cedrus_write(dev, VE_DEC_MPEG_CTRL, value);
++
++	if (vop->vop_coding_type == V4L2_MPEG4_VOP_TYPE_B) {
++		cedrus_write(dev, VE_DEC_MPEG_TRBTRD_FRAME,
++			     VE_DEC_MPEG_TRBTRD_FRAME_TRB(vop->trb) |
++			     VE_DEC_MPEG_TRBTRD_FRAME_TRD(vop->trd));
++
++		if (vol->flags & V4L2_MPEG4_VOL_FLAG_INTERLACED)
++			cedrus_write(dev, VE_DEC_MPEG_TRBTRD_FIELD,
++				     VE_DEC_MPEG_TRBTRD_FIELD_TRB(vop->trb_field) |
++				     VE_DEC_MPEG_TRBTRD_FIELD_TRD(vop->trd_field));
++	}
++
++	if (vop->vop_coding_type == V4L2_MPEG4_VOP_TYPE_S)
++		cedrus_dec_mpeg4_gmc_write(dev, vol, vop);
++
++	cedrus_write(dev, VE_DEC_MPEG_QCINPUT,
++		     VE_DEC_MPEG_QCINPUT_QUANT_SCALE(slice->quant_scale));
++
++	/* Scratch buffers. */
++
++	cedrus_write(dev, VE_DEC_MPEG_MBH_ADDR,
++		     mpeg4->scratch_addr + CEDRUS_MPEG4_MBH_OFFSET);
++	cedrus_write(dev, VE_DEC_MPEG_DCAC_ADDR,
++		     mpeg4->scratch_addr + CEDRUS_MPEG4_DCAC_OFFSET);
++	cedrus_write(dev, VE_DEC_MPEG_NCF_ADDR,
++		     mpeg4->scratch_addr + CEDRUS_MPEG4_NCF_OFFSET);
++
++	/* Destination and reference buffers: a missing reference reads the destination. */
++
++	cedrus_job_buffer_picture_dma(ctx, &luma_addr, &chroma_addr);
++	cedrus_write(dev, VE_DEC_MPEG_REC_LUMA, luma_addr);
++	cedrus_write(dev, VE_DEC_MPEG_REC_CHROMA, chroma_addr);
++
++	cedrus_dec_mpeg4_reference_write(ctx, vop->forward_ref_ts, luma_addr,
++					 chroma_addr, VE_DEC_MPEG_FWD_REF_LUMA_ADDR,
++					 VE_DEC_MPEG_FWD_REF_CHROMA_ADDR);
++	cedrus_dec_mpeg4_reference_write(ctx, vop->backward_ref_ts, luma_addr,
++					 chroma_addr, VE_DEC_MPEG_BWD_REF_LUMA_ADDR,
++					 VE_DEC_MPEG_BWD_REF_CHROMA_ADDR);
++
++	/* Coded buffer. */
++
++	cedrus_write(dev, VE_DEC_MPEG_VLD_OFFSET, slice->data_bit_offset);
++	cedrus_write(dev, VE_DEC_MPEG_VLD_LEN,
++		     slice->bit_size - slice->data_bit_offset);
++	cedrus_write(dev, VE_DEC_MPEG_VLD_END_ADDR, coded_addr + coded_size);
++	cedrus_write(dev, VE_DEC_MPEG_VLD_ADDR,
++		     VE_DEC_MPEG_VLD_ADDR_BASE(coded_addr) |
++		     VE_DEC_MPEG_VLD_ADDR_VALID_PIC_DATA |
++		     VE_DEC_MPEG_VLD_ADDR_LAST_PIC_DATA |
++		     VE_DEC_MPEG_VLD_ADDR_FIRST_PIC_DATA);
++
++	cedrus_write(dev, VE_DEC_MPEG_ERROR, 0);
++	cedrus_write(dev, VE_DEC_MPEG_CRTMBADDR, 0);
++
++	return 0;
++}
++
++static void cedrus_dec_mpeg4_job_trigger(struct cedrus_context *ctx)
++{
++	struct cedrus_dec_mpeg4_job *job = ctx->engine_job;
++	struct cedrus_device *dev = ctx->proc->dev;
++
++	cedrus_write(dev, VE_DEC_MPEG_TRIGGER,
++		     VE_DEC_MPEG_TRIGGER_HW_MB |
++		     VE_DEC_MPEG_TRIGGER_MPEG4 |
++		     VE_DEC_MPEG_TRIGGER_CHROMA_FMT_420 |
++		     VE_DEC_MPEG_TRIGGER_NUM_MB(job->slice->num_macroblocks) |
++		     VE_DEC_MPEG_TRIGGER_MB_BOUNDARY);
++}
++
++/* Engine */
++
++static const struct cedrus_engine_ops cedrus_dec_mpeg4_ops = {
++	.ctrl_validate		= cedrus_dec_mpeg4_ctrl_validate,
++
++	.format_prepare		= cedrus_dec_format_coded_prepare,
++	.format_configure	= cedrus_dec_format_coded_configure,
++
++	.setup			= cedrus_dec_mpeg4_setup,
++	.cleanup		= cedrus_dec_mpeg4_cleanup,
++
++	.job_prepare		= cedrus_dec_mpeg4_job_prepare,
++	.job_configure		= cedrus_dec_mpeg4_job_configure,
++	.job_trigger		= cedrus_dec_mpeg4_job_trigger,
++
++	.irq_status		= cedrus_dec_mpeg2_irq_status,
++	.irq_clear		= cedrus_dec_mpeg2_irq_clear,
++	.irq_disable		= cedrus_dec_mpeg2_irq_disable,
++};
++
++static const struct v4l2_ctrl_config cedrus_dec_mpeg4_ctrl_configs[] = {
++	{
++		.id	= V4L2_CID_STATELESS_MPEG4_VOL,
++		.ops	= &cedrus_context_ctrl_ops,
++	},
++	{
++		.id	= V4L2_CID_STATELESS_MPEG4_VOP,
++		.ops	= &cedrus_context_ctrl_ops,
++	},
++	{
++		.id	= V4L2_CID_STATELESS_MPEG4_QUANTISATION,
++	},
++	{
++		.id	= V4L2_CID_STATELESS_MPEG4_SLICE,
++		.ops	= &cedrus_context_ctrl_ops,
++	},
++};
++
++static const struct v4l2_frmsize_stepwise cedrus_dec_mpeg4_frmsize = {
++	.min_width	= 16,
++	.max_width	= CEDRUS_MPEG4_MAX_SIZE,
++	.step_width	= 16,
++
++	.min_height	= 16,
++	.max_height	= CEDRUS_MPEG4_MAX_SIZE,
++	.step_height	= 16,
++};
++
++const struct cedrus_engine cedrus_dec_mpeg4 = {
++	.codec			= CEDRUS_CODEC_MPEG4,
++	.role			= CEDRUS_ROLE_DECODER,
++	.capabilities		= CEDRUS_CAPABILITY_MPEG4_DEC,
++
++	.ops			= &cedrus_dec_mpeg4_ops,
++
++	.pixelformat		= V4L2_PIX_FMT_MPEG4_SLICE,
++	.slice_based		= true,
++	.ctrl_configs		= cedrus_dec_mpeg4_ctrl_configs,
++	.ctrl_configs_count	= ARRAY_SIZE(cedrus_dec_mpeg4_ctrl_configs),
++	.frmsize		= &cedrus_dec_mpeg4_frmsize,
++
++	.ctx_size		= sizeof(struct cedrus_dec_mpeg4_context),
++	.job_size		= sizeof(struct cedrus_dec_mpeg4_job),
++	.buffer_size		= 0,
++};
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec_mpeg4.h b/drivers/staging/media/sunxi/cedrus/cedrus_dec_mpeg4.h
+new file mode 100644
+index 000000000..1869a7b40
+--- /dev/null
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec_mpeg4.h
+@@ -0,0 +1,20 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Cedrus Video Engine Driver
++ */
++
++#ifndef _CEDRUS_DEC_MPEG4_H_
++#define _CEDRUS_DEC_MPEG4_H_
++
++#include <media/v4l2-ctrls.h>
++
++struct cedrus_dec_mpeg4_job {
++	const struct v4l2_ctrl_mpeg4_vol		*vol;
++	const struct v4l2_ctrl_mpeg4_vop		*vop;
++	const struct v4l2_ctrl_mpeg4_quantisation	*quantisation;
++	const struct v4l2_ctrl_mpeg4_slice		*slice;
++};
++
++extern const struct cedrus_engine cedrus_dec_mpeg4;
++
++#endif
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_regs.h b/drivers/staging/media/sunxi/cedrus/cedrus_regs.h
+index 5526b31c4..809b48d01 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_regs.h
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_regs.h
+@@ -163,8 +163,34 @@
+ #define VE_DEC_MPEG_MP12HDR_FULL_PEL_BACKWARD_VECTOR(v) \
+ 	((v) ? BIT(0) : 0)
+ 
++#define VE_DEC_MPEG_MP4VOPHDR			(VE_ENGINE_DEC_MPEG + 0x04)
++
++#define VE_DEC_MPEG_MP4VOPHDR_SHORT_VIDEO_HEADER	BIT(31)
++#define VE_DEC_MPEG_MP4VOPHDR_INTERLACED	BIT(30)
++#define VE_DEC_MPEG_MP4VOPHDR_CO_LOCATED_TYPE(t) \
++	SHIFT_AND_MASK_BITS(t, 29, 28)
++#define VE_DEC_MPEG_MP4VOPHDR_SPRITE_ACCURACY(a) \
++	SHIFT_AND_MASK_BITS(a, 26, 25)
++#define VE_DEC_MPEG_MP4VOPHDR_QUANT_TYPE	BIT(24)
++#define VE_DEC_MPEG_MP4VOPHDR_QUARTER_SAMPLE	BIT(23)
++#define VE_DEC_MPEG_MP4VOPHDR_RESYNC_MARKER_DIS	BIT(22)
++#define VE_DEC_MPEG_MP4VOPHDR_WARPING_POINTS(n)	SHIFT_AND_MASK_BITS(n, 21, 20)
++#define VE_DEC_MPEG_MP4VOPHDR_CODING_TYPE(t)	SHIFT_AND_MASK_BITS(t, 19, 18)
++#define VE_DEC_MPEG_MP4VOPHDR_ROUNDING_TYPE	BIT(17)
++#define VE_DEC_MPEG_MP4VOPHDR_H263_ESCAPE	BIT(16)
++#define VE_DEC_MPEG_MP4VOPHDR_INTRA_DC_VLC_THR(t) \
++	SHIFT_AND_MASK_BITS(t, 10, 8)
++#define VE_DEC_MPEG_MP4VOPHDR_TOP_FIELD_FIRST	BIT(7)
++#define VE_DEC_MPEG_MP4VOPHDR_ALT_VERTICAL_SCAN	BIT(6)
++#define VE_DEC_MPEG_MP4VOPHDR_FCODE_F(f)	SHIFT_AND_MASK_BITS(f, 5, 3)
++#define VE_DEC_MPEG_MP4VOPHDR_FCODE_B(f)	SHIFT_AND_MASK_BITS(f, 2, 0)
++
+ #define VE_DEC_MPEG_PICCODEDSIZE		(VE_ENGINE_DEC_MPEG + 0x08)
+ 
++#define VE_DEC_MPEG_PICCODEDSIZE_STORE_MBS(w)	SHIFT_AND_MASK_BITS(w, 23, 16)
++#define VE_DEC_MPEG_PICCODEDSIZE_WIDTH_MBS(w)	SHIFT_AND_MASK_BITS(w, 15, 8)
++#define VE_DEC_MPEG_PICCODEDSIZE_HEIGHT_MBS(h)	SHIFT_AND_MASK_BITS(h, 7, 0)
++
+ #define VE_DEC_MPEG_PICCODEDSIZE_WIDTH(w) \
+ 	SHIFT_AND_MASK_BITS(DIV_ROUND_UP(w, 16), 15, 8)
+ #define VE_DEC_MPEG_PICCODEDSIZE_HEIGHT(h) \
+@@ -183,10 +209,15 @@
+ #define VE_DEC_MPEG_CTRL			(VE_ENGINE_DEC_MPEG + 0x14)
+ 
+ #define VE_DEC_MPEG_CTRL_MC_CACHE_EN		BIT(31)
++#define VE_DEC_MPEG_CTRL_MV4_QM(m)		SHIFT_AND_MASK_BITS(m, 25, 24)
++#define VE_DEC_MPEG_CTRL_MV1_QM(m)		SHIFT_AND_MASK_BITS(m, 23, 22)
++#define VE_DEC_MPEG_CTRL_FLD_QM(m)		SHIFT_AND_MASK_BITS(m, 21, 20)
++#define VE_DEC_MPEG_CTRL_FLD_HM			BIT(19)
+ #define VE_DEC_MPEG_CTRL_SW_VLD			BIT(27)
+ #define VE_DEC_MPEG_CTRL_JPEG_FORCE_420		BIT(18)
+ #define VE_DEC_MPEG_CTRL_SW_IQ_IS		BIT(17)
+ #define VE_DEC_MPEG_CTRL_QP_AC_DC_OUT_EN	BIT(14)
++#define VE_DEC_MPEG_CTRL_NC_FLAG_OUT_EN		BIT(12)
+ #define VE_DEC_MPEG_CTRL_ROTATE_SCALE_OUT_EN	BIT(8)
+ #define VE_DEC_MPEG_CTRL_MC_NO_WRITEBACK	BIT(7)
+ #define VE_DEC_MPEG_CTRL_ROTATE_IRQ_EN		BIT(6)
+@@ -200,6 +231,7 @@
+ #define VE_DEC_MPEG_TRIGGER			(VE_ENGINE_DEC_MPEG + 0x18)
+ 
+ #define VE_DEC_MPEG_TRIGGER_MB_BOUNDARY		BIT(31)
++#define VE_DEC_MPEG_TRIGGER_NUM_MB(n)		SHIFT_AND_MASK_BITS(n, 22, 8)
+ 
+ #define VE_DEC_MPEG_TRIGGER_CHROMA_FMT_420	(0x00 << 27)
+ #define VE_DEC_MPEG_TRIGGER_CHROMA_FMT_411	(0x01 << 27)
+@@ -265,6 +297,16 @@
+ #define VE_DEC_MPEG_STATUS_CHECK_ERROR \
+ 	(VE_DEC_MPEG_STATUS_ERROR | VE_DEC_MPEG_STATUS_VLD_DATA_REQ)
+ 
++#define VE_DEC_MPEG_TRBTRD_FIELD		(VE_ENGINE_DEC_MPEG + 0x20)
++
++#define VE_DEC_MPEG_TRBTRD_FIELD_TRB(t)		SHIFT_AND_MASK_BITS(t, 15, 8)
++#define VE_DEC_MPEG_TRBTRD_FIELD_TRD(t)		SHIFT_AND_MASK_BITS(t, 7, 0)
++
++#define VE_DEC_MPEG_TRBTRD_FRAME		(VE_ENGINE_DEC_MPEG + 0x24)
++
++#define VE_DEC_MPEG_TRBTRD_FRAME_TRB(t)		SHIFT_AND_MASK_BITS(t, 31, 16)
++#define VE_DEC_MPEG_TRBTRD_FRAME_TRD(t)		SHIFT_AND_MASK_BITS(t, 15, 0)
++
+ #define VE_DEC_MPEG_VLD_ADDR			(VE_ENGINE_DEC_MPEG + 0x28)
+ 
+ #define VE_DEC_MPEG_VLD_ADDR_FIRST_PIC_DATA	BIT(30)
+@@ -282,6 +324,10 @@
+ #define VE_DEC_MPEG_VLD_LEN			(VE_ENGINE_DEC_MPEG + 0x30)
+ #define VE_DEC_MPEG_VLD_END_ADDR		(VE_ENGINE_DEC_MPEG + 0x34)
+ 
++#define VE_DEC_MPEG_MBH_ADDR			(VE_ENGINE_DEC_MPEG + 0x38)
++#define VE_DEC_MPEG_DCAC_ADDR			(VE_ENGINE_DEC_MPEG + 0x3c)
++#define VE_DEC_MPEG_NCF_ADDR			(VE_ENGINE_DEC_MPEG + 0x44)
++
+ #define VE_DEC_MPEG_REC_LUMA			(VE_ENGINE_DEC_MPEG + 0x48)
+ #define VE_DEC_MPEG_REC_CHROMA			(VE_ENGINE_DEC_MPEG + 0x4c)
+ #define VE_DEC_MPEG_FWD_REF_LUMA_ADDR		(VE_ENGINE_DEC_MPEG + 0x50)
+@@ -289,6 +335,22 @@
+ #define VE_DEC_MPEG_BWD_REF_LUMA_ADDR		(VE_ENGINE_DEC_MPEG + 0x58)
+ #define VE_DEC_MPEG_BWD_REF_CHROMA_ADDR		(VE_ENGINE_DEC_MPEG + 0x5c)
+ 
++#define VE_DEC_MPEG_SPRITE_CHROMA_OFFSET_X	(VE_ENGINE_DEC_MPEG + 0x60)
++#define VE_DEC_MPEG_SPRITE_CHROMA_OFFSET_Y	(VE_ENGINE_DEC_MPEG + 0x64)
++#define VE_DEC_MPEG_SPRITE_LUMA_OFFSET		(VE_ENGINE_DEC_MPEG + 0x68)
++#define VE_DEC_MPEG_SPRITE_LUMA_DELTA_X		(VE_ENGINE_DEC_MPEG + 0x6c)
++#define VE_DEC_MPEG_SPRITE_LUMA_DELTA_Y		(VE_ENGINE_DEC_MPEG + 0x70)
++#define VE_DEC_MPEG_SPRITE_SHIFT		(VE_ENGINE_DEC_MPEG + 0x74)
++#define VE_DEC_MPEG_SPRITE_CHROMA_DELTA_X	(VE_ENGINE_DEC_MPEG + 0x78)
++#define VE_DEC_MPEG_SPRITE_CHROMA_DELTA_Y	(VE_ENGINE_DEC_MPEG + 0x7c)
++
++#define VE_DEC_MPEG_SPRITE_PAIR(hi, lo) \
++	(SHIFT_AND_MASK_BITS(hi, 31, 16) | SHIFT_AND_MASK_BITS(lo, 15, 0))
++#define VE_DEC_MPEG_SPRITE_SHIFT_LUMA(s)	SHIFT_AND_MASK_BITS(s, 4, 0)
++#define VE_DEC_MPEG_SPRITE_SHIFT_CHROMA(s)	SHIFT_AND_MASK_BITS(s, 12, 8)
++#define VE_DEC_MPEG_SPRITE_SHIFT_DELTA_LSB(i)	BIT(16 + (i))
++#define VE_DEC_MPEG_SPRITE_SHIFT_DELTA_HALVED	BIT(31)
++
+ #define VE_DEC_MPEG_IQMINPUT			(VE_ENGINE_DEC_MPEG + 0x80)
+ 
+ #define VE_DEC_MPEG_IQMINPUT_FLAG_INTRA		(0x01 << 14)
+@@ -296,6 +358,16 @@
+ #define VE_DEC_MPEG_IQMINPUT_WEIGHT(i, v) \
+ 	(SHIFT_AND_MASK_BITS(i, 13, 8) | SHIFT_AND_MASK_BITS(v, 7, 0))
+ 
++#define VE_DEC_MPEG_QCINPUT			(VE_ENGINE_DEC_MPEG + 0x84)
++
++#define VE_DEC_MPEG_QCINPUT_QUANT_SCALE(q)	SHIFT_AND_MASK_BITS(q, 5, 0)
++
++#define VE_DEC_MPEG_GMC_LUMA_MV			(VE_ENGINE_DEC_MPEG + 0xa8)
++#define VE_DEC_MPEG_GMC_CHROMA_MV		(VE_ENGINE_DEC_MPEG + 0xac)
++
++#define VE_DEC_MPEG_GMC_MV(x, y) \
++	(SHIFT_AND_MASK_BITS(x, 30, 16) | SHIFT_AND_MASK_BITS(y, 14, 0))
++
+ #define VE_DEC_MPEG_JPEG_SIZE			(VE_ENGINE_DEC_MPEG + 0xb8)
+ 
+ #define VE_DEC_MPEG_JPEG_SIZE_WIDTH(w) \
+-- 
+2.47.3
+

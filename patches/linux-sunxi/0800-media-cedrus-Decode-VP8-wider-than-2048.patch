@@ -1,0 +1,147 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 31 Oct 2026 02:23:26 -0400
+Subject: [PATCH] media: cedrus: Decode VP8 wider than 2048
+
+Past 2048 wide the engine keeps its deblocking and intra prediction rows
+in DRAM, as for H.264, and reads further into the probability buffer,
+which the vendor's library allocates at 0x5400 bytes. Without the rows
+it decoded wrong pictures at 2304 wide; without the larger buffer it
+faulted reading past it at 3840.
+---
+ .../media/sunxi/cedrus/cedrus_dec_vp8.c       | 65 +++++++++++++++++++
+ .../media/sunxi/cedrus/cedrus_dec_vp8.h       | 10 ++-
+ 2 files changed, 74 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec_vp8.c b/drivers/staging/media/sunxi/cedrus/cedrus_dec_vp8.c
+index 1df8f20df..3a0c4d318 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_dec_vp8.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec_vp8.c
+@@ -455,10 +455,50 @@ static uint8_t read_bits(struct cedrus_device *dev, unsigned int bits_count,
+ 
+ /* Context */
+ 
++static void cedrus_dec_vp8_free_rows(struct device *dev,
++				     struct cedrus_dec_vp8_context *vp8_ctx)
++{
++	if (vp8_ctx->deblk_buf)
++		dma_free_attrs(dev, vp8_ctx->deblk_buf_size, vp8_ctx->deblk_buf,
++			       vp8_ctx->deblk_buf_dma, DMA_ATTR_NO_KERNEL_MAPPING);
++	if (vp8_ctx->intra_pred_buf)
++		dma_free_attrs(dev, vp8_ctx->intra_pred_buf_size,
++			       vp8_ctx->intra_pred_buf,
++			       vp8_ctx->intra_pred_buf_dma,
++			       DMA_ATTR_NO_KERNEL_MAPPING);
++	vp8_ctx->deblk_buf = NULL;
++	vp8_ctx->intra_pred_buf = NULL;
++}
++
++/* Sizes from the vendor's VP8 decoder; intra prediction as H.264's on H6 */
++static int cedrus_dec_vp8_alloc_rows(struct device *dev,
++				     struct cedrus_dec_vp8_context *vp8_ctx,
++				     unsigned int width)
++{
++	vp8_ctx->deblk_buf_size = ALIGN(width, 32) * 24;
++	vp8_ctx->deblk_buf = dma_alloc_attrs(dev, vp8_ctx->deblk_buf_size,
++					     &vp8_ctx->deblk_buf_dma, GFP_KERNEL,
++					     DMA_ATTR_NO_KERNEL_MAPPING);
++	vp8_ctx->intra_pred_buf_size = ALIGN(width, 64) * 5 * 2;
++	vp8_ctx->intra_pred_buf = dma_alloc_attrs(dev,
++						  vp8_ctx->intra_pred_buf_size,
++						  &vp8_ctx->intra_pred_buf_dma,
++						  GFP_KERNEL,
++						  DMA_ATTR_NO_KERNEL_MAPPING);
++	if (!vp8_ctx->deblk_buf || !vp8_ctx->intra_pred_buf) {
++		cedrus_dec_vp8_free_rows(dev, vp8_ctx);
++		return -ENOMEM;
++	}
++
++	return 0;
++}
++
+ static int cedrus_dec_vp8_setup(struct cedrus_context *cedrus_ctx)
+ {
+ 	struct device *dev = cedrus_ctx->proc->dev->dev;
+ 	struct cedrus_dec_vp8_context *vp8_ctx = cedrus_ctx->engine_ctx;
++	unsigned int width = cedrus_ctx->v4l2.format_coded.fmt.pix.width;
++	int ret;
+ 
+ 	vp8_ctx->entropy_probs_buf =
+ 		dma_alloc_coherent(dev, CEDRUS_DEC_VP8_ENTROPY_PROBS_SIZE,
+@@ -474,6 +514,16 @@ static int cedrus_dec_vp8_setup(struct cedrus_context *cedrus_ctx)
+ 	memcpy(&vp8_ctx->entropy_probs_buf[2048],
+ 	       prob_table_init, sizeof(prob_table_init));
+ 
++	if (width > 2048) {
++		ret = cedrus_dec_vp8_alloc_rows(dev, vp8_ctx, width);
++		if (ret) {
++			dma_free_coherent(dev, CEDRUS_DEC_VP8_ENTROPY_PROBS_SIZE,
++					  vp8_ctx->entropy_probs_buf,
++					  vp8_ctx->entropy_probs_buf_dma);
++			return ret;
++		}
++	}
++
+ 	return 0;
+ }
+ 
+@@ -485,6 +535,7 @@ static void cedrus_dec_vp8_cleanup(struct cedrus_context *cedrus_ctx)
+ 	dma_free_coherent(dev, CEDRUS_DEC_VP8_ENTROPY_PROBS_SIZE,
+ 			  vp8_ctx->entropy_probs_buf,
+ 			  vp8_ctx->entropy_probs_buf_dma);
++	cedrus_dec_vp8_free_rows(dev, vp8_ctx);
+ }
+ 
+ /* Job */
+@@ -863,6 +914,20 @@ static int cedrus_dec_vp8_job_configure(struct cedrus_context *cedrus_ctx)
+ 	cedrus_write(dev, VE_VP8_ALT_LUMA, luma_addr);
+ 	cedrus_write(dev, VE_VP8_ALT_CHROMA, chroma_addr);
+ 
++	if (vp8_ctx->deblk_buf) {
++		cedrus_write(dev, VE_BUF_CTRL,
++			     VE_BUF_CTRL_INTRAPRED_MIXED_RAM |
++			     VE_BUF_CTRL_DBLK_MIXED_RAM);
++		cedrus_write(dev, VE_DBLK_DRAM_BUF_ADDR,
++			     vp8_ctx->deblk_buf_dma);
++		cedrus_write(dev, VE_INTRAPRED_DRAM_BUF_ADDR,
++			     vp8_ctx->intra_pred_buf_dma);
++	} else {
++		cedrus_write(dev, VE_BUF_CTRL,
++			     VE_BUF_CTRL_INTRAPRED_INT_SRAM |
++			     VE_BUF_CTRL_DBLK_INT_SRAM);
++	}
++
+ 	/* Enable relevant interrupts. */
+ 
+ 	cedrus_write(dev, VE_H264_CTRL, VE_H264_CTRL_VP8 |
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec_vp8.h b/drivers/staging/media/sunxi/cedrus/cedrus_dec_vp8.h
+index 443325c33..ea3c968dc 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_dec_vp8.h
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec_vp8.h
+@@ -12,7 +12,7 @@
+ 
+ #include <media/v4l2-ctrls.h>
+ 
+-#define CEDRUS_DEC_VP8_ENTROPY_PROBS_SIZE	0x2400
++#define CEDRUS_DEC_VP8_ENTROPY_PROBS_SIZE	0x5400
+ 
+ struct cedrus_dec_vp8_context {
+ 	unsigned int	last_frame_p_type;
+@@ -21,6 +21,14 @@ struct cedrus_dec_vp8_context {
+ 
+ 	u8		*entropy_probs_buf;
+ 	dma_addr_t	entropy_probs_buf_dma;
++
++	/* past 2048 wide, the engine's deblock and intra prediction rows in DRAM */
++	void		*deblk_buf;
++	dma_addr_t	deblk_buf_dma;
++	size_t		deblk_buf_size;
++	void		*intra_pred_buf;
++	dma_addr_t	intra_pred_buf_dma;
++	size_t		intra_pred_buf_size;
+ };
+ 
+ struct cedrus_dec_vp8_job {
+-- 
+2.47.3
+

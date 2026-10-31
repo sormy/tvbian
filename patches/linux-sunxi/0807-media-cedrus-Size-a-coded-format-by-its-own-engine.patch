@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 31 Oct 2026 09:48:06 -0400
+Subject: [PATCH] media: cedrus: Size a coded format by its own engine
+
+S_FMT on the coded queue prepared the format with the engine it was
+about to replace: a JPEG stream took the MPEG-2 engine's size limits,
+the engine the context opens with, and any codec those of the last.
+---
+ drivers/staging/media/sunxi/cedrus/cedrus_dec.c    | 4 +++-
+ drivers/staging/media/sunxi/cedrus/cedrus_engine.c | 5 ++++-
+ 2 files changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec.c b/drivers/staging/media/sunxi/cedrus/cedrus_dec.c
+index 85468c232..d40e3b8a1 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_dec.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec.c
+@@ -104,7 +104,9 @@ int cedrus_dec_format_coded_prepare(struct cedrus_context *ctx,
+ 				    struct v4l2_format *format)
+ {
+ 	struct v4l2_pix_format *pix_format = &format->fmt.pix;
+-	const struct v4l2_frmsize_stepwise *frmsize = ctx->engine->frmsize;
++	const struct v4l2_frmsize_stepwise *frmsize =
++		cedrus_proc_engine_find_format(ctx->proc,
++					       pix_format->pixelformat)->frmsize;
+ 
+ 	/* Coded dimensions are the stream's own: limit, but do not align. */
+ 	pix_format->width = clamp(pix_format->width, frmsize->min_width,
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_engine.c b/drivers/staging/media/sunxi/cedrus/cedrus_engine.c
+index 6be012de5..56a574498 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_engine.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_engine.c
+@@ -46,10 +46,13 @@ int cedrus_engine_ctrl_prepare(struct cedrus_context *ctx,
+ 
+ /* Format */
+ 
++/* A coded format is prepared by its own engine, not the one it replaces. */
+ int cedrus_engine_format_prepare(struct cedrus_context *ctx,
+ 				 struct v4l2_format *format)
+ {
+-	const struct cedrus_engine *engine = ctx->engine;
++	const struct cedrus_engine *engine =
++		cedrus_proc_engine_find_format(ctx->proc,
++					       format->fmt.pix.pixelformat);
+ 
+ 	if (WARN_ON(!engine || !engine->ops || !engine->ops->format_prepare))
+ 		return -ENODEV;
+-- 
+2.47.3
+

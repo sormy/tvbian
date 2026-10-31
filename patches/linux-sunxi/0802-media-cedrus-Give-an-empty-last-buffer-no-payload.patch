@@ -1,0 +1,74 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 31 Oct 2026 02:23:27 -0400
+Subject: [PATCH] media: cedrus: Give an empty last buffer no payload
+
+A stop with nothing left to process hands back the next picture buffer
+as the last one, still carrying the payload buffer_prepare set: a
+reader took it for a picture of whatever the buffer last held.
+---
+ .../media/sunxi/cedrus/cedrus_context.c       |  1 +
+ .../staging/media/sunxi/cedrus/cedrus_proc.c  | 28 ++++++++++++++++++-
+ 2 files changed, 28 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_context.c b/drivers/staging/media/sunxi/cedrus/cedrus_context.c
+index 4fa89f591..4cd51b583 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_context.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_context.c
+@@ -520,6 +520,7 @@ static void cedrus_context_buffer_queue(struct vb2_buffer *vb2_buffer)
+ 	if (V4L2_TYPE_IS_CAPTURE(vb2_buffer->type) &&
+ 	    vb2_is_streaming(vb2_buffer->vb2_queue) &&
+ 	    v4l2_m2m_dst_buf_is_last(m2m_ctx)) {
++		vb2_set_plane_payload(vb2_buffer, 0, 0);
+ 		v4l2_m2m_last_buffer_done(m2m_ctx, v4l2_buffer);
+ 		return;
+ 	}
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_proc.c b/drivers/staging/media/sunxi/cedrus/cedrus_proc.c
+index 1fad2f6dd..01eca7b6c 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_proc.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_proc.c
+@@ -732,6 +732,32 @@ static int cedrus_proc_subscribe_event(struct v4l2_fh *fh,
+ 	return v4l2_ctrl_subscribe_event(fh, sub);
+ }
+ 
++/*
++ * With nothing left to process, a stop returns the next picture buffer as
++ * the last one: it carries no picture.
++ */
++static void cedrus_proc_stop_empty_prepare(struct cedrus_context *ctx)
++{
++	struct v4l2_m2m_ctx *m2m_ctx = ctx->v4l2.fh.m2m_ctx;
++	struct vb2_v4l2_buffer *dst = v4l2_m2m_next_dst_buf(m2m_ctx);
++
++	if (dst && !v4l2_m2m_num_src_bufs_ready(m2m_ctx))
++		vb2_set_plane_payload(&dst->vb2_buf, 0, 0);
++}
++
++static int cedrus_proc_encoder_cmd(struct file *file, void *private,
++				   struct v4l2_encoder_cmd *cmd)
++{
++	struct cedrus_context *ctx =
++		container_of(file->private_data, struct cedrus_context,
++			     v4l2.fh);
++
++	if (cmd->cmd == V4L2_ENC_CMD_STOP)
++		cedrus_proc_stop_empty_prepare(ctx);
++
++	return v4l2_m2m_ioctl_encoder_cmd(file, private, cmd);
++}
++
+ static const struct v4l2_ioctl_ops cedrus_proc_ioctl_ops = {
+ 	.vidioc_querycap		= cedrus_proc_querycap,
+ 
+@@ -768,7 +794,7 @@ static const struct v4l2_ioctl_ops cedrus_proc_ioctl_ops = {
+ 	.vidioc_decoder_cmd		= v4l2_m2m_ioctl_stateless_decoder_cmd,
+ 	.vidioc_try_decoder_cmd		= v4l2_m2m_ioctl_stateless_try_decoder_cmd,
+ 
+-	.vidioc_encoder_cmd		= v4l2_m2m_ioctl_encoder_cmd,
++	.vidioc_encoder_cmd		= cedrus_proc_encoder_cmd,
+ 	.vidioc_try_encoder_cmd		= v4l2_m2m_ioctl_try_encoder_cmd,
+ 
+ 	.vidioc_subscribe_event		= cedrus_proc_subscribe_event,
+-- 
+2.47.3
+

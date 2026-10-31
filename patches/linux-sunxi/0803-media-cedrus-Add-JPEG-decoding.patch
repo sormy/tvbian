@@ -1,0 +1,682 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Emmanuel Gil Peyrot <linkmauve@linkmauve.fr>
+Date: Sun, 14 Jan 2024 10:54:01 +0100
+Subject: [PATCH] media: cedrus: Add JPEG decoding
+
+Baseline 8-bit YCbCr JPEG up to 6144x6144, written by the rotate and
+scale output as NV12; 4:2:2 and 4:4:4 come out as 4:2:0. Motion JPEG
+too, whose frames may leave the Huffman tables out: the Annex K tables
+stand in for them.
+
+The engine parses the headers itself, so it takes no request, keeps a
+CPU mapping of the coded buffer and drains as a stateful decoder.
+
+Ported from Emmanuel Gil Peyrot's series to the reworked driver.
+---
+ drivers/staging/media/sunxi/cedrus/Kconfig    |   1 +
+ drivers/staging/media/sunxi/cedrus/Makefile   |   1 +
+ drivers/staging/media/sunxi/cedrus/cedrus.c   |   1 +
+ drivers/staging/media/sunxi/cedrus/cedrus.h   |   2 +
+ .../media/sunxi/cedrus/cedrus_context.c       |   7 +-
+ .../staging/media/sunxi/cedrus/cedrus_dec.c   |   6 +
+ .../media/sunxi/cedrus/cedrus_dec_jpeg.c      | 390 ++++++++++++++++++
+ .../media/sunxi/cedrus/cedrus_dec_jpeg.h      |  20 +
+ .../media/sunxi/cedrus/cedrus_engine.h        |   4 +
+ .../staging/media/sunxi/cedrus/cedrus_proc.c  |  40 +-
+ .../staging/media/sunxi/cedrus/cedrus_regs.h  |  12 +
+ 11 files changed, 481 insertions(+), 3 deletions(-)
+ create mode 100644 drivers/staging/media/sunxi/cedrus/cedrus_dec_jpeg.c
+ create mode 100644 drivers/staging/media/sunxi/cedrus/cedrus_dec_jpeg.h
+
+diff --git a/drivers/staging/media/sunxi/cedrus/Kconfig b/drivers/staging/media/sunxi/cedrus/Kconfig
+index 09a7ffd55..79a7eb05c 100644
+--- a/drivers/staging/media/sunxi/cedrus/Kconfig
++++ b/drivers/staging/media/sunxi/cedrus/Kconfig
+@@ -9,6 +9,7 @@ config VIDEO_SUNXI_CEDRUS
+ 	select V4L2_MEM2MEM_DEV
+ 	select SUNXI_SRAM
+ 	select V4L2_VP9
++	select V4L2_JPEG_HELPER
+ 	help
+ 	  Support for the Allwinner Video Engine.
+ 
+diff --git a/drivers/staging/media/sunxi/cedrus/Makefile b/drivers/staging/media/sunxi/cedrus/Makefile
+index 53dae6334..4248b6224 100644
+--- a/drivers/staging/media/sunxi/cedrus/Makefile
++++ b/drivers/staging/media/sunxi/cedrus/Makefile
+@@ -6,6 +6,7 @@ sunxi-cedrus-y = cedrus.o \
+ 		 cedrus_dec.o \
+ 		 cedrus_dec_h264.o \
+ 		 cedrus_dec_h265.o \
++		 cedrus_dec_jpeg.o \
+ 		 cedrus_dec_mpeg2.o \
+ 		 cedrus_dec_vc1.o \
+ 		 cedrus_dec_vp8.o \
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus.c b/drivers/staging/media/sunxi/cedrus/cedrus.c
+index f93ad456d..ecf7d517a 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus.c
+@@ -574,6 +574,7 @@ static const struct cedrus_variant cedrus_variant_sun50i_h616 = {
+ 			  CEDRUS_CAPABILITY_VP8_DEC |
+ 			  CEDRUS_CAPABILITY_VP9_DEC |
+ 			  CEDRUS_CAPABILITY_VC1_DEC |
++			  CEDRUS_CAPABILITY_JPEG_DEC |
+ 			  CEDRUS_CAPABILITY_H264_ENC |
+ 			  CEDRUS_CAPABILITY_ENC_H616,
+ 	.clock_mod_rate	= 600000000,
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus.h b/drivers/staging/media/sunxi/cedrus/cedrus.h
+index 08dca2069..59beb82b8 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus.h
++++ b/drivers/staging/media/sunxi/cedrus/cedrus.h
+@@ -38,6 +38,7 @@ enum cedrus_codec {
+ 	CEDRUS_CODEC_VP8,
+ 	CEDRUS_CODEC_VP9,
+ 	CEDRUS_CODEC_VC1,
++	CEDRUS_CODEC_JPEG,
+ };
+ 
+ enum cedrus_irq_status {
+@@ -57,6 +58,7 @@ enum cedrus_capability {
+ 	CEDRUS_CAPABILITY_VC1_DEC	= BIT(7),
+ 	CEDRUS_CAPABILITY_H264_ENC	= BIT(8),
+ 	CEDRUS_CAPABILITY_ENC_H616	= BIT(9),
++	CEDRUS_CAPABILITY_JPEG_DEC	= BIT(10),
+ };
+ 
+ struct cedrus_context;
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_context.c b/drivers/staging/media/sunxi/cedrus/cedrus_context.c
+index 4cd51b583..dcb70f7d0 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_context.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_context.c
+@@ -187,6 +187,11 @@ int cedrus_context_engine_update(struct cedrus_context *ctx)
+ 
+ 	ctx->engine = engine;
+ 
++	queue->requires_requests = !engine->parses_header &&
++				   ctx->proc->role == CEDRUS_ROLE_DECODER;
++	queue->dma_attrs = engine->parses_header ? 0 :
++			   DMA_ATTR_NO_KERNEL_MAPPING;
++
+ 	if (engine->slice_based)
+ 		queue->subsystem_flags |=
+ 			VB2_V4L2_FL_SUPPORTS_M2M_HOLD_CAPTURE_BUF;
+@@ -237,7 +242,7 @@ void cedrus_context_job_finish(struct cedrus_context *ctx, int state)
+ 	cedrus_engine_job_finish(ctx, state);
+ 	memset(&ctx->job, 0, sizeof(ctx->job));
+ 
+-	if (proc->role == CEDRUS_ROLE_ENCODER)
++	if (proc->role == CEDRUS_ROLE_ENCODER || ctx->engine->parses_header)
+ 		cedrus_context_drain_check(ctx);
+ 
+ 	v4l2_m2m_buf_done_and_job_finish(m2m_dev, m2m_ctx, state);
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec.c b/drivers/staging/media/sunxi/cedrus/cedrus_dec.c
+index c061e815c..987054826 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_dec.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec.c
+@@ -17,6 +17,7 @@
+ #include "cedrus_dec_mpeg2.h"
+ #include "cedrus_dec_h264.h"
+ #include "cedrus_dec_h265.h"
++#include "cedrus_dec_jpeg.h"
+ #include "cedrus_dec_vc1.h"
+ #include "cedrus_dec_vp8.h"
+ #include "cedrus_dec_vp9.h"
+@@ -144,7 +145,10 @@ int cedrus_dec_format_coded_configure(struct cedrus_context *ctx)
+ 	value |= VE_MODE_DDR_MODE_BW_128;
+ 
+ 	switch (pix_format->pixelformat) {
++	/* JPEG runs in the MPEG engine. */
+ 	case V4L2_PIX_FMT_MPEG2_SLICE:
++	case V4L2_PIX_FMT_JPEG:
++	case V4L2_PIX_FMT_MJPEG:
+ 		value |= VE_MODE_DEC_MPEG;
+ 		break;
+ 	case V4L2_PIX_FMT_H264_SLICE:
+@@ -565,6 +569,8 @@ static const struct cedrus_engine *cedrus_dec_engines[] = {
+ 	&cedrus_dec_vp8,
+ 	&cedrus_dec_vp9,
+ 	&cedrus_dec_vc1,
++	&cedrus_dec_jpeg,
++	&cedrus_dec_mjpeg,
+ };
+ 
+ /* Decoder */
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec_jpeg.c b/drivers/staging/media/sunxi/cedrus/cedrus_dec_jpeg.c
+new file mode 100644
+index 000000000..ed943462c
+--- /dev/null
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec_jpeg.c
+@@ -0,0 +1,390 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Cedrus Video Engine Driver
++ *
++ * Copyright (C) 2022 Emmanuel Gil Peyrot <linkmauve@linkmauve.fr>
++ */
++
++#include <linux/types.h>
++#include <linux/unaligned.h>
++#include <linux/videodev2.h>
++#include <media/v4l2-jpeg.h>
++#include <media/videobuf2-dma-contig.h>
++
++#include "cedrus.h"
++#include "cedrus_context.h"
++#include "cedrus_dec.h"
++#include "cedrus_dec_jpeg.h"
++#include "cedrus_engine.h"
++#include "cedrus_proc.h"
++#include "cedrus_regs.h"
++
++#define CEDRUS_JPEG_HUFFMAN_CODES	16
++#define CEDRUS_JPEG_HUFFMAN_SYMBOLS_WORDS	64
++#define CEDRUS_JPEG_HUFFMAN_GAP_WORDS	192
++
++/* The Annex K tables, for a stream that leaves them out, as MJPEG does. */
++static const struct {
++	const u8	*table;
++	size_t		length;
++} cedrus_dec_jpeg_default_huffman[4] = {
++	{ v4l2_jpeg_ref_table_luma_dc_ht, V4L2_JPEG_REF_HT_DC_LEN },
++	{ v4l2_jpeg_ref_table_chroma_dc_ht, V4L2_JPEG_REF_HT_DC_LEN },
++	{ v4l2_jpeg_ref_table_luma_ac_ht, V4L2_JPEG_REF_HT_AC_LEN },
++	{ v4l2_jpeg_ref_table_chroma_ac_ht, V4L2_JPEG_REF_HT_AC_LEN },
++};
++
++static void cedrus_dec_jpeg_huffman_default(struct v4l2_jpeg_header *header)
++{
++	unsigned int i;
++
++	for (i = 0; i < ARRAY_SIZE(cedrus_dec_jpeg_default_huffman); i++) {
++		struct v4l2_jpeg_reference *table = &header->huffman_tables[i];
++
++		if (table->start)
++			continue;
++
++		table->start = (u8 *)cedrus_dec_jpeg_default_huffman[i].table;
++		table->length = cedrus_dec_jpeg_default_huffman[i].length;
++	}
++}
++
++static void cedrus_dec_jpeg_huffman_codes_write(struct cedrus_device *dev,
++					      const u8 *counts)
++{
++	u16 start_codes[CEDRUS_JPEG_HUFFMAN_CODES];
++	u8 offsets[CEDRUS_JPEG_HUFFMAN_CODES];
++	unsigned int count = 0, code = 0;
++	int i;
++
++	for (i = 0; i < CEDRUS_JPEG_HUFFMAN_CODES; i++) {
++		offsets[i] = count;
++		start_codes[i] = code;
++		count += counts[i];
++		code = (code + counts[i]) * 2;
++	}
++
++	for (i = CEDRUS_JPEG_HUFFMAN_CODES - 1; i >= 0 && !counts[i]; i--)
++		start_codes[i] = 0xffff;
++
++	for (i = 0; i < CEDRUS_JPEG_HUFFMAN_CODES; i += 2)
++		cedrus_write(dev, VE_DEC_MPEG_SRAM_RW_DATA,
++			     start_codes[i] | start_codes[i + 1] << 16);
++
++	for (i = 0; i < CEDRUS_JPEG_HUFFMAN_CODES; i += 4)
++		cedrus_write(dev, VE_DEC_MPEG_SRAM_RW_DATA,
++			     get_unaligned_le32(&offsets[i]));
++
++	for (i = 0; i < 4; i++)
++		cedrus_write(dev, VE_DEC_MPEG_SRAM_RW_DATA, 0);
++}
++
++static void cedrus_dec_jpeg_huffman_symbols_write(struct cedrus_device *dev,
++						const u8 *symbols,
++						size_t length)
++{
++	unsigned int i, words = DIV_ROUND_UP(length, 4);
++	u32 value = 0;
++
++	/* Little-endian words, the last one zero-padded. */
++	for (i = 0; i < length; i++) {
++		value |= symbols[i] << (8 * (i % 4));
++		if (i % 4 == 3 || i == length - 1) {
++			cedrus_write(dev, VE_DEC_MPEG_SRAM_RW_DATA, value);
++			value = 0;
++		}
++	}
++
++	for (i = words; i < CEDRUS_JPEG_HUFFMAN_SYMBOLS_WORDS; i++)
++		cedrus_write(dev, VE_DEC_MPEG_SRAM_RW_DATA, 0);
++}
++
++/* Luma DC and AC, then chroma DC and AC; the third component shares chroma's. */
++static void cedrus_dec_jpeg_huffman_write(struct cedrus_device *dev,
++					  struct v4l2_jpeg_header *header)
++{
++	struct v4l2_jpeg_reference *tables[4];
++	unsigned int i;
++
++	for (i = 0; i < 2; i++) {
++		struct v4l2_jpeg_scan_component_spec *component =
++			&header->scan->component[i];
++
++		tables[i * 2] = &header->huffman_tables[
++			component->dc_entropy_coding_table_selector];
++		tables[i * 2 + 1] = &header->huffman_tables[
++			component->ac_entropy_coding_table_selector + 2];
++	}
++
++	cedrus_write(dev, VE_DEC_MPEG_SRAM_RW_OFFSET, 0);
++
++	for (i = 0; i < ARRAY_SIZE(tables); i++)
++		cedrus_dec_jpeg_huffman_codes_write(dev, tables[i]->start);
++
++	for (i = 0; i < CEDRUS_JPEG_HUFFMAN_GAP_WORDS; i++)
++		cedrus_write(dev, VE_DEC_MPEG_SRAM_RW_DATA, 0);
++
++	for (i = 0; i < ARRAY_SIZE(tables); i++)
++		cedrus_dec_jpeg_huffman_symbols_write(dev,
++			tables[i]->start + CEDRUS_JPEG_HUFFMAN_CODES,
++			tables[i]->length - CEDRUS_JPEG_HUFFMAN_CODES);
++}
++
++static int cedrus_dec_jpeg_quantisation_write(struct cedrus_device *dev,
++					      const struct v4l2_jpeg_reference *table,
++					      u32 flag)
++{
++	const u8 *matrix = table->start;
++	bool wide = table->length > V4L2_JPEG_PIXELS_IN_BLOCK;
++	unsigned int i;
++	u32 value;
++
++	if (!matrix)
++		return -EINVAL;
++
++	for (i = 0; i < V4L2_JPEG_PIXELS_IN_BLOCK; i++) {
++		value = wide ? get_unaligned_be16(&matrix[i * 2]) : matrix[i];
++		cedrus_write(dev, VE_DEC_MPEG_IQMINPUT,
++			     VE_DEC_MPEG_IQMINPUT_WEIGHT(i, value) | flag);
++	}
++
++	return 0;
++}
++
++static int cedrus_dec_jpeg_subsampling(const struct v4l2_jpeg_frame_header *frame,
++				       u32 *subsampling)
++{
++	const struct v4l2_jpeg_frame_component_spec *c = frame->component;
++	u32 factors = c[0].horizontal_sampling_factor << 20 |
++		      c[0].vertical_sampling_factor << 16 |
++		      c[1].horizontal_sampling_factor << 12 |
++		      c[1].vertical_sampling_factor << 8 |
++		      c[2].horizontal_sampling_factor << 4 |
++		      c[2].vertical_sampling_factor;
++
++	switch (factors) {
++	case 0x221111:
++		*subsampling = VE_DEC_MPEG_TRIGGER_CHROMA_FMT_420;
++		return 0;
++	case 0x211111:
++		*subsampling = VE_DEC_MPEG_TRIGGER_CHROMA_FMT_422;
++		return 0;
++	case 0x111111:
++		*subsampling = VE_DEC_MPEG_TRIGGER_CHROMA_FMT_444;
++		return 0;
++	case 0x121111:
++		*subsampling = VE_DEC_MPEG_TRIGGER_CHROMA_FMT_422T;
++		return 0;
++	default:
++		return -EINVAL;
++	}
++}
++
++/* Job */
++
++static int cedrus_dec_jpeg_job_configure(struct cedrus_context *ctx)
++{
++	struct cedrus_device *dev = ctx->proc->dev;
++	struct cedrus_dec_jpeg_job *job = ctx->engine_job;
++	struct v4l2_pix_format *pix_format = &ctx->v4l2.format_coded.fmt.pix;
++	struct vb2_buffer *coded =
++		&cedrus_job_buffer_coded(ctx)->m2m_buffer.vb.vb2_buf;
++	struct v4l2_jpeg_reference quantisation_tables[4] = { };
++	struct v4l2_jpeg_reference huffman_tables[4] = { };
++	struct v4l2_jpeg_scan_header scan = { };
++	struct v4l2_jpeg_header header = {
++		.scan			= &scan,
++		.quantization_tables	= quantisation_tables,
++		.huffman_tables		= huffman_tables,
++	};
++	const struct v4l2_jpeg_frame_component_spec *components;
++	unsigned int size = vb2_get_plane_payload(coded, 0);
++	dma_addr_t coded_addr, luma_addr, chroma_addr;
++	unsigned int hmax = 0, vmax = 0, i;
++	void *coded_data = vb2_plane_vaddr(coded, 0);
++	u32 value;
++	int ret;
++
++	if (!coded_data)
++		return -EFAULT;
++
++	ret = v4l2_jpeg_parse_header(coded_data, size, &header);
++	if (ret < 0)
++		return ret;
++
++	/* Baseline 8-bit YCbCr, within the buffers the coded format sized. */
++	if (header.frame.precision != 8 || header.frame.num_components != 3 ||
++	    header.frame.width > pix_format->width ||
++	    header.frame.height > pix_format->height)
++		return -EINVAL;
++
++	ret = cedrus_dec_jpeg_subsampling(&header.frame, &job->subsampling);
++	if (ret)
++		return ret;
++
++	cedrus_dec_jpeg_huffman_default(&header);
++
++	components = header.frame.component;
++	for (i = 0; i < 3; i++) {
++		hmax = max_t(unsigned int, hmax,
++			     components[i].horizontal_sampling_factor);
++		vmax = max_t(unsigned int, vmax,
++			     components[i].vertical_sampling_factor);
++	}
++
++	cedrus_write(dev, VE_DEC_MPEG_TRIGGER,
++		     VE_DEC_MPEG_TRIGGER_JPEG | job->subsampling);
++
++	cedrus_write(dev, VE_DEC_MPEG_JPEG_RES_INT, header.restart_interval);
++
++	/* Size in MCUs. */
++	value = VE_DEC_MPEG_JPEG_SIZE_WIDTH(DIV_ROUND_UP(header.frame.width,
++							 8 * hmax)) |
++		VE_DEC_MPEG_JPEG_SIZE_HEIGHT(DIV_ROUND_UP(header.frame.height,
++							  8 * vmax));
++	cedrus_write(dev, VE_DEC_MPEG_JPEG_SIZE, value);
++
++	/* Luma's table as the intra matrix, chroma's as the non-intra one. */
++	ret = cedrus_dec_jpeg_quantisation_write(dev,
++			&quantisation_tables[components[0].quantization_table_selector],
++			VE_DEC_MPEG_IQMINPUT_FLAG_INTRA);
++	if (ret)
++		return ret;
++
++	ret = cedrus_dec_jpeg_quantisation_write(dev,
++			&quantisation_tables[components[1].quantization_table_selector],
++			VE_DEC_MPEG_IQMINPUT_FLAG_NON_INTRA);
++	if (ret)
++		return ret;
++
++	cedrus_dec_jpeg_huffman_write(dev, &header);
++
++	/* The engine writes JPEG to its rotate and scale output only. */
++	cedrus_dec_picture_secondary_output_set(ctx, &luma_addr, &chroma_addr);
++	cedrus_write(dev, VE_DEC_MPEG_ROT_LUMA, luma_addr);
++	cedrus_write(dev, VE_DEC_MPEG_ROT_CHROMA, chroma_addr);
++	cedrus_write(dev, VE_DEC_MPEG_SD_ROT_DBLK_CTL, 0);
++
++	/* The entropy-coded segment, in bits from the start of the buffer. */
++	coded_addr = vb2_dma_contig_plane_dma_addr(coded, 0);
++
++	cedrus_write(dev, VE_DEC_MPEG_VLD_OFFSET, header.ecs_offset * 8);
++	cedrus_write(dev, VE_DEC_MPEG_VLD_LEN, size * 8);
++	cedrus_write(dev, VE_DEC_MPEG_VLD_ADDR,
++		     VE_DEC_MPEG_VLD_ADDR_BASE(coded_addr) |
++		     VE_DEC_MPEG_VLD_ADDR_VALID_PIC_DATA |
++		     VE_DEC_MPEG_VLD_ADDR_LAST_PIC_DATA |
++		     VE_DEC_MPEG_VLD_ADDR_FIRST_PIC_DATA);
++	cedrus_write(dev, VE_DEC_MPEG_VLD_END_ADDR, coded_addr + size);
++
++	value = VE_DEC_MPEG_CTRL_IRQ_MASK;
++	if (job->subsampling != VE_DEC_MPEG_TRIGGER_CHROMA_FMT_420)
++		value |= VE_DEC_MPEG_CTRL_JPEG_FORCE_420;
++	cedrus_write(dev, VE_DEC_MPEG_CTRL, value);
++
++	return 0;
++}
++
++static void cedrus_dec_jpeg_job_trigger(struct cedrus_context *ctx)
++{
++	struct cedrus_device *dev = ctx->proc->dev;
++	struct cedrus_dec_jpeg_job *job = ctx->engine_job;
++
++	cedrus_write(dev, VE_DEC_MPEG_TRIGGER,
++		     VE_DEC_MPEG_TRIGGER_HW_JPEG_VLD |
++		     VE_DEC_MPEG_TRIGGER_JPEG | job->subsampling);
++}
++
++/* IRQ */
++
++static int cedrus_dec_jpeg_irq_status(struct cedrus_context *ctx)
++{
++	struct cedrus_device *dev = ctx->proc->dev;
++	u32 status;
++
++	status = cedrus_read(dev, VE_DEC_MPEG_STATUS);
++	status &= VE_DEC_MPEG_STATUS_CHECK_MASK;
++
++	if (!status)
++		return CEDRUS_IRQ_NONE;
++
++	if (status & VE_DEC_MPEG_STATUS_CHECK_ERROR)
++		return CEDRUS_IRQ_ERROR;
++
++	return CEDRUS_IRQ_SUCCESS;
++}
++
++static void cedrus_dec_jpeg_irq_clear(struct cedrus_context *ctx)
++{
++	struct cedrus_device *dev = ctx->proc->dev;
++
++	cedrus_write(dev, VE_DEC_MPEG_STATUS, VE_DEC_MPEG_STATUS_CHECK_MASK);
++}
++
++static void cedrus_dec_jpeg_irq_disable(struct cedrus_context *ctx)
++{
++	struct cedrus_device *dev = ctx->proc->dev;
++	u32 value;
++
++	value = cedrus_read(dev, VE_DEC_MPEG_CTRL);
++	value &= ~VE_DEC_MPEG_CTRL_IRQ_MASK;
++
++	cedrus_write(dev, VE_DEC_MPEG_CTRL, value);
++}
++
++/* Engine */
++
++static const struct cedrus_engine_ops cedrus_dec_jpeg_ops = {
++	.format_prepare		= cedrus_dec_format_coded_prepare,
++	.format_configure	= cedrus_dec_format_coded_configure,
++
++	.job_configure		= cedrus_dec_jpeg_job_configure,
++	.job_trigger		= cedrus_dec_jpeg_job_trigger,
++
++	.irq_status		= cedrus_dec_jpeg_irq_status,
++	.irq_clear		= cedrus_dec_jpeg_irq_clear,
++	.irq_disable		= cedrus_dec_jpeg_irq_disable,
++};
++
++static const struct v4l2_frmsize_stepwise cedrus_dec_jpeg_frmsize = {
++	.min_width	= 16,
++	.max_width	= 6144,
++	.step_width	= 16,
++
++	.min_height	= 16,
++	.max_height	= 6144,
++	.step_height	= 16,
++};
++
++const struct cedrus_engine cedrus_dec_jpeg = {
++	.codec			= CEDRUS_CODEC_JPEG,
++	.role			= CEDRUS_ROLE_DECODER,
++	.capabilities		= CEDRUS_CAPABILITY_JPEG_DEC |
++				  CEDRUS_CAPABILITY_UNTILED,
++
++	.ops			= &cedrus_dec_jpeg_ops,
++
++	.pixelformat		= V4L2_PIX_FMT_JPEG,
++	.parses_header		= true,
++	.pixelformat_picture	= V4L2_PIX_FMT_NV12,
++	.frmsize		= &cedrus_dec_jpeg_frmsize,
++
++	.job_size		= sizeof(struct cedrus_dec_jpeg_job),
++};
++
++/* Motion JPEG: the same pictures, which may leave the Huffman tables out. */
++const struct cedrus_engine cedrus_dec_mjpeg = {
++	.codec			= CEDRUS_CODEC_JPEG,
++	.role			= CEDRUS_ROLE_DECODER,
++	.capabilities		= CEDRUS_CAPABILITY_JPEG_DEC |
++				  CEDRUS_CAPABILITY_UNTILED,
++
++	.ops			= &cedrus_dec_jpeg_ops,
++
++	.pixelformat		= V4L2_PIX_FMT_MJPEG,
++	.parses_header		= true,
++	.pixelformat_picture	= V4L2_PIX_FMT_NV12,
++	.frmsize		= &cedrus_dec_jpeg_frmsize,
++
++	.job_size		= sizeof(struct cedrus_dec_jpeg_job),
++};
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec_jpeg.h b/drivers/staging/media/sunxi/cedrus/cedrus_dec_jpeg.h
+new file mode 100644
+index 000000000..203d39877
+--- /dev/null
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec_jpeg.h
+@@ -0,0 +1,20 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Cedrus Video Engine Driver
++ *
++ * Copyright (C) 2022 Emmanuel Gil Peyrot <linkmauve@linkmauve.fr>
++ */
++
++#ifndef _CEDRUS_DEC_JPEG_H_
++#define _CEDRUS_DEC_JPEG_H_
++
++#include <linux/types.h>
++
++struct cedrus_dec_jpeg_job {
++	u32	subsampling;
++};
++
++extern const struct cedrus_engine cedrus_dec_jpeg;
++extern const struct cedrus_engine cedrus_dec_mjpeg;
++
++#endif
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_engine.h b/drivers/staging/media/sunxi/cedrus/cedrus_engine.h
+index ca6323797..25ab06da4 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_engine.h
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_engine.h
+@@ -54,6 +54,10 @@ struct cedrus_engine {
+ 
+ 	u32					pixelformat;
+ 	bool					slice_based;
++	/* Reads its own headers from the coded data: no request, CPU-mapped. */
++	bool					parses_header;
++	/* The one picture format, when the engine writes no other. */
++	u32					pixelformat_picture;
+ 
+ 	const struct v4l2_ctrl_config		*ctrl_configs;
+ 	unsigned int				ctrl_configs_count;
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_proc.c b/drivers/staging/media/sunxi/cedrus/cedrus_proc.c
+index 01eca7b6c..d0d0f2f27 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_proc.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_proc.c
+@@ -62,6 +62,11 @@ static bool cedrus_proc_format_match(struct cedrus_context *ctx,
+ 	    format->pixelformat_coded != pixelformat_coded)
+ 		return false;
+ 
++	if (format_type == CEDRUS_FORMAT_TYPE_PICTURE && ctx->engine &&
++	    ctx->engine->pixelformat_picture &&
++	    format->pixelformat != ctx->engine->pixelformat_picture)
++		return false;
++
+ 	return true;
+ }
+ 
+@@ -758,6 +763,37 @@ static int cedrus_proc_encoder_cmd(struct file *file, void *private,
+ 	return v4l2_m2m_ioctl_encoder_cmd(file, private, cmd);
+ }
+ 
++/* An engine reading its own headers drains as a stateful decoder. */
++static int cedrus_proc_decoder_cmd(struct file *file, void *private,
++				   struct v4l2_decoder_cmd *cmd)
++{
++	struct cedrus_context *ctx =
++		container_of(file->private_data, struct cedrus_context,
++			     v4l2.fh);
++
++	if (ctx->engine->parses_header) {
++		if (cmd->cmd == V4L2_DEC_CMD_STOP)
++			cedrus_proc_stop_empty_prepare(ctx);
++
++		return v4l2_m2m_ioctl_decoder_cmd(file, private, cmd);
++	}
++
++	return v4l2_m2m_ioctl_stateless_decoder_cmd(file, private, cmd);
++}
++
++static int cedrus_proc_try_decoder_cmd(struct file *file, void *private,
++				       struct v4l2_decoder_cmd *cmd)
++{
++	struct cedrus_context *ctx =
++		container_of(file->private_data, struct cedrus_context,
++			     v4l2.fh);
++
++	if (ctx->engine->parses_header)
++		return v4l2_m2m_ioctl_try_decoder_cmd(file, private, cmd);
++
++	return v4l2_m2m_ioctl_stateless_try_decoder_cmd(file, private, cmd);
++}
++
+ static const struct v4l2_ioctl_ops cedrus_proc_ioctl_ops = {
+ 	.vidioc_querycap		= cedrus_proc_querycap,
+ 
+@@ -791,8 +827,8 @@ static const struct v4l2_ioctl_ops cedrus_proc_ioctl_ops = {
+ 	.vidioc_streamon		= v4l2_m2m_ioctl_streamon,
+ 	.vidioc_streamoff		= v4l2_m2m_ioctl_streamoff,
+ 
+-	.vidioc_decoder_cmd		= v4l2_m2m_ioctl_stateless_decoder_cmd,
+-	.vidioc_try_decoder_cmd		= v4l2_m2m_ioctl_stateless_try_decoder_cmd,
++	.vidioc_decoder_cmd		= cedrus_proc_decoder_cmd,
++	.vidioc_try_decoder_cmd		= cedrus_proc_try_decoder_cmd,
+ 
+ 	.vidioc_encoder_cmd		= cedrus_proc_encoder_cmd,
+ 	.vidioc_try_encoder_cmd		= v4l2_m2m_ioctl_try_encoder_cmd,
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_regs.h b/drivers/staging/media/sunxi/cedrus/cedrus_regs.h
+index 0bc41bc72..47e7bb303 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_regs.h
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_regs.h
+@@ -184,6 +184,7 @@
+ 
+ #define VE_DEC_MPEG_CTRL_MC_CACHE_EN		BIT(31)
+ #define VE_DEC_MPEG_CTRL_SW_VLD			BIT(27)
++#define VE_DEC_MPEG_CTRL_JPEG_FORCE_420		BIT(18)
+ #define VE_DEC_MPEG_CTRL_SW_IQ_IS		BIT(17)
+ #define VE_DEC_MPEG_CTRL_QP_AC_DC_OUT_EN	BIT(14)
+ #define VE_DEC_MPEG_CTRL_ROTATE_SCALE_OUT_EN	BIT(8)
+@@ -295,10 +296,21 @@
+ #define VE_DEC_MPEG_IQMINPUT_WEIGHT(i, v) \
+ 	(SHIFT_AND_MASK_BITS(i, 13, 8) | SHIFT_AND_MASK_BITS(v, 7, 0))
+ 
++#define VE_DEC_MPEG_JPEG_SIZE			(VE_ENGINE_DEC_MPEG + 0xb8)
++
++#define VE_DEC_MPEG_JPEG_SIZE_WIDTH(w) \
++	SHIFT_AND_MASK_BITS((w) - 1, 10, 0)
++#define VE_DEC_MPEG_JPEG_SIZE_HEIGHT(h) \
++	SHIFT_AND_MASK_BITS((h) - 1, 26, 16)
++
++#define VE_DEC_MPEG_JPEG_RES_INT		(VE_ENGINE_DEC_MPEG + 0xc0)
+ #define VE_DEC_MPEG_ERROR			(VE_ENGINE_DEC_MPEG + 0xc4)
+ #define VE_DEC_MPEG_CRTMBADDR			(VE_ENGINE_DEC_MPEG + 0xc8)
+ #define VE_DEC_MPEG_ROT_LUMA			(VE_ENGINE_DEC_MPEG + 0xcc)
+ #define VE_DEC_MPEG_ROT_CHROMA			(VE_ENGINE_DEC_MPEG + 0xd0)
++#define VE_DEC_MPEG_SD_ROT_DBLK_CTL		(VE_ENGINE_DEC_MPEG + 0xd4)
++#define VE_DEC_MPEG_SRAM_RW_OFFSET		(VE_ENGINE_DEC_MPEG + 0xe0)
++#define VE_DEC_MPEG_SRAM_RW_DATA		(VE_ENGINE_DEC_MPEG + 0xe4)
+ 
+ /* H.265 Decoder Registers */
+ 
+-- 
+2.47.3
+

@@ -1,0 +1,618 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 31 Oct 2026 03:03:21 -0400
+Subject: [PATCH] media: cedrus: Add JPEG encoding on the H616
+
+Baseline 4:2:0 JPEG from NV12, 16x16 to 4096x4096, quality through
+V4L2_CID_JPEG_COMPRESSION_QUALITY as libjpeg scales the Annex K tables.
+The engine codes the scan with the Annex K Huffman tables and takes the
+quantisation tables, a rounding offset and a reciprocal per entry, at
+0xe0/0xe4; the headers go out through its put-bits path and the end
+marker is written by the CPU. Sizes count in 8-pixel units, as the
+vendor's library does on this engine.
+
+The same engine answers MJPG, the format FFmpeg and others ask for. The
+H.264 encoder's interrupt handlers move to cedrus_enc.c, shared.
+---
+ drivers/staging/media/sunxi/cedrus/Makefile   |   1 +
+ drivers/staging/media/sunxi/cedrus/cedrus.c   |   1 +
+ drivers/staging/media/sunxi/cedrus/cedrus.h   |   1 +
+ .../staging/media/sunxi/cedrus/cedrus_enc.c   |  42 +++
+ .../staging/media/sunxi/cedrus/cedrus_enc.h   |   8 +-
+ .../media/sunxi/cedrus/cedrus_enc_h264.c      |  37 +-
+ .../media/sunxi/cedrus/cedrus_enc_jpeg.c      | 354 ++++++++++++++++++
+ .../media/sunxi/cedrus/cedrus_enc_jpeg.h      |  12 +
+ .../staging/media/sunxi/cedrus/cedrus_regs.h  |  14 +
+ 9 files changed, 435 insertions(+), 35 deletions(-)
+ create mode 100644 drivers/staging/media/sunxi/cedrus/cedrus_enc_jpeg.c
+ create mode 100644 drivers/staging/media/sunxi/cedrus/cedrus_enc_jpeg.h
+
+diff --git a/drivers/staging/media/sunxi/cedrus/Makefile b/drivers/staging/media/sunxi/cedrus/Makefile
+index 4248b6224..c70d632e9 100644
+--- a/drivers/staging/media/sunxi/cedrus/Makefile
++++ b/drivers/staging/media/sunxi/cedrus/Makefile
+@@ -13,5 +13,6 @@ sunxi-cedrus-y = cedrus.o \
+ 		 cedrus_dec_vp9.o \
+ 		 cedrus_enc.o \
+ 		 cedrus_enc_h264.o \
++		 cedrus_enc_jpeg.o \
+ 		 cedrus_engine.o \
+ 		 cedrus_proc.o
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus.c b/drivers/staging/media/sunxi/cedrus/cedrus.c
+index ecf7d517a..77e60b1b2 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus.c
+@@ -575,6 +575,7 @@ static const struct cedrus_variant cedrus_variant_sun50i_h616 = {
+ 			  CEDRUS_CAPABILITY_VP9_DEC |
+ 			  CEDRUS_CAPABILITY_VC1_DEC |
+ 			  CEDRUS_CAPABILITY_JPEG_DEC |
++			  CEDRUS_CAPABILITY_JPEG_ENC |
+ 			  CEDRUS_CAPABILITY_H264_ENC |
+ 			  CEDRUS_CAPABILITY_ENC_H616,
+ 	.clock_mod_rate	= 600000000,
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus.h b/drivers/staging/media/sunxi/cedrus/cedrus.h
+index 59beb82b8..bf98f9f2c 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus.h
++++ b/drivers/staging/media/sunxi/cedrus/cedrus.h
+@@ -59,6 +59,7 @@ enum cedrus_capability {
+ 	CEDRUS_CAPABILITY_H264_ENC	= BIT(8),
+ 	CEDRUS_CAPABILITY_ENC_H616	= BIT(9),
+ 	CEDRUS_CAPABILITY_JPEG_DEC	= BIT(10),
++	CEDRUS_CAPABILITY_JPEG_ENC	= BIT(11),
+ };
+ 
+ struct cedrus_context;
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_enc.c b/drivers/staging/media/sunxi/cedrus/cedrus_enc.c
+index a1401bb71..3e10b3ac8 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_enc.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_enc.c
+@@ -13,6 +13,7 @@
+ #include "cedrus_context.h"
+ #include "cedrus_enc.h"
+ #include "cedrus_enc_h264.h"
++#include "cedrus_enc_jpeg.h"
+ #include "cedrus_engine.h"
+ #include "cedrus_proc.h"
+ #include "cedrus_regs.h"
+@@ -43,6 +44,14 @@ int cedrus_enc_format_coded_prepare(struct cedrus_context *ctx,
+ 	/* Choose some minimum size since this can't be 0 */
+ 	pix_format->sizeimage = max_t(u32, SZ_1K, pix_format->sizeimage);
+ 
++	/* Twice the raw 4:2:0 picture, and its headers, hold any JPEG quality. */
++	if (pix_format->pixelformat == V4L2_PIX_FMT_JPEG ||
++	    pix_format->pixelformat == V4L2_PIX_FMT_MJPEG)
++		pix_format->sizeimage =
++			max_t(u32, pix_format->sizeimage,
++			      ALIGN(pix_format->width, 16) *
++			      ALIGN(pix_format->height, 16) * 3 + SZ_1K);
++
+ 	pix_format->field = V4L2_FIELD_NONE;
+ 
+ 	/* Coded format information is copied from picture format. */
+@@ -200,6 +209,37 @@ int cedrus_enc_format_picture_configure(struct cedrus_context *ctx)
+ 	return 0;
+ }
+ 
++/* IRQ */
++
++int cedrus_enc_irq_status(struct cedrus_context *ctx)
++{
++	struct cedrus_device *dev = ctx->proc->dev;
++	u32 status;
++
++	status = cedrus_read(dev, VE_ENC_AVC_STATUS_REG);
++	if (!(status & VE_ENC_AVC_STATUS_MASK))
++		return CEDRUS_IRQ_NONE;
++
++	if (status & VE_ENC_AVC_STATUS_FINISH)
++		return CEDRUS_IRQ_SUCCESS;
++
++	return CEDRUS_IRQ_ERROR;
++}
++
++void cedrus_enc_irq_clear(struct cedrus_context *ctx)
++{
++	struct cedrus_device *dev = ctx->proc->dev;
++
++	cedrus_write(dev, VE_ENC_AVC_STATUS_REG, VE_ENC_AVC_STATUS_MASK);
++}
++
++void cedrus_enc_irq_disable(struct cedrus_context *ctx)
++{
++	struct cedrus_device *dev = ctx->proc->dev;
++
++	cedrus_write(dev, VE_ENC_AVC_INT_EN_REG, 0);
++}
++
+ static int cedrus_enc_format_setup(struct cedrus_context *ctx)
+ {
+ 	struct cedrus_proc *proc = ctx->proc;
+@@ -314,6 +354,8 @@ static int cedrus_enc_size_picture_enum(struct cedrus_context *ctx,
+ 
+ static const struct cedrus_engine *cedrus_enc_engines[] = {
+ 	&cedrus_enc_h264,
++	&cedrus_enc_jpeg,
++	&cedrus_enc_mjpeg,
+ };
+ 
+ /* Encoder */
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_enc.h b/drivers/staging/media/sunxi/cedrus/cedrus_enc.h
+index 822ed96b7..77202c0ba 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_enc.h
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_enc.h
+@@ -23,7 +23,13 @@ int cedrus_enc_format_picture_configure(struct cedrus_context *ctx);
+ void cedrus_enc_write_addr(struct cedrus_device *dev, u32 reg,
+ 			   dma_addr_t addr);
+ 
+-/* Decoder */
++/* IRQ */
++
++int cedrus_enc_irq_status(struct cedrus_context *ctx);
++void cedrus_enc_irq_clear(struct cedrus_context *ctx);
++void cedrus_enc_irq_disable(struct cedrus_context *ctx);
++
++/* Encoder */
+ 
+ int cedrus_enc_setup(struct cedrus_device *dev);
+ void cedrus_enc_cleanup(struct cedrus_device *dev);
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.c b/drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.c
+index 076b424da..f41037afe 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.c
+@@ -1443,37 +1443,6 @@ static void cedrus_enc_h264_job_finish(struct cedrus_context *ctx, int state)
+ 	}
+ }
+ 
+-/* IRQ */
+-
+-static int cedrus_enc_h264_irq_status(struct cedrus_context *ctx)
+-{
+-	struct cedrus_device *dev = ctx->proc->dev;
+-	u32 status;
+-
+-	status = cedrus_read(dev, VE_ENC_AVC_STATUS_REG);
+-	if (!(status & VE_ENC_AVC_STATUS_MASK))
+-		return CEDRUS_IRQ_NONE;
+-
+-	if (status & VE_ENC_AVC_STATUS_FINISH)
+-		return CEDRUS_IRQ_SUCCESS;
+-
+-	return CEDRUS_IRQ_ERROR;
+-}
+-
+-static void cedrus_enc_h264_irq_clear(struct cedrus_context *ctx)
+-{
+-	struct cedrus_device *dev = ctx->proc->dev;
+-
+-	cedrus_write(dev, VE_ENC_AVC_STATUS_REG, VE_ENC_AVC_STATUS_MASK);
+-}
+-
+-static void cedrus_enc_h264_irq_disable(struct cedrus_context *ctx)
+-{
+-	struct cedrus_device *dev = ctx->proc->dev;
+-
+-	cedrus_write(dev, VE_ENC_AVC_INT_EN_REG, 0);
+-}
+-
+ /* Engine */
+ 
+ static const struct cedrus_engine_ops cedrus_enc_h264_ops = {
+@@ -1492,9 +1461,9 @@ static const struct cedrus_engine_ops cedrus_enc_h264_ops = {
+ 	.job_trigger		= cedrus_enc_h264_job_trigger,
+ 	.job_finish		= cedrus_enc_h264_job_finish,
+ 
+-	.irq_status		= cedrus_enc_h264_irq_status,
+-	.irq_clear		= cedrus_enc_h264_irq_clear,
+-	.irq_disable		= cedrus_enc_h264_irq_disable,
++	.irq_status		= cedrus_enc_irq_status,
++	.irq_clear		= cedrus_enc_irq_clear,
++	.irq_disable		= cedrus_enc_irq_disable,
+ };
+ 
+ static const struct v4l2_ctrl_config cedrus_enc_h264_ctrl_configs[] = {
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_enc_jpeg.c b/drivers/staging/media/sunxi/cedrus/cedrus_enc_jpeg.c
+new file mode 100644
+index 000000000..a9f1ccf08
+--- /dev/null
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_enc_jpeg.c
+@@ -0,0 +1,354 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Cedrus Video Engine Driver
++ *
++ * Baseline JPEG, 4:2:0, from the encoder's JPEG mode: the engine codes the
++ * scan with the Annex K Huffman tables; the headers and the end marker are
++ * written here.
++ */
++
++#include <linux/types.h>
++#include <linux/videodev2.h>
++#include <media/v4l2-jpeg.h>
++#include <media/videobuf2-dma-contig.h>
++
++#include "cedrus.h"
++#include "cedrus_context.h"
++#include "cedrus_enc.h"
++#include "cedrus_enc_jpeg.h"
++#include "cedrus_engine.h"
++#include "cedrus_proc.h"
++#include "cedrus_regs.h"
++
++#define CEDRUS_ENC_JPEG_QUALITY_DEFAULT	85
++#define CEDRUS_ENC_JPEG_BIT_MAX		0x0fff0000
++#define CEDRUS_ENC_JPEG_DC_SCALE	1024
++
++#define JPEG_MARKER_SOI		0xd8
++#define JPEG_MARKER_EOI		0xd9
++#define JPEG_MARKER_DQT		0xdb
++#define JPEG_MARKER_SOF0	0xc0
++#define JPEG_MARKER_DHT		0xc4
++#define JPEG_MARKER_SOS		0xda
++
++enum cedrus_enc_jpeg_table {
++	CEDRUS_ENC_JPEG_LUMA,
++	CEDRUS_ENC_JPEG_CHROMA,
++	CEDRUS_ENC_JPEG_TABLES,
++};
++
++struct cedrus_enc_jpeg_job {
++	u8	quantisation[CEDRUS_ENC_JPEG_TABLES][V4L2_JPEG_PIXELS_IN_BLOCK];
++};
++
++/* libjpeg's scaling of the Annex K tables, natural order. */
++static void cedrus_enc_jpeg_quantisation(struct cedrus_enc_jpeg_job *job,
++					 unsigned int quality)
++{
++	const u8 *reference[CEDRUS_ENC_JPEG_TABLES] = {
++		v4l2_jpeg_ref_table_luma_qt,
++		v4l2_jpeg_ref_table_chroma_qt,
++	};
++	unsigned int scale = quality < 50 ? 5000 / quality : 200 - 2 * quality;
++	unsigned int t, i;
++
++	for (t = 0; t < CEDRUS_ENC_JPEG_TABLES; t++)
++		for (i = 0; i < V4L2_JPEG_PIXELS_IN_BLOCK; i++)
++			job->quantisation[t][i] =
++				clamp((reference[t][i] * scale + 50) / 100,
++				      1U, 255U);
++}
++
++static void cedrus_enc_jpeg_put(struct cedrus_device *dev, u8 byte)
++{
++	cedrus_poll(dev, VE_ENC_AVC_STATUS_REG,
++		    VE_ENC_AVC_STATUS_PUT_BITS_READY);
++
++	cedrus_write(dev, VE_ENC_AVC_PUTBITSDATA_REG, byte);
++
++	cedrus_write(dev, VE_ENC_AVC_STARTTRIG_REG,
++		     VE_ENC_AVC_STARTTRIG_ENCODE_MODE_JPEG |
++		     VE_ENC_AVC_STARTTRIG_NUM_BITS(8) |
++		     VE_ENC_AVC_STARTTRIG_TYPE_PUT_BITS);
++}
++
++static void cedrus_enc_jpeg_put_u16(struct cedrus_device *dev, u16 value)
++{
++	cedrus_enc_jpeg_put(dev, value >> 8);
++	cedrus_enc_jpeg_put(dev, value);
++}
++
++static void cedrus_enc_jpeg_put_marker(struct cedrus_device *dev, u8 marker)
++{
++	cedrus_enc_jpeg_put(dev, 0xff);
++	cedrus_enc_jpeg_put(dev, marker);
++}
++
++static void cedrus_enc_jpeg_put_dqt(struct cedrus_device *dev,
++				    const struct cedrus_enc_jpeg_job *job)
++{
++	unsigned int t, i;
++
++	for (t = 0; t < CEDRUS_ENC_JPEG_TABLES; t++) {
++		cedrus_enc_jpeg_put_marker(dev, JPEG_MARKER_DQT);
++		cedrus_enc_jpeg_put_u16(dev, 3 + V4L2_JPEG_PIXELS_IN_BLOCK);
++		cedrus_enc_jpeg_put(dev, t);
++
++		for (i = 0; i < V4L2_JPEG_PIXELS_IN_BLOCK; i++)
++			cedrus_enc_jpeg_put(dev, job->quantisation[t]
++					    [v4l2_jpeg_zigzag_scan_index[i]]);
++	}
++}
++
++/* Luma 2x2, chroma 1x1, each chroma component on the chroma tables. */
++static void cedrus_enc_jpeg_put_sof(struct cedrus_device *dev,
++				    const struct v4l2_pix_format *pix_format)
++{
++	unsigned int c;
++
++	cedrus_enc_jpeg_put_marker(dev, JPEG_MARKER_SOF0);
++	cedrus_enc_jpeg_put_u16(dev, 8 + 3 * 3);
++	cedrus_enc_jpeg_put(dev, 8);
++	cedrus_enc_jpeg_put_u16(dev, pix_format->height);
++	cedrus_enc_jpeg_put_u16(dev, pix_format->width);
++	cedrus_enc_jpeg_put(dev, 3);
++
++	for (c = 1; c <= 3; c++) {
++		cedrus_enc_jpeg_put(dev, c);
++		cedrus_enc_jpeg_put(dev, c == 1 ? 0x22 : 0x11);
++		cedrus_enc_jpeg_put(dev, c == 1 ? CEDRUS_ENC_JPEG_LUMA :
++					 CEDRUS_ENC_JPEG_CHROMA);
++	}
++}
++
++static void cedrus_enc_jpeg_put_dht(struct cedrus_device *dev)
++{
++	static const struct {
++		u8		class_id;
++		const u8	*table;
++		unsigned int	length;
++	} tables[] = {
++		{ 0x00, v4l2_jpeg_ref_table_luma_dc_ht, V4L2_JPEG_REF_HT_DC_LEN },
++		{ 0x10, v4l2_jpeg_ref_table_luma_ac_ht, V4L2_JPEG_REF_HT_AC_LEN },
++		{ 0x01, v4l2_jpeg_ref_table_chroma_dc_ht, V4L2_JPEG_REF_HT_DC_LEN },
++		{ 0x11, v4l2_jpeg_ref_table_chroma_ac_ht, V4L2_JPEG_REF_HT_AC_LEN },
++	};
++	unsigned int t, i;
++
++	for (t = 0; t < ARRAY_SIZE(tables); t++) {
++		cedrus_enc_jpeg_put_marker(dev, JPEG_MARKER_DHT);
++		cedrus_enc_jpeg_put_u16(dev, 3 + tables[t].length);
++		cedrus_enc_jpeg_put(dev, tables[t].class_id);
++
++		for (i = 0; i < tables[t].length; i++)
++			cedrus_enc_jpeg_put(dev, tables[t].table[i]);
++	}
++}
++
++static void cedrus_enc_jpeg_put_sos(struct cedrus_device *dev)
++{
++	unsigned int c;
++
++	cedrus_enc_jpeg_put_marker(dev, JPEG_MARKER_SOS);
++	cedrus_enc_jpeg_put_u16(dev, 6 + 2 * 3);
++	cedrus_enc_jpeg_put(dev, 3);
++
++	for (c = 1; c <= 3; c++) {
++		cedrus_enc_jpeg_put(dev, c);
++		cedrus_enc_jpeg_put(dev, c == 1 ? 0x00 : 0x11);
++	}
++
++	/* Spectral selection 0-63, no successive approximation. */
++	cedrus_enc_jpeg_put(dev, 0);
++	cedrus_enc_jpeg_put(dev, 63);
++	cedrus_enc_jpeg_put(dev, 0);
++}
++
++/* Job */
++
++static int cedrus_enc_jpeg_job_prepare(struct cedrus_context *ctx)
++{
++	int quality = cedrus_context_ctrl_value(ctx,
++					V4L2_CID_JPEG_COMPRESSION_QUALITY);
++
++	cedrus_enc_jpeg_quantisation(ctx->engine_job, quality);
++
++	return 0;
++}
++
++static int cedrus_enc_jpeg_job_configure(struct cedrus_context *ctx)
++{
++	struct cedrus_device *dev = ctx->proc->dev;
++	struct cedrus_enc_jpeg_job *job = ctx->engine_job;
++	struct v4l2_pix_format *pix_format = &ctx->v4l2.format_picture.fmt.pix;
++	unsigned int width_8 = DIV_ROUND_UP(pix_format->width, 8);
++	unsigned int height_8 = DIV_ROUND_UP(pix_format->height, 8);
++	const u8 *luma = job->quantisation[CEDRUS_ENC_JPEG_LUMA];
++	const u8 *chroma = job->quantisation[CEDRUS_ENC_JPEG_CHROMA];
++	unsigned int size, t, i;
++	dma_addr_t addr;
++
++	cedrus_write(dev, VE_ENC_AVC_STARTTRIG_REG,
++		     VE_ENC_AVC_STARTTRIG_ENCODE_MODE_JPEG);
++
++	/* JPEG counts the picture in 8-pixel units. */
++	cedrus_write(dev, VE_ISP_PIC_INFO_REG,
++		     VE_ISP_PIC_INFO_WIDTH_MBS(width_8) |
++		     VE_ISP_PIC_INFO_HEIGHT_MBS(height_8));
++	cedrus_write(dev, VE_ISP_SCALER_SIZE_REG,
++		     VE_ISP_SCALER_SIZE_HEIGHT_MBS(height_8) |
++		     VE_ISP_SCALER_SIZE_WIDTH_MBS(width_8));
++
++	cedrus_write(dev, VE_ENC_AVC_STATUS_REG, VE_ENC_AVC_STATUS_MASK);
++
++	/* Coded buffer. */
++
++	cedrus_job_buffer_coded_dma(ctx, &addr, &size);
++
++	cedrus_write(dev, VE_ENC_AVC_STM_BIT_OFFSET_REG, 0);
++	cedrus_enc_write_addr(dev, VE_ENC_AVC_STM_START_ADDR_REG, addr);
++	cedrus_enc_write_addr(dev, VE_ENC_AVC_STM_END_ADDR_REG, addr + size - 1);
++	cedrus_write(dev, VE_ENC_AVC_STM_BIT_MAX_REG,
++		     min_t(u32, size * 8, CEDRUS_ENC_JPEG_BIT_MAX));
++	cedrus_write(dev, VE_ENC_AVC_STM_BIT_LEN_REG, 0);
++
++	/* Headers, their 0xff bytes not stuffed. */
++
++	cedrus_write(dev, VE_ENC_AVC_PARA0_REG, VE_ENC_AVC_PARA0_EPTB_DIS);
++
++	cedrus_enc_jpeg_put_marker(dev, JPEG_MARKER_SOI);
++	cedrus_enc_jpeg_put_dqt(dev, job);
++	cedrus_enc_jpeg_put_sof(dev, pix_format);
++	cedrus_enc_jpeg_put_dht(dev);
++	cedrus_enc_jpeg_put_sos(dev);
++
++	/* The scan, stuffed. */
++
++	cedrus_poll(dev, VE_ENC_AVC_STATUS_REG,
++		    VE_ENC_AVC_STATUS_PUT_BITS_READY);
++
++	cedrus_write(dev, VE_ENC_AVC_PARA0_REG,
++		     VE_ENC_AVC_PARA0_EPTB_DIS |
++		     VE_ENC_AVC_PARA0_STUFF_ZERO_AFTER_FF_EN |
++		     VE_ENC_JPEG_PARA0_DC_CHROMA(CEDRUS_ENC_JPEG_DC_SCALE /
++						 chroma[0]) |
++		     VE_ENC_JPEG_PARA0_DC_LUMA(CEDRUS_ENC_JPEG_DC_SCALE /
++					       luma[0]));
++
++	/* Plain quantisation: no coefficient or run-length shortcuts. */
++	cedrus_write(dev, VE_ENC_AVC_PARA1_REG,
++		     VE_ENC_JPEG_PARA1_RUN_LEN_OPT_DIS |
++		     VE_ENC_JPEG_PARA1_COEF_DOWN_DIS);
++
++	cedrus_write(dev, VE_ENC_JPEG_QM_INDEX_REG, 0);
++	for (t = 0; t < CEDRUS_ENC_JPEG_TABLES; t++)
++		for (i = 0; i < V4L2_JPEG_PIXELS_IN_BLOCK; i++)
++			cedrus_write(dev, VE_ENC_JPEG_QM_DATA_REG,
++				     VE_ENC_JPEG_QM_DATA_ROUND(job->quantisation[t][i]) |
++				     VE_ENC_JPEG_QM_DATA_RECIPROCAL(job->quantisation[t][i]));
++
++	return 0;
++}
++
++static void cedrus_enc_jpeg_job_trigger(struct cedrus_context *ctx)
++{
++	struct cedrus_device *dev = ctx->proc->dev;
++
++	cedrus_write(dev, VE_ENC_AVC_INT_EN_REG,
++		     VE_ENC_AVC_INT_EN_STALL |
++		     VE_ENC_AVC_INT_EN_FINISH);
++
++	cedrus_write(dev, VE_ENC_AVC_STARTTRIG_REG,
++		     VE_ENC_AVC_STARTTRIG_ENCODE_MODE_JPEG |
++		     VE_ENC_AVC_STARTTRIG_TYPE_ENC_START);
++}
++
++/* The engine leaves the end marker to software. */
++static void cedrus_enc_jpeg_job_finish(struct cedrus_context *ctx, int state)
++{
++	struct cedrus_device *dev = ctx->proc->dev;
++	struct vb2_v4l2_buffer *v4l2_buffer = ctx->job.buffer_coded;
++	struct vb2_buffer *vb2_buffer = &v4l2_buffer->vb2_buf;
++	u8 *data = vb2_plane_vaddr(vb2_buffer, 0);
++	u32 length;
++
++	length = cedrus_read(dev, VE_ENC_AVC_STM_BIT_LEN_REG) / 8;
++
++	if (state != VB2_BUF_STATE_DONE || !data ||
++	    length + 2 > vb2_plane_size(vb2_buffer, 0)) {
++		vb2_set_plane_payload(vb2_buffer, 0, 0);
++		return;
++	}
++
++	data[length++] = 0xff;
++	data[length++] = JPEG_MARKER_EOI;
++
++	vb2_set_plane_payload(vb2_buffer, 0, length);
++	v4l2_buffer->flags |= V4L2_BUF_FLAG_KEYFRAME;
++}
++
++/* Engine */
++
++static const struct cedrus_engine_ops cedrus_enc_jpeg_ops = {
++	.format_prepare		= cedrus_enc_format_coded_prepare,
++	.format_configure	= cedrus_enc_format_coded_configure,
++
++	.job_prepare		= cedrus_enc_jpeg_job_prepare,
++	.job_configure		= cedrus_enc_jpeg_job_configure,
++	.job_trigger		= cedrus_enc_jpeg_job_trigger,
++	.job_finish		= cedrus_enc_jpeg_job_finish,
++
++	.irq_status		= cedrus_enc_irq_status,
++	.irq_clear		= cedrus_enc_irq_clear,
++	.irq_disable		= cedrus_enc_irq_disable,
++};
++
++static const struct v4l2_ctrl_config cedrus_enc_jpeg_ctrl_configs[] = {
++	{
++		.id	= V4L2_CID_JPEG_COMPRESSION_QUALITY,
++		.min	= 1,
++		.max	= 100,
++		.step	= 1,
++		.def	= CEDRUS_ENC_JPEG_QUALITY_DEFAULT,
++	},
++};
++
++static const struct v4l2_frmsize_stepwise cedrus_enc_jpeg_frmsize = {
++	.min_width	= 16,
++	.max_width	= 4096,
++	.step_width	= 2,
++
++	.min_height	= 16,
++	.max_height	= 4096,
++	.step_height	= 2,
++};
++
++const struct cedrus_engine cedrus_enc_jpeg = {
++	.codec			= CEDRUS_CODEC_JPEG,
++	.role			= CEDRUS_ROLE_ENCODER,
++	.capabilities		= CEDRUS_CAPABILITY_JPEG_ENC,
++
++	.ops			= &cedrus_enc_jpeg_ops,
++
++	.pixelformat		= V4L2_PIX_FMT_JPEG,
++	.ctrl_configs		= cedrus_enc_jpeg_ctrl_configs,
++	.ctrl_configs_count	= ARRAY_SIZE(cedrus_enc_jpeg_ctrl_configs),
++	.frmsize		= &cedrus_enc_jpeg_frmsize,
++
++	.job_size		= sizeof(struct cedrus_enc_jpeg_job),
++};
++
++/* Motion JPEG: the same pictures, as clients that ask for MJPG name them. */
++const struct cedrus_engine cedrus_enc_mjpeg = {
++	.codec			= CEDRUS_CODEC_JPEG,
++	.role			= CEDRUS_ROLE_ENCODER,
++	.capabilities		= CEDRUS_CAPABILITY_JPEG_ENC,
++
++	.ops			= &cedrus_enc_jpeg_ops,
++
++	/* Its quality is the JPEG engine's control: one handler holds them all. */
++	.pixelformat		= V4L2_PIX_FMT_MJPEG,
++	.frmsize		= &cedrus_enc_jpeg_frmsize,
++
++	.job_size		= sizeof(struct cedrus_enc_jpeg_job),
++};
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_enc_jpeg.h b/drivers/staging/media/sunxi/cedrus/cedrus_enc_jpeg.h
+new file mode 100644
+index 000000000..1a4a02861
+--- /dev/null
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_enc_jpeg.h
+@@ -0,0 +1,12 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Cedrus Video Engine Driver
++ */
++
++#ifndef _CEDRUS_ENC_JPEG_H_
++#define _CEDRUS_ENC_JPEG_H_
++
++extern const struct cedrus_engine cedrus_enc_jpeg;
++extern const struct cedrus_engine cedrus_enc_mjpeg;
++
++#endif
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_regs.h b/drivers/staging/media/sunxi/cedrus/cedrus_regs.h
+index 47e7bb303..5526b31c4 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_regs.h
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_regs.h
+@@ -1242,6 +1242,20 @@ static inline u32 cedrus_vp9_tile_offset(u32 tile_no, u32 mis,
+ #define VE_ENC_AVC_STM_BIT_MAX_REG		(VE_ENGINE_ENC_H264_BASE + 0x8c)
+ #define VE_ENC_AVC_STM_BIT_LEN_REG		(VE_ENGINE_ENC_H264_BASE + 0x90)
+ 
++/* JPEG mode */
++
++#define VE_ENC_JPEG_PARA0_DC_CHROMA(v)		SHIFT_AND_MASK_BITS(v, 26, 16)
++#define VE_ENC_JPEG_PARA0_DC_LUMA(v)		SHIFT_AND_MASK_BITS(v, 10, 0)
++
++#define VE_ENC_JPEG_PARA1_RUN_LEN_OPT_DIS	BIT(31)
++#define VE_ENC_JPEG_PARA1_COEF_DOWN_DIS		BIT(30)
++
++#define VE_ENC_JPEG_QM_INDEX_REG		(VE_ENGINE_ENC_H264_BASE + 0xe0)
++#define VE_ENC_JPEG_QM_DATA_REG			(VE_ENGINE_ENC_H264_BASE + 0xe4)
++#define VE_ENC_JPEG_QM_DATA_ROUND(q)		SHIFT_AND_MASK_BITS((q) >> 1, 31, 16)
++#define VE_ENC_JPEG_QM_DATA_RECIPROCAL(q) \
++	SHIFT_AND_MASK_BITS(min(SZ_64K / (q) + 1, 0xffff), 15, 0)
++
+ #define VE_ENC_AVC_ROW_INFO_ADDR_REG		(VE_ENGINE_ENC_H264_BASE + 0x9c)
+ 
+ #define VE_ENC_AVC_REF0_ADDR_Y_REG		(VE_ENGINE_ENC_H264_BASE + 0xa0)
+-- 
+2.47.3
+

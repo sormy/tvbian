@@ -21,13 +21,10 @@ Streams the hardware cannot handle are rejected during control
 validation: the Complex and Main profiles, reduced-resolution (RESPIC)
 coding and out-of-range PQINDEX values.
 
-Main profile is rejected because its P pictures decode incorrectly: the
-engine leaves the macroblocks the picture flags as skipped untouched
-instead of copying them from the forward reference, so they keep stale
-destination content. The only way found around it is seeding every
-destination with a full copy of its forward reference before each
-decode, which costs more than the hardware decode saves. Main profile
-content is left to software decoding, and the range reduction and
+Main profile is rejected because its P pictures decode incorrectly
+against the SMPTE conformance streams: chroma drifts in a stream with B
+pictures, and luma too in one with FASTUVMC. Main profile content is
+left to software decoding, and the range reduction and
 multi-resolution coding that only exist in that profile are not
 programmed.
 
@@ -78,10 +75,10 @@ index ab295ed4ba59..adb8f3756a17 100644
 +
 +		if (slice->sequence.profile == V4L2_VC1_PROFILE_MAIN)
 +			/*
-+			 * Main profile decodes incorrectly: the engine leaves
-+			 * the macroblocks a P picture flags as skipped
-+			 * untouched instead of copying them from the forward
-+			 * reference, so they keep stale destination content.
++			 * Main profile decodes incorrectly, against the
++			 * SMPTE conformance streams: chroma drifts across P
++			 * pictures in a stream with B pictures, and luma too
++			 * with FASTUVMC.
 +			 */
 +			return -EINVAL;
 +

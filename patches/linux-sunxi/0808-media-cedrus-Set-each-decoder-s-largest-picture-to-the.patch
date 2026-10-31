@@ -1,0 +1,163 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 31 Oct 2026 13:48:45 -0400
+Subject: [PATCH] media: cedrus: Set each decoder's largest picture to the
+ engine's
+
+HEVC and VP9 decode to 8192x4320; 8192x8192 hangs the SoC. 10-bit
+pictures past 6144x3456 fail or hang, so their SPS is refused there.
+MPEG-4 goes to 4080 wide, the engine's 8-bit macroblock count, with the
+neighbour scratch sized for it. JPEG stops at 6000x4000: 6144x6144 hangs
+the SoC.
+---
+ drivers/staging/media/sunxi/cedrus/cedrus_dec.h  |  4 ++++
+ .../staging/media/sunxi/cedrus/cedrus_dec_h265.c |  9 +++++++--
+ .../staging/media/sunxi/cedrus/cedrus_dec_jpeg.c |  4 ++--
+ .../media/sunxi/cedrus/cedrus_dec_mpeg4.c        | 16 +++++++++-------
+ .../staging/media/sunxi/cedrus/cedrus_dec_vp9.c  |  9 +++++++--
+ 5 files changed, 29 insertions(+), 13 deletions(-)
+
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec.h b/drivers/staging/media/sunxi/cedrus/cedrus_dec.h
+index 186357a21..a217b4a0f 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_dec.h
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec.h
+@@ -35,6 +35,10 @@ cedrus_dec_picture_10bit_extra_size(struct cedrus_context *ctx,
+ 
+ /* Bit depth */
+ 
++/* 10-bit pictures past this fail to decode, or hang the engine. */
++#define CEDRUS_DEC_10BIT_MAX_WIDTH	6144
++#define CEDRUS_DEC_10BIT_MAX_HEIGHT	3456
++
+ int cedrus_dec_bit_depth_update(struct cedrus_context *ctx,
+ 				unsigned int bit_depth);
+ 
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec_h265.c b/drivers/staging/media/sunxi/cedrus/cedrus_dec_h265.c
+index 22d1c84d3..99b562b51 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_dec_h265.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec_h265.c
+@@ -181,6 +181,11 @@ static int cedrus_dec_h265_ctrl_validate(struct cedrus_context *ctx,
+ 	if (bit_depth > max_depth)
+ 		return -EINVAL;
+ 
++	if (bit_depth > 8 &&
++	    (sps->pic_width_in_luma_samples > CEDRUS_DEC_10BIT_MAX_WIDTH ||
++	     sps->pic_height_in_luma_samples > CEDRUS_DEC_10BIT_MAX_HEIGHT))
++		return -EINVAL;
++
+ 	return cedrus_dec_bit_depth_update(ctx, bit_depth);
+ }
+ 
+@@ -1127,11 +1132,11 @@ static const struct v4l2_ctrl_config cedrus_dec_h265_ctrl_configs[] = {
+ 
+ static const struct v4l2_frmsize_stepwise cedrus_dec_h265_frmsize = {
+ 	.min_width	= 16,
+-	.max_width	= 4096,
++	.max_width	= 8192,
+ 	.step_width	= 16,
+ 
+ 	.min_height	= 16,
+-	.max_height	= 2304,
++	.max_height	= 4320,
+ 	.step_height	= 16,
+ };
+ 
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec_jpeg.c b/drivers/staging/media/sunxi/cedrus/cedrus_dec_jpeg.c
+index ed943462c..f3d1ae91f 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_dec_jpeg.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec_jpeg.c
+@@ -348,11 +348,11 @@ static const struct cedrus_engine_ops cedrus_dec_jpeg_ops = {
+ 
+ static const struct v4l2_frmsize_stepwise cedrus_dec_jpeg_frmsize = {
+ 	.min_width	= 16,
+-	.max_width	= 6144,
++	.max_width	= 6000,
+ 	.step_width	= 16,
+ 
+ 	.min_height	= 16,
+-	.max_height	= 6144,
++	.max_height	= 4000,
+ 	.step_height	= 16,
+ };
+ 
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec_mpeg4.c b/drivers/staging/media/sunxi/cedrus/cedrus_dec_mpeg4.c
+index a2fb1d93c..367ec18cd 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_dec_mpeg4.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec_mpeg4.c
+@@ -21,13 +21,15 @@
+ #include "cedrus_proc.h"
+ #include "cedrus_regs.h"
+ 
+-#define CEDRUS_MPEG4_MAX_SIZE		2048
+-#define CEDRUS_MPEG4_MAX_MBS		(CEDRUS_MPEG4_MAX_SIZE / 16)
++/* The engine counts macroblocks in 8 bits: 4080 wide */
++#define CEDRUS_MPEG4_MAX_WIDTH		4080
++#define CEDRUS_MPEG4_MAX_HEIGHT		2304
++#define CEDRUS_MPEG4_MAX_MBS		(CEDRUS_MPEG4_MAX_WIDTH / 16)
+ 
+ /* Scratch sizes for the largest picture: the vendor's or libvdpau's, larger */
+ #define CEDRUS_MPEG4_MBH_SIZE		(CEDRUS_MPEG4_MAX_MBS * SZ_2K)
+ #define CEDRUS_MPEG4_DCAC_SIZE		(CEDRUS_MPEG4_MAX_MBS * CEDRUS_MPEG4_MAX_MBS * 2)
+-#define CEDRUS_MPEG4_NCF_SIZE		(CEDRUS_MPEG4_MAX_MBS * SZ_2K)
++#define CEDRUS_MPEG4_NCF_SIZE		(CEDRUS_MPEG4_MAX_MBS * SZ_4K)
+ #define CEDRUS_MPEG4_MBH_OFFSET		0
+ #define CEDRUS_MPEG4_DCAC_OFFSET	CEDRUS_MPEG4_MBH_SIZE
+ #define CEDRUS_MPEG4_NCF_OFFSET		(CEDRUS_MPEG4_DCAC_OFFSET + \
+@@ -78,8 +80,8 @@ static int cedrus_dec_mpeg4_vol_validate(const struct v4l2_ctrl_mpeg4_vol *vol)
+ 	    vol->sprite_warping_accuracy > CEDRUS_MPEG4_WARPING_ACCURACY_MAX)
+ 		return -EINVAL;
+ 
+-	if (!vol->width || vol->width > CEDRUS_MPEG4_MAX_SIZE ||
+-	    !vol->height || vol->height > CEDRUS_MPEG4_MAX_SIZE)
++	if (!vol->width || vol->width > CEDRUS_MPEG4_MAX_WIDTH ||
++	    !vol->height || vol->height > CEDRUS_MPEG4_MAX_HEIGHT)
+ 		return -EINVAL;
+ 
+ 	return 0;
+@@ -718,11 +720,11 @@ static const struct v4l2_ctrl_config cedrus_dec_mpeg4_ctrl_configs[] = {
+ 
+ static const struct v4l2_frmsize_stepwise cedrus_dec_mpeg4_frmsize = {
+ 	.min_width	= 16,
+-	.max_width	= CEDRUS_MPEG4_MAX_SIZE,
++	.max_width	= CEDRUS_MPEG4_MAX_WIDTH,
+ 	.step_width	= 16,
+ 
+ 	.min_height	= 16,
+-	.max_height	= CEDRUS_MPEG4_MAX_SIZE,
++	.max_height	= CEDRUS_MPEG4_MAX_HEIGHT,
+ 	.step_height	= 16,
+ };
+ 
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec_vp9.c b/drivers/staging/media/sunxi/cedrus/cedrus_dec_vp9.c
+index a82ddec14..d5155577c 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_dec_vp9.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec_vp9.c
+@@ -1336,6 +1336,11 @@ static int cedrus_vp9_ctrl_validate(struct cedrus_context *ctx,
+ 	if (dec->bit_depth > max_depth)
+ 		return -EINVAL;
+ 
++	if (dec->bit_depth > 8 &&
++	    (dec->frame_width_minus_1 + 1 > CEDRUS_DEC_10BIT_MAX_WIDTH ||
++	     dec->frame_height_minus_1 + 1 > CEDRUS_DEC_10BIT_MAX_HEIGHT))
++		return -EINVAL;
++
+ 	return cedrus_dec_bit_depth_update(ctx, dec->bit_depth);
+ }
+ 
+@@ -1404,11 +1409,11 @@ static const struct v4l2_ctrl_config cedrus_dec_vp9_ctrl_configs[] = {
+ 
+ static const struct v4l2_frmsize_stepwise cedrus_dec_vp9_frmsize = {
+ 	.min_width	= 16,
+-	.max_width	= 4096,
++	.max_width	= 8192,
+ 	.step_width	= 16,
+ 
+ 	.min_height	= 16,
+-	.max_height	= 2304,
++	.max_height	= 4320,
+ 	.step_height	= 16,
+ };
+ 
+-- 
+2.55.0
+

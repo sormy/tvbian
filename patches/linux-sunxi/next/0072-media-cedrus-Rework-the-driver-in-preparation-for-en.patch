@@ -271,10 +271,10 @@ index ee61b15..79d2d65 100644
 -
 -		if (slice->sequence.profile == V4L2_VC1_PROFILE_MAIN)
 -			/*
--			 * Main profile decodes incorrectly: the engine leaves
--			 * the macroblocks a P picture flags as skipped
--			 * untouched instead of copying them from the forward
--			 * reference, so they keep stale destination content.
+-			 * Main profile decodes incorrectly, against the
+-			 * SMPTE conformance streams: chroma drifts across P
+-			 * pictures in a stream with B pictures, and luma too
+-			 * with FASTUVMC.
 -			 */
 -			return -EINVAL;
 -
@@ -6681,9 +6681,9 @@ index 7f51b01..0684a22 100644
 +		return -EINVAL;
 +
 +	/*
-+	 * Main profile decodes incorrectly: the engine leaves the macroblocks
-+	 * a P picture flags as skipped untouched instead of copying them from
-+	 * the forward reference, so they keep stale destination content.
++	 * Main profile decodes incorrectly, against the SMPTE conformance
++	 * streams: chroma drifts across P pictures in a stream with B
++	 * pictures, and luma too with FASTUVMC.
 +	 */
 +	if (slice->sequence.profile == V4L2_VC1_PROFILE_MAIN)
 +		return -EINVAL;

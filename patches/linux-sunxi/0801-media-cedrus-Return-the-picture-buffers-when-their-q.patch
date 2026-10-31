@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 31 Oct 2026 02:23:27 -0400
+Subject: [PATCH] media: cedrus: Return the picture buffers when their queue
+ stops
+
+Stopping the picture queue left its queued buffers with the driver, and
+videobuf2 warned of a driver bug for each.
+---
+ drivers/staging/media/sunxi/cedrus/cedrus_context.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_context.c b/drivers/staging/media/sunxi/cedrus/cedrus_context.c
+index 2f5d5d950..4fa89f591 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_context.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_context.c
+@@ -624,8 +624,10 @@ static void cedrus_context_stop_streaming(struct vb2_queue *queue)
+ 	v4l2_m2m_update_stop_streaming_state(ctx->v4l2.fh.m2m_ctx, queue);
+ 
+ 	/* Only stop the engine from the coded queue. */
+-	if (format_type != CEDRUS_FORMAT_TYPE_CODED)
++	if (format_type != CEDRUS_FORMAT_TYPE_CODED) {
++		cedrus_context_queue_cleanup(queue, true);
+ 		return;
++	}
+ 
+ 	cedrus_engine_cleanup(ctx);
+ 
+-- 
+2.47.3
+
