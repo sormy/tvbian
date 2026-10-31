@@ -65,7 +65,7 @@ Rockchip boxes; Amlogic ones are in [README_AMLOGIC.md](README_AMLOGIC.md), Allw
 | HDMI hotplug re-detect                            | 🟡  |      🟡      |      ✅       |
 | HDMI 4K60                                         | 🟡  |      🟡      |      ✅       |
 | HDMI-CEC                                          | 🟡  |      🟡      |      ✅       |
-| AV jack — composite video and audio               | 🟡  |      🟡      |      ➖       |
+| AV jack — composite video and audio               | ❓  |      ❓      |      ➖       |
 | GPU — Mali-450 under lima                         | ✅  |      ✅      |      ✅       |
 | Hardware decode — H.264, HEVC, VP9 to 8K          | ✅  |      ✅      |      ✅       |
 | Hardware decode — MPEG-1/2/4, VP8 to 1080p, H.263 | ✅  |      ✅      |      ✅       |
@@ -174,9 +174,10 @@ Pairing mode is **left + right until the LED blinks**; the entry is named **`Blu
 because naming things is hard. Pair in **one `bluetoothctl` session with a scan running**:
 
 ```sh
-# 1. remote in pairing mode (LED blinking), then find it by name:
-MAC=$(bluetoothctl --timeout 20 scan on | grep -im1 "bluetooth remote" \
-      | grep -oE '([0-9A-F]{2}:){5}[0-9A-F]{2}')
+# 1. remote in pairing mode (LED blinking), then find it by name; prints its MAC or "not found":
+bluetoothctl --timeout 20 scan on >/dev/null
+MAC=$(bluetoothctl devices | grep -im1 "bluetooth remote" | grep -oE '([0-9A-F]{2}:){5}[0-9A-F]{2}')
+echo "${MAC:-not found}"
 
 # 2. put it back in pairing mode, then pair with the scan running:
 { echo "agent NoInputNoOutput"; sleep 1; echo "default-agent"; sleep 1; echo "scan on"; sleep 8
