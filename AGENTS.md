@@ -63,7 +63,7 @@ another, so nothing rots when one is rewritten.
 
 | Doc                                      | Holds                                                                |
 | ---------------------------------------- | -------------------------------------------------------------------- |
-| `docs/bring-up.md`                       | board, chip and family bring-up, the kit, the criteria of done       |
+| `docs/bring-up/`                         | bring-up in phases, each do, bites and checks; the run's rules       |
 | `docs/first-login.md`                    | a new box's user, timezone, locale and Wi-Fi, by hand                |
 | `docs/mpp.md`                            | reaching the video engines; the codec test commands                  |
 | `docs/video-support.md`                  | each SoC's hardware decode, encode and display formats, by codec     |
@@ -141,10 +141,11 @@ cannot be backed, say so rather than rounding up.
 - **Docs stand alone: none names another**, by link or in prose, nor explains itself through another
   family's terms. A doc that needs another's fact states it. Exceptions: the index above, the top
   READMEs routing a reader to a family or a guide, a board's own `board.md` for its per-board facts,
-  and a worklog naming the files it changed.
-- **Checklist IDs live in `docs/bring-up.md`, nowhere else**: a renumbered checklist leaves every
-  other mention pointing at the wrong line. A board's test report and every other doc say what the
-  line checks.
+  a worklog naming the files it changed, and the bring-up's phases naming each other and the docs
+  they update.
+- **Checklist IDs live in `docs/bring-up/` and the boards' Test reports, nowhere else**: worklogs,
+  commits and messages name what a line checks. An ID is never renumbered; a new line takes the next
+  free one.
 - **Worklogs are written as work happens** — dated entries, wrong turns included. They are the raw
   material everything else derives from, and what the next port follows.
 - **Narrative lives in `docs/`**, never in scripts, payload files or DTB tables. Those stay terse.
@@ -163,9 +164,8 @@ cannot be backed, say so rather than rounding up.
 - **One command, one line.** The mechanism behind it goes in `docs/todo/` or the patch that
   implements it. Never warn against a command the doc does not give, or defend against a state it
   forbids.
-- **Keep a doc around 300 lines** — past that by much, split it or cut it. Three exceptions:
-  `docs/<board>/board.md` gets 500; `docs/bring-up.md` 600, being the procedure and its validation
-  in one; and `worklog.md` has no limit, being append-only history.
+- **Keep a doc around 300 lines** — past that by much, split it or cut it. Two exceptions:
+  `docs/<board>/board.md` gets 500, and `worklog.md` has no limit, being append-only history.
 - **README is scannable**: no filler, no repeated links, no per-board hardcoding where a pattern
   works. Warnings go in blockquotes. Humour is fine; it must not cost clarity.
 - `npx prettier --write` on every markdown file you touch.

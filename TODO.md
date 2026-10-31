@@ -14,8 +14,8 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
       in one `docs/`. Split them, by folder or by name, so a user never lands in a worklog.
 
 - [ ] **Docs: the cross-references out.** `AGENTS.md` now has docs stand alone; the reference docs
-      still name others, `bring-up.md` eight, the board docs up to five. Each goes: the fact stated
-      where it is needed, or the reference dropped.
+      still name others, the board docs up to five. Each goes: the fact stated where it is needed,
+      or the reference dropped.
 
 - [ ] **`tools/dtcx/bases/`: out of `tools/`.** Each `.conf` describes a kernel's or a U-Boot's
       trees, headers and vendor properties: data beside what it describes, not tool code. The
@@ -107,7 +107,7 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
       `ir_keyN` table in `board.patch` gives its own keys today (OK is `KEY_ENTER` on the R69,
       `KEY_REPLY` on the H313); then its pass over both transports, once a box has the remote.
 - [ ] **Rename the R69 to `r69-1`.** `r69` names boxes of several designs, against
-      `docs/bring-up.md`'s board identity. `boards/`, `stock/` and `docs/` move; a last `tvb-r69`
+      `docs/bring-up/`'s board identity. `boards/`, `stock/` and `docs/` move; a last `tvb-r69`
       depends on `tvb-r69-1`, which `Replaces` and `Breaks` it, so an installed box upgrades into
       it; `/usr/lib/tvb/board-id` changes with it.
 - [ ] **Rename the H96 Max H313's board ID to the H96 Max 3518's.** Its name already is; the ID, its
@@ -129,8 +129,8 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
 
 - [ ] **`tools/validate/`: one script a component, one runner.** `validate.sh` becomes components
       beside `video.py` (boot, watchdog, Wi-Fi and Bluetooth, storage, USB, HDMI and CEC, audio,
-      input, sleep and wake, thermal), each case tied to a line of `docs/bring-up.md`'s criteria,
-      all on `video.py`'s host and box split: JSON out, `report`, `matrix` for a board's `board.md`,
+      input, sleep and wake, thermal), each case tied to a line of `docs/bring-up/`'s checks, all on
+      `video.py`'s host and box split: JSON out, `report`, `matrix` for a board's `board.md`,
       `compare` as the regression check.
 
 ## Bigger todos

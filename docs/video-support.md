@@ -1,7 +1,9 @@
 # Hardware video: what each chip plays, records and shows
 
 Which video formats each chip handles in its video hardware, rather than on the CPU. Measured
-through FFmpeg 9.0.2 with `patches/ffmpeg/`, on TVBian's kernels:
+through FFmpeg 9.0.2 with `patches/ffmpeg/`, on TVBian's kernels. Each chip's columns are
+`tools/validate/video.py`'s matrix from one board of it, run again after every kernel or FFmpeg
+change:
 
 | Chip            | Die    | Engine, as FFmpeg reaches it                   |
 | --------------- | ------ | ---------------------------------------------- |
