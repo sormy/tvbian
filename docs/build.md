@@ -1,7 +1,12 @@
 # Building TVBian
 
 `./build.sh` runs every step in one container image, `build-env/Containerfile` on Debian stable.
-Outputs land in `build/out/`; the kernel tree and caches in the `tvb-work` volume.
+Outputs land in `build/out/`; the kernel tree and caches in the `tvb-work` volume. A tree deleted
+from the volume frees nothing on a macOS host until the volume is trimmed:
+
+```sh
+container run --rm --cap-add CAP_SYS_ADMIN -v tvb-work:/work debian:trixie fstrim -v /work   # host
+```
 
 ## Hosts
 
@@ -21,8 +26,8 @@ byte-identical modules from a macOS and a Linux host.
 The work volume is a case-sensitive ext4, never a bind mount: macOS's APFS is case-insensitive, and
 the kernel has names that differ only by case (`xt_TCPMSS.h`, `xt_tcpmss.h`).
 
-Maskrom, `amlcmd` and writing a card stay on the host: a container on macOS reaches no USB. So do
-the tools they need: `./build.sh tool <name>` builds one from `tools/<name>/` natively, into
+Maskrom, FEL, `amlcmd` and writing a card stay on the host: a container on macOS reaches no USB. So
+do the tools they need: `./build.sh tool <name>` builds one from `tools/<name>/` natively, into
 `build/tools/<name>/`, its commands linked in `build/bin/`; `./build.sh tools` builds every one.
 
 | Host         | Beyond the runtime                       |
@@ -51,6 +56,12 @@ the tools they need: `./build.sh tool <name>` builds one from `tools/<name>/` na
 `tvb-<name>-modules-<kernelrelease>`; the metapackage depends on them. A local build is versioned
 `0~local`, below every published one. A board builds once `kernel/` has its `BOARD_KERNEL`.
 `TVB_BUILD_SUITE=forky` builds against Debian testing.
+
+A one-file kernel change goes through the step too: the patch in the kernel's list, then
+`./build.sh kernel`. The step brings ccache and the host's CPUs and memory; a bare `container run`
+gets the runtime's 4 CPUs and 1 GB and no cache, 40 minutes where the step takes under two. A kernel
+goes on a box with every deb its step built, `tvb-*-modules` included, in one `dpkg -i`: the
+kernel's own `modules.dep` drops a driver whose package ran `depmod` before it.
 
 ## Release
 
@@ -172,9 +183,9 @@ publishes the week it lands. A box never moves on its own: its `sources.list` na
 
 ### First boot
 
-- **Login:** `ssh root@<board-key>.local`, password `1234`, expired by `chage -d 0`, so PAM asks for
+- **Login:** `ssh root@<hostname>.local`, password `1234`, expired by `chage -d 0`, so PAM asks for
   a new one before any shell. A drop-in lets `sshd` take a root password. A second box of the same
-  board answers as `<board-key>-2.local`.
+  board answers as `<hostname>-2.local`.
 - **No Ethernet:** a USB Ethernet adapter (`r8152`, `ax88179_178a`, `asix`, `cdc_ether`, `cdc_ncm`
   in the fragment), or HDMI and a keyboard on `tty1`, then `nmtui`.
 - **Unique per box:** SSH host keys and `machine-id`, generated at first boot.
