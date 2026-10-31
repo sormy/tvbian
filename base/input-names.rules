@@ -1,11 +1,19 @@
-# event* numbering is probe-order dependent
+# event* numbering is probe-order dependent; a rule for a device a box lacks never matches, but two
+# rules naming one link must not both match on one box, or they race for it
+
+# Rockchip
 SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="*.pwm",          SYMLINK+="input/ir-remote"
-SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="adc-keys",       SYMLINK+="input/adc-keys"
+SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="adc-keys",       SYMLINK+="input/recovery-button"
 SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="hdmi_cec_key",   SYMLINK+="input/cec-remote"
-SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="dw_hdmi",        SYMLINK+="input/hdmi"
 SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="rockchip,hdmi*", SYMLINK+="input/hdmi-sound"
 SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="bt-powerkey",    SYMLINK+="input/bt-powerkey"
-# one symlink per interface — two rules on one name race for the link
+
+# Allwinner
+SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="sunxi-ir",       SYMLINK+="input/ir-remote"
+SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="gpio-keys",      SYMLINK+="input/recovery-button"
+SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="dw_hdmi",        SYMLINK+="input/cec-remote"
+
+# every family: the Bluetooth remote, one link per interface
 SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="Bluetooth remote Keyboard", SYMLINK+="input/bt-remote"
 SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="Bluetooth remote Consumer Control", SYMLINK+="input/bt-remote-consumer"
 SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="Bluetooth remote Mouse", SYMLINK+="input/bt-remote-mouse"

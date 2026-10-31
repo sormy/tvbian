@@ -4,6 +4,11 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
 
 ## Open
 
+- [ ] **Every board: the recovery button sends `KEY_VENDOR`.** Mainline's code for a "recovery",
+      "update" or "maskrom" button; the Tanix TX1 V2.0 has it. The others keep their factory trees'
+      codes: the R69 and H96 Max H313 `KEY_VOLUMEUP`, the H96 Max 3518D `KEY_F11`. Each change says
+      why in its `board.patch`, and a press under `evtest /dev/input/recovery-button` checks it.
+
 - [ ] **Docs: user guides apart from developer docs.** The guides a user follows (install, back up,
       restore, first login, the service modes) beside the bring-up, build and reference docs today,
       in one `docs/`. Split them, by folder or by name, so a user never lands in a worklog.
