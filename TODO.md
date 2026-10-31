@@ -9,6 +9,36 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
       codes: the R69 and H96 Max H313 `KEY_VOLUMEUP`, the H96 Max 3518D `KEY_F11`. Each change says
       why in its `board.patch`, and a press under `evtest /dev/input/recovery-button` checks it.
 
+- [ ] **Every board: which recovery button it has.** Most boxes expose a U-Boot recovery button, a
+      key the bootloader reads and Linux sees, not the SoC's maskrom or FEL strap, which is rarely
+      wired out. Each board's README row and `board.md` name it: "Recovery button (U-Boot)", or "→
+      Maskrom" where holding it reaches the boot ROM, shown by the boot ROM's USB device.
+
+- [ ] **Every board without an SD slot: our U-Boot boots a USB disk first when one is in**, as an SD
+      card does on the boards that have one. A failed update is then undone by plugging in a stick,
+      with no hidden button to find. Rockchip's part is in `docs/todo/rk35xx-uboot-usb.md`; on an
+      Allwinner board it is the U-Boot conf's `BOOT_PREBOOT`, done on the Tanix.
+
+- [ ] **Every board: a recovery button with no other use picks the fallback in our U-Boot.** Held at
+      power-on: the previous kernel (u-boot-menu's second entry, the one Debian keeps). Held longer:
+      U-Boot's boot menu on HDMI, for a USB keyboard. On a board without an SD slot a USB disk needs
+      no button: it boots first whenever one is in. Never Android's recovery, which our images do
+      not have. The Tanix TX1 V2.0's PH9 was built once this way.
+
+- [ ] **Every board: `tvb-install` keeps the eMMC's bootloader**, compares it with the image's and
+      warns on a mismatch: `docs/todo/tvb-install-bootloader.md`.
+
+- [ ] **Every board: built outputs made by the build, not committed.** The repo keeps the inputs
+      (`factory_*`, `*.patch`) and builds the rest: factory tree → `.dts` → patch → `board.dts` →
+      `board.dtb`, and the same for `uboot.dts`, `maskrom_loader.bin` and `fel_loader.bin`. Today
+      those outputs are committed beside their inputs, and can drift from them.
+
+- [ ] **Rename `rk35xx` to `rockchip`:** the kernel conf, fragment and packages
+      (`linux-image-tvb-rk35xx`, its `-next`), `BOARD_KERNEL`, and `BOARD_FAMILY` split off as its
+      own SoC key (`meson-gxl`, `sunxi-h616` beside the kernel's `meson64`, `sunxi64`), the
+      `rk35xx-` todo prefix. Installed boxes need the new packages to `Replace` and `Break` the old,
+      which the release guard checks.
+
 - [ ] **Docs: user guides apart from developer docs.** The guides a user follows (install, back up,
       restore, first login, the service modes) beside the bring-up, build and reference docs today,
       in one `docs/`. Split them, by folder or by name, so a user never lands in a worklog.
@@ -21,13 +51,27 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
       trees, headers and vendor properties: data beside what it describes, not tool code. The
       boards' `BOARD_*_DTB_SOURCE` and `_TARGET` name them.
 
+- [ ] **`./build.sh kernel`: a test kernel under its own release name**, installed beside the
+      known-good one so the boot menu keeps a fallback. Kbuild appends `LOCALVERSION` from the
+      environment; `run` does not pass it into the container, and the driver packages must follow
+      the new release.
+
+- [ ] **`patches/linux-sunxi/`: folders by subsystem.** 255 patches in one list, ours squeezed into
+      the gaps of LibreELEC's numbering, `0099` against its `0100`. Split by the files a patch
+      touches into `soc/`, `mmc/`, `sound/`, `drm/`, `media/`, `dts/`, numbered per folder, applied
+      in that order, a patch spanning two in the later. Origin goes in each folder's README. A
+      move-only commit: the patched tree byte-identical before and after.
+
+- [ ] **Every board: the Test report keyed by checklist ID.** `docs/bring-up/` asks for it; no
+      board's report is, so a line never run stays invisible. The Tanix TX1 V2.0 first.
+
 - [ ] **H96 Max M20: VC-1 needs GStreamer 1.26.6.** 1.26.2, trixie's, maps no caps to
       `V4L2_PIX_FMT_VC1_ANNEX_G`: `v4l2vc1dec` registers and fails "Invalid caps". By hand until
       trixie moves: `patches/gst-plugins-good/README.md`. TVBian replaces no Debian package, so it
       waits for trixie or upstream.
 
 - [ ] **H96 Max M20: the decoder leaves CAPTURE buffers active on STREAMOFF.** Four `WARN`s, buffers
-      0-13, all from Fuseamp's `fuseamp-flips` and `fuseamp-quality`; ffmpeg stopped early on H.264,
+      0-13, all from fuseamp's `fuseamp-flips` and `fuseamp-quality`; ffmpeg stopped early on H.264,
       HEVC 8- and 10-bit, VP9 to 4K does not reproduce it. Next: that client's ioctl sequence around
       the stop.
 
@@ -112,6 +156,13 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
       it; `/usr/lib/tvb/board-id` changes with it.
 - [ ] **Rename the H96 Max H313's board ID to the H96 Max 3518's.** Its name already is; the ID, its
       directories and its image still say `h96max-h313`. The same move as the R69's rename above.
+
+- [ ] **A board package refuses the wrong box.** `tvb-<board>` ships loaders that brick a box of
+      another SoC: `apt install tvb-tanix-tx1-v2` on an RK3518 writes Allwinner loaders. A `preinst`
+      compares the running SoC, `/proc/device-tree/compatible`, with `BOARD_FAMILY` and aborts on a
+      mismatch. The image build installs it in a chroot off the box, so it checks only on real
+      hardware.
+
 - [ ] **A USB keyboard's keymap on `tty1`:** `console-setup` in the image and a README line, or US
       only.
 - [ ] **BTF:** dropped with debug info by `CONFIG_DEBUG_INFO_NONE`, or kept for BPF tools at the
@@ -137,13 +188,14 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
 
 | File                                    | Open question                               |
 | --------------------------------------- | ------------------------------------------- |
+| `docs/todo/video.md`                    | hardware video: what is left, every SoC     |
 | `docs/todo/media-stick.md`              | the universal media stick                   |
+| `docs/todo/kodi.md`                     | Kodi 22 on our FFmpeg, built on trixie      |
+| `docs/todo/extras-upstream.md`          | extras built from an upstream release       |
 | `docs/todo/rk35xx-boot-log.md`          | boot log cleanup                            |
 | `docs/todo/rk35xx-sd-uhs-warm-reset.md` | `dwmmc` first init after a warm reset       |
 | `docs/todo/rk35xx-uboot-usb.md`         | USB in our U-Boot                           |
+| `docs/todo/tanix-tx1-v2.md`             | the Tanix TX1 V2.0: what is left            |
+| `docs/todo/tvb-install-bootloader.md`   | an install that keeps the box bootable      |
 | `docs/todo/website.md`                  | tvbian.com: one page on GitHub Pages        |
 | `docs/todo/repo-layout.md`              | folders, patches, tools and docs, regrouped |
-| `docs/todo/video.md`                    | hardware video: what is left, every SoC     |
-| `docs/todo/kodi.md`                     | Kodi 22 on our FFmpeg, built on trixie      |
-| `docs/todo/extras-upstream.md`          | extras built from an upstream release       |
-| `docs/todo/tanix-tx1-v2.md`             | the Tanix TX1 V2.0: what is left            |
