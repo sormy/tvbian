@@ -17,10 +17,11 @@ family-wide.
 `board.conf` decides: `BOARD_UBOOT=rk3528` builds `uboot/rk3528.conf` around the board's own control
 tree, `boards/<board>/uboot.dts` or the tree `BOARD_UBOOT_DTB` names there, and `tvb-<board>`
 installs the image as `/usr/lib/tvb/u-boot.bin`: the FIT, or Allwinner's U-Boot with its SPL. An
-Allwinner board names `board`: its stock U-Boot reads the kernel's tree, and ours does too. Every
-board here has one — a shared FIT built from mainline's `rk3528-generic` tree carries no board DT
-and no `CONFIG_ADC`, so the recovery button cannot reach Maskrom from U-Boot on it. Whether a board
-has ever booted its own belongs in that board's `board.md`.
+Allwinner board names `board`: its stock U-Boot reads the kernel's tree, and ours does too. Its FEL
+loader is a second variant of the same U-Boot, on the defconfig's tree, so a board tree cannot break
+the way in. Every board here has one — a shared FIT built from mainline's `rk3528-generic` tree
+carries no board DT and no `CONFIG_ADC`, so the recovery button cannot reach Maskrom from U-Boot on
+it. Whether a board has ever booted its own belongs in that board's `board.md`.
 
 To enable a board: set `BOARD_UBOOT_DTB_SOURCE` and `BOARD_UBOOT_DTB_TARGET` in its `board.conf`,
 write `boards/<board>/uboot.patch` against `factory_uboot.dts`
@@ -179,6 +180,7 @@ On the host:
 
 ```sh
 ./build.sh uboot <board>                     # -> build/out/uboot/<board>/u-boot.bin
+./build.sh uboot <board> loader              # Allwinner: -> build/out/uboot/<board>/fel_loader.bin
 strings -a build/out/uboot/<board>/u-boot.bin | grep -E 'bl31-v|fdt-rk3528'   # identify a blob
 # bl31-v1.21 / fdt-rk3528-<board>
 ```

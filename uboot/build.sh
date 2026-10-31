@@ -1,19 +1,25 @@
 #!/bin/bash
 # Build one board's U-Boot, inside the build container, from the uboot/<conf>.conf its board.conf
-# names as BOARD_UBOOT: /out/uboot/<board>/u-boot.bin, on the board's control tree where it has one
-# (BOARD_UBOOT_DTB, else uboot). BL31 is rkbin's blob in binman's FIT, or TF-A built from source; an
-# Allwinner board's DRAM settings are its factory boot0's.
+# names as BOARD_UBOOT. The variant: boot, /out/uboot/<board>/u-boot.bin, on the board's control
+# tree where it has one (BOARD_UBOOT_DTB, else uboot); loader, an Allwinner board's fel_loader.bin,
+# which FEL loads to serve the eMMC over USB, on the defconfig's tree. BL31 is rkbin's blob in
+# binman's FIT, or TF-A built from source; an Allwinner board's DRAM settings are its factory boot0's.
 set -euo pipefail
-BOARD=$1
+BOARD=$1 VARIANT=${2:-boot}
 # shellcheck source=/dev/null
 . "/repo/boards/$BOARD/board.conf"
-# shellcheck source=/dev/null  # the conf: REPO, TAG, DEFCONFIG; CONFIGS, PATCHES, SOC, RKBIN, TFA_*, BOOT_PREBOOT...
+# shellcheck source=/dev/null  # the conf: REPO, TAG, DEFCONFIG; CONFIGS, PATCHES, SOC, RKBIN, TFA_*, LOADER_*...
 . "/repo/uboot/${BOARD_UBOOT:?boards/$BOARD/board.conf names no BOARD_UBOOT}.conf"
 TREE=/work/uboot/$BOARD
 OUT=/out/uboot/$BOARD
 DTS=/repo/boards/$BOARD/${BOARD_UBOOT_DTB:-uboot}.dts
 BOOT0=/repo/boards/$BOARD/factory_boot0.bin
-NAME=u-boot.bin
+case $VARIANT in
+  boot) NAME=u-boot.bin ;;
+  loader) NAME=fel_loader.bin && [ -n "${LOADER_BOOTCOMMAND:-}" ] ||
+    { echo "✗ $BOARD: only an Allwinner board's loader is a U-Boot" >&2; exit 1; } ;;
+  *) echo "✗ $BOARD: no U-Boot variant $VARIANT: boot or loader" >&2; exit 1 ;;
+esac
 
 configs=${CONFIGS:-}
 if [ -f "$BOOT0" ]; then
@@ -32,6 +38,7 @@ if [ -f "$BOOT0" ]; then
     DRAM_SUNXI_ODT_EN=$(dram 5) DRAM_SUNXI_TPR0=$(dram 22) DRAM_SUNXI_TPR6=$(dram 26)
     DRAM_SUNXI_TPR10=$(dram 27) DRAM_SUNXI_TPR11=$(dram 28) DRAM_SUNXI_TPR12=$(dram 29)"
 fi
+[ "$VARIANT" = boot ] || configs="$configs $LOADER_CONFIGS"
 
 fetch() {  # repo, ref, dir
   mkdir -p "$3" && git -C "$3" init -q && git -C "$3" fetch -q --depth=1 "$1" "$2" &&
@@ -45,7 +52,7 @@ rm -rf "$TREE/u-boot/.git"   # a git checkout suffixes the version: 2026.10+, or
 cd "$TREE/u-boot"
 for p in ${PATCHES:-}; do patch -s -p1 -F0 <"/repo/$p"; done
 
-if [ -f "$DTS" ]; then
+if [ "$VARIANT" = boot ] && [ -f "$DTS" ]; then
   if [ -n "${SOC:-}" ]; then
     DT=$SOC-$BOARD
     cp "$DTS" "arch/arm/dts/$DT.dts"
@@ -65,7 +72,11 @@ if [ -f "$DTS" ]; then
 fi
 make -s "$DEFCONFIG"
 for c in $configs; do scripts/config --set-val "${c%%=*}" "${c#*=}"; done
-[ -z "${BOOT_PREBOOT:-}" ] || scripts/config --set-str PREBOOT "$BOOT_PREBOOT"
+if [ "$VARIANT" = boot ]; then
+  [ -z "${BOOT_PREBOOT:-}" ] || scripts/config --set-str PREBOOT "$BOOT_PREBOOT"
+else
+  scripts/config --set-str BOOTCOMMAND "$LOADER_BOOTCOMMAND"
+fi
 make -s olddefconfig
 # a symbol Kconfig drops, through a renamed or unmet dependency, would ship a quietly different build
 for c in $configs; do

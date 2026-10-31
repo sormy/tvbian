@@ -24,7 +24,7 @@ code** — one `boards/<board>/` directory. If a change needs new code per board
 | `kernel/`          | each kernel's pin, config, fragment and patch list, and the step building it                   |
 | `build-env/`       | the build environment: one container image every `./build.sh` step runs in                     |
 | `modules/`         | each out-of-tree driver: its pin, our patches, the step packaging it per kernel                |
-| `uboot/`           | each U-Boot a board package ships: its pin and defconfig, and the step building it             |
+| `uboot/`           | each U-Boot a board package ships, and each FEL loader: pin, defconfig, the step building it   |
 | `package/`         | the steps building `tvb-<board>`, `tvb-firmware-<chip>`, `tvb-base` and `tvb-archive-keyring`  |
 | `image/`           | the image step, its package list, and the image's own state: locale, root's first SSH login    |
 | `release/`         | the release plan, the signed `apt` repo, and the upload to GitHub                              |
@@ -39,11 +39,11 @@ mechanism no other board can use: a unit for hardware only it has.
 
 **Tools we build, and must:** `dtc` (`./build.sh tool dtc` — vanilla cannot round-trip a vendor blob
 with `&label`s) · `rkdeveloptool` (`./build.sh tool rkdeveloptool`) and each board's maskrom loader
-(`./build.sh loaders`) · `sunxi-fel` (`./build.sh tool sunxi-fel`) · `amlcmd` and `gxlimg`
-(`./build.sh tool amlcmd`, `./build.sh tool gxlimg` — Amlogic's own are closed and x86-64 Linux
-only) · each board's `board.dtb` and `uboot.dts` from its factory trees
-(`./build.sh board-dtb <board>`, `./build.sh uboot-dtb <board>`) — or every board's boot files at
-once with `./build.sh boards`. **From the host:** `cc` and `patch` · `fdtput` · `fsck.ext4`
+(`./build.sh loaders`) · `sunxi-fel` (`./build.sh tool sunxi-fel`) and each board's FEL loader, the
+same step · `amlcmd` and `gxlimg` (`./build.sh tool amlcmd`, `./build.sh tool gxlimg` — Amlogic's
+own are closed and x86-64 Linux only) · each board's `board.dtb` and `uboot.dts` from its factory
+trees (`./build.sh board-dtb <board>`, `./build.sh uboot-dtb <board>`) — or every board's boot files
+at once with `./build.sh boards`. **From the host:** `cc` and `patch` · `fdtput` · `fsck.ext4`
 (keg-only on Homebrew: `/opt/homebrew/opt/e2fsprogs/sbin/`) · `xz` · `npx prettier` · `python3` ·
 `mtools` and `mkimage`, for a board whose image carries a FAT boot partition. **On the box:**
 `evtest`, `fio`, `stress-ng`, `iw`, `bluez`.
@@ -68,6 +68,7 @@ another, so nothing rots when one is rewritten.
 | `docs/uboot.md`                          | the bootloader pair: what we build, what stays factory, why          |
 | `docs/rockchip-maskrom.md`               | Rockchip's USB service modes: entry, the 32 MiB Loader trap, restore |
 | `docs/amlogic-burning-mode.md`           | the Amlogic burning gadget: entry, backup, restore, the mask ROM     |
+| `docs/allwinner-fel.md`                  | Allwinner's FEL: back up, restore, install over USB                  |
 | `docs/watchdog.md`                       | why it cannot be stopped, and why a soft reboot can strand the box   |
 | `docs/hdmi-edid-override.md`             | banning a display mode the panel advertises but nothing should pick  |
 | `docs/remote-keymap.md`                  | validating IR and BLE keymaps separately; the `hwdb` override        |

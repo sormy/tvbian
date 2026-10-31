@@ -22,7 +22,8 @@
 #                                             factory_board.dtb + board.patch
 #          ./build.sh uboot-dtb <board>       factory_uboot.dts, uboot.dts from factory_uboot.dtb +
 #                                             uboot.patch
-#          ./build.sh loader <board>          maskrom_loader.bin from factory_idbloader.bin + rkbin
+#          ./build.sh loader <board>          maskrom_loader.bin from factory_idbloader.bin + rkbin, or
+#                                             fel_loader.bin, a variant of the board's U-Boot
 #          ./build.sh board-dtbs | uboot-dtbs | loaders   the same, for every board that has the input
 #          ./build.sh boards                  all three plurals, then whether boards/ drifted from git
 #          ./build.sh test                    tests/, in the build container
@@ -167,7 +168,7 @@ board() {
 
 case "$1" in
   kernel) run bash kernel/build.sh "${2:?usage: ./build.sh kernel <kernel/*.conf>}" ;;
-  uboot) run bash uboot/build.sh "${2:?usage: ./build.sh uboot <board>}" ;;
+  uboot) run bash uboot/build.sh "${2:?usage: ./build.sh uboot <board> [boot|loader]}" "${3:-boot}" ;;
   board) board "${2:?usage: ./build.sh board <board>}" ;;
   firmware) run bash package/firmware.sh "${2:?usage: ./build.sh firmware <dir>}" ;;
   base) run bash package/base.sh ;;

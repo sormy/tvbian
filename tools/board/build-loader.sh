@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# Pack each Rockchip board's maskrom USB loader into boards/<board>/maskrom_loader.bin: Rockchip's
-# usbplug with that board's own DDR init, carved from its factory idbloader.
+# Build each board's USB service-mode loader into its board directory, byte-identical on a rebuild:
+#   Rockchip:  maskrom_loader.bin, Rockchip's usbplug with that board's own DDR init, carved from its
+#              factory idbloader; stamped with the time of the commit that last changed the idbloader.
+#   Allwinner: fel_loader.bin, the U-Boot step's FEL loader, which serves the eMMC over USB, on
+#              the DRAM settings of its factory boot0; stamped with its U-Boot tag's commit time.
+#   Amlogic:   none; its factory U-Boot's burning mode serves the eMMC itself, through amlcmd.
 #
-# Stamped with the time of the commit that last changed the idbloader, so a repack is byte-identical.
-#
-# Usage: tools/board/build-loader.sh [board...]   # default: every board with a factory_idbloader.bin
+# Usage: tools/board/build-loader.sh [board...]   # default: every board with a factory loader input
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -20,20 +22,33 @@ RK3528_CHIP_TAG=8253          # "3528", as the loader header stores it, byte-rev
 RKBOOT_INI="RKBOOT/RK3528MINIALL.ini"             # declares NEWIDB + RC4_OFF; also names the usbplug and SPL
 USBPLUG="bin/rk35/rk3528_usbplug_v1.04.bin"       # presence of this marks rkbin as fetched
 
-boards() { for c in "$BOARDS_DIR"/*/board.conf; do d=$(dirname "$c"); [ ! -f "$d/factory_idbloader.bin" ] || basename "$d"; done; }
+boards() {
+	for c in "$BOARDS_DIR"/*/board.conf; do
+		d=$(dirname "$c")
+		[ ! -f "$d/factory_idbloader.bin" ] && [ ! -f "$d/factory_boot0.bin" ] || basename "$d"
+	done
+}
 BOARDS="${*:-$(boards)}"
-[ -n "$BOARDS" ] || { echo "no boards/*/factory_idbloader.bin to build a loader from"; exit 1; }
-[ -x "$RKDEV" ] || { echo "Need the patched rkdeveloptool. Run: ./build.sh tool rkdeveloptool"; exit 1; }
+[ -n "$BOARDS" ] || { echo "no boards/*/factory_idbloader.bin or factory_boot0.bin to build a loader from"; exit 1; }
 
-if [ ! -e "$RKBIN/$USBPLUG" ]; then
+rkbin() {
+	[ -x "$RKDEV" ] || { echo "Need the patched rkdeveloptool. Run: ./build.sh tool rkdeveloptool"; exit 1; }
+	[ ! -e "$RKBIN/$USBPLUG" ] || return 0
 	rm -rf "$RKBIN" && mkdir -p "$RKBIN" && ( cd "$RKBIN"
 		git init -q
 		git fetch -q --depth 1 "$RKBIN_REPO" "$RKBIN_SHA" && git checkout -q FETCH_HEAD )
-fi
+}
 
 for BOARD in $BOARDS; do
+	if [ -f "$BOARDS_DIR/$BOARD/factory_boot0.bin" ]; then
+		"$REPO/build.sh" uboot "$BOARD" loader
+		cp "$REPO/build/out/uboot/$BOARD/fel_loader.bin" "$BOARDS_DIR/$BOARD/fel_loader.bin"
+		echo "-> boards/$BOARD/fel_loader.bin"
+		continue
+	fi
 	IDB="$BOARDS_DIR/$BOARD/factory_idbloader.bin"
-	[ -f "$IDB" ] || { echo "$BOARD has no factory_idbloader.bin: not a Rockchip board, no maskrom loader"; exit 1; }
+	[ -f "$IDB" ] || { echo "$BOARD has no factory_idbloader.bin or factory_boot0.bin: no loader"; exit 1; }
+	rkbin
 	OUT="$BOARDS_DIR/$BOARD/maskrom_loader.bin"
 
 	# CODE471 is the box's own DDR init, carved from its factory idbloader rather than guessed from
