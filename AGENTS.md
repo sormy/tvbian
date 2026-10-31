@@ -62,6 +62,7 @@ another, so nothing rots when one is rewritten.
 | `docs/bring-up.md`                       | board, chip and family bring-up, the kit, the criteria of done       |
 | `docs/first-login.md`                    | a new box's user, timezone, locale and Wi-Fi, by hand                |
 | `docs/mpp.md`                            | reaching the video engines; the codec test commands                  |
+| `docs/video-support.md`                  | each SoC's hardware decode, encode and display formats, by codec     |
 | `docs/emmc-layout.md`                    | the measured eMMC map: every replicated structure and its sectors    |
 | `docs/build.md`                          | `./build.sh`: hosts, steps, outputs, and making a release            |
 | `docs/sources.md`                        | every upstream we build from: what floats, what is pinned, and why   |
@@ -81,6 +82,7 @@ another, so nothing rots when one is rewritten.
 | `docs/<board>/worklog*.md`               | dated history, wrong turns included; split by topic once it grows    |
 | `tools/dtcx/README.md`                   | a blob decompiled as its vendor wrote it: named constants, decimal   |
 | `tools/amlcmd/README.md`                 | the Amlogic burning-mode client we wrote, and its worklog            |
+| `tools/validate/README.md`               | a running box against the bring-up criteria, one script a component  |
 | `patches/dtc/README.md`                  | the patched `dtc` that round-trips a vendor blob with `&label`s      |
 | `patches/u-boot/README.md`               | U-Boot's pylibfdt build off Linux; the MAC from vendor storage       |
 | `patches/arm-trusted-firmware/README.md` | TF-A's BL31 for Allwinner boards: the watchdog reset fix             |

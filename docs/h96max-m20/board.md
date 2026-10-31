@@ -56,7 +56,7 @@ Kernel 6.18.44, image of 2026-09-17. `fio --direct=1`, `iperf3` to a wired host.
 | USB drive random 4K write       | 1644 IOPS ✅                                      |
 | USB throughput (via Gb NIC)     | 196 Mbit/s, idle and under 4-core load ✅         |
 | `stress-ng` 4×cpu + 2×vm        | 120 s `--verify`, 6 passed, 0 failed ✅           |
-| Watchdog                        | systemd 80 s, hardware 65.5 s ✅                  |
+| Watchdog                        | systemd 80 s, hardware 65.5 s; no reset ❌        |
 | CPU, idle                       | 50 °C                                             |
 | CPU, 10 min `stress-ng --cpu 4` | 86 °C peak; 1.752 GHz for 5 min, then 1.4-1.5 GHz |
 | HDMI                            | 2256x1504 @ 60.00 Hz, the panel's native mode ✅  |
@@ -69,7 +69,9 @@ region was saved and restored byte-identical afterwards.
 The USB drive is USB 3, on this USB 2.0 host at `480M` through a hub, bound to `usb-storage`.
 
 The watchdog counts at 1 kHz into 16 bits, so the hardware stops at 65.5 s; systemd asks for the
-same 80 s as the Rockchip boards and the kernel pings the hardware in between.
+same 80 s as the Rockchip boards and the kernel pings the hardware in between. **A SoC hang is not
+reset**: none of seven video-decoder hangs on 2026-10-31 rebooted the box within minutes; each took
+a power cycle.
 
 **The Ethernet number is a USB measurement.** No Ethernet is fitted, so it is a USB-attached RTL8153
 on a USB 2.0 host that is also serving the rootfs — 196 Mbit/s is the bus, not the NIC.
@@ -117,26 +119,52 @@ The decoder, `meson-vdec`, is patched into TVBian's kernel; the encoders, `amven
 | RealVideo | not implemented | not implemented | ➖              | ➖          | ➖    | ➖  |
 
 Decode ✅ is bit-exact against ffmpeg's software decode over every frame, the rest within IDCT
-rounding: MPEG-1/2 66-68 dB, MPEG-4 59-66 dB, MJPEG 73 dB; encode ✅ is the PSNR below. ➖ is beyond
+rounding: MPEG-1/2 61-70 dB, MPEG-4 51-66 dB, MJPEG 63 dB; encode ✅ is the PSNR below. ➖ is beyond
 the hardware: the H.264 encoder stops at 1920x1088.
 
-MJPEG decodes to I420 only: its microcode writes three planes. VC-1 is the Advanced profile; a
-skipped frame yields no new picture, and the last two pictures of a stream stay in the microcode.
-GStreamer configures a V4L2 VC-1 decoder from 1.26.6; trixie ships 1.26.2, and
-`patches/gst-plugins-good/README.md` rebuilds its plugin with the fix.
+MJPEG decodes to I420 only: its microcode writes three planes. VC-1 is the Advanced profile. A
+skipped picture, a 1-byte P, yields none; at a stream's start the B-pictures after one come out
+ahead of their I and are dropped, and the last two pictures of a stream stay in the microcode: 1442
+of 1451 on a WMV clip, each bit-exact and in order. GStreamer configures a V4L2 VC-1 decoder from
+1.26.6; trixie ships 1.26.2, and `patches/gst-plugins-good/README.md` rebuilds its plugin with the
+fix.
+
+MPEG-4 Advanced Simple decodes B-frames, quarter-pel and GMC: Xvid and DivX AVIs come out whole and
+in order, packed B-frames once ffmpeg unpacks them. Quarter-pel from DivX 5.1 sits at 33 dB, its
+encoder's rounding, which ffmpeg's software decoder imitates and the microcode does not; GMC leaves
+a few pictures in 300 below 40 dB. One ffmpeg-encoded clip stalls the microcode at its 44th picture.
 
 ffmpeg's `*_v4l2m2m` reach every codec the driver decodes, and both encoders, with five patches to
-9.0.2 in `research/ffmpeg-v4l2m2m/`: pts for raw streams, `extradata` for MPEG-1/2, MPEG-4 and VC-1,
-an `mjpeg_v4l2m2m` decoder, encoder `extradata` for Matroska and MP4, and a drain that waits for a
-CAPTURE buffer. Another, `0009`, makes its decoders ask for a scaled CAPTURE: `-capture_max_height`;
-`0010` and `0011` carry a decode across a resolution change. Debian's 7.1.5 decodes H.264, HEVC, VP9
-and MPEG-2 from a container; MPEG-4, VC-1, raw streams and encode to Matroska fail.
+9.0.2, `patches/ffmpeg/` `0003`–`0007`: pts for raw streams, `extradata` for MPEG-1/2, MPEG-4 and
+VC-1, an `mjpeg_v4l2m2m` decoder, encoder `extradata` for Matroska and MP4, and a drain that waits
+for a CAPTURE buffer. Another, `0011`, makes its decoders ask for a scaled CAPTURE:
+`-capture_max_width` and `-capture_max_height`; `0012`, `0013` and `0030` carry a decode across a
+resolution change, `0027` unpacks DivX's packed B-frames, and `0029` sends the stream headers again
+after a seek. Debian's 7.1.5 decodes H.264, HEVC, VP9 and MPEG-2 from a container; MPEG-4, VC-1, raw
+streams and encode to Matroska fail.
+
+**Seeking** as a player does, the decoder flushed, resumes every codec: the first picture comes
+15-220 ms later, from the keyframe before the target (`meson-codecs` `0026`-`0028`). A resolution
+change inside an H.264 stream passes fed at a player's pace; one inside the final drain, the whole
+file queued, stops it at the change.
+
+**Compressed to the display.** HEVC and VP9 hand the display Amlogic FBC instead of NV12 when the
+client asks, `meson-codecs` `0025`: ffmpeg's `-afbc 8,10` (`patches/ffmpeg/` `0028`) gives DRM PRIME
+frames `YU08` or `YU10` with `DRM_FORMAT_MOD_AMLOGIC_FBC`, scatter, which only the video plane
+reads. 10-bit stays 10-bit, and no NV12 copy is written: 4K HEVC decodes at 85 fps so, against 28 to
+NV12, Main10 at 72, VP9 at 82. Every frame passes AddFB2 and an atomic TEST_ONLY on
+`meson_overlay`'s plane, 1080p and 4K, 8 and 10 bits; 🟡 on screen, not watched.
+
+**❌ 4K VP9 can freeze the SoC.** Decoding it while ~1.5 GB is written to eMMC hangs the box 5 s in,
+nothing logged, and the watchdog does not reset it; either alone passes. The first 4K VP9 decode
+after a boot fails outright, the next ones pass.
 
 **On screen, 4K plays at 30 fps and glitches at 60.** The display's video plane cannot read whole
 3840x2160 NV12 pictures 60 times a second, about 750 MB/s; 1080p60 and 4K30 play clean. A client can
 ask for a half-size CAPTURE per stream, `meson-codecs` `0017`, and 4K HEVC at 60 fps then decodes at
 74 fps against 58. HEVC takes coded sizes up to 4096x2304, `0018`: DCI 4K and 4K coded at 2176
-lines.
+lines. H.264 has no scaled CAPTURE: its core scales only under the multi-instance microcode, which
+on GXLX2 takes the sequence and then decodes nothing.
 
 **Not implemented:** the silicon decodes AVS, AVS2 and RealVideo — the factory loads `amvdec_avs`,
 `amvdec_avs2`, `amvdec_real` — but no V4L2 driver for them exists on this chip.
@@ -146,7 +174,7 @@ lines.
 | Decode, 4K                       | H.264 2.57 s, HEVC 2.94 s, VP9 2.64 s       |
 | H.264 encode, 8 Mbit/s           | 720p 51.5 dB, 1080p 45.7 dB                 |
 | HEVC encode, 8 Mbit/s            | 720p 51.1, 1080p 44.9, 4K 38.7 dB in 11.6 s |
-| Peak CMA, 4K decode              | VP9 254 MiB, HEVC 139, H.264 124            |
+| Decoder CMA, a 4K clip           | 291-331 MiB; compressed, Main10 139, VP9 87 |
 
 ## eMMC over the OTG port
 

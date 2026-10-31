@@ -63,7 +63,7 @@ came with Android and a promise of updates; one of those two was real. Rockchip 
 | **Power and recovery**                    |                 |
 | CPU frequency scaling                     |       ✅        |
 | Thermal zones                             |       ✅        |
-| Hardware watchdog                         |       ✅        |
+| Hardware watchdog                         |       ❌        |
 | Suspend, woken by the BT remote           |       ❌        |
 | Serial console                            |       ✅        |
 | eMMC backup over USB, burning mode        |       ✅        |

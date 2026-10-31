@@ -103,6 +103,28 @@ are claimed by the capability word but stay 🟡 — no encoder exists to make a
 
 The R69 measures within noise of every number above — same silicon, so neither box is an outlier.
 
+**Through FFmpeg ✅** — 9.0.2 with `patches/ffmpeg/` on MPP `1.1.0`, `-c:v h264_rkmpp` and the like,
+DRM PRIME out; fps to `-f null`, measured 2026-10-31:
+
+| Codec          | 1080p |  4K | Against software          |
+| -------------- | ----: | --: | ------------------------- |
+| H.264          |   378 |  96 | identical, every frame    |
+| H.264 High 10  |     — |   — | identical, NV15           |
+| HEVC, Main10   |   439 | 100 | identical; 10-bit as NV15 |
+| VP9, profile 2 |   355 |   — | identical, 4K too         |
+| VP8            |    57 |  ➖ | identical                 |
+| MPEG-2         |    85 |  ➖ | 74.5 dB                   |
+| MPEG-4         |    84 |  ➖ | 61.5 dB                   |
+| H.264 encode   |    52 |  ➖ | 41.8 dB at 8 Mbit/s       |
+| HEVC encode    |    58 |  ➖ | 44.0 dB at 8 Mbit/s       |
+
+- `capture_max_height 1080`: 4K H.264 and HEVC as a ½ picture, 93 and 86 fps; 62.8 dB against a
+  software decode scaled down.
+- `afbc 1`: HEVC 4K 10-bit at 120 fps; the Cluster0 plane takes AFBC 8- and 10-bit at 4K in a
+  test-only commit, the Esmart planes refuse it. Picture content on screen ❓.
+- A frame MPP flags as damaged is dropped: one byte in 20,000 corrupted dropped every frame.
+- A writeback commit oopses the vendor kernel's VOP2 (`vop2_crtc_atomic_flush`).
+
 ## Names on disk
 
 Every installed path is `tvb-`, the same as every other board: the tree, loader and helpers under

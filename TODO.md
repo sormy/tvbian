@@ -26,10 +26,6 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
       trixie moves: `patches/gst-plugins-good/README.md`. TVBian replaces no Debian package, so it
       waits for trixie or upstream.
 
-- [ ] **H96 Max M20: ffmpeg's `*_v4l2m2m`.** Every codec works on 9.0.2 with
-      `research/ffmpeg-v4l2m2m/`'s patches; Debian's 7.1.5 still fails MPEG-4, VC-1, raw streams and
-      encode to Matroska. Open: send the patches to ffmpeg, or ship the build.
-
 - [ ] **H96 Max M20: the decoder leaves CAPTURE buffers active on STREAMOFF.** Four `WARN`s, buffers
       0-13, all from Fuseamp's `fuseamp-flips` and `fuseamp-quality`; ffmpeg stopped early on H.264,
       HEVC 8- and 10-bit, VP9 to 4K does not reproduce it. Next: that client's ioctl sequence around
@@ -49,10 +45,6 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
       engines behind an IOMMU; ours is `cma=256M`. Measure `CmaFree` during 4K decode on each board.
 - [ ] **H96 Max M20: sluggish.** Idle, zram and CMA sat unused for 8 h 26 min, 2026-10-20, which
       says nothing about load. Play 4K and watch `vmstat 1` and `CmaFree` together.
-
-- [ ] **H96 Max M20: 4K at 60 fps on screen, through a COMPOSE selection.** `meson-codecs` `0017`
-      decodes HEVC and VP9 to a half-size CAPTURE when asked; not yet watched at 60 Hz. Then:
-      whether the payload sets `capture_max_height`, and whether H.264's core can scale.
 
 - [ ] **RK3518 boards: revisit the GPU against the H96 Max M20.** Same Mali-450 and the same BOE
       2256x1504 panel: the M20 scores glmark2 **64** at it native; the RK3528 boards scored 41 at
@@ -130,6 +122,17 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
       a read-only root, a volatile root, then A/B with `systemd-sysupdate`, two roots plus a data
       partition and a fallback at boot.
 
+- [ ] **H96 Max M20: the watchdog left a hard hang standing.** A VP9 4K decode hung the SoC at 13:51
+      on 2026-10-31; no reset followed, the box stayed down until power-cycled at 13:58. No hang
+      that day reset: each was a power cycle. `meson_gxbb_wdt` is active, 80 s, petted by systemd.
+      The previous boot's journal stops with no oops.
+
+- [ ] **`tools/validate/`: one script a component, one runner.** `validate.sh` becomes components
+      beside `video.py` (boot, watchdog, Wi-Fi and Bluetooth, storage, USB, HDMI and CEC, audio,
+      input, sleep and wake, thermal), each case tied to a line of `docs/bring-up.md`'s criteria,
+      all on `video.py`'s host and box split: JSON out, `report`, `matrix` for a board's `board.md`,
+      `compare` as the regression check.
+
 ## Bigger todos
 
 | File                                    | Open question                               |
@@ -140,3 +143,4 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
 | `docs/todo/rk35xx-uboot-usb.md`         | USB in our U-Boot                           |
 | `docs/todo/website.md`                  | tvbian.com: one page on GitHub Pages        |
 | `docs/todo/repo-layout.md`              | folders, patches, tools and docs, regrouped |
+| `docs/todo/video.md`                    | hardware video: what is left, every SoC     |

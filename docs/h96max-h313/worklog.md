@@ -2184,3 +2184,55 @@ driver loads, brings in `skw_sdio_lite`, and the devices it creates bring in the
 - With `tvb-swt6621s-modules` and `tvb-firmware-swt6621s` built locally with `0007` and without the
   conf: `systemd-modules-load` inserted nothing, `wlan0` at 12.8 s, `hci0` up, nothing failed; a
   fallback unit found all three loaded at 60 s.
+
+## 2026-10-31 — FFmpeg's rkmpp on MPP 1.1.0
+
+- MPP `1.1.0` built on the box, `match chip name: rk3528a`; `mpi_dec_test` H.264 1080p 305 fps,
+  HEVC 434. FFmpeg 9.0.2's own `rkmppdec`/`rkmppenc` extended rather than nyanmisaka's fork, which
+  brings its own device type, NV15 format and RGA filters.
+- Unpatched: the first 10-bit frame was a NULL dereference in the filter setup; MPEG-2 frames came
+  out of order, MPP's parser taking timestamps in microseconds; `-b:v 8M` encoded at 2.5 Mbit/s,
+  MPP's default bounds. `patches/ffmpeg/0020`–`0026`.
+- vdpu382 writes no thumbnail alone: the ½ picture follows the full one in the same buffer. AFBC
+  with it timed out HEVC and gave no H.264 frames, so scaled frames stay linear.
+- A writeback commit to check AFBC content oopsed `vop2_crtc_atomic_flush`, NULL, on a linear NV12
+  frame; the process stayed a zombie holding the DRM device until a reboot.
+- VP9 profile 2 at 3840x2160, 30 frames from libvpx: the NV15 frames identical to software's
+  yuv420p10le, every byte.
+- H.264 High 10 at 1920x1080, 30 frames from libx264: NV15 frames identical to software's.
+- Resolution probe through FFmpeg, 3-frame clips 1920x1080 to 8192x4320: H.264 8- and 10-bit, VP9
+  and profile 2 to 5120x2880, nothing at 7680x4320; HEVC and Main10 to 7680x4320, 8192x4320 wrong
+  (34 dB). VP8 right at 1920x1080 only: 2560 and up decode to 6 dB pictures with kernel errors, not
+  refused. MPEG-2 and MPEG-4 to 1920x1080, nothing past it. `capture_max_height 1080`: H.264, HEVC
+  and VP9 at 4K give 1920x1080, 61–64 dB against software's area scale; 8K HEVC gives 3840x2160, by
+  eye identical, 35 dB as the hardware decimates. H.264 and HEVC encode to 8192x4320.
+- `ffmpeg/0031`: `mpeg2_rkmpp`, `mpeg4_rkmpp` and `vp8_rkmpp` refuse a stream past 1920x1088 at
+  open, "larger than the hardware decodes"; VP8 2560x1440 and MPEG-2/4 above 1080p now fail there,
+  1920x1080 decodes as before.
+- `ffmpeg/0034`: `mpeg1_rkmpp` and `h263_rkmpp`, MPEG-1 through MPP's MPEG-2 parser: MPEG-1
+  1920x1080 75.6 dB, H.263 128x96 to 704x576 70–76 dB, 1408x1152 refused (1152 lines). An
+  `mjpeg_rkmpp` built the same way decoded nothing: MPP's JPEG decoder wants an output buffer with
+  each packet, its task API, as `mpi_dec_test` drives it; left out.
+- 8K H.264 through `rkmppdec`: MPP reports 7680x4320, then ends the stream with no frame; MPP's
+  `mpi_dec_test` decodes the same stream. `CmaAllocated` stays at 2.3 MiB in either: MPP allocates
+  from the system heap, so the 256 MiB CMA is not the limit. Holding the end of stream until the
+  format report, and 24 frame buffers in place of 16, changed nothing; both reverted.
+
+## 2026-10-31 — `rkmppdec` ends the stream early; 8K decodes
+
+- The 8K failure was `rkmppdec`: it set `eos_reached` when it sent the end of stream, so a receive
+  that found no frame yet returned EOF. At 7680x4320 MPP is still allocating after the info change.
+  With the end of stream 60 frames away, 8K VP9 decoded all 60 and 8K H.264 58: the last picture,
+  carried on MPP's end-of-stream frame, was dropped. A flush also left the flag set, so a looped
+  input or a seek after the end decoded nothing. `ffmpeg/0035` keeps sent and reached apart.
+- With it: H.264 8- and 10-bit and HEVC Main and Main10 to 8192x8192, VP9 profiles 0 and 2 to
+  8192x4320; 16384x8640 broken, VP9 8192x8192 broken.
+- VP9 first timed at 14 fps at 3840x2160 against `mpi_dec_test`'s 75: the suite's concat input
+  probed each copy of the clip, decoding a 4K VP9 frame in software every time. Remuxed into one
+  file first: H.264 61, 10-bit 57, HEVC 117, Main10 106, VP9 76, profile 2 67.
+- HEVC encode garbles every width tried between 5120 and 8192, at any height: 6144, 7168, 7680 and
+  7936 come out at 5–14 dB in most runs; 5120 and 8192 always encode clean. Not the memory clock:
+  `dmc` pinned at 786 MHz, 7680 still fails 6 runs in 10; no kernel message. H.264 encode 4K 14 fps
+  against libx264 9.8.
+- Debian's `ffmpeg` installed for a software reference pulled in 58 packages; removed. The test
+  FFmpeg is built on the host with libx264 and libx265, MPP 1.1.0 linked static.

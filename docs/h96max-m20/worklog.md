@@ -1596,3 +1596,93 @@ Ten minutes of `stress-ng --cpu 4` each, on the stick as it sits:
 
 The trip is now 85 °C; hot stays 90 °C and critical 110 °C. The idle reading was 50 °C cold, 62-65
 °C straight after a run; the 67 °C idle recorded on 2026-10-12 matches the latter.
+
+## 2026-10-31 — media parity: ffmpeg 9.0.2 on the box, the drain race
+
+- ffmpeg 9.0.2 with `patches/ffmpeg/0001`–`0018`, built on the box in 85 min. H.264, HEVC, VP9 bit
+  exact to 4K and DRM PRIME frames byte-identical to the raw path; HEVC Main10 out as 8-bit NV12, 53
+  dB; MPEG-1/2 66–69 dB; MJPEG 64 dB, I420. Both encoders decode back: 1080p H.264 45.2 dB, HEVC
+  45.1 dB.
+- HEVC Main10 oopsed on a stream's end, the decoder then hung until a reboot: the end-of-stream
+  drain runs in a worker, the LAST buffer woke ffmpeg, whose STREAMOFF drained again from
+  `stop_streaming` while the worker still walked the frames; both completed buffer 16, then HEVC's
+  frame list was freed under the other (`dead000000000108`). `meson-codecs/0020` runs one drain at a
+  time; three full Main10 runs, the PRIME client and H.264 since, no warning.
+- Not drain-related, the same on the box's own module: an Advanced Simple MPEG-4 720p AVI with
+  B-frames gives 43 of 120 frames, `mpeg4_unpack_bframes` or not; a VC-1 1440x576 stream gives 1193
+  of 1451 frames, each bit exact to some software frame, out of order.
+
+## 2026-10-31 — media parity: MPEG-4, VC-1, compressed scan-out, seeking
+
+- The decode matrix's PSNR compared `setpts=N` streams of different time bases: MPEG-4 and VC-1 read
+  24 dB and "out of order" where every picture was right. Hardware pictures now match software ones
+  by luma PSNR against their neighbours, raw NV12 on both sides.
+- MPEG-4 43 of 120, VC-1 1193 of 1451: ffmpeg queues the whole clip into the 16 MiB VIFIFO and
+  stops; the microcode decodes at the pace CAPTURE buffers return, and the drain gave it 1 s before
+  LAST. `meson-codecs/0022` waits while the VIFIFO level falls. An Xvid ASP AVI: 348 to 591 of 591.
+- Every end of stream waited the parser's 200 ms: the sequence lacked its search pattern, `0021`.
+- ffmpeg segfaulted reading 544x352 and 720x540 DivX: a plane was width×height rounded to 64 KiB,
+  the canvas 64-aligned lines down 64-aligned rows, so the decoder wrote past it. `0023`.
+- MPEG-4 without B-frames came out with timestamps `15 15 17`, `41 41 43 43`: the microcode reports
+  some offsets 22–213 bytes into the padding behind the previous packet. `0024`.
+- Packed DivX and Xvid (P and B in one AVI packet, a 7-byte N-VOP after): `patches/ffmpeg/0027`
+  unpacks, as `mpeg4_rkmpp` does.
+- Open: `mpeg4_720.avi`, ffmpeg's own rate-controlled encode, stalls the microcode at picture 44,
+  `MREG_BUFFERIN` unconsumed with 425 KB in the VIFIFO; B-pictures 31, 33, 39 and 41 come out at
+  29–32 dB before it. Not the workspace (172 KB of 1 MiB used), not a P on a time-base wrap, not the
+  VOL: every re-encode of the same pictures decodes whole.
+- VC-1: 5 skipped pictures (1-byte P) in the clip, none decoded; the 2 B-pictures after the first
+  two come out ahead of their I and are dropped; 2 stay in the microcode. 1442 of 1451, the rest
+  bit-exact and in order.
+- Compressed scan-out: references written compressed but contiguous, the basic layout, hung the SoC
+  and the watchdog reset it. The scatter layout works: `0025`, CAPTURE `AMF8`/`AMFA` holding the MMU
+  header. AddFB2 refused it until `bytesperline` 0: DRM checks `(height - 1) × pitch`.
+- `-afbc 10` on Main10 first gave 0 frames: ffmpeg started on NV12M, the driver resumed, and the
+  source change still queued made ffmpeg reinit a running decoder. ffmpeg now starts compressed.
+- H.264 ½ through `codec_h264_g12a`, ❌: with `g12a_h264_multi` or `gxl_h264_multi` cut from the
+  factory `video_ucode.bin`, the driver first spun on `SEARCH_HEAD` (a resume from inside its own
+  configure, CAPTURE already streaming); past that the microcode sends `CONFIG_REQUEST` twice, takes
+  `CONFIG_DONE` and raises nothing more. Reverted.
+- Seeking as players do (`avcodec_flush_buffers`): H.264, MPEG-1/2, MPEG-4, MJPEG and VC-1 stalled,
+  HEVC now and then before any seek. The restart's drain flagged LAST (`0026`); a stale source
+  change made ffmpeg reinit a resumed decoder (`0027`); canvases went to the buffers queued, in
+  queue order, while recycling counts vb2 indices (`0028`); MPEG-4 and VC-1 headers live only in
+  `extradata` (`patches/ffmpeg/0029`).
+- H.264 changing resolution inside one stream stopped at the first change when fed at a player's
+  pace, 60 of 180, on the module before `0021` too: after its reinit the wrapper restarted the
+  capture queue only on a new packet. `patches/ffmpeg/0030`: 180 of 180. Open: a change inside the
+  final drain, ffmpeg's CLI on a short file, still gets 120 and trips `Assertion pkt failed`.
+- GStreamer is not installed on the box: its pipelines are not re-run against `0027`.
+- 6.18.60 with `0021`-`0028` in-tree: 4K VP9 through ffmpeg's CLI aborted on its first decode after
+  four boots, `Unrecognized dec_status: 00000000`, every packet EIO, and twice the SoC hung minutes
+  later, in the matrix and in a repeat. A module without `0027` passed its first run after a boot;
+  so did the next six fresh boots with every build, the in-tree one included, and 8 rounds of 4K
+  HEVC then VP9. Not attributed to a patch; open.
+- The watchdog never fired: the non-MMU FBC hang, the 13:51 hang and the later one each ended in a
+  manual power cycle. `meson_gxbb_wdt` is active, 80 s, systemd pets it, `bootstatus` 0.
+- The hangs need 4K VP9 decoding while ~1.5 GB goes to eMMC: the decode alone, frames read and
+  dropped, passed; a 1.5 GB `dd` alone passed; both together froze the SoC 5 s in, every time, with
+  nothing in dmesg, 54 °C and 850 MB free. The last samples show the write's dirty page cache moving
+  into CMA beside the decoder's 330 MiB. The `0020` module, none of `0021`-`0028`, hangs the same:
+  not this work's. HEVC and H.264 at 4K with the same writes pass. The earlier matrix piped frames
+  to `md5sum`, no page cache, and never met it.
+- The first 4K VP9 decode after a boot aborts, `Unrecognized dec_status: 00000000`; the box stays up
+  and later runs pass.
+- One HEVC 1080p decode in the 6.18.60 matrix never got its end-of-stream LAST: ffmpeg waited in
+  poll for good, ignored SIGTERM, and its session kept the core from every VDEC_1 and VP9 decode
+  after it, 0 frames each, until `kill -9`. 30 repeats drained clean.
+- `video.py` timed no HEVC rate: its clip, 3 pictures, 16 times back to back, stalled at 40 of 48,
+  every time. The drain waited on 6 OUTPUT buffers that needed a free CAPTURE buffer; 13 of 16 held
+  IDR pictures, POC 0 each, still marked referenced: references match by POC, so the pictures after
+  the newest IDR kept every older one. `meson-codecs/0029` releases them at an IDR or BLA: 48 of 48,
+  20 copies 60 of 60, 30 copies 90 of 90; 8-bit HEVC bit-exact, seek, resolution change and FBC as
+  before. On the out-of-tree module; not yet in a built kernel.
+- `tools/validate/video.py --engine meson`, sizes past 4096x2304 and H.264 10-bit `--skip`ped, on
+  6.18.60 and 7.3.1: the same verdicts, `compare` nothing worse. H.264 and VP9 to 3840x2160, HEVC to
+  4096x2304, MPEG-1/2/4 and MJPEG to 1920x1080, HEVC encode to 4096x2304, H.264 encode to 1920x1080;
+  VP8 and H.263 refused. Its encode verdict read `software`: these encoders free their interrupt on
+  close, and a `*_v4l2m2m` encoder now counts as hardware. 4K rates on 6.18.60 with `0029`: H.264
+  30, HEVC 47, Main10 64, VP9 58, VP9 profile 2 75 (10-bit timed as 8-bit), HEVC encode 21.
+- CMA, no debugfs or sysfs here, `CmaTotal` less `CmaFree` with the clip resident first: the decoder
+  takes 291-331 MiB at 4K as NV12, 139 MiB Main10 compressed, 87 VP9 compressed; the pool peaked at
+  370 of 768 MiB, no display attached.
