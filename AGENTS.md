@@ -124,8 +124,10 @@ cannot be backed, say so rather than rounding up.
 
 - **Docs are updated in the same pass as the change.** Work isn't done when the box works; it's done
   when the docs say what the box does. A doc that contradicts the repo is worse than no doc.
-- **Docs do not link to each other.** Name a file in plain text if a reader needs it. The index
-  above is the only place that points anywhere.
+- **Docs stand alone: none names another**, by link or in prose, nor explains itself through another
+  family's terms. A doc that needs another's fact states it. Exceptions: the index above, the top
+  READMEs routing a reader to a family or a guide, a board's own `board.md` for its per-board facts,
+  and a worklog naming the files it changed.
 - **Worklogs are written as work happens** — dated entries, wrong turns included. They are the raw
   material everything else derives from, and what the next port follows.
 - **Narrative lives in `docs/`**, never in scripts, payload files or DTB tables. Those stay terse.
@@ -173,6 +175,21 @@ cannot be backed, say so rather than rounding up.
 - **A limitation being fixed is current, not permanent.**
 - **History belongs in `worklog.md`.** A **date on a claim is evidence, not history**:
   `✅ measured 2026-08-20` belongs.
+
+## Writing a guide
+
+A guide is a procedure a user follows, a README section or a service-mode doc; a reader who has
+never seen the box must get through it.
+
+- **Sections by task**: prerequisites, then one per job; a job with an easy and a hard case splits.
+- **Prose between the commands**, no numbered steps or bullets; caveats close it as a short list.
+- **Generic**: no board's name or numbers, and both hosts, macOS and Linux, wherever they differ.
+- **No internals**: how it was built and why lives in comments and the reference docs.
+- **No ❓**: what is untested is a todo item, its history the worklog.
+- **No magic numbers**: the command reads them from the repo's own files, or a short comment says
+  what they are.
+- **Each step says what it is for and where it runs**; what is optional says so, and what for.
+- **Recommend the safer route** without forbidding the other.
 
 ## Commits
 

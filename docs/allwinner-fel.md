@@ -78,5 +78,7 @@ sync
 
 - **No disk after the loader:** serial shows why.
 - **macOS asks for approval:** every `sudo` wants the password, and a new disk may need allowing.
+- **macOS says `Operation not permitted` on `/dev/rdiskN`, even with `sudo`:** the terminal app
+  needs Full Disk Access (System Settings, Privacy & Security).
 - **The desktop opened the box's partitions first:** macOS writes a `.fseventsd` folder to each,
   harmless, on partitions Android never reads.

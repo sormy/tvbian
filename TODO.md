@@ -4,6 +4,14 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
 
 ## Open
 
+- [ ] **Docs: user guides apart from developer docs.** The guides a user follows (install, back up,
+      restore, first login, the service modes) beside the bring-up, build and reference docs today,
+      in one `docs/`. Split them, by folder or by name, so a user never lands in a worklog.
+
+- [ ] **Docs: the cross-references out.** `AGENTS.md` now has docs stand alone; the reference docs
+      still name others, `bring-up.md` eight, the board docs up to five. Each goes: the fact stated
+      where it is needed, or the reference dropped.
+
 - [ ] **`tools/dtcx/bases/`: out of `tools/`.** Each `.conf` describes a kernel's or a U-Boot's
       trees, headers and vendor properties: data beside what it describes, not tool code. The
       boards' `BOARD_*_DTB_SOURCE` and `_TARGET` name them.
