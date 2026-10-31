@@ -7,3 +7,12 @@ CONFIG_DEBUG_INFO_NONE=y
 CONFIG_VIDEO_MESON_VDEC=m
 # a built-in KUnit suite runs on every load of the decoder
 # CONFIG_VIDEO_MESON_VDEC_KUNIT_TEST is not set
+# every family: a panic reboots, and leaves its log in pstore
+CONFIG_PSTORE_RAM=y
+CONFIG_PANIC_TIMEOUT=10
+# every family: file names on FAT, NTFS and exFAT disks in UTF-8
+CONFIG_NLS_DEFAULT="utf8"
+# Debian's wireless-regdb is signed by Debian's key: trusted beside the kernel's, or cfg80211
+# rejects it and every country stays 00
+CONFIG_CFG80211_CERTIFICATION_ONUS=y
+CONFIG_CFG80211_EXTRA_REGDB_KEYDIR="/repo/kernel/regdb-certs"
