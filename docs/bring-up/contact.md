@@ -15,8 +15,11 @@ can show, the agent reads off it. Say what each action is for.
    recovery button held while the box powers up: the USB service mode. Its vendor ID, in `lsusb` or
    `system_profiler SPUSBDataType`, names the family: `2207` Rockchip, `1b8e` Amlogic, `1f3a`
    Allwinner.
-4. **Last, Android's UI**: Developer options, debugging, `adb`. TV firmware often hides them.
-5. Read the SoC, decide the kind (the table in `README.md`), and tell the human what comes next.
+4. **No cable to hand: the network**, on the few boxes whose stock listens for `adb` on TCP: try
+   `adb connect <ip>:5555`, then `adb root`. A `userdebug` build with `ro.adb.secure` 0 gives a root
+   shell, and `dump.md`'s files come over it.
+5. **Last, Android's UI**: Developer options, debugging, `adb`. TV firmware often hides them.
+6. Read the SoC, decide the kind (the table in `README.md`), and tell the human what comes next.
 
 ## Bites
 

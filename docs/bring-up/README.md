@@ -103,7 +103,10 @@ These hold in every phase.
 
 **Builds.** Everything goes through `./build.sh` from the first artifact: it brings the cache, the
 host's CPUs and memory. A scratch script is a bug to remove the same day; one container holds the
-build volume at a time; a script is never edited while it runs.
+build volume at a time; a script is never edited while it runs. Even a one-module change builds on
+the host and goes to the box built: a stick or a small box with poor cooling compiles slowly,
+throttles, and its heat disturbs what is being measured. A box with the headroom may build; the host
+is still the default.
 
 **An intermittent fault**, in this order: the journal's timeline around every occurrence, each
 driver warning in it traced to its source and to any handling the vendor commented out; a scenario

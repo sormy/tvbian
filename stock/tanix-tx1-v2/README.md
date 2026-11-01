@@ -15,6 +15,7 @@ gzipped and base64'd across the line and checked by SHA-256. `mac_addr` is redac
 | build       | `Google/p281/p281:10/QP1A.191105.004/eng.lizhon.20260714.193338`     |
 | bootloaders | boot0 `12a0e3cc`, BL31 `05d6c57` 2021-10-28, U-Boot 2018.05-g8ac4189 |
 | kernel      | 4.9.170, built 2026-06-23                                            |
+| adb         | root over TCP 5555: `userdebug`, `test-keys`, `ro.adb.secure` 0      |
 
 | File                            | What                                                    |
 | ------------------------------- | ------------------------------------------------------- |
