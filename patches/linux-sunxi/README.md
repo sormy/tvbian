@@ -44,6 +44,7 @@ for its API, and rewrites of top-level ones it takes in their place (`0103`, `02
 | `0805`–`0806` | Cedrus: MPEG-4 Part 2 and H.263 decode           |
 | `0807`        | Cedrus: a coded format sized by its own engine   |
 | `0808`        | Cedrus: each decoder's largest picture, measured |
+| `0809`        | Cedrus: a missing HEVC reference skipped quietly |
 
 The display stack is 7.2's on both kernels. `0034` takes 7.2.12's `drivers/gpu/drm/sun4i`,
 `bridge/synopsys`, `ccu-sun8i-de2.c`, `sun50i-iommu.c` and `dw_hdmi.h` as they are; LibreELEC's
@@ -164,6 +165,9 @@ context opens with, so JPEG took MPEG-2's 4096x2304 in place of its own. Not yet
 `0808` is ours: each decoder's largest picture, as measured. HEVC and VP9 to 8192x4320, 8192x8192
 hanging the SoC; 10-bit to 6144x3456, 7680x4320 hanging; MPEG-4 to the 4080 its 8-bit macroblock
 count holds; JPEG to 6000x4000, 6144x6144 hanging. Not yet submitted.
+
+`0809` is ours: an HEVC reference the queue no longer holds, after a gap in the stream, is skipped
+with a rate-limited debug line, not a `WARN_ON`. Not yet submitted.
 
 `0089` adds the H616 TV encoder to `sun4i_tv`, on both kernels, its DAC load detection left off:
 armed, it clicks on the AV jack, and it sensed no cable here; `0090` keeps the encoder's clock on

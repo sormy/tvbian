@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 31 Oct 2026 19:55:13 -0400
+Subject: [PATCH] media: cedrus: Skip an HEVC reference the queue no longer
+ holds
+
+A stream with a gap, a network stall or a cut, names references whose
+pictures were dropped. The DPB setup skipped such an entry under a
+WARN_ON: a backtrace any player can raise, five in a burst after one
+stall. Skip it with a rate-limited debug line, as H.264 does.
+---
+ drivers/staging/media/sunxi/cedrus/cedrus_dec_h265.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec_h265.c b/drivers/staging/media/sunxi/cedrus/cedrus_dec_h265.c
+index 99b562b51..6465f1a5d 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_dec_h265.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec_h265.c
+@@ -327,8 +327,13 @@ cedrus_dec_h265_frame_info_write_dpb(struct cedrus_context *ctx,
+ 		struct cedrus_buffer *buffer =
+ 			cedrus_buffer_picture_find(ctx, dpb[i].timestamp);
+ 
+-		if (WARN_ON(!buffer))
++		/* a stream with a gap names references the queue no longer holds */
++		if (!buffer) {
++			dev_dbg_ratelimited(ctx->proc->dev->dev,
++					    "reference %llu not queued\n",
++					    dpb[i].timestamp);
+ 			continue;
++		}
+ 
+ 		cedrus_dec_h265_frame_info_write_single(ctx, buffer, i,
+ 							dpb[i].field_pic,
+-- 
+2.55.0
+
