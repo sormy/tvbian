@@ -44,9 +44,9 @@ boxes are in [README.md](README.md), Amlogic ones in [README_AMLOGIC.md](README_
 | **Display and video**                           |                |
 | HDMI video                                      |       ✅       |
 | HDMI audio                                      |       ✅       |
-| HDMI-CEC                                        |       🟡       |
+| HDMI-CEC                                        |       ✅       |
 | HDMI HDR10                                      |       ✅       |
-| HDMI 10-bit                                     |       ❓       |
+| HDMI 10-bit, as 4:2:0 at 4K only                |       🟠       |
 | AV jack — composite video                       |       ❌       |
 | AV jack — audio                                 |       ❌       |
 | GPU — Mali-G31 under Panfrost                   |       ✅       |

@@ -4,6 +4,10 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
 
 ## Open
 
+- [ ] **Every board: answer the TV's CEC queries.** The TV asks for the box's power status and gets
+      `FEATURE_ABORT`: nothing on the box speaks CEC's follower side. The TV's remote reaches the
+      box.
+
 - [ ] **Every board: the recovery button sends `KEY_VENDOR`.** Mainline's code for a "recovery",
       "update" or "maskrom" button; the Tanix TX1 V2.0 has it. The others keep their factory trees'
       codes: the R69 and H96 Max H313 `KEY_VOLUMEUP`, the H96 Max 3518D `KEY_F11`. Each change says
@@ -55,11 +59,6 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
       known-good one so the boot menu keeps a fallback. Kbuild appends `LOCALVERSION` from the
       environment; `run` does not pass it into the container, and the driver packages must follow
       the new release.
-
-- [ ] **Allwinner kernels: one series per subsystem, on both.** LibreELEC's taken whole where it is
-      better maintained (audio, the video engine, `sunxi-mmc`), other boards' and SoCs' patches
-      (AC200, other trees, SCPI) out of 7.2; a per-kernel copy only where the API forces it. A fix
-      proven on `sunxi64-next` comes back to `sunxi64`.
 
 - [ ] **`patches/linux-sunxi/`: folders by subsystem.** 255 patches in one list, ours squeezed into
       the gaps of LibreELEC's numbering, `0099` against its `0100`. Split by the files a patch
@@ -150,6 +149,7 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
 | `docs/todo/rk35xx-boot-log.md`          | boot log cleanup                            |
 | `docs/todo/rk35xx-sd-uhs-warm-reset.md` | `dwmmc` first init after a warm reset       |
 | `docs/todo/rk35xx-uboot-usb.md`         | USB in our U-Boot                           |
+| `docs/todo/allwinner.md`                | Allwinner boards, every one                 |
 | `docs/todo/tanix-tx1-v2.md`             | the Tanix TX1 V2.0: what is left            |
 | `docs/todo/h96max-m20.md`               | the H96 Max M20: what is left               |
 | `docs/todo/h96max-h313.md`              | the H96 Max H313: what is left              |
