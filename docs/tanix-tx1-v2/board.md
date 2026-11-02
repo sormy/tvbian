@@ -143,7 +143,7 @@ regression pass on each.
 | Wi-Fi bands      | ✅  | ✅  | 2.4 GHz only; the AP's US, DE settable                           |
 | Wi-Fi rate       | ✅  | ✅  | 78–81 / 79 Mbit/s down at 40 MHz; 20 MHz halves it               |
 | Wi-Fi loaded     | ✅  | ✅  | under `stress-ng`, 7.2: 66.5 up, 77.0 down vs 65.5 / 79.1        |
-| Wi-Fi latching   | 🟠  | 🟠  | no latch; 2 h on 7.2: 3 drops, each back in 2.0–2.7 s            |
+| Wi-Fi latching   | 🟠  | 🟠  | a restart clears a stuck receive; back in 2–3 s                  |
 | scan, no region  | ✅  | ✅  | scans with no region set                                         |
 | region set       | ✅  | ✅  | DE set, read back as an intersection                             |
 | BT up            | ✅  | ✅  | `hci0` UP RUNNING, `errors:0`, with BLE on                       |

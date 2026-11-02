@@ -4,13 +4,10 @@ Date: Tue, 27 Oct 2026 11:15:00 -0400
 Subject: [PATCH 15/15] atbm6031: restart the firmware when it latches RX at
  DSSS/CCK
 
-The firmware can latch the AP's data to us at DSSS/CCK rates on a
-strong link: 11 Mbit/s, about 5 down, until it is restarted; a
-reassociation does not cure it. Every 5 s, a work judges the unicast
-data frames from the AP above latch_rssi: latch_strikes windows in a
-row of latch_frames or more, latch_dsss_pct of them DSSS/CCK, halt
-and reload the firmware and reassociate, at most once per
-latch_holdoff seconds.
+Every 5 s, a work judges the unicast data frames from the AP above
+latch_rssi: latch_strikes windows in a row of latch_frames or more,
+latch_dsss_pct of them DSSS/CCK, halt and reload the firmware and
+reassociate, at most once per latch_holdoff seconds.
 
 For a look at the firmware: latch_trace logs its CFO MIB and
 temperature every so many seconds, latch_fwlog forwards its own log,
@@ -80,8 +77,8 @@ index 0000000..aab305f
 +++ b/hal_apollo/latch.c
 @@ -0,0 +1,233 @@
 +/*
-+ * Rate latch watchdog: the firmware can latch the AP's unicast data to us
-+ * at DSSS/CCK rates on a strong link until it is restarted.
++ * Restart the firmware when unicast from the AP stays at DSSS/CCK
++ * on a strong link.
 + */
 +#include <linux/module.h>
 +#include <linux/etherdevice.h>

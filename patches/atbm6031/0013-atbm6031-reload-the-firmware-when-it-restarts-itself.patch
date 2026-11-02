@@ -3,13 +3,12 @@ From: Artem Butusov <art.sormy@gmail.com>
 Date: Tue, 27 Oct 2026 09:45:00 -0400
 Subject: [PATCH 13/17] atbm6031: reload the firmware when it restarts itself
 
-The firmware reboots itself under load, minutes to hours apart.
-Its message sequence starts again at 0, and the driver only logged
-the mismatch: the rebooted firmware ran without the setup the driver
-gave it until a command happened to time out, seconds or minutes
-later, or never. A message numbered 0 out of turn now halts the bus
-and reloads the firmware at once, as AltoBeam's commented-out code
-did for any mismatch; a single lost message still only logs.
+A message numbered 0 out of turn now halts the bus and reloads
+the firmware at once. The sequence starting again at 0 is the firmware
+having rebooted and lost the driver's setup; the driver only logged the
+mismatch until a command happened to time out, seconds or minutes later,
+or never. AltoBeam's commented-out code did this for any mismatch; a
+single lost message still only logs.
 ---
  hal_apollo/bh_sdio.c | 13 +++++++------
  1 file changed, 7 insertions(+), 6 deletions(-)

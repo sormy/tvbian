@@ -1,8 +1,8 @@
 # ATBM6031 — Wi-Fi rate latch
 
-The Tanix TX1 V2.0's AltoBeam ATBM6031 (SDIO, 2.4 GHz, 1x1 802.11n) drops into a slow state after
-hours associated and stays there until the driver is reloaded. Dated history is in
-`docs/tanix-tx1-v2/worklog.md`.
+The Tanix TX1 V2.0's AltoBeam ATBM6031 (SDIO, 2.4 GHz, 1x1 802.11n) goes slow, and drops its link,
+with the AP's own networks on channel 1. Channel 6 at 40 MHz holds it. A firmware restart does not.
+Measurements are in `worklog.md`.
 
 ## Symptom
 
@@ -13,8 +13,7 @@ hours associated and stays there until the driver is reloaded. Dated history is 
 | latched, after reconnect | 65.0 MBit/s MCS 7         | 11.0 MBit/s       | 17.3 / 5.3 Mbit/s  |
 | after `rmmod`/`modprobe` | 135.0 MBit/s MCS 7 40 MHz | 65.0 MBit/s MCS 7 | 66.7 / 67.5 Mbit/s |
 
-Signal -41 dBm throughout. A reassociation does not cure it, a module reload does: the state is in
-the driver or the chip, not the access point's rate control.
+Signal -41 dBm throughout. A reassociation does not clear that session.
 
 ## Known
 
@@ -75,8 +74,7 @@ other. Unverified; a test keeps TX on 4-7.
 
 ## Hypothesis
 
-The firmware reboots itself and runs on without the setup the driver gave it: the latch a reboot
-nobody noticed. Unverified: no latch seen since 0013 and 0014.
+The firmware reboots itself and runs on without the setup the driver gave it. It does not.
 
 ## Sweep, 2026-10-27
 
@@ -123,9 +121,9 @@ down 6, rx 11 Mbit/s; idle after, 20.2 / 5.6, `connected time` 3609 s, no reconn
 | `iw disconnect`, reassociated          | 5.5  | 22.5 | 11.0 legacy |
 | `halt`, then a reconnect               | 52.4 | 59.2 | 39.0 MCS 4  |
 
-The state is the firmware's: host block-ack sessions, tokens and the association rebuilt change
-nothing; a firmware restart without the probe's calibration cures it. The sweep's `halt` result was
-the block-ack mismatch of a `halt` without a reconnect.
+Host block-ack sessions, tokens and the association rebuilt changed nothing; a firmware restart
+without the probe's calibration recovered that session. The sweep's `halt` result was the block-ack
+mismatch of a `halt` without a reconnect.
 
 ## Firmware reboots, 2026-10-27
 
@@ -136,16 +134,23 @@ the block-ack mismatch of a `halt` without a reconnect.
 - Its log over SDIO (`WSM_MIB_ID_DBG_PRINT_TO_HOST`) coincided with reboots: 4 in 73 min on, 0 in 64
   min off.
 - Its own log, forwarded through two reboots on 7.2, is routine to the last line (CPU 12-16%,
-  `ppm-4`): the firmware reboots without a warning, so recovery is the fix within reach.
+  `ppm-4`): the firmware reboots without a warning.
 - Firmware strings (`atbm6031_fw.bin`, NDS32): `compenCfo`, `DCXO%u->%u`, `ppm%d,cnt%d`, `WdtCnt`,
   `HIF HW ERR0-8`.
 
+## Verdict, 2026-10-31
+
+There are a few issues, firmware restart causing latch, wireless interference. Both kind of leaded
+to horrible experience and fixing AP configuration (moving to another channel with forced 40Mhz wide)
+and better handling firmware restart seemed to fix all the issues.
+
 ## Reproducing
 
-`tools/playsoak.sh` for an hour: the 4K decode and a 50 Mbit/s stream. `tools/force.sh` arms of
-scans, reconnects and heat reproduced nothing in 10 min each.
+On channel 1, `tools/playsoak.sh` for an hour: the 4K decode and a 50 Mbit/s stream.
+`tools/force.sh` arms of scans, reconnects and heat reproduced nothing in 10 min each.
 
 ## Tools
 
-- `tools/wifimon.sh`: the link's rates, width, signal and station counters every minute, to time a
-  latch in the wild.
+- `tools/bootlog.sh <minutes>`: temperatures, signal, rx and tx rates, a 5 s `iperf3 -R` to `plex`,
+  every ~28 s.
+- `tools/wifimon.sh`: the link's rates, width, signal and station counters every minute.

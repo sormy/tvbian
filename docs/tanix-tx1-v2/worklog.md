@@ -1344,3 +1344,14 @@ engines 4096x4080, HEVC 16383x16383):
   FFmpeg's `mjpeg` 6.9.
 - `mjpeg_v4l2m2m` decodes nothing after an end of stream: a looped input gets its first pass only.
   The restart command goes out; the capture queue stays done. Open.
+
+## 2026-11-01 — Wi-Fi was channel 1
+
+The slow receive and the drops were the AP's own three networks on channel 1. Channel 6 at 40 MHz
+cleared both: near, 72.6 Mbit/s down and 62.2 up; at 15 m, 24.5–33.9 down and 22.6 up, sending at
+MCS 7 and receiving at MCS 2-3. Channel 6 at 20 MHz stayed at 18.9 down. A firmware restart does not
+clear it.
+
+## 2026-11-01 — HLG
+
+The 4K TV does not support HLG, so a player cannot be checked on it.

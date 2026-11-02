@@ -19,7 +19,7 @@
 | `0012` | ours: received frames through NAPI and GRO, as AltoBeam's newer SDK      |
 | `0013` | ours: a firmware that rebooted itself reloaded at once                   |
 | `0014` | ours: the probe's per-rate power and auto-CFO sent again on a restart    |
-| `0015` | ours: a firmware latched at DSSS/CCK rates restarted                     |
+| `0015` | ours: DSSS/CCK on a strong link restarts the firmware                    |
 | `0016` | ours: routine events at debug level, masked by default                   |
 | `0017` | ours: a flush with nothing joined drops, not waits 7 s                   |
 
@@ -51,18 +51,18 @@ no-BLE image. The module now depends on `bluetooth`.
 `0012`: frames went up one by one through `netif_rx()`, which GRO cannot merge. Against `plex`:
 66.5–69.5 Mbit/s down at 18–19% of four cores before; 79.0–81.4 at 8–12% after.
 
-`0013`: the firmware reboots itself under load, minutes to hours apart; its message sequence
-restarts at 0. The driver logged the mismatch and ran on with a firmware that had lost its setup
-until a command timed out, 11–26 s later or never. A 0 out of turn now reloads it.
+`0013`: a message numbered 0 out of turn reloads the firmware. The sequence restarting at 0 is the
+firmware having rebooted and lost the driver's setup; the driver logged the mismatch and ran on
+until a command timed out, 11–26 s later or never.
 
 `0014`: the restart sent neither `wsm_set_rate_power()` nor `"cfo 1 0"`, the firmware's automatic
 CFO calibration; its CFO MIB read uninitialised for 40+ min after a restart, and calibrated 1 s
 after reassociating with the patch.
 
-`0015`: the latch, rx at 11 Mbit/s on a strong link until the firmware restarts, judged every 5 s on
-the AP's unicast data. `latch_trace`, `latch_fwlog` and `latch_ppm` read the firmware's CFO, forward
-its log and warn on its crystal estimate; off by default, as its log over SDIO coincided with faster
-reboots.
+`0015`: every 5 s, unicast data from the AP. `latch_strikes` windows of at least `latch_dsss_pct`
+DSSS/CCK, above `latch_rssi`, restart the firmware, at most once per `latch_holdoff` (300 s).
+`latch_trace`, `latch_fwlog` and `latch_ppm` read the firmware's CFO, forward its log and warn on
+its crystal estimate; off by default, as its log over SDIO coincided with faster reboots.
 
 `0016`: every message went out at `KERN_ERR`, routine scans and block-ack sessions included; each
 class now prints at its own level, and `atbm_printk_mask` defaults to errors and warnings.
