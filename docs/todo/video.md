@@ -27,6 +27,8 @@ FFmpeg's, and what no chip has measured yet.
 - [ ] Decoder scaling for VP9, VP8, MPEG-2 and JPEG: the register map below.
 - [ ] AFBC for H.264 and the other codecs; HEVC and VP9 have it.
 - [ ] AFBC and the scaled picture together: AFBC is the primary output's mode.
+- [ ] Root-cause the flicker of a full-screen 3840x2160 `AR24` plane over a 3840x2160 `YU10` AFBC
+      video, even at 30 Hz, where either plane alone is clean.
 - [ ] `linux-sunxi/0096`'s limit: AFBC shrunk by the display at growing ratios (1.7× plays clean, 2×
       for 4K to 1080p, beyond) until the picture or `RCQ sync timed out` fails; the patch's estimate
       set to that edge. Today it refuses 1.7×, which plays.
