@@ -98,6 +98,7 @@ regression pass on each.
 | 1440p on a TV    | ✅  | ❓  | 2026-10-31: 120 Hz, the only rate the TV offers                  |
 | 4K on a TV       | ✅  | ❓  | 2026-10-31: 24, 25, 30, 50, 60 Hz; 60 Hz as 10-bit 4:2:0         |
 | PC monitor modes | ✅  | ✅  | the monitor's native 2256×1504 at 60 Hz, a PC timing             |
+| colour table     | ✅  | ❓  | `0276`: VI plane 33, 17³, within 2 codes of the table            |
 | HDMI hotplug     | ✅  | ❓  | unplugged and replugged: the picture comes back                  |
 | HDMI audio       | ✅  | ❓  | heard on the TV, the default sink                                |
 | 5.1 LPCM         | ❓  | ❓  | needs a receiver                                                 |

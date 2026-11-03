@@ -1355,3 +1355,33 @@ clear it.
 ## 2026-11-01 — HLG
 
 The 4K TV does not support HLG, so a player cannot be checked on it.
+
+## 2026-11-02 — the display engine's colour table, `0276`
+
+- The vendor's DE330 driver: a CDC on VI channels 0 and 1, channel 0's with a CSC on each side, a
+  17-point LUT of 30-bit nodes in eight parity banks at `0x1000`–`0x6400`. Its RCQ path marks the
+  banks dirty every frame; ours uploads them once a blob, and 300 flips on one blob kept the table
+  in all 30 captures. LUT RAM read back while the CDC runs differs from what was written; after it
+  stops, every node matches.
+- This driver's fixed channel map gives mixer 0 VI 0 (plane 33 here) and UI 6, 7; mixer 1 VI 1, VI 2
+  and UI 8. One VI plane with a CDC on the HDMI mixer; the UI channels have a matrix CSC only.
+- `0276` on 6.18.60, kexec'd with the writeback tree: blobs short, with a reserved field set,
+  unknown or past 32 bits refused; RGB bypass, identity, a channel mix, an inversion switched while
+  active and back, disabled again, NV12 bypass, identity and Y inverted, all within one 8-bit code.
+  A constant table on NV12 shows red, green and blue carrying Y, Cb, Cr.
+- Prism's tables against libplacebo, 64 YUV patches each, writeback in 8-bit RGB: the engine is
+  within 1–2 codes of the 17-point table interpolated trilinearly, 32 off tetrahedrally. Against a
+  65-point bake, max and mean: HDR10 to SDR 72 / 4.0 (the 72 one saturated out-of-gamut patch, the
+  next 15), HLG to SDR 11 / 2.4, SDR BT.2020 to BT.709 8 / 1.7, SDR BT.709 8-bit to PQ 2 / 0.6, HLG
+  to PQ 10 / 1.2, HDR10 to HLG 56 / 5.6.
+- HDMI out: `HDR_OUTPUT_METADATA` with PQ, `Colorspace` `BT2020_RGB`: `FC_PACKET_TX_EN` 0x9f, the
+  DRM InfoFrame version 1, 26 bytes, EOTF 2 and the metadata as sent; AVI C 3, EC 6. Output stays
+  RGB 8-bit (`VP_PR_CD` 0x40) whatever `max bpc`: the mixer offers RGB888 and 4:2:0 alone.
+- 10-bit 4:4:4 on the 2256x1504 monitor (TMDS 294.6 MHz of its 300): `TX_INVID0` 0x19, `VP_PR_CD`
+  0x50, but the `hdmi` clock came out 269.1 MHz for 294.4: the video PLL is integer, 12 MHz steps,
+  and the TCON took 471 MHz / 2. 5/4 of a pixel clock has no exact divider; deep 4:4:4 dropped.
+- Pixel clocks the CCU picks, by its own rounding (2256x1504 checked: 235.5 MHz from 471 / 2):
+  3840x2160 at 23.976 295.5 MHz (−4056 ppm), at 59.94 591.0 (−4056 ppm), 1920x1080 at 23.976 74.143
+  (−444 ppm), at 59.94 148.0 (−2370 ppm); 24, 30, 50, 60 Hz exact.
+- A sigma-delta table on `pll-video0` for the four 1000/1001 clocks hung the box at a mode set to
+  1920x1080 at 59.94: not taken.

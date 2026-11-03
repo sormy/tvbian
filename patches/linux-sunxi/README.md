@@ -40,6 +40,7 @@ for its API, and rewrites of top-level ones it takes in their place (`0103`, `02
 | `0096`        | planes: AFBC past the scaler alone refused       |
 | `0097`        | Cedrus: 10-bit H.265 scaled as P010              |
 | `0099`        | VI scaler: edge-directed only to enlarge         |
+| `0276`        | DE33: the CDC 3D LUT on the VI planes            |
 | `0800`–`0804` | Cedrus: VP8 to 4096 wide, JPEG both ways         |
 | `0805`–`0806` | Cedrus: MPEG-4 Part 2 and H.263 decode           |
 | `0807`        | Cedrus: a coded format sized by its own engine   |
@@ -168,6 +169,15 @@ count holds; JPEG to 6000x4000, 6144x6144 hanging. Not yet submitted.
 
 `0809` is ours: an HEVC reference the queue no longer holds, after a gap in the stream, is skipped
 with a rate-limited debug line, not a `WARN_ON`. Not yet submitted.
+
+`0276` is ours: DE33's VI channels 0 and 1 carry a 17-point 3D LUT, CDC, ahead of the channel's CSC,
+on the channel's own signal: Y, Cb, Cr for YUV input in the red, green and blue fields; R, G, B for
+RGB. Planes with one carry `SUNXI_CDC_LUT3D_SIZE`, immutable, 17, and `SUNXI_CDC_LUT3D`, a blob of
+17³ `drm_color_lut`, the first component fastest, reserved zero; 0 bypasses. The plane's
+`COLOR_ENCODING` and `COLOR_RANGE` describe the table's output. The table goes through the RCQ in
+the hardware's eight parity banks when the blob changes or the plane becomes visible; channel 0's
+CSC stages around it stay at identity. Channel 1 belongs to mixer 1 in this driver's fixed mapping.
+Not yet submitted.
 
 `0089` adds the H616 TV encoder to `sun4i_tv`, on both kernels, its DAC load detection left off:
 armed, it clicks on the AV jack, and it sensed no cable here; `0090` keeps the encoder's clock on
