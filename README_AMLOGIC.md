@@ -13,9 +13,9 @@ came with Android and a promise of updates; one of those two was real. Rockchip 
 
 ## Boxes
 
-| Box                                                | Board                                                       | Hardware                                                                                                   | Install                    |
-| -------------------------------------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | -------------------------- |
-| <img src="docs/h96max-m20/image1.png" width="260"> | **[H96 Max M20][doc]**<br>`905_DG_ZX01_V01`<br>`2025-09-03` | SoC S905L3<br>2 GB RAM · 16 GB eMMC<br>USB-C 2.0 (OTG) + USB-A 2.0<br>**no Ethernet** · MT7668S Wi-Fi + BT | OTG cable, then a USB disk |
+| Box                                                | Board                                                       | Hardware                                                                                                   | Install   |
+| -------------------------------------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | --------- |
+| <img src="docs/h96max-m20/image1.png" width="260"> | **[H96 Max M20][doc]**<br>`905_DG_ZX01_V01`<br>`2025-09-03` | SoC S905L3<br>2 GB RAM · 16 GB eMMC<br>USB-C 2.0 (OTG) + USB-A 2.0<br>**no Ethernet** · MT7668S Wi-Fi + BT | OTG cable |
 
 [doc]: docs/h96max-m20/board.md
 

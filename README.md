@@ -4,23 +4,26 @@
 [![Released](https://img.shields.io/github/release-date/sormy/tvbian?label=released&display_date=published_at)](https://github.com/sormy/tvbian/releases/latest)
 [![Weekly build](https://github.com/sormy/tvbian/actions/workflows/release.yml/badge.svg)](https://github.com/sormy/tvbian/actions/workflows/release.yml)
 
-You bought a **$15–35 Android TV box**. It is silent, fanless, came with a remote, and runs an
-Android its maker forgot the day after it shipped. The hardware deserved better. TVBian is the
-better: plain Debian, our own kernels and drivers, a signed `apt` repository, and a robot that
-builds fresh images every week whether anyone asked or not.
+You bought a **cheap Android TV box**. It is silent, fanless, came with a remote, and runs an
+Android its maker forgot the day after it shipped. The hardware deserves better than a landfill next
+year. TVBian is the better: plain Debian, our own kernels and drivers, a signed `apt` repository,
+and a robot that builds fresh images every week whether anyone asked or not.
 
 **Images:** the [latest release](https://github.com/sormy/tvbian/releases/latest). Checksums signed,
 because we have trust issues too.
 
 ## Boxes
 
-| Box                   | Board                      | Form     | Ports                               | SoC           | RAM · eMMC                 | Wi-Fi/BT   | Install            |
-| --------------------- | -------------------------- | -------- | ----------------------------------- | ------------- | -------------------------- | ---------- | ------------------ |
-| [R69-1][r69]          | `XR821_V1.1`               | box      | HDMI, USB 3+2, LAN 100M, SD, AV, IR | [RK3518][rk]  | 2 GB (1.5 usable) · 16 GB  | AIC8800D80 | SD card or OTG     |
-| [H96 Max 3518][a]     | `3518_ZX_V01`              | box      | HDMI, USB 3+2, LAN 100M, SD, AV, IR | [RK3518][rk]  | 2 GB · 16 GB               | SWT6621S   | SD card or OTG     |
-| [H96 Max 3518D][b]    | `3518_DG_ZX_V01`           | stick    | HDMI, USB-C + USB-A                 | [RK3518][rk]  | 2 GB · 16 GB               | SWT6621S   | OTG                |
-| [H96 Max M20][m20]    | `905_DG_ZX01_V01`          | stick    | HDMI, USB-C + USB-A                 | [S905L3][aml] | 2 GB · 16 GB               | MT7668S    | OTG, then USB disk |
-| [Tanix TX1 V2.0][tx1] | `QHZIW_H313_TX1_EMCP_V2.0` | mini box | HDMI, USB-A, AV, IR                 | [H313][aw]    | 1.5 GB (sold as 2) · 16 GB | ATBM6031-X | OTG                |
+| Box                   | Board                      | Form     | SoC    | RAM\*     | eMMC\* | Wi-Fi/BT   | Ports                               | Install         |
+| --------------------- | -------------------------- | -------- | ------ | --------- | ------ | ---------- | ----------------------------------- | --------------- |
+| [R69-1][r69]          | `XR821_V1.1`               | box      | RK3518 | 2G (1.5G) | 16G    | AIC8800D80 | HDMI, USB 3+2, LAN 100M, SD, AV, IR | [SD or OTG][rk] |
+| [H96 Max 3518][a]     | `3518_ZX_V01`              | box      | RK3518 | 2G        | 16G    | SWT6621S   | HDMI, USB 3+2, LAN 100M, SD, AV, IR | [SD or OTG][rk] |
+| [H96 Max 3518D][b]    | `3518_DG_ZX_V01`           | stick    | RK3518 | 2G        | 16G    | SWT6621S   | HDMI, USB-C + USB-A                 | [OTG][rk]       |
+| [H96 Max M20][m20]    | `905_DG_ZX01_V01`          | stick    | S905L3 | 2G        | 16G    | MT7668S    | HDMI, USB-C + USB-A                 | [OTG][aml]      |
+| [Tanix TX1 V2.0][tx1] | `QHZIW_H313_TX1_EMCP_V2.0` | mini box | H313   | 2G (1.5G) | 16G    | ATBM6031-X | HDMI, USB-A, AV, IR                 | [OTG][aw]       |
+
+\*What our units carry. The same model ships with more or less of either, and the image takes what
+it finds: no device tree fixes either size.
 
 [r69]: docs/r69-1/board.md
 [a]: docs/h96max-3518/board.md
@@ -31,10 +34,21 @@ because we have trust issues too.
 [aml]: README_AMLOGIC.md
 [aw]: README_ALLWINNER.md
 
-Click the SoC for its family's guide: what works, installing, updating, and getting Android back
-when regret sets in. OTG is a USB-A male-to-male cable into the box's OTG port, the one port that
-turns a TV box into a patient on the operating table. **Host: macOS or Linux.** Windows users: we
-believe in you, from a distance.
+Click the install method for its family's guide: what works, installing, updating, and getting
+Android back when regret sets in. OTG is a USB-A male-to-male cable into the box's OTG port, the one
+port that turns a TV box into a patient on the operating table. **Host: macOS or Linux.** Windows
+users: we believe in you, from a distance.
+
+## Will it brick my box?
+
+We try hard not to: the installer leaves alone what recovery needs. Still, **back up first**; each
+family's guide says how.
+
+Worst case, the box is not dead, just expensive: short the eMMC's
+[CLK trace](docs/rockchip-maskrom.md#4-shorting-emmc-clk-or-d0-to-gnd) at power-on and the boot ROM
+listens again, if you can find the trace. [One R69](https://github.com/sormy/tvbian/issues/6) still
+hides it, after Armbian's installer gave it another board's loader. TVBian's installer writes only
+the loader for the board you picked. Pick the right one.
 
 ## Your box is not here
 

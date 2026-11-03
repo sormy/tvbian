@@ -86,8 +86,8 @@ signed checksums. Build it yourself instead with `./build.sh`: [docs/build.md](d
 ## Back up first
 
 The eMMC holds Android and the box's own `DVKR` and `SSKR` stores, its label MAC and serial. Only
-the backup brings them back, so take it before anything is written. Skipping it is how a $30 box
-becomes a $30 lesson.
+the backup brings them back, so take it before anything is written. Skipping it is how a cheap box
+becomes an expensive lesson.
 
 - **With an SD slot**: boot the image from a card (route 1), then from the box:
 
