@@ -1,20 +1,21 @@
 # TVBian for Amlogic TV boxes
 
 [![Latest release](https://img.shields.io/github/v/release/sormy/tvbian?label=release&sort=date)](https://github.com/sormy/tvbian/releases/latest)
-[![Released](https://img.shields.io/github/release-date/sormy/tvbian?label=released)](https://github.com/sormy/tvbian/releases/latest)
+[![Released](https://img.shields.io/github/release-date/sormy/tvbian?label=released&display_date=published_at)](https://github.com/sormy/tvbian/releases/latest)
 [![Weekly build](https://github.com/sormy/tvbian/actions/workflows/release.yml/badge.svg)](https://github.com/sormy/tvbian/actions/workflows/release.yml)
 
 Debian on an Amlogic Android TV box: mainline Linux, our drivers, a weekly signed image. The box
 came with Android and a promise of updates; one of those two was real. Rockchip boxes are in
-[README.md](README.md), Allwinner ones in [README_ALLWINNER.md](README_ALLWINNER.md).
+[README_ROCKCHIP.md](README_ROCKCHIP.md), Allwinner ones in
+[README_ALLWINNER.md](README_ALLWINNER.md).
 
 **Host: macOS or Linux.** Not Windows.
 
 ## Boxes
 
-| Box                                                | Board                                                | Hardware                                                                                                   | Install   |
-| -------------------------------------------------- | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | --------- |
-| <img src="docs/h96max-m20/image1.png" width="260"> | **H96 Max M20**<br>`905_DG_ZX01_V01`<br>`2025/09/03` | SoC S905L3<br>2 GB RAM · 16 GB eMMC<br>USB-C 2.0 (OTG) + USB-A 2.0<br>**no Ethernet** · MT7668S Wi-Fi + BT | USB stick |
+| Box                                                | Board                                                       | Hardware                                                                                                   | Install                    |
+| -------------------------------------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | -------------------------- |
+| <img src="docs/h96max-m20/image1.png" width="260"> | **[H96 Max M20][doc]**<br>`905_DG_ZX01_V01`<br>`2025-09-03` | SoC S905L3<br>2 GB RAM · 16 GB eMMC<br>USB-C 2.0 (OTG) + USB-A 2.0<br>**no Ethernet** · MT7668S Wi-Fi + BT | OTG cable, then a USB disk |
 
 [doc]: docs/h96max-m20/board.md
 
@@ -22,7 +23,7 @@ came with Android and a promise of updates; one of those two was real. Rockchip 
 
 | Mark | Means                                                                |
 | :--: | -------------------------------------------------------------------- |
-|  ✅  | tested here — the number behind it is in the [board doc][doc]        |
+|  ✅  | tested here — the number behind it is in the board's doc             |
 |  🟡  | likely — a proven mechanism backs it and nothing indicates a problem |
 |  ❓  | never tested                                                         |
 |  🟠  | works, measurably short of its siblings or stock                     |
@@ -116,16 +117,18 @@ build/bin/amlcmd reset
 
 Once is enough: every later power-on boots the stick. Pull it and Android boots, none the wiser.
 
-3. Log in: `ssh root@<hostname>.local`, password `1234`, expired, so pick a new one. A user, the
-   timezone, the locale and Wi-Fi: [docs/first-login.md](docs/first-login.md). No Ethernet is
-   fitted, so a USB adapter or the HDMI console gets you to Wi-Fi first.
-
-4. Optionally, move to the eMMC. **This replaces Android.** From the booted stick:
+3. Optionally, move to the eMMC. **This replaces Android.** From the booted stick:
 
 ```sh
 sudo tvb-install
 sudo poweroff                                    # pull the stick; it boots from eMMC
 ```
+
+## First login
+
+`ssh root@<hostname>.local`, password `1234`, expired, so pick a new one. A user, the timezone, the
+locale and Wi-Fi: [docs/first-login.md](docs/first-login.md). No Ethernet is fitted, so a USB
+adapter or the HDMI console gets you to Wi-Fi first.
 
 ## Update a running box
 

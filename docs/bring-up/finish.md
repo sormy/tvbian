@@ -26,6 +26,6 @@
 - [ ] **Q1** Every line has a mark on both kernels; no ❓ left
 - [ ] **Q2** Every ❌ and gap is scoped in Known gaps
 - [ ] **Q3** 👤 A few days of daily use with no issue
-- [ ] **Q4** The README lists the board, in its support matrix too
+- [ ] **Q4** The main README and its family's README list the board
 - [ ] **Q5** CI is green
 - [ ] **Q6** Untested platforms are named in the PR

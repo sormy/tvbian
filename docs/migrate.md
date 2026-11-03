@@ -77,8 +77,9 @@ The overlay's Amlogic stick boots through Armbian's `boot.scr`, which never read
 `extlinux.conf`, so it takes the image instead.
 
 1. Copy off what is yours: `/home`, `/srv`, any `/etc` file you changed.
-2. Write the board's image from the latest release to an SD card or USB stick, as the README gives
-   it; an Amlogic box the overlay set up already boots its stick. A box with no card slot takes it
-   straight onto the eMMC over USB, `docs/rockchip-maskrom.md`, unit's own sectors restored after.
+2. Write the board's image from the latest release to an SD card or USB stick, as its family's
+   README gives it; an Amlogic box the overlay set up already boots its stick. A box with no card
+   slot takes it straight onto the eMMC over USB, `docs/rockchip-maskrom.md`, unit's own sectors
+   restored after.
 3. Boot it; `sudo tvb-install` writes the eMMC and keeps the unit's MAC and serial.
 4. Put your files back; `docs/first-login.md` covers the user, locale and Wi-Fi.
