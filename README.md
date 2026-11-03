@@ -48,7 +48,8 @@ Worst case, the box is not dead, just expensive: short the eMMC's
 [CLK trace](docs/rockchip-maskrom.md#4-shorting-emmc-clk-or-d0-to-gnd) at power-on and the boot ROM
 listens again, if you can find the trace. [One R69](https://github.com/sormy/tvbian/issues/6) still
 hides it, after Armbian's installer gave it another board's loader. TVBian's installer writes only
-the loader for the board you picked. Pick the right one.
+the loader for the board you picked, and `apt` refuses a board package for another chip family. Pick
+the right one anyway.
 
 ## Your box is not here
 

@@ -43,7 +43,7 @@ mmdebstrap --variant=minbase --mode=root --architectures=arm64 \
   --customize-hook="printf '127.0.0.1\tlocalhost\n127.0.1.1\t$BOARD_HOSTNAME\n' >\"\$1/etc/hosts\"" \
   --customize-hook="echo 'UUID=$UUID / ext4 defaults,noatime,x-systemd.growfs 0 1' >\"\$1/etc/fstab\"" \
   --customize-hook="mkdir -p \"\$1/tmp/tvb\" && cp $DEBS \"\$1/tmp/tvb/\"" \
-  --customize-hook='chroot "$1" sh -c "apt-get install -y --no-install-recommends /tmp/tvb/*.deb && rm -r /tmp/tvb"' \
+  --customize-hook='chroot "$1" env TVB_SKIP_BOARD_CHECK=1 sh -c "apt-get install -y --no-install-recommends /tmp/tvb/*.deb && rm -r /tmp/tvb"' \
   --customize-hook='echo root:1234 | chroot "$1" chpasswd && chroot "$1" chage -d 0 root' \
   --customize-hook='rm -f "$1"/etc/ssh/ssh_host_*' \
   --customize-hook='rm -f "$1/etc/update-motd.d/10-uname"; : >"$1/etc/motd"' \

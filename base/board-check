@@ -1,0 +1,30 @@
+#!/bin/sh
+# apt's Pre-Install-Pkgs hook: refuse a board package for another family than the eMMC's loader.
+[ "${TVB_SKIP_BOARD_CHECK:-}" != 1 ] || exit 0
+
+emmc=
+for d in /sys/block/mmcblk*; do
+  [ "$(cat "$d/device/type" 2>/dev/null)" = MMC ] && emmc=/dev/${d##*/}
+done
+[ -n "$emmc" ] || exit 0
+
+box=
+while read -r family magic offset; do
+  found=$(dd if="$emmc" bs=1 skip="$offset" count=${#magic} status=none 2>/dev/null || true)
+  [ "$found" != "$magic" ] || box=$family
+done <<FAMILIES
+rk35xx RKNS 32768
+meson-gxl @AML 528
+sunxi-h616 eGON.BT0 8196
+FAMILIES
+[ -n "$box" ] || exit 0
+
+while read -r deb; do
+  case $deb in *.deb) ;; *) continue ;; esac
+  family=$(dpkg-deb -f "$deb" X-Tvb-Family 2>/dev/null || true)
+  if [ -n "$family" ] && [ "$family" != "$box" ]; then
+    echo "tvb-board-check: $(basename "$deb") is for $family boxes; this eMMC holds a $box loader." >&2
+    echo "To install anyway: sudo TVB_SKIP_BOARD_CHECK=1 apt install ..." >&2
+    exit 1
+  fi
+done

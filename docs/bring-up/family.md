@@ -17,7 +17,8 @@ In order: each stage is the way back for the next.
    service mode before it is ever written.
 3. **The image layout and `tvb-install`**: where the loaders and the rootfs sit for this family, an
    image booting from external media, and `tvb-install` putting it on the eMMC with the per-unit
-   window and the eMMC's bootloader kept.
+   window and the eMMC's bootloader kept. The loader's magic and offset go into `base/board-check`,
+   so `apt` refuses another family's board package on these boxes.
 4. **Both kernels from the start**: `kernel/<family>.conf` on longterm, `<family>-next.conf` on
    stable. Sources, best first: mainline; the SoC vendor's, where mainline lacks what the board
    needs; an unofficial newer tree, last, from a maintained place. The defconfig starts from a
@@ -54,3 +55,4 @@ In order: each stage is the way back for the next.
 - [ ] **F9** Our U-Boot boots over the service mode before it is written
 - [ ] **F10** `tvb-install` installs the family's image, the per-unit window and bootloader kept
 - [ ] **F11** Each patched subsystem's effect shown on the box, on both kernels
+- [ ] **F12** `base/board-check` refuses another family's board package on the box

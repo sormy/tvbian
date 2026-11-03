@@ -233,6 +233,20 @@ The journal stays in `/run`, 64 MB, and moves to `/var/log/journal` at three qua
 15-minute check), daily and at shutdown, so `journalctl -b -1` reads the previous boot. An unplug
 loses what had not moved yet.
 
+### A board package for the right box
+
+Every board package names its family in `X-Tvb-Family`. `tvb-base` runs `/usr/lib/tvb/board-check`
+before `apt` changes anything, and it refuses a board package of another family than the loader on
+the eMMC:
+
+| Family       | Loader magic | eMMC byte |
+| ------------ | ------------ | --------- |
+| `rk35xx`     | `RKNS`       | 32768     |
+| `meson-gxl`  | `@AML`       | 528       |
+| `sunxi-h616` | `eGON.BT0`   | 8196      |
+
+A blank or unknown eMMC passes. `TVB_SKIP_BOARD_CHECK=1` skips the check; the image build sets it.
+
 ### Taken from Armbian
 
 What `armbian-bsp` does, done by a Debian package where one exists and by ours only where none does.

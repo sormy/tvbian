@@ -64,7 +64,7 @@ chmod 0755 "$ROOT/DEBIAN/postinst"
   printf 'Provides: tvb-board\nConflicts: tvb-board\n'
   [ -n "${BOARD_RENAMED_FROM:-}" ] &&
     printf 'Replaces: tvb-%s (<< 1:0)\nBreaks: tvb-%s (<< 1:0)\n' "$BOARD_RENAMED_FROM" "$BOARD_RENAMED_FROM"
-  printf 'Section: admin\nPriority: optional\n'
+  printf 'Section: admin\nPriority: optional\nX-Tvb-Family: %s\n' "$BOARD_FAMILY"
   printf 'X-Tvb-Inputs: %s\n' "$(bash /repo/release/inputs.sh board "$BOARD")"
   printf 'Description: TVBian board support for the %s\n' "$BOARD_NAME"
   printf ' The board'\''s device tree, its firmware and settings, and its loader files.\n'

@@ -126,12 +126,6 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
 - [ ] **R69 and the 3518: their IR tables onto the canonical keymap** in `docs/remote-keymap.md`.
       Each `ir_keyN` table in `board.patch` gives its own keys today (OK is `KEY_ENTER` on the R69,
       `KEY_REPLY` on the 3518); then its pass over both transports, once a box has the remote.
-- [ ] **A board package refuses the wrong box.** `tvb-<board>` ships loaders that brick a box of
-      another SoC: `apt install tvb-tanix-tx1-v2` on an RK3518 writes Allwinner loaders. A `preinst`
-      compares the running SoC, `/proc/device-tree/compatible`, with `BOARD_FAMILY` and aborts on a
-      mismatch. The image build installs it in a chroot off the box, so it checks only on real
-      hardware.
-
 - [ ] **A USB keyboard's keymap on `tty1`:** `console-setup` in the image and a README line, or US
       only.
 - [ ] **BTF:** dropped with debug info by `CONFIG_DEBUG_INFO_NONE`, or kept for BPF tools at the

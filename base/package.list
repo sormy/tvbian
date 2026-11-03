@@ -30,3 +30,6 @@ link ../tvb-journal-spill.timer /usr/lib/systemd/system/timers.target.wants/tvb-
 
 # apt: no Recommends, no translations
 0644 apt-lean.conf             /etc/apt/apt.conf.d/90-tvb-lean
+# apt: no board package for another SoC family than the eMMC's loader
+0644 apt-board-check.conf      /etc/apt/apt.conf.d/50-tvb-board-check
+0755 board-check               /usr/lib/tvb/board-check
