@@ -1433,3 +1433,17 @@ experiment", its `tools/kernel/` (the experimental patch and its README).
   accepted, 0 underflows, Main10 HDR10 and 8-bit 4K 232 shown, none dropped, in 10 s.
   `tools/validate/display.py`: 18 passed, 0 failed (the LUT within 2 codes on every case, the HDMI
   cases, no underflow at rest).
+
+## 2026-11-03 — `afbc_shrink_margin`
+
+- `0096`'s 90% is `sun8i_mixer.afbc_shrink_margin`, percent, clamped to 50–150, read at each check.
+  4K Main10 at 1400x1050 (97.9% of a line time): 90, 97 and 98 refuse it, the player goes linear,
+  16–28 underflows and 14–82 shown in 6 s; 100 takes it, 0 underflows, 137 shown.
+- Swept at 150, every mode the monitor lists, 10 s each, Main10 HDR10 and Dolby Vision 8.1, no
+  interface, the stand-in interface and overlay islands (drawn 1.5 times smaller off 2256x1504),
+  after 60 s warm-up, 58–61 °C. The share of a line time each needs, and the underflows: 2256x1504
+  87.3%, 1920x1080 74.5%, 1920x1200 81.7%, 1280x800 81.6%, 1400x1050 97.9%, 1024x768 100.1%, 800x600
+  100.3%: 0 in every load. 1600x1200 99.3% and 640x480 104.2%: 571–583, every refresh, with or
+  without the interface; a 1080p picture at those modes 0.
+- Not monotonic past 98%: the one-pixel-a-clock model holds to about ±2%. 90 kept: the lowest
+  failure is 99.3%, and a 4K screen's interface traffic was not in these runs.

@@ -94,6 +94,7 @@ regression pass on each.
 | video scaling    | 🟠  | 🟠  | linear scales; AFBC past the scaler refused (0096); 2 `RCQ` open |
 | stream restart   | ✅  | ✅  | eleven stops: no warning, no fault                               |
 | 4K60 on AFBC     | ✅  | ❓  | 4K shrunk to 2256×1504: 232 of 232 shown, 0 underflows           |
+| AFBC shrink cap  | ✅  | ❓  | `afbc_shrink_margin` 90; underflows from 99.3% of a line time    |
 | 1080p on a TV    | ✅  | ❓  | 2026-10-31: 24, 25, 30, 50, 60, 120 Hz, `modetest -s`            |
 | 1440p on a TV    | ✅  | ❓  | 2026-10-31: 120 Hz, the only rate the TV offers                  |
 | 4K on a TV       | ✅  | ❓  | 2026-10-31: 24, 25, 30, 50, 60 Hz; 60 Hz as 10-bit 4:2:0         |

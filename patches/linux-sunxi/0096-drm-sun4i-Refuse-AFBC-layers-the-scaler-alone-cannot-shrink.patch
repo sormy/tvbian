@@ -16,28 +16,50 @@ width times the shrink, must fit in 90% of the mixer clocks of its line
 time. On DE33 at 696 MHz, 3840x2160 onto 1269 lines of 2256x1504@60
 needs 87% and scans out with no TCON underflow; at 600 MHz it needs
 101% and breaks up. A 1:1 AFBC layer still passes.
+
+The margin is the module parameter afbc_shrink_margin, a percentage,
+clamped to 50-150 and read at each check, so it can be swept at run
+time.
 ---
 diff -urN a/drivers/gpu/drm/sun4i/sun8i_vi_layer.c b/drivers/gpu/drm/sun4i/sun8i_vi_layer.c
 --- a/drivers/gpu/drm/sun4i/sun8i_vi_layer.c
 +++ b/drivers/gpu/drm/sun4i/sun8i_vi_layer.c
-@@ -66,6 +66,63 @@
+@@ -3,6 +3,8 @@
+  * Copyright (C) Jernej Skrabec <jernej.skrabec@siol.net>
+  */
+ 
++#include <linux/moduleparam.h>
++
+ #include <drm/drm_atomic.h>
+ #include <drm/drm_atomic_helper.h>
+ #include <drm/drm_blend.h>
+@@ -66,6 +68,72 @@
  	}
  }
  
-+/* The share of a line time an AFBC layer's scaler may use, in percent */
-+#define SUN8I_VI_AFBC_SCALER_LOAD	90
++#define SUN8I_VI_AFBC_SHRINK_MARGIN_MIN	50
++#define SUN8I_VI_AFBC_SHRINK_MARGIN_MAX	150
++
++static unsigned int afbc_shrink_margin = 90;
++module_param(afbc_shrink_margin, uint, 0644);
++MODULE_PARM_DESC(afbc_shrink_margin,
++		 "Share of a line time an AFBC layer's VI scaler may use to shrink, in percent, clamped to 50-150 (default 90)");
 +
 +/*
 + * The scaler takes a source pixel a clock, so an output line's source pixels
-+ * must fit in the clocks of its line time, with a margin.
++ * must fit in the clocks of its line time, with a margin: afbc_shrink_margin.
 + */
 +static bool sun8i_vi_layer_afbc_shrink_fits(struct sun8i_mixer *mixer,
 +					    const struct drm_display_mode *mode,
 +					    u32 width, u32 src_h, u32 dst_h)
 +{
 +	u64 needed = (u64)width * src_h * 100;
++	unsigned int margin = clamp_t(unsigned int,
++				      READ_ONCE(afbc_shrink_margin),
++				      SUN8I_VI_AFBC_SHRINK_MARGIN_MIN,
++				      SUN8I_VI_AFBC_SHRINK_MARGIN_MAX);
 +	u64 available = (u64)clk_get_rate(mixer->mod_clk) * mode->htotal *
-+			SUN8I_VI_AFBC_SCALER_LOAD * dst_h;
++			margin * dst_h;
 +
 +	return needed <= div_u64(available, mode->clock * 1000ULL);
 +}
@@ -84,7 +106,7 @@ diff -urN a/drivers/gpu/drm/sun4i/sun8i_vi_layer.c b/drivers/gpu/drm/sun4i/sun8i
  static void sun8i_vi_layer_update_coord(struct sun8i_layer *layer,
  					struct drm_plane *plane, bool afbc)
  {
-@@ -284,10 +341,15 @@
+@@ -284,10 +352,15 @@
  		max_scale = SUN8I_VI_SCALER_SCALE_MAX;
  	}
  
