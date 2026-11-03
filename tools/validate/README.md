@@ -6,6 +6,7 @@ One script a component, each run from the host or on the box as its header says.
 | ------------- | --------------------------------------------------------- |
 | `validate.sh` | boot, watchdog, Wi-Fi, decode, audio: one regression pass |
 | `video.py`    | the hardware video matrix: decode, scale, encode          |
+| `display.py`  | the display's colour: the video plane's LUT, HDMI HDR out |
 
 ## video.py
 
@@ -58,3 +59,28 @@ and first failure run again: a case that differs between them is flaky. A case g
   second, the difference divided out so setup cancels; decoded frames stay in the engine's buffers,
   encoded ones come from memory. The decoder's rate alone, on a synthetic clip, with nothing shown:
   a ceiling, not playback. A pass under 24 fps cannot play a film: 🟠 in the grid.
+
+## display.py
+
+The display path's colour on a box with nothing else on the screen: a video plane's 3D LUT
+(`SUNXI_CDC_LUT3D`) applied as written, the HDMI output's InfoFrames and pixel format for SDR, PQ
+and HLG, and the TCON's underrun count. A case the box lacks the means for is skipped.
+
+### Run
+
+On the box, as root, the player stopped:
+
+```sh
+python3 display.py   # box
+```
+
+### What passes
+
+- **LUT:** malformed blobs refused; identity, a channel mix and an inversion, switched while active,
+  on RGB; the table held over 60 flips; HDR10 to SDR, HLG to SDR, SDR to PQ and HLG to PQ on 64 YUV
+  patches. Every capture, by writeback, within two 8-bit codes of the same table interpolated
+  trilinearly. The tables are the script's own colour science: what is checked is that the hardware
+  applies a table, not how good the table is.
+- **HDMI:** SDR, PQ and HLG at `max bpc` 8 and 10: the DRM InfoFrame sent with HDR alone, its EOTF
+  as asked, BT.2020 colorimetry with HDR, RGB for SDR and for HDR at 8 bits.
+- **Underruns:** the count holds still over a static picture for 3 s.

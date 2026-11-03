@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Mon, 2 Nov 2026 22:30:00 -0500
+Subject: [PATCH] drm/sun4i: Refuse UI layers scaled past the line buffer
+
+A UI channel's scaler holds one source line, 2048 pixels on DE33, and
+the vendor driver decimates a wider source in the fetcher before it
+scales. This driver does not, so a wider source scaled is programmed as
+it is. Refuse it in atomic_check; a 1:1 layer of any width still
+passes.
+---
+diff -urN a/drivers/gpu/drm/sun4i/sun8i_ui_layer.c b/drivers/gpu/drm/sun4i/sun8i_ui_layer.c
+--- a/drivers/gpu/drm/sun4i/sun8i_ui_layer.c
++++ b/drivers/gpu/drm/sun4i/sun8i_ui_layer.c
+@@ -139,6 +139,24 @@
+ 			 lower_32_bits(dma_addr));
+ }
+ 
++/* The scaler holds a source line: a wider one it cannot scale. */
++static int sun8i_ui_layer_check_line_buffer(struct sun8i_layer *layer,
++					    struct drm_plane_state *state)
++{
++	unsigned int scanline = layer->cfg->scanline_rgb[layer->channel];
++	u32 src_w = drm_rect_width(&state->src) >> 16;
++	u32 src_h = drm_rect_height(&state->src) >> 16;
++
++	if (!scanline || src_w <= scanline ||
++	    (src_w == drm_rect_width(&state->dst) &&
++	     src_h == drm_rect_height(&state->dst)))
++		return 0;
++
++	DRM_DEBUG_DRIVER("UI: %u wide past the %u-pixel line buffer\n",
++			 src_w, scanline);
++	return -EINVAL;
++}
++
+ static int sun8i_ui_layer_atomic_check(struct drm_plane *plane,
+ 				       struct drm_atomic_commit *state)
+ {
+@@ -173,10 +191,13 @@
+ 		max_scale = SUN8I_UI_SCALER_SCALE_MAX;
+ 	}
+ 
+-	return drm_atomic_helper_check_plane_state(new_plane_state,
+-						   crtc_state,
+-						   min_scale, max_scale,
+-						   true, true);
++	ret = drm_atomic_helper_check_plane_state(new_plane_state, crtc_state,
++						  min_scale, max_scale,
++						  true, true);
++	if (ret || !new_plane_state->visible)
++		return ret;
++
++	return sun8i_ui_layer_check_line_buffer(layer, new_plane_state);
+ }
+ 
+ 

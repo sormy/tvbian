@@ -1427,4 +1427,9 @@ experiment", its `tools/kernel/` (the experimental patch and its README).
   `AFBC_FEATURES` is 0x10001, bit 0 set, so Mesa 25.0 allocates every AFBC request linear. Not
   taken.
 - UI planes scale 2256x1504 to 1920x1080 and 1280x720 and back in TEST_ONLY commits; DE33's UI
-  scaler holds 2048 pixels a line; a wider source scaled is accepted all the same.
+  scaler holds 2048 pixels a line: `0279` refuses a wider source scaled (2256x1504 to 1920x1080
+  `EINVAL`, 2048x1366 to 1920x1080 and 1:1 accepted).
+- The tvbian build with `0096` revised and `0276`–`0279`, kexec'd: AFBC 4K shrunk to the screen
+  accepted, 0 underflows, Main10 HDR10 and 8-bit 4K 232 shown, none dropped, in 10 s.
+  `tools/validate/display.py`: 18 passed, 0 failed (the LUT within 2 codes on every case, the HDMI
+  cases, no underflow at rest).

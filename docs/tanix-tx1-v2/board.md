@@ -93,7 +93,7 @@ regression pass on each.
 | zero copy        | ✅  | ✅  | `import_dmabuf`, no copy                                         |
 | video scaling    | 🟠  | 🟠  | linear scales; AFBC past the scaler refused (0096); 2 `RCQ` open |
 | stream restart   | ✅  | ✅  | eleven stops: no warning, no fault                               |
-| 4K60 on AFBC     | 🟠  | ❓  | 6.18.60: AFBC shrinks refused (`0096`), decoder scaling instead  |
+| 4K60 on AFBC     | ✅  | ❓  | 4K shrunk to 2256×1504: 232 of 232 shown, 0 underflows           |
 | 1080p on a TV    | ✅  | ❓  | 2026-10-31: 24, 25, 30, 50, 60, 120 Hz, `modetest -s`            |
 | 1440p on a TV    | ✅  | ❓  | 2026-10-31: 120 Hz, the only rate the TV offers                  |
 | 4K on a TV       | ✅  | ❓  | 2026-10-31: 24, 25, 30, 50, 60 Hz; 60 Hz as 10-bit 4:2:0         |
@@ -232,27 +232,27 @@ The H616 datasheet's limits (§2.4, linux-sunxi's `H616_Datasheet_V1.0`; none pu
 H313), against `tools/validate/video.py` on 2026-10-31: fps the engine's alone at 3840×2160, the
 CPU's own beside each encoder:
 
-| Codec                | Datasheet            | Measured          | State                           |
-| -------------------- | -------------------- | ----------------- | ------------------------------- |
-| H.264 BP/MP/HP       | L4.2, 4K@30          | 31                | ✅ Cedrus                       |
-| HEVC Main            | L5.1, 4K@60, 6K@30   | 61                | ✅ Cedrus                       |
-| Scaled CAPTURE, ½ ¼  | —                    | 4K HEVC at ½      | ✅ `0094`, `ffmpeg/0017`        |
-| HEVC Main10          | as Main              | 33                | ✅ P010 default, `0085`         |
-| MPEG-2               | MP/HL, 1080p@60      | 36                | ✅ Cedrus                       |
-| MPEG-1               | 1080p@60             | —                 | ❌ no hwaccel                   |
-| VP8                  | 1080p@60             | 45                | ✅ `0800`, to 4096 wide         |
-| VP9 Profile 0/2      | 4K@60                | 43 / 25           | ✅ `0053`                       |
-| VC-1 SP/MP/AP        | 1080p@60             | 304 at 720p       | 🟠 SP/AP; MP refused            |
-| MPEG-4 SP/ASP, H.263 | 1080p@60             | 32                | 🟠 `0806`, `ffmpeg/0019`        |
-| AVS/AVS+, AVS2       | 1080p@60; AVS2 4K@60 | ❓                | ❌ no uAPI to adopt             |
-| JPEG decode          | 45 Mpixel/s          | 28                | ✅ `0803`, to 6000×4000         |
-| H.264 encode         | 4K@25, CBR/VBR       | 24, CPU 8.4       | ✅ `0069`–`0084`                |
-| JPEG encode          | 1080p@60             | 10.8, CPU 6.9     | ✅ `0804`, to 4096              |
-| Deinterlace (DI300)  | —                    | 121, 1080i        | ✅ `0067`, `ffmpeg/0014`        |
-| AV jack, composite   | CVBS out             | —                 | ❌ no picture                   |
-| Dolby Vision, HDR10+ | not listed           | —                 | ➖                              |
-| HDR10 to HDMI        | CTA-861.3            | InfoFrame follows | ✅ `0095`                       |
-| HLG, 10-bit to HDMI  | 10-bit HDMI          | —                 | 🟠 10-bit at 4K60 4:2:0; HLG ❓ |
+| Codec                | Datasheet            | Measured          | State                        |
+| -------------------- | -------------------- | ----------------- | ---------------------------- |
+| H.264 BP/MP/HP       | L4.2, 4K@30          | 31                | ✅ Cedrus                    |
+| HEVC Main            | L5.1, 4K@60, 6K@30   | 61                | ✅ Cedrus                    |
+| Scaled CAPTURE, ½ ¼  | —                    | 4K HEVC at ½      | ✅ `0094`, `ffmpeg/0017`     |
+| HEVC Main10          | as Main              | 33                | ✅ P010 default, `0085`      |
+| MPEG-2               | MP/HL, 1080p@60      | 36                | ✅ Cedrus                    |
+| MPEG-1               | 1080p@60             | —                 | ❌ no hwaccel                |
+| VP8                  | 1080p@60             | 45                | ✅ `0800`, to 4096 wide      |
+| VP9 Profile 0/2      | 4K@60                | 43 / 25           | ✅ `0053`                    |
+| VC-1 SP/MP/AP        | 1080p@60             | 304 at 720p       | 🟠 SP/AP; MP refused         |
+| MPEG-4 SP/ASP, H.263 | 1080p@60             | 32                | 🟠 `0806`, `ffmpeg/0019`     |
+| AVS/AVS+, AVS2       | 1080p@60; AVS2 4K@60 | ❓                | ❌ no uAPI to adopt          |
+| JPEG decode          | 45 Mpixel/s          | 28                | ✅ `0803`, to 6000×4000      |
+| H.264 encode         | 4K@25, CBR/VBR       | 24, CPU 8.4       | ✅ `0069`–`0084`             |
+| JPEG encode          | 1080p@60             | 10.8, CPU 6.9     | ✅ `0804`, to 4096           |
+| Deinterlace (DI300)  | —                    | 121, 1080i        | ✅ `0067`, `ffmpeg/0014`     |
+| AV jack, composite   | CVBS out             | —                 | ❌ no picture                |
+| Dolby Vision, HDR10+ | not listed           | —                 | ➖                           |
+| HDR10 to HDMI        | CTA-861.3            | InfoFrame follows | ✅ `0095`                    |
+| HLG, 10-bit to HDMI  | 10-bit HDMI          | —                 | ✅ HDR as 4:2:2, `0278`; HLG |
 
 LE is LibreELEC's `projects/Allwinner/patches/linux`; the VP9 decoder shares the HEVC engine's slot,
 so the factory tree's `vp9@01c00000` has no hardware behind it on the H616.
