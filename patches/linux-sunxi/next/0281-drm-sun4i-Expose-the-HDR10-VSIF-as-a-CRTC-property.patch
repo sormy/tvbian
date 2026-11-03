@@ -1,0 +1,197 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Tue, 3 Nov 2026 09:30:00 -0500
+Subject: [PATCH] drm/sun4i: Expose the HDR10+ VSIF as a CRTC property
+
+Add HDR10PLUS_VSIF, a blob on each CRTC: the CTA-861-G HDR10+ VSIF
+payload, PB1-PB27, the OUI 0x90848b first; zero for none. A blob of
+another size or another OUI is refused. It rides in the CRTC state,
+beside the output format and encoding the HDMI encoder already reads.
+
+The HDMI encoder hands it to dw-hdmi in atomic_mode_set. Where only the
+payload changed, the commit tail calls that hook again for the CRTC's
+TMDS encoders, after the planes: the metadata follows a scene without a
+mode set. The clock it also sets is unchanged, so setting it is a no-op.
+---
+diff -urN a/drivers/gpu/drm/sun4i/sun4i_crtc.c b/drivers/gpu/drm/sun4i/sun4i_crtc.c
+--- a/drivers/gpu/drm/sun4i/sun4i_crtc.c
++++ b/drivers/gpu/drm/sun4i/sun4i_crtc.c
+@@ -19,6 +19,7 @@
+ #include <video/videomode.h>
+ 
+ #include <drm/drm_atomic.h>
++#include <drm/bridge/dw_hdmi.h>
+ #include <drm/drm_atomic_helper.h>
+ #include <drm/drm_crtc.h>
+ #include <drm/drm_modes.h>
+@@ -232,6 +233,7 @@
+ static void sun4i_crtc_destroy_state(struct drm_crtc *crtc,
+ 				     struct drm_crtc_state *state)
+ {
++	drm_property_blob_put(drm_crtc_state_to_sun4i_crtc_state(state)->hdr10plus);
+ 	__drm_atomic_helper_crtc_destroy_state(state);
+ 	kfree(drm_crtc_state_to_sun4i_crtc_state(state));
+ }
+@@ -268,10 +270,56 @@
+ 	__drm_atomic_helper_crtc_duplicate_state(crtc, &state->base);
+ 	state->format = current_state->format;
+ 	state->encoding = current_state->encoding;
++	state->hdr10plus = current_state->hdr10plus;
++	if (state->hdr10plus)
++		drm_property_blob_get(state->hdr10plus);
+ 
+ 	return &state->base;
+ }
+ 
++static int sun4i_crtc_atomic_set_property(struct drm_crtc *crtc,
++					  struct drm_crtc_state *state,
++					  struct drm_property *property,
++					  u64 val)
++{
++	struct sun4i_crtc_state *scrtc_state =
++		drm_crtc_state_to_sun4i_crtc_state(state);
++	const u8 *payload;
++	bool replaced;
++	int ret;
++
++	if (property != drm_crtc_to_sun4i_crtc(crtc)->hdr10plus_property)
++		return -EINVAL;
++
++	ret = drm_property_replace_blob_from_id(crtc->dev, &scrtc_state->hdr10plus,
++						val, DW_HDMI_HDR10PLUS_LEN, -1, -1,
++						&replaced);
++	if (ret || !scrtc_state->hdr10plus)
++		return ret;
++
++	/* The HDR10+ OUI, 0x90848b, least significant byte first */
++	payload = scrtc_state->hdr10plus->data;
++	if (payload[0] != 0x8b || payload[1] != 0x84 || payload[2] != 0x90)
++		return -EINVAL;
++
++	return 0;
++}
++
++static int sun4i_crtc_atomic_get_property(struct drm_crtc *crtc,
++					  const struct drm_crtc_state *state,
++					  struct drm_property *property,
++					  u64 *val)
++{
++	struct drm_property_blob *blob =
++		container_of(state, const struct sun4i_crtc_state, base)->hdr10plus;
++
++	if (property != drm_crtc_to_sun4i_crtc(crtc)->hdr10plus_property)
++		return -EINVAL;
++
++	*val = blob ? blob->base.id : 0;
++	return 0;
++}
++
+ static int sun4i_crtc_underruns_show(struct seq_file *m, void *data)
+ {
+ 	struct sun4i_crtc *scrtc = m->private;
+@@ -295,6 +343,8 @@
+ 	.late_register		= sun4i_crtc_late_register,
+ 	.atomic_destroy_state	= sun4i_crtc_destroy_state,
+ 	.atomic_duplicate_state	= sun4i_crtc_duplicate_state,
++	.atomic_set_property	= sun4i_crtc_atomic_set_property,
++	.atomic_get_property	= sun4i_crtc_atomic_get_property,
+ 	.destroy		= drm_crtc_cleanup,
+ 	.page_flip		= drm_atomic_helper_page_flip,
+ 	.reset			= sun4i_crtc_reset,
+@@ -353,6 +403,12 @@
+ 
+ 	drm_crtc_helper_add(&scrtc->crtc, &sun4i_crtc_helper_funcs);
+ 
++	scrtc->hdr10plus_property = drm_property_create(drm, DRM_MODE_PROP_BLOB,
++							"HDR10PLUS_VSIF", 0);
++	if (scrtc->hdr10plus_property)
++		drm_object_attach_property(&scrtc->crtc.base,
++					   scrtc->hdr10plus_property, 0);
++
+ 	/* Set crtc.port to output port node of the tcon */
+ 	scrtc->crtc.port = of_graph_get_port_by_id(scrtc->tcon->dev->of_node,
+ 						   1);
+diff -urN a/drivers/gpu/drm/sun4i/sun4i_crtc.h b/drivers/gpu/drm/sun4i/sun4i_crtc.h
+--- a/drivers/gpu/drm/sun4i/sun4i_crtc.h
++++ b/drivers/gpu/drm/sun4i/sun4i_crtc.h
+@@ -15,6 +15,7 @@
+ 
+ 	struct sunxi_engine		*engine;
+ 	struct sun4i_tcon		*tcon;
++	struct drm_property		*hdr10plus_property;
+ };
+ 
+ /**
+@@ -23,11 +24,13 @@
+  * @format: negotiated output media bus format of the display engine
+  * @encoding: negotiated output YCbCr encoding, meaningless when @format
+  *	is RGB
++ * @hdr10plus: the HDR10+ VSIF payload the HDMI output sends, PB1-PB27
+  */
+ struct sun4i_crtc_state {
+ 	struct drm_crtc_state		base;
+ 	u32				format;
+ 	enum drm_color_encoding		encoding;
++	struct drm_property_blob	*hdr10plus;
+ };
+ 
+ static inline struct sun4i_crtc *drm_crtc_to_sun4i_crtc(struct drm_crtc *crtc)
+diff -urN a/drivers/gpu/drm/sun4i/sun8i_dw_hdmi.c b/drivers/gpu/drm/sun4i/sun8i_dw_hdmi.c
+--- a/drivers/gpu/drm/sun4i/sun8i_dw_hdmi.c
++++ b/drivers/gpu/drm/sun4i/sun8i_dw_hdmi.c
+@@ -185,6 +185,8 @@
+ 	}
+ 
+ 	clk_set_rate(hdmi->clk_tmds, rate);
++	dw_hdmi_set_hdr10plus(hdmi->hdmi, scrtc_state->hdr10plus ?
++					  scrtc_state->hdr10plus->data : NULL);
+ }
+ static const struct drm_encoder_funcs sun8i_dw_hdmi_encoder_funcs = {
+ 	.destroy = drm_encoder_cleanup,
+diff -urN a/drivers/gpu/drm/sun4i/sun4i_framebuffer.c b/drivers/gpu/drm/sun4i/sun4i_framebuffer.c
+--- a/drivers/gpu/drm/sun4i/sun4i_framebuffer.c
++++ b/drivers/gpu/drm/sun4i/sun4i_framebuffer.c
+@@ -136,6 +136,35 @@
+ 	return false;
+ }
+ 
++/*
++ * A TMDS output's infoframes follow the CRTC state: where the HDR10+ payload
++ * changed without a mode set, its encoder sets them again in place.
++ */
++static void sun4i_de_commit_infoframes(struct drm_atomic_commit *state)
++{
++	struct drm_crtc_state *old_state, *new_state;
++	struct drm_encoder *encoder;
++	struct drm_crtc *crtc;
++	int i;
++
++	for_each_oldnew_crtc_in_state(state, crtc, old_state, new_state, i) {
++		if (!new_state->active || drm_atomic_crtc_needs_modeset(new_state) ||
++		    drm_crtc_state_to_sun4i_crtc_state(old_state)->hdr10plus ==
++		    drm_crtc_state_to_sun4i_crtc_state(new_state)->hdr10plus)
++			continue;
++
++		drm_for_each_encoder_mask(encoder, state->dev,
++					  new_state->encoder_mask) {
++			const struct drm_encoder_helper_funcs *funcs =
++				encoder->helper_private;
++
++			if (encoder->encoder_type == DRM_MODE_ENCODER_TMDS &&
++			    funcs && funcs->atomic_mode_set)
++				funcs->atomic_mode_set(encoder, new_state, NULL);
++		}
++	}
++}
++
+ static void sun4i_de_atomic_commit_tail(struct drm_atomic_commit *state)
+ {
+ 	struct drm_crtc_state *new_crtc_state;
+@@ -149,6 +178,7 @@
+ 	drm_atomic_helper_commit_planes(dev, state,
+ 					DRM_PLANE_COMMIT_ACTIVE_ONLY);
+ 	drm_atomic_helper_commit_encoder_bridge_enable(dev, state);
++	sun4i_de_commit_infoframes(state);
+ 	drm_atomic_helper_commit_writebacks(dev, state);
+ 	drm_atomic_helper_fake_vblank(state);
+ 	drm_atomic_helper_commit_hw_done(state);

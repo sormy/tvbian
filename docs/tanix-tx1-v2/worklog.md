@@ -1469,3 +1469,19 @@ gain, the unit's own DRAM init on the eMMC, is not worth it; the install keeps w
   decodes none on channel 1. Channel 0's, with the plane shown: control 1, the LUT programmed.
 - `0276` exposes the CDC on channel 0 alone, its CSC stages always set; the map change dropped, no
   CDC to gain. `display.py` 18 passed on the kexec'd build. The interface into PQ stays a GPU pass.
+
+## 2026-11-03 — HDR10+ dynamic metadata out, `0280`–`0281`
+
+- dw-hdmi has one vendor-specific InfoFrame slot, HDMI's own VSIF's, and treats any
+  `HDR_OUTPUT_METADATA` change as a mode set. This tree's HDMI encoder is a bridge chain with
+  `drm_bridge_connector`, so a property on dw-hdmi's own connector never appears: the payload rides
+  in `sun4i_crtc_state`, beside the format and encoding the encoder already reads.
+- `HDR10PLUS_VSIF` on each CRTC, the 27-byte CTA-861-G payload. `display.py`, the kexec'd build: a
+  26-byte blob and a wrong OUI refused (`EINVAL`); a payload, then a second one, committed without
+  `ALLOW_MODESET`: `VSDSIZE` 27, the OUI and all 24 payload bytes as sent, `DATAUTO0` VSD set; none:
+  HDMI's VSIF back, OUI `03 0c 00`, size 4; a payload kept across a `max bpc` mode set. 24 passed.
+- dw-hdmi sends HDMI's VSIF on every HDMI sink, format none where the mode needs nothing. At 4K 24,
+  25 and 30 Hz the VSIF carries `HDMI_VIC` and the AVI none; with HDR10+ in the slot the AVI takes
+  the CTA VIC. Not seen on the wire: the monitor lists no 4K mode.
+- 7.3: `0280` applies as it is; `0281` rewritten for `drm_atomic_commit` and the blob replace's
+  `max_size`, its objects built clean.

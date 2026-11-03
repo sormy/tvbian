@@ -4,7 +4,7 @@ Applied through `kernel/sunxi64.conf` (6.18) and `kernel/sunxi64-next.conf` (new
 each listing its patches one by one; each leaves on the bump that brings it from upstream. The top
 level is the current kernel's series, 6.18's; `next/` holds what only `-next` does: patches written
 for its API, and rewrites of top-level ones it takes in their place (`0103`, `0246`, `0257`, `0263`,
-`0265`, `0276`, `0278`, for 7.3).
+`0265`, `0276`, `0278`, `0281`, for 7.3).
 
 | Patch         | Holds                                            |
 | ------------- | ------------------------------------------------ |
@@ -44,6 +44,8 @@ for its API, and rewrites of top-level ones it takes in their place (`0103`, `02
 | `0277`        | TCON: FIFO underflows counted in debugfs         |
 | `0278`        | HDMI: HDR as 10-bit YCbCr 4:2:2                  |
 | `0279`        | UI layers: no scaling past the line buffer       |
+| `0280`        | dw-hdmi: an HDR10+ VSIF, sent in place           |
+| `0281`        | CRTC: `HDR10PLUS_VSIF`, no mode set to change it |
 | `0800`–`0804` | Cedrus: VP8 to 4096 wide, JPEG both ways         |
 | `0805`–`0806` | Cedrus: MPEG-4 Part 2 and H.263 decode           |
 | `0807`        | Cedrus: a coded format sized by its own engine   |
@@ -118,7 +120,7 @@ keys. Not yet submitted.
 | `0087`                 | Cedrus metadata copy, 7.2's two-argument call     |
 | `0103`, `0257`, `0265` | the dw-hdmi bridge on 7.3's encoder and state API |
 | `0246`, `0263`         | AFBC framebuffers, the writeback check on 7.3     |
-| `0276`, `0278`         | the CDC LUT and HDR 4:2:2 on 7.3's DRM API        |
+| `0276`, `0278`, `0281` | the CDC LUT, HDR 4:2:2, HDR10+ on 7.3's DRM API   |
 
 ## LibreELEC's series and ours
 
@@ -196,6 +198,14 @@ as `dri/<n>/crtc-<i>/underruns` in debugfs. `0278` sends HDR as YCbCr 4:2:2, 12-
 sink lists 4:2:2; SDR stays RGB. 4:4:4 at 10 bits needs a TMDS clock 5/4 of the pixel clock, which
 the H616's integer video PLL cannot divide from the TCON's. `0279` refuses a UI layer scaled from a
 source wider than its channel's line buffer, 2048 on DE33. Not yet submitted.
+
+`0280` and `0281` are ours. `0280` lets dw-hdmi send CTA-861-G's HDR10+ VSIF in its one
+vendor-specific slot, written at once without a mode set and again after every setup; none gives the
+slot back to HDMI's VSIF. A 3D mode keeps HDMI's; on a mode HDMI's VSIF names by `HDMI_VIC`, the 4K
+24, 25 and 30 Hz ones, the AVI InfoFrame names the CTA VIC instead. `0281` exposes it as
+`HDR10PLUS_VSIF` on each CRTC, a blob of the 27-byte payload, PB1–PB27, the OUI `8b 84 90` first;
+another size or OUI is refused. Where only the payload changes, the commit tail has the CRTC's TMDS
+encoder hand it to dw-hdmi again. Not yet submitted.
 
 `0089` adds the H616 TV encoder to `sun4i_tv`, on both kernels, its DAC load detection left off:
 armed, it clicks on the AV jack, and it sensed no cable here; `0090` keeps the encoder's clock on

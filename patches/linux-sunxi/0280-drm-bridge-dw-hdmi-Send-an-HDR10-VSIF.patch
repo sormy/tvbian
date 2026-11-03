@@ -1,0 +1,130 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Tue, 3 Nov 2026 09:30:00 -0500
+Subject: [PATCH] drm/bridge: dw-hdmi: Send an HDR10+ VSIF
+
+HDR10+ dynamic metadata reaches a sink as a vendor-specific InfoFrame,
+CTA-861-G's HDR10+ VSIF: 27 bytes, the OUI 0x90848b first. The
+controller has one vendor-specific slot, HDMI's own VSIF's.
+
+Add dw_hdmi_set_hdr10plus(): it keeps the payload, writes it at once
+while the output runs, without a mode set, and again after every setup.
+NULL gives the slot back to HDMI's VSIF. A 3D mode keeps HDMI's VSIF,
+which carries its structure. On a mode named by an HDMI_VIC, the 4K
+24, 25 and 30 Hz ones, the VSIF no longer carries it, so the AVI
+InfoFrame names the mode's CTA VIC instead, as HDMI 2.0 allows.
+---
+diff -urN a/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c b/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
+--- a/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
++++ b/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
+@@ -147,6 +147,8 @@
+ 	const struct dw_hdmi_plat_data *plat_data;
+ 
+ 	int vic;
++	u8 hdr10plus[DW_HDMI_HDR10PLUS_LEN];	/* PB1-PB27, the OUI first */
++	bool hdr10plus_set;
+ 
+ 	u8 edid[HDMI_EDID_LEN];
+ 
+@@ -1993,6 +1995,39 @@
+ 			HDMI_FC_DATAUTO0_VSD_MASK);
+ }
+ 
++/*
++ * The HDR10+ VSIF takes the one vendor-specific slot from HDMI's own, but
++ * for a 3D mode, whose structure only HDMI's carries.
++ */
++static void hdmi_config_hdr10plus_infoframe(struct dw_hdmi *hdmi,
++					    const struct drm_connector *connector,
++					    const struct drm_display_mode *mode)
++{
++	struct hdmi_vendor_infoframe frame;
++	int i;
++
++	if (drm_hdmi_vendor_infoframe_from_display_mode(&frame, connector, mode) ||
++	    frame.s3d_struct != HDMI_3D_STRUCTURE_INVALID)
++		return;
++
++	hdmi_mask_writeb(hdmi, 0, HDMI_FC_DATAUTO0, HDMI_FC_DATAUTO0_VSD_OFFSET,
++			 HDMI_FC_DATAUTO0_VSD_MASK);
++	hdmi_writeb(hdmi, DW_HDMI_HDR10PLUS_LEN, HDMI_FC_VSDSIZE);
++	hdmi_writeb(hdmi, hdmi->hdr10plus[0], HDMI_FC_VSDIEEEID0);
++	hdmi_writeb(hdmi, hdmi->hdr10plus[1], HDMI_FC_VSDIEEEID1);
++	hdmi_writeb(hdmi, hdmi->hdr10plus[2], HDMI_FC_VSDIEEEID2);
++	for (i = 3; i < DW_HDMI_HDR10PLUS_LEN; i++)
++		hdmi_writeb(hdmi, hdmi->hdr10plus[i], HDMI_FC_VSDPAYLOAD0 + i - 3);
++	hdmi_writeb(hdmi, 1, HDMI_FC_DATAUTO1);
++	hdmi_writeb(hdmi, 0x11, HDMI_FC_DATAUTO2);
++	hdmi_mask_writeb(hdmi, 1, HDMI_FC_DATAUTO0, HDMI_FC_DATAUTO0_VSD_OFFSET,
++			 HDMI_FC_DATAUTO0_VSD_MASK);
++
++	/* Without HDMI_VIC in the VSIF, the AVI InfoFrame names the CTA VIC. */
++	if (frame.vic)
++		hdmi_writeb(hdmi, drm_match_cea_mode(mode), HDMI_FC_AVIVID);
++}
++
+ static void hdmi_config_drm_infoframe(struct dw_hdmi *hdmi,
+ 				      const struct drm_connector *connector)
+ {
+@@ -2376,6 +2411,8 @@
+ 		/* HDMI Initialization Step F - Configure AVI InfoFrame */
+ 		hdmi_config_AVI(hdmi, connector, mode);
+ 		hdmi_config_vendor_specific_infoframe(hdmi, connector, mode);
++		if (hdmi->hdr10plus_set)
++			hdmi_config_hdr10plus_infoframe(hdmi, connector, mode);
+ 		hdmi_config_drm_infoframe(hdmi, connector);
+ 	} else {
+ 		dev_dbg(hdmi->dev, "%s DVI mode\n", __func__);
+@@ -2686,6 +2723,39 @@
+ 	return 0;
+ }
+ 
++/**
++ * dw_hdmi_set_hdr10plus - send an HDR10+ VSIF, or stop sending one
++ * @hdmi: the controller
++ * @payload: the CTA-861-G HDR10+ VSIF payload, PB1-PB27 with the OUI first,
++ *	or NULL to return the slot to HDMI's own VSIF
++ *
++ * Takes effect at once while the output runs, without a mode set, and is
++ * sent again after every setup.
++ */
++void dw_hdmi_set_hdr10plus(struct dw_hdmi *hdmi, const u8 *payload)
++{
++	mutex_lock(&hdmi->mutex);
++	hdmi->hdr10plus_set = payload;
++	if (payload)
++		memcpy(hdmi->hdr10plus, payload, DW_HDMI_HDR10PLUS_LEN);
++
++	if (!hdmi->disabled && hdmi->curr_conn) {
++		if (payload) {
++			hdmi_config_hdr10plus_infoframe(hdmi, hdmi->curr_conn,
++							&hdmi->previous_mode);
++		} else {
++			hdmi_mask_writeb(hdmi, 0, HDMI_FC_DATAUTO0,
++					 HDMI_FC_DATAUTO0_VSD_OFFSET,
++					 HDMI_FC_DATAUTO0_VSD_MASK);
++			hdmi_config_AVI(hdmi, hdmi->curr_conn, &hdmi->previous_mode);
++			hdmi_config_vendor_specific_infoframe(hdmi, hdmi->curr_conn,
++							      &hdmi->previous_mode);
++		}
++	}
++	mutex_unlock(&hdmi->mutex);
++}
++EXPORT_SYMBOL_GPL(dw_hdmi_set_hdr10plus);
++
+ /* -----------------------------------------------------------------------------
+  * DRM Bridge Operations
+  */
+diff -urN a/include/drm/bridge/dw_hdmi.h b/include/drm/bridge/dw_hdmi.h
+--- a/include/drm/bridge/dw_hdmi.h
++++ b/include/drm/bridge/dw_hdmi.h
+@@ -218,6 +218,9 @@
+ void dw_hdmi_set_channel_allocation(struct dw_hdmi *hdmi, unsigned int ca);
+ void dw_hdmi_audio_enable(struct dw_hdmi *hdmi);
+ void dw_hdmi_audio_disable(struct dw_hdmi *hdmi);
++#define DW_HDMI_HDR10PLUS_LEN	27
++void dw_hdmi_set_hdr10plus(struct dw_hdmi *hdmi, const u8 *payload);
++
+ void dw_hdmi_set_high_tmds_clock_ratio(struct dw_hdmi *hdmi,
+ 				       const struct drm_display_info *display);
+ 
