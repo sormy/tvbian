@@ -6,10 +6,13 @@ RK3518 inside. The LED tells the RK3518 models apart: in the middle on the 3518
 (`https://h5.h96max.com/products-details/h96-max-rk3518-4k-android-streaming-box`), on the left on
 the 3518B; this unit's is in the middle.
 
+Formerly `h96max-h313`. A box installed under that name upgrades from `tvb-h96max-h313` to
+`tvb-h96max-3518` and keeps its hostname; an image built now names the box `h96max-3518`.
+
 Runs TVBian, migrated in place from Armbian: Debian trixie, kernel `6.1.172-tvb-rk35xx`, U-Boot
-`v2026.10`, `tvb-h96max-h313`, NetworkManager, hostname `h96max-h313`. ✅ Wi-Fi, BT, IR, CEC, the
-VPU nodes, Ethernet on the label MAC, which our U-Boot reads from vendor storage; ❓ HDMI, suspend
-and IR wake on this kernel.
+`v2026.10`, NetworkManager, hostname `h96max-h313`. ✅ Wi-Fi, BT, IR, CEC, the VPU nodes, Ethernet
+on the label MAC, which our U-Boot reads from vendor storage; ❓ HDMI, suspend and IR wake on this
+kernel.
 
 <img src="board.jpg" alt="H96 Max PCB, serial header bottom-right" width="360">
 
@@ -130,8 +133,8 @@ DRM PRIME out; `tools/validate/video.py`, 2026-10-31, fps the engine's alone at 
 ## Names on disk
 
 Every installed path is `tvb-`, the same as every other board: the tree, loader and helpers under
-`/usr/lib/tvb/` in `tvb-h96max-h313`, and systemd drop-ins under `/usr/lib/systemd/` named to sort
-last — `logind.conf.d/zz-tvb-powerkey.conf` in `tvb-h96max-h313`,
+`/usr/lib/tvb/` in `tvb-h96max-3518`, and systemd drop-ins under `/usr/lib/systemd/` named to sort
+last — `logind.conf.d/zz-tvb-powerkey.conf` in `tvb-h96max-3518`,
 `system.conf.d/zz-tvb-watchdog.conf` in `tvb-base`.
 
 ## LEDs
@@ -151,7 +154,7 @@ Early boot briefly shows both LEDs dimly lit, until the kernel driver takes the 
 
 **Over IR, with no pairing at all** — every button works out of the box. The receiver is input
 device `ffa90030.pwm` at the stable path `/dev/input/ir-remote`; scancodes come from
-`rockchip,usercode = <0xfb04>` in `boards/h96max-h313/board.dts`:
+`rockchip,usercode = <0xfb04>` in `boards/h96max-3518/board.dts`:
 
 | Button            | Key event                                        |
 | ----------------- | ------------------------------------------------ |

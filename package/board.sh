@@ -53,19 +53,21 @@ set -e
 SCRIPT
 chmod 0755 "$ROOT/DEBIAN/postinst"
 
-cat >"$ROOT/DEBIAN/control" <<CONTROL
-Package: tvb-$BOARD
-Version: $VERSION
-Architecture: arm64
-Maintainer: TVBian <archive@tvbian.com>
-Depends: tvb-base, linux-image-tvb-$BOARD_KERNEL, u-boot-menu${BOARD_DEPENDS:+, ${BOARD_DEPENDS// /, }}
-Provides: tvb-board
-Conflicts: tvb-board
-Section: admin
-Priority: optional
-X-Tvb-Inputs: $(bash /repo/release/inputs.sh board "$BOARD")
-Description: TVBian board support for the $BOARD_NAME
- The board's device tree, its firmware and settings, and its loader files.
-CONTROL
+# a renamed board supersedes its former package: Replaces lets apt overwrite the old box's files,
+# and a last tvb-<old>, in epoch 1, Depends on this one and pulls it in on upgrade. Unversioned,
+# Breaks would match that transition too, and apt would keep the old package back.
+{
+  printf 'Package: tvb-%s\nVersion: %s\nArchitecture: arm64\n' "$BOARD" "$VERSION"
+  printf 'Maintainer: TVBian <archive@tvbian.com>\n'
+  printf 'Depends: tvb-base, linux-image-tvb-%s, u-boot-menu%s\n' \
+    "$BOARD_KERNEL" "${BOARD_DEPENDS:+, ${BOARD_DEPENDS// /, }}"
+  printf 'Provides: tvb-board\nConflicts: tvb-board\n'
+  [ -n "${BOARD_RENAMED_FROM:-}" ] &&
+    printf 'Replaces: tvb-%s (<< 1:0)\nBreaks: tvb-%s (<< 1:0)\n' "$BOARD_RENAMED_FROM" "$BOARD_RENAMED_FROM"
+  printf 'Section: admin\nPriority: optional\n'
+  printf 'X-Tvb-Inputs: %s\n' "$(bash /repo/release/inputs.sh board "$BOARD")"
+  printf 'Description: TVBian board support for the %s\n' "$BOARD_NAME"
+  printf ' The board'\''s device tree, its firmware and settings, and its loader files.\n'
+} >"$ROOT/DEBIAN/control"
 dpkg-deb --root-owner-group -Zxz -b "$ROOT" "/out/debs/tvb-${BOARD}_${VERSION}_arm64.deb" >/dev/null
 echo "✓ tvb-${BOARD}_${VERSION}_arm64.deb"

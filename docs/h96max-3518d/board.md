@@ -1,6 +1,6 @@
 # H96 Max 3518D — board details
 
-A stick-form RK3518 box. Sibling to `docs/h96max-h313/`, which is the same SoC and the same radio on
+A stick-form RK3518 box. Sibling to `docs/h96max-3518/`, which is the same SoC and the same radio on
 a different PCB (`3518_ZX_V01` there, `3518_DG_ZX_V01` here).
 
 Runs TVBian, migrated in place from Armbian: Debian trixie, kernel `6.1.172-tvb-rk35xx`, U-Boot
@@ -190,7 +190,7 @@ from one behind a hub — the "runs indefinitely" observation was made through a
 ## IR — no receiver is fitted ➖
 
 Settled 2026-09-06. `evtest` on `/dev/input/ir-remote` saw nothing on any keypress, and **the same
-remote drives the H313 over IR** — a known-good receiver rules the transmitter out, so the missing
+remote drives the 3518 over IR** — a known-good receiver rules the transmitter out, so the missing
 half is this board. (A silent `evtest` alone would not prove it: it also looks like a receiver whose
 usercode matches none of the nine `ir_keyN` tables. The worklog has the full reasoning.)
 
@@ -343,7 +343,7 @@ The only view of U-Boot and early boot; under stock Android it is a **root shell
 Worked first attempt on 2026-09-05 — that refers to the **wiring** being right, no TX/RX swap
 needed; it says nothing about how fiddly the contact was.
 
-> **A board photo is still missing**; both `docs/r69/` and `docs/h96max-h313/` have one. The pinout
+> **A board photo is still missing**; both `docs/r69/` and `docs/h96max-3518/` have one. The pinout
 > above is unambiguous without one, but nothing else is illustrated.
 
 ## Recovery — read this before writing anything

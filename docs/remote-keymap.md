@@ -236,7 +236,7 @@ Two traps worth knowing: there is **no `60-keyboard.rules`** on current systemd 
 No board's IR table has had this pass; each was transcribed from what the hardware emitted. Where
 the same button disagrees, known here:
 
-| Button      | R69, IR      | H96 Max H313, IR | BLE, after `hwdb` |
+| Button      | R69, IR      | H96 Max 3518, IR | BLE, after `hwdb` |
 | ----------- | ------------ | ---------------- | ----------------- |
 | Cog         | `KEY_SETUP`  | `KEY_F13`        | `KEY_CONFIG`      |
 | OK (centre) | `KEY_ENTER`  | `KEY_REPLY`      | `KEY_OK`          |
@@ -250,4 +250,4 @@ the same button disagrees, known here:
   The app keys are YouTube `KEY_RED`, Netflix `KEY_YELLOW`, Prime Video `KEY_BLUE`, Google Play
   `KEY_GREEN`.
 - **BLE:** every board's remote reports `2B54:1600`, but the map is ✅ only where its scancodes were
-  captured: 🟡 on the H313, whose remote also drives the 3518D; ❓ on the R69, whose is not.
+  captured: 🟡 on the 3518, whose remote also drives the 3518D; ❓ on the R69, whose is not.

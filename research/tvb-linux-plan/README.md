@@ -33,7 +33,7 @@ only what a change moved, so a board-only change builds no kernel.
 
 | Family  | Kernel                | Boards           |
 | ------- | --------------------- | ---------------- |
-| rk35xx  | Rockchip's vendor 6.1 | R69, H313, 3518D |
+| rk35xx  | Rockchip's vendor 6.1 | R69, 3518, 3518D |
 | meson64 | mainline 6.18         | M20              |
 
 Each family has a `-next` kernel beside it, `kernel/<family>-next.conf`: the family's conf sourced,

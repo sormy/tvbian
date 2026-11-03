@@ -181,6 +181,13 @@ case "$1" in
     for k in kernel/*.conf; do run bash kernel/build.sh "$k"; done
     for f in $(firmwares); do run bash package/firmware.sh "$f"; done
     for b in $(boards); do board "$b"; done
+    # a renamed board's former name: its last transition, built after the new package it pulls in
+    for c in boards/*/board.conf; do
+      b=$(basename "$(dirname "$c")")
+      # shellcheck source=/dev/null
+      old=$(. "boards/$b/board.conf"; echo "${BOARD_RENAMED_FROM:-}")
+      [ -n "$old" ] && run bash package/retire.sh "$b"
+    done
     run bash package/base.sh
     run bash package/keyring.sh
     for e in $(extras); do run bash extras/build.sh "$e"; done ;;
@@ -204,6 +211,7 @@ case "$1" in
           kernel) [ -f "$OUT/debs/linux-image-tvb-$(basename "$arg" .conf)_${version}_arm64.deb" ] ||
             TVB_BUILD_REVISION=${version##*-} run bash kernel/build.sh "$arg" ;;
           board) TVB_BUILD_REVISION=$version board "$arg" ;;
+          retire) TVB_BUILD_REVISION=$version run bash package/retire.sh "$arg" ;;
           firmware) TVB_BUILD_REVISION=$version run bash package/firmware.sh "$arg" ;;
           base) TVB_BUILD_REVISION=$version run bash package/base.sh ;;
           keyring) TVB_BUILD_REVISION=$version run bash package/keyring.sh ;;

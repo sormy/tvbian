@@ -10,7 +10,7 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
 
 - [ ] **Every board: the recovery button sends `KEY_VENDOR`.** Mainline's code for a "recovery",
       "update" or "maskrom" button; the Tanix TX1 V2.0 has it. The others keep their factory trees'
-      codes: the R69 and H96 Max H313 `KEY_VOLUMEUP`, the H96 Max 3518D `KEY_F11`. Each change says
+      codes: the R69 and H96 Max 3518 `KEY_VOLUMEUP`, the H96 Max 3518D `KEY_F11`. Each change says
       why in its `board.patch`, and a press under `evtest /dev/input/recovery-button` checks it.
 
 - [ ] **Every board: which recovery button it has.** Most boxes expose a U-Boot recovery button, a
@@ -88,7 +88,7 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
       current or in `research/`: `docs/todo/repo-layout.md`.
 
 - [ ] **`tvb-install`, a first real install.** `boards/common/tvb-install` has reached its prompt on
-      the H313, never past it: the H313 from its SD to the eMMC, keeping `DVKR`/`SSKR`; the M20
+      the 3518, never past it: the 3518 from its SD to the eMMC, keeping `DVKR`/`SSKR`; the M20
       image from a stick to the eMMC, then back from the eMMC to a stick. Together they test phases
       4 and 5.
 - [ ] **Keep an Amlogic board's Ethernet address, as `LAN_MAC` is kept on Rockchip.** It is the
@@ -109,13 +109,13 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
   - the locale: `SUPPORTED`'s UTF-8 lines through `fzf`, then `locale-gen`;
   - Wi-Fi, where a Wi-Fi device exists: `nmcli device wifi list` through `fzf`, then
     `nmcli --ask device wifi connect`.
-- [ ] **RK3528 boards: a 4K display on the R69 and the H313.** Every RK3528 `board.dts` sets
+- [ ] **RK3528 boards: a 4K display on the R69 and the 3518.** Every RK3528 `board.dts` sets
       `esmart_lb_mode = [02]`, a 4K line buffer for Esmart0, where the factory's `[03]` corrupts the
       right third of a 4K frame; ✅ on the 3518D only. Check `3840x2160p60` full-screen with no
       fringe on the right, then that a 1080p display still comes up clean.
-- [ ] **R69 and H313: their IR tables onto the canonical keymap** in `docs/remote-keymap.md`. Each
-      `ir_keyN` table in `board.patch` gives its own keys today (OK is `KEY_ENTER` on the R69,
-      `KEY_REPLY` on the H313); then its pass over both transports, once a box has the remote.
+- [ ] **R69 and the 3518: their IR tables onto the canonical keymap** in `docs/remote-keymap.md`.
+      Each `ir_keyN` table in `board.patch` gives its own keys today (OK is `KEY_ENTER` on the R69,
+      `KEY_REPLY` on the 3518); then its pass over both transports, once a box has the remote.
 - [ ] **A board package refuses the wrong box.** `tvb-<board>` ships loaders that brick a box of
       another SoC: `apt install tvb-tanix-tx1-v2` on an RK3518 writes Allwinner loaders. A `preinst`
       compares the running SoC, `/proc/device-tree/compatible`, with `BOARD_FAMILY` and aborts on a
@@ -152,7 +152,6 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
 | `docs/todo/allwinner.md`                | Allwinner boards, every one                 |
 | `docs/todo/tanix-tx1-v2.md`             | the Tanix TX1 V2.0: what is left            |
 | `docs/todo/h96max-m20.md`               | the H96 Max M20: what is left               |
-| `docs/todo/h96max-h313.md`              | the H96 Max H313: what is left              |
 | `docs/todo/r69.md`                      | the R69: what is left                       |
 | `docs/todo/tvb-install-bootloader.md`   | an install that keeps the box bootable      |
 | `docs/todo/website.md`                  | tvbian.com: one page on GitHub Pages        |

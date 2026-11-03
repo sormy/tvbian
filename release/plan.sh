@@ -88,6 +88,15 @@ for c in boards/*/board.conf; do
   [ -n "$k" ] && [ -f "kernel/$k.conf" ] || continue
   plan board "$b" "tvb-$b" "$(bash release/inputs.sh board "$b")"
 done
+# a renamed board's former name: a last tvb-<old> that pulls in tvb-<new> on upgrade, so an
+# installed box migrates rather than being left on the old, now-unmaintained package
+for c in boards/*/board.conf; do
+  b=$(basename "$(dirname "$c")")
+  # shellcheck source=/dev/null
+  old=$(. "$c"; echo "${BOARD_RENAMED_FROM:-}")
+  # epoch 1: every version of the transition sorts above every real one of the old board
+  [ -n "$old" ] && plan retire "$b" "tvb-$old" "$(bash release/inputs.sh retire "$b")" 1 :
+done
 for c in firmware/*/firmware.conf; do
   d=$(basename "$(dirname "$c")")
   plan firmware "$d" "tvb-firmware-$(sed -n 's/^FIRMWARE_CHIP=//p' "$c")" "$(bash release/inputs.sh firmware "$d")"

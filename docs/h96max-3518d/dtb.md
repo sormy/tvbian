@@ -10,7 +10,7 @@ Factory tree: `boards/h96max-3518d/factory_board.dtb`, carved from the `boot` pa
 ## It is four lines away from the H96 Max
 
 Both boxes ship the same vendor tree, `rockchip,rk3518-evb1-ddr4-v10`, same `model` string. Diffing
-`boards/h96max-h313/factory_board.dtb` against `boards/h96max-3518d/factory_board.dtb` with phandles
+`boards/h96max-3518/factory_board.dtb` against `boards/h96max-3518d/factory_board.dtb` with phandles
 normalised gives **four differences in 4640 lines**:
 
 | Node                     | H96 Max                                       | 3518D                                   | Consequence                                                                                                                                                                                      |
@@ -30,7 +30,7 @@ here has to be measured with `evtest`, not inferred.
 
 ## What that means for the grafts
 
-`boards/h96max-h313/board.patch` is 47 changed lines. Every hunk except two lands on a region that
+`boards/h96max-3518/board.patch` is 47 changed lines. Every hunk except two lands on a region that
 is **byte-identical** in this board's tree, so it should apply essentially verbatim:
 
 | Graft                                                        | Transfers?                                                    |
@@ -83,7 +83,7 @@ PM: Some devices failed to suspend, or early wake event detected
 ```
 
 Every suspend aborted, and an abort is indistinguishable from an instant wake unless you check
-`last_failed_dev`. The R69 and H96 Max H313 keep `combphy` `okay` and suspend fine; this board was
+`last_failed_dev`. The R69 and H96 Max 3518 keep `combphy` `okay` and suspend fine; this board was
 the only one that disabled it and the only one that could not suspend.
 
 The nodes now stay as the factory left them, with the reasoning kept as comments. **A phantom 5 Gbps
@@ -148,7 +148,7 @@ them before the fix.
 The H96 Max uses:
 
 ```
-compatible = "h96max-h313,rk3518-tvbox", "rockchip,rk3518-evb1-ddr4-v10", "rockchip,rk3518", "rockchip,rk3528a";
+compatible = "h96max-3518,rk3518-tvbox", "rockchip,rk3518-evb1-ddr4-v10", "rockchip,rk3518", "rockchip,rk3528a";
 ```
 
 Both ends of that chain do work, and both matter here:
@@ -204,10 +204,10 @@ did not reply.
 
 ## Console: this board keeps the vendor's
 
-uart0 and `fiq-debugger` stay stock, as on the H96 Max H313 and the R69 since 2026-10-20: stock
+uart0 and `fiq-debugger` stay stock, as on the H96 Max 3518 and the R69 since 2026-10-20: stock
 Android logs the same three `-ENXIO` lines on this hardware and its `ttyFIQ0` console works. The
 vendor sets `rockchip,irq-mode-enable = <1>` because there is no FIQ here, so `ttyFIQ0` is a plain
 tty over uart0. `console=ttyFIQ0` is the family default; the baud comes from the node's
 `rockchip,baudrate`, and systemd's getty-generator follows `/proc/consoles`.
 
-🟡 this board has not booted since; the H313 runs the same nodes.
+🟡 this board has not booted since; the 3518 runs the same nodes.

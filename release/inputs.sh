@@ -6,6 +6,14 @@
 # so a build image changed for another step rebuilds nothing it does not touch.
 set -euo pipefail
 cd /repo
+# a transition's inputs are the rename itself, not files: stable, so it publishes once and then
+# fetches rather than rebuilding every week
+if [ "${1:-}" = retire ]; then
+  # shellcheck source=/dev/null
+  . "boards/$2/board.conf"
+  printf 'tvb-%s\n' "${BOARD_RENAMED_FROM:?no BOARD_RENAMED_FROM}" | sha256sum | cut -c1-16
+  exit 0
+fi
 files() {
   case $1 in
     kernel)

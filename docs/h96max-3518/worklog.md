@@ -2236,3 +2236,44 @@ driver loads, brings in `skw_sdio_lite`, and the devices it creates bring in the
   against libx264 9.8.
 - Debian's `ffmpeg` installed for a software reference pulled in 58 packages; removed. The test
   FFmpeg is built on the host with libx264 and libx265, MPP 1.1.0 linked static.
+
+## 2026-11-02 — rename `h96max-h313` to `h96max-3518`
+
+The `h313` id was the Leffot retail label on the case, not the SoC, and it misled: the box is an
+RK3518, so the TVBian name now matches. `BOARD_ID`, `BOARD_HOSTNAME` and the package, directory and
+build key are `h96max-3518`; `boards/`, `docs/` and `stock/` moved with it, `board.dtb` regenerated.
+The DTB `compatible` is `h96max-3518,rk3518-tvbox`, so the Seekwave NV link and `model` follow it in
+the same package, and Wi-Fi still loads on a fresh flash.
+
+A box already on `tvb-h96max-h313` migrates rather than being stranded: `board.conf` names
+`BOARD_RENAMED_FROM=h96max-h313`, so `board.sh` stamps the new package with `Replaces`/`Breaks` to
+overwrite the old one's files, and a last `tvb-h96max-h313` — `package/retire.sh`, versioned past
+the old package — only `Depends` on the new, which `apt upgrade` pulls in. The rename is the only
+input to that transition, so it publishes once and then fetches. `inputs.sh`, `plan.sh`, `repo.sh`
+and `build.sh` learn the `retire` step; `guard.sh` already exempted the move through the shared
+`tvb-board` virtual.
+
+"H96 Max H313" survives only as the name on the case (the board's `Name` row and `Leffot H313` alt
+name); the Allwinner H313, a different chip, is untouched.
+
+**The same day, finished.** Two parts of the above were not yet true, and one did not work:
+
+- The directories had not moved, and `board.dtb` still said `h96max-h313`: `package/board.sh`
+  refuses a `BOARD_ID` that is not its directory, and the transition would have been
+  `tvb-h96max-h313` depending on itself. `boards/`, `docs/` and `stock/` moved; `board.dtb` and
+  `uboot.dts` regenerated, U-Boot's `model` too; the board's todo, only this rename, dropped.
+- An unversioned `Breaks: tvb-h96max-h313` matches the transition too. In a trixie container, old
+  board at version 2, new board and transition in a local repo, `apt full-upgrade` kept
+  `tvb-h96max-h313` back and never installed the new board. With the transition in epoch 1
+  (`plan.sh` numbers it `1:<n>`) and `Replaces`/`Breaks: tvb-h96max-h313 (<< 1:0)`, the same upgrade
+  installs `tvb-h96max-3518`, takes the transition to `1:1` and moves the files, the `tvb-board`
+  conflict included. The deb's file name drops the epoch.
+
+**On the box, the same day.** The board package at version 3 and the transition at `1:1`, built from
+this tree, went on with `dpkg`: `apt` refuses any install while a local kernel, `6.1.172-0~local`,
+sits under the release's exact pins. `dpkg -i` took the transition first only on a second run: it
+processes the archives in order and refused the board while the old package still matched `Breaks`;
+`apt` orders it itself. After the reboot, 42 s: compatible `h96max-3518,rk3518-tvbox`, model
+`H96 Max 3518 3518_ZX_V01`, `board-id` `h96max-3518`, hostname still `h96max-h313`, and `wlan0` up
+through the renamed Seekwave NV link, the only one left. The previous tree is kept at
+`/root/board.dtb.known-good`.

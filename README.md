@@ -14,11 +14,11 @@ Rockchip boxes; Amlogic ones are in [README_AMLOGIC.md](README_AMLOGIC.md), Allw
 
 ## Boxes
 
-|            | **R69**                                     | **H96 Max H313**                                    | **H96 Max 3518D**                                    |
+|            | **R69**                                     | **H96 Max 3518**                                    | **H96 Max 3518D**                                    |
 | ---------- | ------------------------------------------- | --------------------------------------------------- | ---------------------------------------------------- |
-| Box        | <img src="docs/r69/image1.jpg" width="300"> | <img src="docs/h96max-h313/image1.jpg" width="300"> | <img src="docs/h96max-3518d/image1.png" width="300"> |
-| Board      | <img src="docs/r69/board.jpg" width="300">  | <img src="docs/h96max-h313/board.jpg" width="300">  | <img src="docs/h96max-3518d/board.jpg" width="300">  |
-| Board key  | `r69`                                       | `h96max-h313`                                       | `h96max-3518d`                                       |
+| Box        | <img src="docs/r69/image1.jpg" width="300"> | <img src="docs/h96max-3518/image1.jpg" width="300"> | <img src="docs/h96max-3518d/image1.png" width="300"> |
+| Board      | <img src="docs/r69/board.jpg" width="300">  | <img src="docs/h96max-3518/board.jpg" width="300">  | <img src="docs/h96max-3518d/board.jpg" width="300">  |
+| Board key  | `r69`                                       | `h96max-3518`                                       | `h96max-3518d`                                       |
 | Silkscreen | `XR821_V1.1`                                | `3518_ZX_V01 20250818`                              | `3518_DG_ZX_V01 20250401`                            |
 | SoC        | RK3518                                      | RK3518                                              | RK3518                                               |
 | RAM        | 2 GB (1.5 GB usable)                        | 2 GB                                                | 2 GB                                                 |
@@ -30,7 +30,7 @@ Rockchip boxes; Amlogic ones are in [README_AMLOGIC.md](README_AMLOGIC.md), Allw
 | Details    | [board doc][r69]                            | [board doc][h96]                                    | [board doc][h96d]                                    |
 
 [r69]: docs/r69/board.md
-[h96]: docs/h96max-h313/board.md
+[h96]: docs/h96max-3518/board.md
 [h96d]: docs/h96max-3518d/board.md
 
 ## What works
@@ -44,7 +44,7 @@ Rockchip boxes; Amlogic ones are in [README_AMLOGIC.md](README_AMLOGIC.md), Allw
 |  ❌  | broken                                                               |
 |  ➖  | not on this board                                                    |
 
-| Hardware                                          | R69 | H96 Max H313 | H96 Max 3518D |
+| Hardware                                          | R69 | H96 Max 3518 | H96 Max 3518D |
 | ------------------------------------------------- | :-: | :----------: | :-----------: |
 | **Storage**                                       |     |              |               |
 | eMMC — boot and rootfs                            | ✅  |      ✅      |      ✅       |
@@ -188,12 +188,12 @@ echo "${MAC:-not found}"
 ## Serial console
 
 The only view of U-Boot and of any hang before the network. **3.3 V, 1500000 baud.** Both cases open
-with a plastic pry tool; the H313 needs a couple of screws out to reach the pads from the back.
+with a plastic pry tool; the 3518 needs a couple of screws out to reach the pads from the back.
 
 | Board             | Where                                       | Pinout, `[square pad]` where marked |
 | ----------------- | ------------------------------------------- | ----------------------------------- |
 | **R69**           | 4-pad header beside the SD slot             | **[GND] · TX · RX · 3V3**           |
-| **H96 Max H313**  | 3 plated holes between the SD slot and LEDs | **[RX] · GND · TX**                 |
+| **H96 Max 3518**  | 3 plated holes between the SD slot and LEDs | **[RX] · GND · TX**                 |
 | **H96 Max 3518D** | 3 tiny round test points, no holes          | **TX · GND · RX**, TX nearest HDMI  |
 
 - **Adapter:** 3.3 V USB-TTL doing 1.5 Mbaud — **FT232 or CH340**, e.g.

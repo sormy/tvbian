@@ -1,4 +1,4 @@
-# H96 Max "H313" (RK3518) — stock/vanilla board evidence
+# H96 Max 3518 (RK3518) — stock/vanilla board evidence
 
 The equivalent of `stock/r69/`, with one difference in provenance: the R69's dumps came from a
 **root shell on the running stock Android**, while this box's evidence was gathered without one. At
@@ -52,12 +52,12 @@ box runs the R69 image from SD (the eMMC's Android is untouched):
 | `armbian-first-boot-serial.log`      | full serial capture of that first Armbian boot (DDR banner →     |
 |                                      | login) — proves the eMMC-SPL-prefers-SD boot path                |
 
-**(D) Extracted from the eMMC dump** (`../../backup/h96max-h313-stock.img.xz` — GPT parsed,
+**(D) Extracted from the eMMC dump** (`../../backup/h96max-3518-stock.img.xz` — GPT parsed,
 partitions carved, `super` unpacked with `lpunpack`; all images turned out ext4, not EROFS):
 
 | File                                   | What                                                                          |
 | -------------------------------------- | ----------------------------------------------------------------------------- |
-| `boards/h96max-h313/factory_board.dtb` | **the stock DTB** — two identical FDT copies inside `boot` (p7); 4641-line    |
+| `boards/h96max-3518/factory_board.dtb` | **the stock DTB** — two identical FDT copies inside `boot` (p7); 4641-line    |
 |                                        | dts, `rockchip,rk3518-evb1-ddr4-v10`. The radio runs off `/seekwcn_boot`      |
 |                                        | (`seekwave,sv6160lite`, chip_en/host_wake/chip_wake = gpio3.10/11/12); the    |
 |                                        | `wireless-wlan`/`wireless-bluetooth` nodes are **disabled** leftovers         |
@@ -79,10 +79,10 @@ gpio claims (`/sys/kernel/debug/gpio`), `pinmux-pins`, full `getprop`, `lsmod`, 
 `/sys/firmware/fdt`. The carved DTB + `boot.log` cover most of what those provided on the R69.
 `iomem.txt` here is address-zeroed (read without root) — re-dump with root if ever needed.
 
-## `boards/h96max-h313/factory_uboot.dtb`
+## `boards/h96max-3518/factory_uboot.dtb`
 
 The factory U-Boot's own control device tree, not the kernel's. Carved from the U-Boot FIT in the
 eMMC backup —
-`xz -dc backup/h96max-h313-stock.img.xz | head -c $((24576 * 512)) | tail -c $((8192 * 512))`, then
+`xz -dc backup/h96max-3518-stock.img.xz | head -c $((24576 * 512)) | tail -c $((8192 * 512))`, then
 the second `d00dfeed` inside that FIT. Round-trips exactly through our patched `dtc`. It describes
 uart2, eMMC timing, `saradc` and `adc-keys` (the download key) — and no USB controllers at all.

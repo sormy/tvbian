@@ -82,6 +82,12 @@ the old owner's first release without it; `release/guard.sh` fails the release o
 the debs a run adds against the published `Contents`. A path renamed within one package needs
 neither.
 
+A board renamed keeps its installed boxes: `BOARD_RENAMED_FROM=<old>` in its `board.conf` gives the
+new package `Replaces` and `Breaks: tvb-<old> (<< 1:0)`, and the release builds a last `tvb-<old>`,
+`package/retire.sh`, in epoch 1, shipping nothing and depending on the new one: `apt upgrade`
+installs the new board and drops the old. Unversioned, the `Breaks` would match that transition too
+and apt would keep the old package back.
+
 Testing the served repo from a box, 🟡 run from a trixie container only:
 
 ```sh
@@ -204,7 +210,7 @@ for two, both older than or identical to the stock builds.
 
 | Blob              | Source                     | Ships in                |
 | ----------------- | -------------------------- | ----------------------- |
-| Seekwave SWT6621S | H313, 3518D stock          | `tvb-firmware-swt6621s` |
+| Seekwave SWT6621S | 3518, 3518D stock          | `tvb-firmware-swt6621s` |
 | MT7668            | M20 stock                  | `tvb-firmware-mt7668`   |
 | AIC8800D80        | armbian/firmware           | `tvb-firmware-aic8800`  |
 | meson vdec, venc  | M20 stock; WAVE420L, newer | `tvb-firmware-amlogic`  |
