@@ -1,4 +1,4 @@
-# tvb-r69's files (mode src dest, src under boards/; link target dest for a symlink).
+# tvb-r69-1's files (mode src dest, src under boards/; link target dest for a symlink).
 # package/board.sh adds the tree, the loader and the u-boot-menu drop-in; tvb-base holds what every
 # board shares.
 

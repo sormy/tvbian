@@ -1,7 +1,10 @@
-# R69 — board details
+# R69-1 — board details
 
 Sold as the "R69". Its SoC reports `rk3528` — RK3518 is a variant in that family, which is what
 makes a stock ROCK 2F image the right base.
+
+Formerly `r69`. A box installed under that name upgrades from `tvb-r69` to `tvb-r69-1` and keeps its
+hostname; an image built now names the box `r69-1`.
 
 Runs TVBian, migrated in place from Armbian: Debian trixie, kernel `6.1.172-tvb-rk35xx`, U-Boot
 `v2026.10`, `tvb-r69`, NetworkManager, hostname `cnc`. ✅ Wi-Fi on the out-of-tree AIC8800,
@@ -19,7 +22,7 @@ kernel.
 | Sold as       | [amazon.com/dp/B0GK8P5YFT](https://www.amazon.com/dp/B0GK8P5YFT) — ~$35 complete with PSU                                                       |
 | SoC           | **RK3518A** — `SoC: 35181001`, reports `rk3528` (RK3518 is a variant in the RK3528 family)                                                      |
 | RAM / storage | 2 GB DRAM (**~1.5 GB usable** — boot-chain ceiling) · 16 GB Samsung eMMC 5.x (HS200) · microSD                                                  |
-| Runs from     | eMMC since 2026-08-09 (`mmcblk2p1`); factory Android overwritten — backup in `backup/r69-stock.img.xz`                                          |
+| Runs from     | eMMC since 2026-08-09 (`mmcblk2p1`); factory Android overwritten — backup in `backup/r69-1-stock.img.xz`                                        |
 | Label MAC     | **`C4:2A:FE:10:51:77`** — assigned, and held in eMMC vendor storage as `LAN_MAC`                                                                |
 | Wi-Fi / BT    | **AIC8800D80** — SDIO Wi-Fi + UART Bluetooth                                                                                                    |
 | Ports         | HDMI · USB 2.0 · USB 3.0 · 10/100 Ethernet · microSD · AV jack · IR-extender jack                                                               |
@@ -121,8 +124,8 @@ AVS2** are claimed by the capability word but stay 🟡 — no encoder exists to
 ## Names on disk
 
 Every installed path is `tvb-`, the same as every other board: the tree, loader and helpers under
-`/usr/lib/tvb/` in `tvb-r69`, and systemd drop-ins under `/usr/lib/systemd/` named to sort last —
-`logind.conf.d/zz-tvb-powerkey.conf` in `tvb-r69`, `system.conf.d/zz-tvb-watchdog.conf` in
+`/usr/lib/tvb/` in `tvb-r69-1`, and systemd drop-ins under `/usr/lib/systemd/` named to sort last —
+`logind.conf.d/zz-tvb-powerkey.conf` in `tvb-r69-1`, `system.conf.d/zz-tvb-watchdog.conf` in
 `tvb-base`.
 
 ## Front LED
@@ -144,7 +147,7 @@ it is the BootROM's **maskrom trigger**.
 
 The receiver is input device **`ffa90030.pwm`**, reachable at the stable path
 **`/dev/input/ir-remote`**; scancodes come from `rockchip,usercode = <0xfb05>` in
-`boards/r69/board.dts`. The kernel builds the driver in, with the shared-IRQ fix from
+`boards/r69-1/board.dts`. The kernel builds the driver in, with the shared-IRQ fix from
 `kernel/rk35xx.conf`.
 
 > **Baseline, not a spec** — this is the mapping of _our_ unit, and these boxes vary between
@@ -198,7 +201,7 @@ theirs, and its scancodes have not been captured here. `docs/remote-keymap.md` h
 
 ## Bluetooth
 
-`tvb-r69` depends on `bluez`. The controller binds through serdev, so no unit of ours starts it.
+`tvb-r69-1` depends on `bluez`. The controller binds through serdev, so no unit of ours starts it.
 
 **The radio starts soft-blocked without a udev rule.** Rockchip's `rfkill-bt` hardcodes `BT_BLOCKED`
 true — the Android model. Nothing else here does it: Wi-Fi on the same chip comes up unblocked, no
@@ -247,10 +250,10 @@ Still open:
 - **Never exercised**: **HDMI-CEC**, **HDMI 4K60 / EDID mode list / hotplug re-detect**, honest
   **Wi-Fi throughput** on either band, **SD hotplug removal**, **the IR-extender jack**, and
   **A2DP** to a speaker. Each needs a screen or hands on the box.
-- **Back-to-stock is unverified.** `backup/r69-stock.img.xz` (15,758,000,128 B unpacked) is the only
-  route back to Android, and a full restore has never been tested — either `dd` to the eMMC node
-  from an SD rescue boot, or maskrom + `rkdeveloptool wl 0`. A **partial** restore is proven: on
-  2026-08-18 sectors 7168–16383 were written back from that image after `armbian-install` zeroed
+- **Back-to-stock is unverified.** `backup/r69-1-stock.img.xz` (15,758,000,128 B unpacked) is the
+  only route back to Android, and a full restore has never been tested — either `dd` to the eMMC
+  node from an SD rescue boot, or maskrom + `rkdeveloptool wl 0`. A **partial** restore is proven:
+  on 2026-08-18 sectors 7168–16383 were written back from that image after `armbian-install` zeroed
   them, and `DVKR`/`SSKR`/`LAN_MAC` all came back. Identify the eMMC by its `boot0`/`boot1`
   companions, not a remembered number.
 - **Wi-Fi and BT addresses are derived, the efuse holding neither.** `wlan0` is `8a:00:33:65:64:b6`:
@@ -269,7 +272,7 @@ Still open:
 button inside the AV jack**, held _before_ power reaches the box, lands in `Maskrom` directly:
 U-Boot's `adc-keys` sees it and resets into BootROM download. `db` with its maskrom loader, then
 `rfi` (30777344 sectors) and `rl` — a read of sector 64 came back byte-identical to
-`boards/r69/factory_idbloader.bin`, and slot A read over USB matched the FIT written over ssh.
+`boards/r69-1/factory_idbloader.bin`, and slot A read over USB matched the FIT written over ssh.
 
 The button is only as alive as the U-Boot in slot A: it needs a FIT with the ADC enabled, which is
 why this board ships its own.

@@ -152,7 +152,6 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
 | `docs/todo/allwinner.md`                | Allwinner boards, every one                 |
 | `docs/todo/tanix-tx1-v2.md`             | the Tanix TX1 V2.0: what is left            |
 | `docs/todo/h96max-m20.md`               | the H96 Max M20: what is left               |
-| `docs/todo/r69.md`                      | the R69: what is left                       |
 | `docs/todo/tvb-install-bootloader.md`   | an install that keeps the box bootable      |
 | `docs/todo/website.md`                  | tvbian.com: one page on GitHub Pages        |
 | `docs/todo/repo-layout.md`              | folders, patches, tools and docs, regrouped |

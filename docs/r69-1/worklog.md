@@ -1863,3 +1863,14 @@ overlay built these drivers with DKMS on first boot, after udev's coldplug. `aic
   package and dated 2026-08-15, the Armbian era, which the migration's list missed. Removed too.
 - Second boot: `systemd-modules-load` inserted nothing, `aicbsp_init` at 12.3 s, `wlan0` up, the PHY
   on `RK630 PHY`, `cncjs` active; the fallback logged both drivers already loaded. Unit removed.
+
+## 2026-11-02 — renamed `r69` to `r69-1`
+
+The board key now names the model as its silkscreen does, as `BOARD_NAME` already did.
+`BOARD_RENAMED_FROM=r69` builds a final `tvb-r69` that depends on `tvb-r69-1`, and the compatible
+became `r69-1,rk3518-tvbox`.
+
+**On the box, the same day.** `apt` took `tvb-r69-1` 3 and the transition at `1:3` from this tree in
+one run, ordering them itself. Two reboots, 29 s and 27 s: compatible `r69-1,rk3518-tvbox`,
+`board-id` `r69-1`, hostname still `cnc`, `wlan0` up, `cncjs`, NetworkManager and Bluetooth active,
+nothing failed. The previous tree is kept at `/root/board.dtb.known-good`.

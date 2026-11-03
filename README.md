@@ -14,15 +14,15 @@ because we have trust issues too.
 
 ## Boxes
 
-| Box                   | Form     | Ports                               | SoC           | Wi-Fi/BT   | Install            |
-| --------------------- | -------- | ----------------------------------- | ------------- | ---------- | ------------------ |
-| [R69][r69]            | box      | HDMI, USB 3+2, LAN 100M, SD, AV, IR | [RK3518][rk]  | AIC8800D80 | SD card or OTG     |
-| [H96 Max 3518][a]     | box      | HDMI, USB 3+2, LAN 100M, SD, AV, IR | [RK3518][rk]  | SWT6621S   | SD card or OTG     |
-| [H96 Max 3518D][b]    | stick    | HDMI, USB-C + USB-A                 | [RK3518][rk]  | SWT6621S   | OTG                |
-| [H96 Max M20][m20]    | stick    | HDMI, USB-C + USB-A                 | [S905L3][aml] | MT7668S    | OTG, then USB disk |
-| [Tanix TX1 V2.0][tx1] | mini box | HDMI, USB-A, AV, IR                 | [H313][aw]    | ATBM6031-X | OTG                |
+| Box                   | Board                      | Form     | Ports                               | SoC           | RAM · eMMC                 | Wi-Fi/BT   | Install            |
+| --------------------- | -------------------------- | -------- | ----------------------------------- | ------------- | -------------------------- | ---------- | ------------------ |
+| [R69-1][r69]          | `XR821_V1.1`               | box      | HDMI, USB 3+2, LAN 100M, SD, AV, IR | [RK3518][rk]  | 2 GB (1.5 usable) · 16 GB  | AIC8800D80 | SD card or OTG     |
+| [H96 Max 3518][a]     | `3518_ZX_V01`              | box      | HDMI, USB 3+2, LAN 100M, SD, AV, IR | [RK3518][rk]  | 2 GB · 16 GB               | SWT6621S   | SD card or OTG     |
+| [H96 Max 3518D][b]    | `3518_DG_ZX_V01`           | stick    | HDMI, USB-C + USB-A                 | [RK3518][rk]  | 2 GB · 16 GB               | SWT6621S   | OTG                |
+| [H96 Max M20][m20]    | `905_DG_ZX01_V01`          | stick    | HDMI, USB-C + USB-A                 | [S905L3][aml] | 2 GB · 16 GB               | MT7668S    | OTG, then USB disk |
+| [Tanix TX1 V2.0][tx1] | `QHZIW_H313_TX1_EMCP_V2.0` | mini box | HDMI, USB-A, AV, IR                 | [H313][aw]    | 1.5 GB (sold as 2) · 16 GB | ATBM6031-X | OTG                |
 
-[r69]: docs/r69/board.md
+[r69]: docs/r69-1/board.md
 [a]: docs/h96max-3518/board.md
 [b]: docs/h96max-3518d/board.md
 [m20]: docs/h96max-m20/board.md

@@ -1,6 +1,6 @@
 # H96 Max 3518 (RK3518) — stock/vanilla board evidence
 
-The equivalent of `stock/r69/`, with one difference in provenance: the R69's dumps came from a
+The equivalent of `stock/r69-1/`, with one difference in provenance: the R69's dumps came from a
 **root shell on the running stock Android**, while this box's evidence was gathered without one. At
 the time we couldn't type into its serial console at all; that turned out to be our wiring, but
 **whether this box's Android offers a root shell was never confirmed** — nobody retested it once the

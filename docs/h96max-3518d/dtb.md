@@ -158,10 +158,10 @@ Both ends of that chain do work, and both matter here:
   calibration blobs differ from the H96 Max's, so the compatible is what keeps them apart. It has to
   be this board's own string, `h96max-3518d,rk3518-tvbox`.
 - **`rockchip,rk3528a` last** — rkmpp has no `rk3518` entry and cannot find the VPU without it.
-  **This board needs the append more than the R69 does.** `docs/r69/board.md` notes MPP works there
-  because "the factory tree already says `rockchip,rk3528a`" — but that is the _runtime_ tree, which
-  the vendor U-Boot rewrites. The disk tree here says `rockchip,rk3518`, and our U-Boot does no such
-  rewrite, so without the append nothing downstream can name the SoC.
+  **This board needs the append more than the R69 does.** `docs/r69-1/board.md` notes MPP works
+  there because "the factory tree already says `rockchip,rk3528a`" — but that is the _runtime_ tree,
+  which the vendor U-Boot rewrites. The disk tree here says `rockchip,rk3518`, and our U-Boot does
+  no such rewrite, so without the append nothing downstream can name the SoC.
 
 ## Open graft candidate — the eMMC clock
 
@@ -173,9 +173,10 @@ starts.
 So the cap is a choice in this board's tree, and raising it to match the H96 Max is a one-property
 experiment with a sibling as prior evidence.
 
-**Do not treat that as free.** `docs/r69/board.md` records HS400ES reading ~290 MB/s on the R69 and
-then corrupting sustained writes, which is why that board is deliberately pinned at HS200. Measure
-with `fio` and verify written data before keeping any raise, and change one property at a time.
+**Do not treat that as free.** `docs/r69-1/board.md` records HS400ES reading ~290 MB/s on the R69
+and then corrupting sustained writes, which is why that board is deliberately pinned at HS200.
+Measure with `fio` and verify written data before keeping any raise, and change one property at a
+time.
 
 Order of business: get the box booting on the factory 50 MHz value first, and only then treat the
 clock as a separate, measured experiment.

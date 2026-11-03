@@ -343,8 +343,8 @@ The only view of U-Boot and early boot; under stock Android it is a **root shell
 Worked first attempt on 2026-09-05 — that refers to the **wiring** being right, no TX/RX swap
 needed; it says nothing about how fiddly the contact was.
 
-> **A board photo is still missing**; both `docs/r69/` and `docs/h96max-3518/` have one. The pinout
-> above is unambiguous without one, but nothing else is illustrated.
+> **A board photo is still missing**; both `docs/r69-1/` and `docs/h96max-3518/` have one. The
+> pinout above is unambiguous without one, but nothing else is illustrated.
 
 ## Recovery — read this before writing anything
 
