@@ -3,12 +3,13 @@ From: Artem Butusov <art.sormy@gmail.com>
 Date: Mon, 2 Nov 2026 21:00:00 -0500
 Subject: [PATCH] drm/sun4i: Expose the DE33 CDC 3D LUT on video planes
 
-DE33's VI channels 0 and 1 carry a colour lattice, CDC: a 17-point 3D
-LUT, 10 bits a component, on the channel's own signal (Y, Cb, Cr for YUV
-input, R, G, B for RGB), ahead of the channel's CSC. Channel 0's CDC
-also has a CSC stage on each side of the LUT, held at identity here.
+DE33's VI channel 0 carries a colour lattice, CDC: a 17-point 3D LUT,
+10 bits a component, on the channel's own signal (Y, Cb, Cr for YUV
+input, R, G, B for RGB), ahead of the channel's CSC, with a CSC stage
+on each side of the LUT held at identity here. The vendor driver lists
+one on channel 1 too; on the H313 that block keeps no write.
 
-Expose it as two plane properties on the VI planes that have one:
+Expose it as two plane properties on that VI plane:
 SUNXI_CDC_LUT3D_SIZE, immutable, 17; and SUNXI_CDC_LUT3D, a blob of
 17^3 drm_color_lut, the first component fastest, reserved zero, zero to
 bypass. The plane's COLOR_ENCODING and COLOR_RANGE then describe the
@@ -36,11 +37,12 @@ diff -urN a/drivers/gpu/drm/sun4i/Makefile b/drivers/gpu/drm/sun4i/Makefile
 diff -urN a/drivers/gpu/drm/sun4i/sun8i_cdc.c b/drivers/gpu/drm/sun4i/sun8i_cdc.c
 --- a/drivers/gpu/drm/sun4i/sun8i_cdc.c
 +++ b/drivers/gpu/drm/sun4i/sun8i_cdc.c
-@@ -0,0 +1,262 @@
+@@ -0,0 +1,253 @@
 +// SPDX-License-Identifier: GPL-2.0-or-later
 +/*
-+ * The DE33 colour lattice (CDC): a 17-point 3D LUT on VI channels 0 and 1,
-+ * applied to the channel's own signal, YUV or RGB, before its CSC.
++ * The DE33 colour lattice (CDC): a 17-point 3D LUT on VI channel 0, applied
++ * to the channel's own signal, YUV or RGB, between two CSC stages. The vendor
++ * lists one on channel 1 too; the H313's channel 1 keeps no write there.
 + */
 +
 +#include <drm/drm_atomic_helper.h>
@@ -54,9 +56,7 @@ diff -urN a/drivers/gpu/drm/sun4i/sun8i_cdc.c b/drivers/gpu/drm/sun4i/sun8i_cdc.
 +#include "sun8i_rdma.h"
 +
 +#define SUN8I_CDC_OFFSET		0x8000
-+#define SUN8I_CDC_CHANNELS		2
-+/* Only channel 0's CDC has CSC stages around its LUT. */
-+#define SUN8I_CDC_CSC_CHANNEL		0
++#define SUN8I_CDC_CHANNELS		1
 +#define SUN8I_CDC_CTL_SIZE		0x90
 +#define SUN8I_CDC_CTL_EN		BIT(0)
 +#define SUN8I_CDC_IN_CSC		0x14
@@ -83,10 +83,6 @@ diff -urN a/drivers/gpu/drm/sun4i/sun8i_cdc.c b/drivers/gpu/drm/sun4i/sun8i_cdc.
 +};
 +
 +static const struct reg_region sun8i_cdc_ctl_regions[] = {
-+	{ 0, 1 }, { }
-+};
-+
-+static const struct reg_region sun8i_cdc_ctl_csc_regions[] = {
 +	{ 0, 1 }, { SUN8I_CDC_IN_CSC, 15 }, { SUN8I_CDC_OUT_CSC, 15 }, { }
 +};
 +
@@ -247,7 +243,6 @@ diff -urN a/drivers/gpu/drm/sun4i/sun8i_cdc.c b/drivers/gpu/drm/sun4i/sun8i_cdc.
 +		   void __iomem *reg_base)
 +{
 +	struct drm_device *drm = layer->plane.dev;
-+	bool has_csc = layer->channel == SUN8I_CDC_CSC_CHANNEL;
 +	struct drm_property *size_property;
 +	struct sun8i_cdc *cdc;
 +	unsigned int i;
@@ -263,9 +258,7 @@ diff -urN a/drivers/gpu/drm/sun4i/sun8i_cdc.c b/drivers/gpu/drm/sun4i/sun8i_cdc.
 +
 +	base = layer->channel * DE33_CH_SIZE + SUN8I_CDC_OFFSET;
 +	cdc->ctl = sun8i_rdma_add_unit(rdma, reg_base + base, 0x100000 + base,
-+				       SUN8I_CDC_CTL_SIZE,
-+				       has_csc ? sun8i_cdc_ctl_csc_regions :
-+						 sun8i_cdc_ctl_regions);
++				       SUN8I_CDC_CTL_SIZE, sun8i_cdc_ctl_regions);
 +	base += SUN8I_CDC_LUT_START;
 +	cdc->lut = sun8i_rdma_add_unit(rdma, reg_base + base, 0x100000 + base,
 +				       SUN8I_CDC_LUT_SIZE,
@@ -274,15 +267,14 @@ diff -urN a/drivers/gpu/drm/sun4i/sun8i_cdc.c b/drivers/gpu/drm/sun4i/sun8i_cdc.
 +		return -ENOMEM;
 +
 +	/* The CSC stages around the LUT pass its signal through unchanged. */
-+	if (has_csc)
-+		for (i = 0; i < 3; i++) {
-+			sun8i_rdma_write(cdc->ctl,
-+					 SUN8I_CDC_CSC_DIAGONAL(SUN8I_CDC_IN_CSC, i),
-+					 SUN8I_CDC_CSC_ONE);
-+			sun8i_rdma_write(cdc->ctl,
-+					 SUN8I_CDC_CSC_DIAGONAL(SUN8I_CDC_OUT_CSC, i),
-+					 SUN8I_CDC_CSC_ONE);
-+		}
++	for (i = 0; i < 3; i++) {
++		sun8i_rdma_write(cdc->ctl,
++				 SUN8I_CDC_CSC_DIAGONAL(SUN8I_CDC_IN_CSC, i),
++				 SUN8I_CDC_CSC_ONE);
++		sun8i_rdma_write(cdc->ctl,
++				 SUN8I_CDC_CSC_DIAGONAL(SUN8I_CDC_OUT_CSC, i),
++				 SUN8I_CDC_CSC_ONE);
++	}
 +
 +	cdc->lut_property = drm_property_create(drm, DRM_MODE_PROP_BLOB,
 +						"SUNXI_CDC_LUT3D", 0);

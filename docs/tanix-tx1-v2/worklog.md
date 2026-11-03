@@ -1456,3 +1456,16 @@ Allwinner head. `u-boot` is AArch32, a `uboot` spare head with a checksum and ru
 `boot0`, ours would need TF-A relinked from `0x40000000` behind a `monitor` head and U-Boot proper
 behind a `uboot` head, `PRELOADED_BL33_BASE` to match. FEL recovers the box from any state, so the
 gain, the unit's own DRAM init on the eMMC, is not worth it; the install keeps writing our SPL.
+
+## 2026-11-03 — VI channel 1 has no CDC
+
+- Mixer 1's VI 1 moved onto mixer 0, the vendor's single-screen map (`sun50i_planes.c`: mixer 0
+  `{0, 1, 6, 7}`, mixer 1 `{2, 8}`, the primary the first UI channel): plane 41 on CRTC 0, overlay,
+  zpos 0–3, ARGB8888 and YUV, scanned out. Its `SUNXI_CDC_LUT3D` changed nothing: every table came
+  back as identity, `display.py` 7 failures on it.
+- With plane 41 shown, channel 1's overlay attribute read `0xff008403`, as channel 0's; its CDC
+  control at `0x01128000` and LUT at `0x01129000` read 0 and kept no write, plain data offsets
+  included. The vendor's mode 0 lists a CDC on channels 0 and 1 at the same offset; this H313
+  decodes none on channel 1. Channel 0's, with the plane shown: control 1, the LUT programmed.
+- `0276` exposes the CDC on channel 0 alone, its CSC stages always set; the map change dropped, no
+  CDC to gain. `display.py` 18 passed on the kexec'd build. The interface into PQ stays a GPU pass.

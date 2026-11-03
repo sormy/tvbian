@@ -174,14 +174,14 @@ count holds; JPEG to 6000x4000, 6144x6144 hanging. Not yet submitted.
 `0809` is ours: an HEVC reference the queue no longer holds, after a gap in the stream, is skipped
 with a rate-limited debug line, not a `WARN_ON`. Not yet submitted.
 
-`0276` is ours: DE33's VI channels 0 and 1 carry a 17-point 3D LUT, CDC, ahead of the channel's CSC,
-on the channel's own signal: Y, Cb, Cr for YUV input in the red, green and blue fields; R, G, B for
-RGB. Planes with one carry `SUNXI_CDC_LUT3D_SIZE`, immutable, 17, and `SUNXI_CDC_LUT3D`, a blob of
-17³ `drm_color_lut`, the first component fastest, reserved zero; 0 bypasses. The plane's
+`0276` is ours: DE33's VI channel 0 carries a 17-point 3D LUT, CDC, ahead of the channel's CSC, on
+the channel's own signal: Y, Cb, Cr for YUV input in the red, green and blue fields; R, G, B for
+RGB. Its plane carries `SUNXI_CDC_LUT3D_SIZE`, immutable, 17, and `SUNXI_CDC_LUT3D`, a blob of 17³
+`drm_color_lut`, the first component fastest, reserved zero; 0 bypasses. The plane's
 `COLOR_ENCODING` and `COLOR_RANGE` describe the table's output. The table goes through the RCQ in
-the hardware's eight parity banks when the blob changes or the plane becomes visible; channel 0's
-CSC stages around it stay at identity. Channel 1 belongs to mixer 1 in this driver's fixed mapping.
-Not yet submitted.
+the hardware's eight parity banks when the blob changes or the plane becomes visible; the CSC stages
+around it stay at identity. The vendor driver lists a CDC on channel 1 too; the H313's keeps no
+write there. Not yet submitted.
 
 `0096` is ours: an AFBC layer skips the fetcher's coarse downscale, so a shrink the VI scaler cannot
 keep up with breaks the picture up below its top. The scaler takes a source pixel a clock: an output
