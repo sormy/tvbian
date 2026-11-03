@@ -78,16 +78,18 @@ MiB, both H96 Max boards 2304 MiB.
 ## What our image reproduces
 
 `image/build.sh` lays a GPT with one `rootfs` starting at sector 32768, exactly where the factory
-`misc` began, the idbloader in all five slots and the FIT in both, and leaves 7168–16383 empty: that
-window is the unit's, which `tvb-install` keeps on the eMMC.
+`misc` began, the idbloader in all five slots and the FIT in both, and leaves 7168–16383 empty. The
+image's idbloader boots it from an SD card; on the eMMC, the unit's own stays.
 
-| Region              | Factory            | Our image                                     |
-| ------------------- | ------------------ | --------------------------------------------- |
-| idbloader           | 5 slots (R69: 2)   | ✅ **all five**, from the board's own blob    |
-| vendor storage      | `DVKR` ×4          | ➖ left empty: `tvb-install` keeps the unit's |
-| secure storage      | `SSKR` ×4          | ➖ left empty: `tvb-install` keeps the unit's |
-| `uboot`, both slots | factory U-Boot ×2  | ✅ ours ×2 — the two slots are kept identical |
-| everything ≥ 32768  | Android partitions | ➖ replaced by `rootfs` — deliberate          |
+| Region              | Factory            | An install to the eMMC                      |
+| ------------------- | ------------------ | ------------------------------------------- |
+| GPT                 | Android's          | ✅ ours                                     |
+| idbloader           | 5 slots (R69: 2)   | ➖ the unit's, kept: its DDR init booted it |
+| vendor storage      | `DVKR` ×4          | ➖ the unit's, kept                         |
+| secure storage      | `SSKR` ×4          | ➖ the unit's, kept                         |
+| `uboot`, both slots | factory U-Boot ×2  | ✅ ours ×2, the two slots identical         |
+| `trust`             | empty              | ➖ kept: our FIT carries BL31 and OP-TEE    |
+| everything ≥ 32768  | Android partitions | ✅ `rootfs`, deliberately                   |
 
 **Only the first slot boots**; the second is a copy the SPL never falls back to on its own.
 

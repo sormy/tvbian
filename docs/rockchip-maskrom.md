@@ -68,6 +68,20 @@ outlives the button, and why the lower the stage, the more it survives:
 | U-Boot @ 16384       | any key in the 2 s delay, then `mw.l` | cable + serial        |
 | booted OS            | `reboot maskrom`                      | any access to the OS  |
 
+**The boot order.** The BootROM runs the eMMC's idbloader first, and its SPL loads the FIT from an
+SD card before the eMMC's: with a card in, the card's U-Boot runs over a different, valid one on the
+eMMC. So a card rescues a box whose eMMC idbloader still trains DRAM, and nothing rescues one whose
+does not but the BootROM's own fallback, route 4.
+
+**Recovery, by what failed:**
+
+| What failed                         | Last stage that runs | Way back               | Needs                 |
+| ----------------------------------- | -------------------- | ---------------------- | --------------------- |
+| rootfs or partition table           | U-Boot               | an SD card; the button | card, or cable        |
+| U-Boot: corrupt, or another board's | the SPL              | an SD card; `ctrl+b`   | card, or serial       |
+| sector 64 erased                    | the BootROM          | plug in                | cable                 |
+| a DDR blob that cannot train        | none past DDR init   | short CLK or D0        | cable + probe + hours |
+
 The BootROM rescues you only when it never handed off — so **erasing sector 64 is recoverable,
 writing a wrong DDR blob there is not.** `ctrl+b` needs DRAM up, so it is only ever as good as the
 DDR init beside it in the same block.
@@ -185,17 +199,18 @@ build/bin/rkdeveloptool db boards/<board>/maskrom_loader.bin
 build/bin/rkdeveloptool wl 0 <image>
 ```
 
-The image leaves the factory window blank: put 7168-16383 back from your dump — **after** the image,
-since `wl 0` writes the whole chip:
+Then put the box's own sectors back from your dump — **after** the image:
 
 ```sh
-dd if=emmc-stock.img of=window.bin bs=512 skip=7168 count=9216     # on the host
-build/bin/rkdeveloptool wl 7168 window.bin
+grep -o '^[0-9]*-[0-9]*' boards/common/preserve-sectors.rk35xx | while IFS=- read -r first last; do
+  dd if=emmc-stock.img of=window.bin bs=512 skip="$first" count=$((last - first + 1))
+  build/bin/rkdeveloptool wl "$first" window.bin              # the box's own sectors, from the dump
+done
 build/bin/rkdeveloptool rd
 ```
 
-Skip it and the box loses its label MAC and serial, and nothing else. Once it boots, confirm with
-`ip link show eth0` — it must match the label.
+Skip it and the box runs another unit's DRAM init, without its label MAC and serial. Once it boots,
+confirm with `ip link show eth0` — it must match the label.
 
 ## Traps
 

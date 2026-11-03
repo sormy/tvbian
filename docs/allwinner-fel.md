@@ -40,6 +40,12 @@ sudo umount /dev/sdX?*
 When done, eject the disk (`diskutil eject /dev/diskN`, `sudo eject /dev/sdX`), unplug the cable and
 plug the power back in.
 
+## Recovery
+
+The BootROM reads the FEL button before anything on the eMMC, so the routes above work from any
+state the eMMC is in. It also tries an SD card before the eMMC: on a box with a slot, a card holding
+an image boots whatever the eMMC holds.
+
 ## Back up
 
 The whole eMMC, the box's MAC address, serial number and keys included: the only way back to stock
@@ -63,14 +69,18 @@ sync
 On a box with an SD card slot, booting the image from an SD card and running `sudo tvb-install` from
 it is recommended instead: the box runs the image before anything is written to its eMMC.
 
-An image is written around the box's secure storage, which holds its MAC address, serial number and
-keys. The first line reads its sectors from the board's `preserve-sectors`:
+Write the image around the family's `preserve-sectors`, which holds the box's MAC address, serial
+number and keys:
 
 ```sh
-read first last <<<"$(sed -n '1s/^\([0-9]*\)-\([0-9]*\).*/\1 \2/p' boards/<board>/preserve-sectors)"
 xz -dc <image>.img.xz > image.img
-sudo dd if=image.img of=<disk> bs=64K count=$((first / 128))   # 64K: 128 sectors
-sudo dd if=image.img of=<disk> bs=64K skip=$(((last + 1) / 128)) seek=$(((last + 1) / 128))
+pos=0
+for range in $(grep -o '^[0-9]*-[0-9]*' boards/common/preserve-sectors.sunxi-h616); do
+  first=${range%-*}
+  [ "$first" -le "$pos" ] || sudo dd if=image.img of=<disk> bs=512 skip=$pos seek=$pos count=$((first - pos))
+  pos=$((${range#*-} + 1))
+done
+sudo dd if=image.img of=<disk> bs=1M skip=$((pos / 2048)) seek=$((pos / 2048))   # the rootfs
 sync
 ```
 

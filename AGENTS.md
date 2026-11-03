@@ -33,10 +33,10 @@ code** — one `boards/<board>/` directory. If a change needs new code per board
 
 **Repo files carry no prefix**: each board's `package.list` names where a file installs. A board
 directory holds `board.conf`, the tree, the factory idbloader and the maskrom loader,
-`package.list`, `preserve-sectors` where it has a `tvb-install`, and firmware only where it is shown
-to be this board's. **What every box gets lives in `base/`, mechanism some boards share in
-`boards/common/`** — a board never keeps its own copy of a family script. What it may keep is
-mechanism no other board can use: a unit for hardware only it has.
+`package.list`, and firmware only where it is shown to be this board's. **What every box gets lives
+in `base/`, mechanism some boards share in `boards/common/`** — a board never keeps its own copy of
+a family script. What it may keep is mechanism no other board can use: a unit for hardware only it
+has.
 
 **A board's version lives in `BOARD_ID` alone**, beside `BOARD_PCB`'s silkscreen, which says it
 anyway. `BOARD_NAME` and `BOARD_HOSTNAME` name the model: `tanix-tx1-v2` is `Tanix TX1` at

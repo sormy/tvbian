@@ -16,3 +16,7 @@ link /usr/lib/firmware/updates/swt6621s/SWT6621S_NV_SDIO_STANDALONE_FDD.bin /usr
 # the video engines for a normal user, Bluetooth unblocked at registration
 0644 common/vpu.rules              /usr/lib/udev/rules.d/99-tvb-vpu.rules
 0644 common/rfkill-bt.rules        /usr/lib/udev/rules.d/60-tvb-rfkill-bt.rules
+
+# tvb-install, and what it never writes on the eMMC: the family's preserve list
+0755 common/tvb-install                   /usr/sbin/tvb-install
+0644 common/preserve-sectors.rk35xx       /usr/lib/tvb/preserve-sectors

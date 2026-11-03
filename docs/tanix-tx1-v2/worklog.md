@@ -1447,3 +1447,12 @@ experiment", its `tools/kernel/` (the experimental patch and its README).
   without the interface; a 1080p picture at those modes 0.
 - Not monotonic past 98%: the one-pixel-a-clock model holds to about ±2%. 90 kept: the lowest
   failure is 99.3%, and a 4K screen's interface traffic was not in these runs.
+
+## 2026-11-03 — keeping boot0 on install: not pursued
+
+Read from the stock boot package at 24576: four TOC1 items with `run_addr` 0, each carrying its own
+Allwinner head. `u-boot` is AArch32, a `uboot` spare head with a checksum and run address
+`0x4a000000`; `monitor` is BL31, AArch64, a `monitor`/`CHKv1.0` head at `0x48000000`. Behind stock
+`boot0`, ours would need TF-A relinked from `0x40000000` behind a `monitor` head and U-Boot proper
+behind a `uboot` head, `PRELOADED_BL33_BASE` to match. FEL recovers the box from any state, so the
+gain, the unit's own DRAM init on the eMMC, is not worth it; the install keeps writing our SPL.

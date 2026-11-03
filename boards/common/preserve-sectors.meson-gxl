@@ -1,0 +1,8 @@
+1-8191          # factory bootloader: BL2 and the stages after it
+73736-73759     # reserved: unused
+73760-74271     # reserved: unifykeys: serial, MACs
+74272-79871     # reserved: unused
+79872-80127     # reserved: eMMC tuning pattern
+80128-81919     # reserved: unused
+82944-204799    # reserved: unused
+204800-237567   # stock cache: unused by our layout

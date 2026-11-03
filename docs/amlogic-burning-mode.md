@@ -42,6 +42,22 @@ amlcmd read store boot 0x1000 boot.bin    # a named partition, through the store
 - The size comes from `amlmmc size wholeDev`, the boot device; another device takes an explicit
   count.
 
+## Recovery, by what failed
+
+The factory bootloader runs first and an install never writes it. Its U-Boot parses the partition
+table and device tree in `reserved` at every eMMC init, falls back from one to the other or to its
+built-in env when they are bad, and then runs `preboot`, which samples the button
+(`upgrade_sadckey`). On a cold boot `try_auto_burn` opens burning mode for 700 ms.
+
+| What failed                          | Last stage that runs            | Way back                    | Needs |
+| ------------------------------------ | ------------------------------- | --------------------------- | ----- |
+| rootfs, the FAT, our U-Boot          | the factory U-Boot              | the button; `try_auto_burn` | cable |
+| `env`                                | the factory U-Boot, its own env | the button                  | cable |
+| `reserved`'s partition table or tree | the factory U-Boot              | the button                  | cable |
+
+With the button held, `update` also runs `aml_autoscript` from a USB stick: a stick holding an image
+boots it.
+
 ## The mask ROM
 
 | Gadget         | `identify`          | Reaches                      |

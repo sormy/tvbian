@@ -35,7 +35,6 @@ files() {
       # shellcheck source=/dev/null
       . "boards/$2/board.conf"
       echo "boards/$2/board.dtb" "boards/$2/package.list" package/board.sh package/install-list.sh
-      [ ! -f "boards/$2/preserve-sectors" ] || echo "boards/$2/preserve-sectors" boards/common/tvb-install
       sed -E 's/#.*//' "boards/$2/package.list" | awk 'NF && $1 != "link" {print "boards/" $2}'
       if [ -n "${BOARD_UBOOT:-}" ]; then
         echo "uboot/$BOARD_UBOOT.conf" uboot/build.sh

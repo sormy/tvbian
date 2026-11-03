@@ -1,0 +1,6 @@
+34-63           # unused, past the GPT
+64-5183         # idbloader ×5: DDR init and SPL
+5184-7167       # unused
+7168-8191       # DVKR: vendor storage ×4, its MAC
+8192-16383      # SSKR: secure storage ×4, and the rest of security
+24576-32767     # trust: unused by our FIT

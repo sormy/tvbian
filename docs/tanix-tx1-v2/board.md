@@ -38,7 +38,7 @@ regression pass on each.
 | backup           | ✅  | ✅  | `backup/tanix-tx1-v2-stock.img.xz`                               |
 | backup size      | ✅  | ✅  | 30777344 sectors, the eMMC's                                     |
 | backup read      | ✅  | ✅  | FEL read hash matches the Android-side read                      |
-| per-unit window  | ✅  | ✅  | `preserve-sectors` 12288–12799                                   |
+| per-unit window  | ✅  | ✅  | `preserve-sectors`: secure storage 12288–12799                   |
 | DRAM init carved | ✅  | ✅  | `factory_boot0.bin`                                              |
 | stock boot log   | ✅  | ✅  | `stock/tanix-tx1-v2/boot.log`                                    |
 | ID searched      | ✅  | ✅  | the V1.1 PCB is another board                                    |
@@ -340,7 +340,8 @@ plus one, the same on every load; the firmware sets it, the driver does not. At 
 | 24576, 32800 | boot package: BL31, U-Boot, the `dtb` | —                 |
 | 32768        | —                                     | the rootfs        |
 
-`preserve-sectors` names the secure storage; an install writes around it.
+An install writes the MBR, our U-Boot and the rootfs. `preserve-sectors` keeps the rest: the secure
+storage, `sdmmc_arg`, the stock boot package and the unused stretches between them.
 
 ## Serial console
 

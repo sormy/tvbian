@@ -9,3 +9,7 @@ link /usr/lib/firmware/updates/meson/gxlx2/gxl_mjpeg.bin     /usr/lib/tvb/firmwa
 
 # keys neither suspend nor power off a box nothing can wake
 0644 h96max-m20/powerkey.conf    /usr/lib/systemd/logind.conf.d/zz-tvb-powerkey.conf
+
+# tvb-install, and what it never writes on the eMMC: the family's preserve list
+0755 common/tvb-install                   /usr/sbin/tvb-install
+0644 common/preserve-sectors.meson-gxl    /usr/lib/tvb/preserve-sectors

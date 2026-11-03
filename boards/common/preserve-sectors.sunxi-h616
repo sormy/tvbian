@@ -1,0 +1,5 @@
+2048-12287      # unused, past our U-Boot
+12288-12799     # secure storage: key map, MAC, serial
+12800-24503     # unused
+24504-24575     # sdmmc_arg: boot0's eMMC tuning
+24576-32767     # stock boot package

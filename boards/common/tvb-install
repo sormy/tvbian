@@ -2,7 +2,7 @@
 # Copy the running TVBian to another disk, bootable as the one it runs from. Every disk an image
 # makes holds the board's whole layout, so the copy is the disk itself: its partition table with the
 # rootfs grown to the target, the rootfs by file under a new UUID, then every sector before the
-# rootfs raw but the ones in /usr/lib/tvb/preserve-sectors, this unit's own.
+# rootfs raw. To the eMMC, all but /usr/lib/tvb/preserve-sectors: what TVBian does not replace.
 set -euo pipefail
 
 PRESERVE_SECTORS=/usr/lib/tvb/preserve-sectors
@@ -106,13 +106,15 @@ HAVE_MIB=$((($(blockdev --getsz "$DST") - START) / 2048))
 
 FROM_TO="TVBian from $(describe "$SRC") to $(describe "$DST")"
 if [ -n "$YES" ]; then echo "Installing $FROM_TO"; else echo "Install $FROM_TO?"; fi
-echo "Keeping the target's own sectors:"
 RANGES=
-while read -r range note; do
-  [ -n "$range" ] && [ "${range#\#}" = "$range" ] || continue
-  RANGES="$RANGES $range"
-  printf '    %-12s %s\n' "$range" "${note#\# }"
-done <"$PRESERVE_SECTORS"
+if [ "$DST" = "$EMMC" ]; then
+  echo "Keeping the eMMC's own sectors:"
+  while read -r range note; do
+    [ -n "$range" ] && [ "${range#\#}" = "$range" ] || continue
+    RANGES="$RANGES $range"
+    printf '    %-14s %s\n' "$range" "${note#\# }"
+  done <"$PRESERVE_SECTORS"
+fi
 if [ -z "$YES" ]; then
   read -rp "All data on the target will be erased; back it up first if you may want it back. [y/N] " answer
   case $answer in y | Y) ;; *) die "not installed" ;; esac

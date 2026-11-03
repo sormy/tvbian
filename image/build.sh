@@ -171,7 +171,7 @@ EOF
     UBOOT=$ROOT/usr/lib/tvb/u-boot.bin
     window=$(sed -n 's/^\([0-9]*\)-.*/\1/p' "$ROOT/usr/lib/tvb/preserve-sectors" | head -1)
     [ $((SPL_SEEK + ($(stat -c %s "$UBOOT") + 511) / 512)) -le "${window:-$ROOT_SEEK}" ] ||
-      { echo "✗ u-boot.bin runs into the per-unit window at sector $window"; exit 1; }
+      { echo "✗ u-boot.bin runs into the preserved sectors at $window"; exit 1; }
     truncate -s $(((ROOT_SEEK + ROOT_COUNT) * 512)) "$IMG"
     mbr_entry 128 131 "$ROOT_SEEK" "$ROOT_COUNT" | dd of="$IMG" bs=1 seek=446 conv=notrunc status=none
     bytes 85 170 | dd of="$IMG" bs=1 seek=510 conv=notrunc status=none

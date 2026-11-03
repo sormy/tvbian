@@ -311,14 +311,16 @@ chain-loads the image's own U-Boot. The image step rewrites the factory MPT and 
 tvb-install
 ```
 
-It copies the stick to the eMMC, all but the unifykeys, sectors 73760–74271.
+It copies the stick to the eMMC, all but what TVBian does not replace: the factory bootloader,
+`reserved` but its MPT and DTB, and the stock `cache`, as `preserve-sectors` lists them.
 
 | Sectors       | Holds                                           |
 | ------------- | ----------------------------------------------- |
-| 0–8191        | MBR; the factory bootloader, the image's copy   |
+| 0             | MBR                                             |
+| 1–8191        | the unit's factory bootloader, kept             |
 | 8192–16383    | the image's U-Boot, read by `amlmmc` from `env` |
 | 16384–73727   | FAT: `boot.scr`, `aml_autoscript`               |
-| 73728–204799  | `reserved`: MPT, keys (the unit's), DTB × 2     |
+| 73728–204799  | `reserved`: our MPT and DTB × 2; the rest kept  |
 | 237568–253951 | `env`: `bootcmd` loads the image's U-Boot       |
 | 253952–end    | the ext4 rootfs                                 |
 

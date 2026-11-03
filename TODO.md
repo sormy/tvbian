@@ -39,9 +39,6 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
       no button: it boots first whenever one is in. Never Android's recovery, which our images do
       not have. The Tanix TX1 V2.0's PH9 was built once this way.
 
-- [ ] **Every board: `tvb-install` keeps the eMMC's bootloader**, compares it with the image's and
-      warns on a mismatch: `docs/todo/tvb-install-bootloader.md`.
-
 - [ ] **Every board: built outputs made by the build, not committed.** The repo keeps the inputs
       (`factory_*`, `*.patch`) and builds the rest: factory tree → `.dts` → patch → `board.dts` →
       `board.dtb`, and the same for `uboot.dts`, `maskrom_loader.bin` and `fel_loader.bin`. Today
@@ -156,6 +153,5 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
 | `docs/todo/allwinner.md`                | Allwinner boards, every one                 |
 | `docs/todo/tanix-tx1-v2.md`             | the Tanix TX1 V2.0: what is left            |
 | `docs/todo/h96max-m20.md`               | the H96 Max M20: what is left               |
-| `docs/todo/tvb-install-bootloader.md`   | an install that keeps the box bootable      |
 | `docs/todo/website.md`                  | tvbian.com: one page on GitHub Pages        |
 | `docs/todo/repo-layout.md`              | folders, patches, tools and docs, regrouped |

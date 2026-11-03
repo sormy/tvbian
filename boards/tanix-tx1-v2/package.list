@@ -3,3 +3,7 @@
 # board shares.
 0644 common/powerkey.conf          /usr/lib/systemd/logind.conf.d/zz-tvb-powerkey.conf
 0644 common/s2idle.conf            /usr/lib/systemd/sleep.conf.d/tvb-s2idle.conf
+
+# tvb-install, and what it never writes on the eMMC: the family's preserve list
+0755 common/tvb-install                   /usr/sbin/tvb-install
+0644 common/preserve-sectors.sunxi-h616   /usr/lib/tvb/preserve-sectors

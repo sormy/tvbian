@@ -2277,3 +2277,17 @@ processes the archives in order and refused the board while the old package stil
 `H96 Max 3518 3518_ZX_V01`, `board-id` `h96max-3518`, hostname still `h96max-h313`, and `wlan0` up
 through the renamed Seekwave NV link, the only one left. The previous tree is kept at
 `/root/board.dtb.known-good`.
+
+## 2026-11-03 — an install keeps what TVBian does not replace
+
+`preserve-sectors` now lists, one block a line, the idbloader (64–5183), `DVKR`, `SSKR`, `trust` and
+the unused stretches; `tvb-install` skips them on the eMMC only. From the SD card, with dumps of
+sectors 0–32767 before and after: every window byte-identical, only the GPT (0–5) and both FIT slots
+written, the FIT equal to the card's; the eMMC's idbloader is the factory one in all five slots. 6.2
+GB in 8 min.
+
+The boot order, measured: the eMMC's FIT set back to the previous build, U-Boot 2026.04, and a
+reboot with the card in. The kernel's `/chosen/u-boot,version` read 2026.10, the card's: the SPL
+loads the card's FIT before the eMMC's. That the BootROM runs the eMMC's idbloader first follows
+from the R69 of issue #6, which booted Armbian's card with ROCK 2F loaders and stopped booting any
+card once the same DDR blob was on its eMMC. The eMMC's FIT is 2026.10 again.
