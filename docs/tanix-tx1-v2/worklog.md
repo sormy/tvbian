@@ -1411,3 +1411,20 @@ experiment", its `tools/kernel/` (the experimental patch and its README).
   enable cleared) and the PLL integer at 471 MHz; the second hung the box, no network and no
   watchdog reset, until power was cut. Without a serial console the cause is unseen: the pattern
   register, the enable order, or the TCON losing its clock while the mixer runs. Not taken.
+- `0277`, the TCON's FIFO underflow (debug register `0xfc`, bits 30 and 31, latched until cleared)
+  counted at each vblank in `dri/0/crtc-0/underruns`: 0 at rest. `display_box`, 10 s each,
+  2256x1504@60, 4K pictures shrunk to the screen, with and without the interface: AFBC (0096's limit
+  lifted by a test knob) 0 underflows, 224–233 shown, 0–7 dropped, on Main10 HDR10, Dolby Vision 8.1
+  and 8-bit 4K; the same as linear P010, 270–513 underflows, 49–121 shown; 8-bit linear, 12–13
+  underflows, 232 shown. The 4K breakup is the linear fallback's bus load.
+- `0096` revised to the line-time model at 90%: 3840x2160 onto 1269 lines needs 87% at 696 MHz and
+  passes; at the old 600 MHz it needed 101%, the breakup seen then.
+- `0278` with PQ, `max bpc` 10, `Colorspace` `BT2020_YCC`: `TX_INVID0` 0x12 (YCbCr 4:2:2, 12-bit),
+  AVI Y 1, EC 6, the DRM InfoFrame EOTF 2; HLG the same with EOTF 3; `max bpc` 8 or SDR: RGB 8-bit,
+  the DRM InfoFrame off. `tcon-tv0` and `hdmi` both 235.5 MHz. The picture on the wire unseen.
+- AFBC on UI channel 6: the vendor's DE330 lists a decoder there (`fbd_u_reg`, the VI one's first
+  0x58 bytes), and a test kernel offered and scanned it out 1:1. No client: the Mali-G31's
+  `AFBC_FEATURES` is 0x10001, bit 0 set, so Mesa 25.0 allocates every AFBC request linear. Not
+  taken.
+- UI planes scale 2256x1504 to 1920x1080 and 1280x720 and back in TEST_ONLY commits; DE33's UI
+  scaler holds 2048 pixels a line; a wider source scaled is accepted all the same.

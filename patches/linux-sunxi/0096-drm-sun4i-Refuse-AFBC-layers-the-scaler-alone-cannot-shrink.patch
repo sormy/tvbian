@@ -4,42 +4,42 @@ Date: Tue, 28 Oct 2026 09:00:00 -0400
 Subject: [PATCH] drm/sun4i: Refuse AFBC layers the scaler alone cannot shrink
 
 When the VI scaler cannot keep up with a downscale in the current mode,
-atomic_update falls back on the fetcher's coarse scaling, by the BSP's
-estimate of the scaler's throughput: the mixer clock, the mode's lines
-and rate, and the wider of the source and destination. AFBC bypasses
-the coarse stage, so an AFBC layer past that estimate, or wider than the
-channel's line buffer, is programmed anyway: the scaler falls behind,
-the picture is clean at the top and garbage below, and the planes log
-"RCQ sync timed out".
+atomic_update falls back on the fetcher's coarse scaling. AFBC bypasses
+the coarse stage, so an AFBC layer the scaler cannot keep up with, or
+wider than the channel's line buffer, is programmed anyway: the scaler
+falls behind, the picture is clean at the top and garbage below.
 
-Check it in atomic_check instead, with the same estimate, so a commit
-the hardware cannot scan out fails and userspace can fall back to a
-linear buffer. A 1:1 AFBC layer still passes: only a downscale is held
-to the estimate.
+Check it in atomic_check instead, so a commit the hardware cannot scan
+out fails and userspace can fall back to a linear buffer. The scaler
+takes a source pixel a clock: an output line's source pixels, the wider
+width times the shrink, must fit in 90% of the mixer clocks of its line
+time. On DE33 at 696 MHz, 3840x2160 onto 1269 lines of 2256x1504@60
+needs 87% and scans out with no TCON underflow; at 600 MHz it needs
+101% and breaks up. A 1:1 AFBC layer still passes.
 ---
- drivers/gpu/drm/sun4i/sun8i_vi_layer.c | 80 ++++++++++++++++++++++++++++++++++++++++----------
- 1 file changed, 67 insertions(+), 13 deletions(-)
-
-diff --git a/drivers/gpu/drm/sun4i/sun8i_vi_layer.c b/drivers/gpu/drm/sun4i/sun8i_vi_layer.c
+diff -urN a/drivers/gpu/drm/sun4i/sun8i_vi_layer.c b/drivers/gpu/drm/sun4i/sun8i_vi_layer.c
 --- a/drivers/gpu/drm/sun4i/sun8i_vi_layer.c
 +++ b/drivers/gpu/drm/sun4i/sun8i_vi_layer.c
-@@ -64,6 +64,60 @@
+@@ -66,6 +66,63 @@
  	}
  }
  
-+/* How far the scaler alone shrinks vertically in this mode, in percent */
-+static u32 sun8i_vi_layer_scale_ability(struct sun8i_mixer *mixer,
-+					const struct drm_display_mode *mode,
-+					u32 src_w, u32 dst_w)
++/* The share of a line time an AFBC layer's scaler may use, in percent */
++#define SUN8I_VI_AFBC_SCALER_LOAD	90
++
++/*
++ * The scaler takes a source pixel a clock, so an output line's source pixels
++ * must fit in the clocks of its line time, with a margin.
++ */
++static bool sun8i_vi_layer_afbc_shrink_fits(struct sun8i_mixer *mixer,
++					    const struct drm_display_mode *mode,
++					    u32 width, u32 src_h, u32 dst_h)
 +{
-+	u32 fps = (mode->clock * 1000) / (mode->vtotal * mode->htotal);
-+	u64 ability = clk_get_rate(mixer->mod_clk);
++	u64 needed = (u64)width * src_h * 100;
++	u64 available = (u64)clk_get_rate(mixer->mod_clk) * mode->htotal *
++			SUN8I_VI_AFBC_SCALER_LOAD * dst_h;
 +
-+	/* BSP algorithm assumes 80% efficiency of VI scaler unit */
-+	ability *= 80;
-+	do_div(ability, mode->vdisplay * fps * max(src_w, dst_w));
-+
-+	return ability;
++	return needed <= div_u64(available, mode->clock * 1000ULL);
 +}
 +
 +/*
@@ -71,8 +71,8 @@ diff --git a/drivers/gpu/drm/sun4i/sun8i_vi_layer.c b/drivers/gpu/drm/sun4i/sun8
 +	}
 +
 +	if (src_h > dst_h &&
-+	    sun8i_vi_layer_scale_ability(mixer, &crtc_state->mode, src_w, dst_w) <
-+	    src_h * 100 / dst_h) {
++	    !sun8i_vi_layer_afbc_shrink_fits(mixer, &crtc_state->mode,
++					     max(src_w, dst_w), src_h, dst_h)) {
 +		DRM_DEBUG_DRIVER("AFBC: %u to %u lines past the scaler alone\n",
 +				 src_h, dst_h);
 +		return -EINVAL;
@@ -84,30 +84,7 @@ diff --git a/drivers/gpu/drm/sun4i/sun8i_vi_layer.c b/drivers/gpu/drm/sun4i/sun8
  static void sun8i_vi_layer_update_coord(struct sun8i_layer *layer,
  					struct drm_plane *plane, bool afbc)
  {
-@@ -129,18 +183,13 @@
- 
- 	if (insize != outsize || subsampled || hphase || vphase) {
- 		unsigned int scanline, required;
--		struct drm_display_mode *mode;
--		u32 hscale, vscale, fps;
--		u64 ability;
-+		u32 hscale, vscale, ability;
- 
- 		DRM_DEBUG_DRIVER("HW scaling is enabled\n");
- 
--		mode = &plane->state->crtc->state->mode;
--		fps = (mode->clock * 1000) / (mode->vtotal * mode->htotal);
--		ability = clk_get_rate(mixer->mod_clk);
--		/* BSP algorithm assumes 80% efficiency of VI scaler unit */
--		ability *= 80;
--		do_div(ability, mode->vdisplay * fps * max(src_w, dst_w));
-+		ability = sun8i_vi_layer_scale_ability(mixer,
-+					&plane->state->crtc->state->mode,
-+					src_w, dst_w);
- 
- 		required = src_h * 100 / dst_h;
- 
-@@ -282,10 +331,15 @@
+@@ -284,10 +341,15 @@
  		max_scale = SUN8I_VI_SCALER_SCALE_MAX;
  	}
  
@@ -127,5 +104,3 @@ diff --git a/drivers/gpu/drm/sun4i/sun8i_vi_layer.c b/drivers/gpu/drm/sun4i/sun8
  }
  
  static void sun8i_vi_layer_atomic_disable(struct drm_plane *plane,
--- 
-2.55.0

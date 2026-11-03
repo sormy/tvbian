@@ -1,0 +1,115 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Mon, 2 Nov 2026 22:00:00 -0500
+Subject: [PATCH] drm/sun4i: Count TCON FIFO underflows
+
+The TCON latches a FIFO underflow, one bit a channel, in its debug
+register until it is cleared: the display engine missed its scanout
+deadline. Count it at each vblank, clearing it, and show the count since
+boot read-only in debugfs, dri/<n>/crtc-<i>/underruns, so a player can
+step its load down where the screen breaks up.
+---
+diff -urN a/drivers/gpu/drm/sun4i/sun4i_crtc.c b/drivers/gpu/drm/sun4i/sun4i_crtc.c
+--- a/drivers/gpu/drm/sun4i/sun4i_crtc.c
++++ b/drivers/gpu/drm/sun4i/sun4i_crtc.c
+@@ -7,6 +7,7 @@
+  */
+ 
+ #include <linux/clk-provider.h>
++#include <linux/debugfs.h>
+ #include <linux/ioport.h>
+ #include <linux/of_address.h>
+ #include <linux/of_graph.h>
+@@ -271,7 +272,27 @@
+ 	return &state->base;
+ }
+ 
++static int sun4i_crtc_underruns_show(struct seq_file *m, void *data)
++{
++	struct sun4i_crtc *scrtc = m->private;
++
++	seq_printf(m, "%u\n", sun4i_tcon_underruns(scrtc->tcon));
++
++	return 0;
++}
++DEFINE_SHOW_ATTRIBUTE(sun4i_crtc_underruns);
++
++static int sun4i_crtc_late_register(struct drm_crtc *crtc)
++{
++	debugfs_create_file("underruns", 0444, crtc->debugfs_entry,
++			    drm_crtc_to_sun4i_crtc(crtc),
++			    &sun4i_crtc_underruns_fops);
++
++	return 0;
++}
++
+ static const struct drm_crtc_funcs sun4i_crtc_funcs = {
++	.late_register		= sun4i_crtc_late_register,
+ 	.atomic_destroy_state	= sun4i_crtc_destroy_state,
+ 	.atomic_duplicate_state	= sun4i_crtc_duplicate_state,
+ 	.destroy		= drm_crtc_cleanup,
+diff -urN a/drivers/gpu/drm/sun4i/sun4i_tcon.c b/drivers/gpu/drm/sun4i/sun4i_tcon.c
+--- a/drivers/gpu/drm/sun4i/sun4i_tcon.c
++++ b/drivers/gpu/drm/sun4i/sun4i_tcon.c
+@@ -753,6 +753,22 @@
+ }
+ EXPORT_SYMBOL(sun4i_tcon_mode_set);
+ 
++/* The TCON's underflow flags stay set until cleared: one count a frame at most. */
++unsigned int sun4i_tcon_underruns(struct sun4i_tcon *tcon)
++{
++	unsigned int debug;
++
++	regmap_read(tcon->regs, SUN4I_TCON_DEBUG_REG, &debug);
++	if (debug & SUN4I_TCON_DEBUG_FIFO_UNDERFLOW) {
++		regmap_update_bits(tcon->regs, SUN4I_TCON_DEBUG_REG,
++				   SUN4I_TCON_DEBUG_FIFO_UNDERFLOW, 0);
++		atomic_inc(&tcon->underruns);
++	}
++
++	return atomic_read(&tcon->underruns);
++}
++EXPORT_SYMBOL(sun4i_tcon_underruns);
++
+ static irqreturn_t sun4i_tcon_handler(int irq, void *private)
+ {
+ 	struct sun4i_tcon *tcon = private;
+@@ -769,6 +785,7 @@
+ 
+ 	drm_crtc_handle_vblank(&scrtc->crtc);
+ 	sun4i_crtc_finish_page_flip(&scrtc->crtc);
++	sun4i_tcon_underruns(tcon);
+ 
+ 	/* Acknowledge the interrupt */
+ 	regmap_update_bits(tcon->regs, SUN4I_TCON_GINT0_REG,
+diff -urN a/drivers/gpu/drm/sun4i/sun4i_tcon.h b/drivers/gpu/drm/sun4i/sun4i_tcon.h
+--- a/drivers/gpu/drm/sun4i/sun4i_tcon.h
++++ b/drivers/gpu/drm/sun4i/sun4i_tcon.h
+@@ -194,6 +194,9 @@
+ #define SUN4I_TCON0_CPU_TRI2_START_DELAY(delay)		(((delay) & 0xffff) << 16)
+ #define SUN4I_TCON0_CPU_TRI2_TRANS_START_SET(set)	((set) & 0xfff)
+ 
++#define SUN4I_TCON_DEBUG_REG			0xfc
++#define SUN4I_TCON_DEBUG_FIFO_UNDERFLOW		(BIT(30) | BIT(31))
++
+ #define SUN4I_TCON_SAFE_PERIOD_REG		0x1f0
+ #define SUN4I_TCON_SAFE_PERIOD_NUM(num)			(((num) & 0xfff) << 16)
+ #define SUN4I_TCON_SAFE_PERIOD_MODE(mode)		((mode) & 0x3)
+@@ -286,6 +289,9 @@
+ 
+ 	int				id;
+ 
++	/* Lines the TCON found its FIFO empty for, since boot */
++	atomic_t			underruns;
++
+ 	/* TCON list management */
+ 	struct list_head		list;
+ };
+@@ -294,6 +300,7 @@
+ struct drm_panel *sun4i_tcon_find_panel(struct device_node *node);
+ 
+ void sun4i_tcon_enable_vblank(struct sun4i_tcon *tcon, bool enable);
++unsigned int sun4i_tcon_underruns(struct sun4i_tcon *tcon);
+ void sun4i_tcon_mode_set(struct sun4i_tcon *tcon,
+ 			 const struct drm_encoder *encoder,
+ 			 const struct drm_display_mode *mode);

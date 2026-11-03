@@ -41,6 +41,8 @@ for its API, and rewrites of top-level ones it takes in their place (`0103`, `02
 | `0097`        | Cedrus: 10-bit H.265 scaled as P010              |
 | `0099`        | VI scaler: edge-directed only to enlarge         |
 | `0276`        | DE33: the CDC 3D LUT on the VI planes            |
+| `0277`        | TCON: FIFO underflows counted in debugfs         |
+| `0278`        | HDMI: HDR as 10-bit YCbCr 4:2:2                  |
 | `0800`–`0804` | Cedrus: VP8 to 4096 wide, JPEG both ways         |
 | `0805`–`0806` | Cedrus: MPEG-4 Part 2 and H.263 decode           |
 | `0807`        | Cedrus: a coded format sized by its own engine   |
@@ -178,6 +180,17 @@ RGB. Planes with one carry `SUNXI_CDC_LUT3D_SIZE`, immutable, 17, and `SUNXI_CDC
 the hardware's eight parity banks when the blob changes or the plane becomes visible; channel 0's
 CSC stages around it stay at identity. Channel 1 belongs to mixer 1 in this driver's fixed mapping.
 Not yet submitted.
+
+`0096` is ours: an AFBC layer skips the fetcher's coarse downscale, so a shrink the VI scaler cannot
+keep up with breaks the picture up below its top. The scaler takes a source pixel a clock: an output
+line's source pixels, the wider width times the shrink, must fit in 90% of the mixer clocks of its
+line time, or the commit is refused for userspace to take a linear buffer. Not yet submitted.
+
+`0277` and `0278` are ours. `0277` counts the TCON's latched FIFO underflow at each vblank, clearing
+it, as `dri/<n>/crtc-<i>/underruns` in debugfs. `0278` sends HDR as YCbCr 4:2:2, 12-bit container,
+where `max bpc` is 10 or more, the connector's `HDR_OUTPUT_METADATA` names an EOTF other than SDR
+and the sink lists 4:2:2; SDR stays RGB. 4:4:4 at 10 bits needs a TMDS clock 5/4 of the pixel clock,
+which the H616's integer video PLL cannot divide from the TCON's. Not yet submitted.
 
 `0089` adds the H616 TV encoder to `sun4i_tv`, on both kernels, its DAC load detection left off:
 armed, it clicks on the AV jack, and it sensed no cable here; `0090` keeps the encoder's clock on
