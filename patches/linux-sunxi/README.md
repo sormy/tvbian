@@ -4,7 +4,7 @@ Applied through `kernel/sunxi64.conf` (6.18) and `kernel/sunxi64-next.conf` (new
 each listing its patches one by one; each leaves on the bump that brings it from upstream. The top
 level is the current kernel's series, 6.18's; `next/` holds what only `-next` does: patches written
 for its API, and rewrites of top-level ones it takes in their place (`0103`, `0246`, `0257`, `0263`,
-`0265`, for 7.3).
+`0265`, `0276`, `0278`, for 7.3).
 
 | Patch         | Holds                                            |
 | ------------- | ------------------------------------------------ |
@@ -117,6 +117,7 @@ keys. Not yet submitted.
 | `0087`                 | Cedrus metadata copy, 7.2's two-argument call     |
 | `0103`, `0257`, `0265` | the dw-hdmi bridge on 7.3's encoder and state API |
 | `0246`, `0263`         | AFBC framebuffers, the writeback check on 7.3     |
+| `0276`, `0278`         | the CDC LUT and HDR 4:2:2 on 7.3's DRM API        |
 
 ## LibreELEC's series and ours
 

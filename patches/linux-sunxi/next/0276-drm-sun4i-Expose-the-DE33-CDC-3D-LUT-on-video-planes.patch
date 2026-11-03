@@ -1,0 +1,413 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Mon, 2 Nov 2026 21:00:00 -0500
+Subject: [PATCH] drm/sun4i: Expose the DE33 CDC 3D LUT on video planes
+
+DE33's VI channels 0 and 1 carry a colour lattice, CDC: a 17-point 3D
+LUT, 10 bits a component, on the channel's own signal (Y, Cb, Cr for YUV
+input, R, G, B for RGB), ahead of the channel's CSC. Channel 0's CDC
+also has a CSC stage on each side of the LUT, held at identity here.
+
+Expose it as two plane properties on the VI planes that have one:
+SUNXI_CDC_LUT3D_SIZE, immutable, 17; and SUNXI_CDC_LUT3D, a blob of
+17^3 drm_color_lut, the first component fastest, reserved zero, zero to
+bypass. The plane's COLOR_ENCODING and COLOR_RANGE then describe the
+table's output. A blob of another size or with a reserved field set is
+refused at commit.
+
+The blob rides in the plane state. The table goes through the register
+queue split across the hardware's eight parity banks, and only when the
+blob changes or the plane becomes visible: the LUT RAM keeps it while
+the CDC runs, every captured frame of 300 flips on the same blob showing
+it.
+---
+diff -urN a/drivers/gpu/drm/sun4i/Makefile b/drivers/gpu/drm/sun4i/Makefile
+--- a/drivers/gpu/drm/sun4i/Makefile
++++ b/drivers/gpu/drm/sun4i/Makefile
+@@ -18,7 +18,7 @@
+ 				   sun8i_vi_layer.o sun8i_ui_scaler.o \
+ 				   sun8i_vi_scaler.o sun8i_csc.o \
+ 				   sun50i_afbc.o sun50i_fmt.o \
+-				   sun50i_planes.o sun8i_rdma.o
++				   sun50i_planes.o sun8i_rdma.o sun8i_cdc.o
+ 
+ sun4i-tcon-y			+= sun4i_crtc.o
+ sun4i-tcon-y			+= sun4i_tcon_dclk.o
+diff -urN a/drivers/gpu/drm/sun4i/sun8i_cdc.c b/drivers/gpu/drm/sun4i/sun8i_cdc.c
+--- a/drivers/gpu/drm/sun4i/sun8i_cdc.c
++++ b/drivers/gpu/drm/sun4i/sun8i_cdc.c
+@@ -0,0 +1,262 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++/*
++ * The DE33 colour lattice (CDC): a 17-point 3D LUT on VI channels 0 and 1,
++ * applied to the channel's own signal, YUV or RGB, before its CSC.
++ */
++
++#include <drm/drm_atomic_helper.h>
++#include <drm/drm_color_mgmt.h>
++#include <drm/drm_device.h>
++#include <drm/drm_property.h>
++#include <linux/slab.h>
++
++#include "sun8i_cdc.h"
++#include "sun8i_mixer.h"
++#include "sun8i_rdma.h"
++
++#define SUN8I_CDC_OFFSET		0x8000
++#define SUN8I_CDC_CHANNELS		2
++/* Only channel 0's CDC has CSC stages around its LUT. */
++#define SUN8I_CDC_CSC_CHANNEL		0
++#define SUN8I_CDC_CTL_SIZE		0x90
++#define SUN8I_CDC_CTL_EN		BIT(0)
++#define SUN8I_CDC_IN_CSC		0x14
++#define SUN8I_CDC_OUT_CSC		0x54
++#define SUN8I_CDC_CSC_DIAGONAL(stage, i)	((stage) + 0xc + (i) * 0x14)
++#define SUN8I_CDC_CSC_ONE		BIT(17)
++
++#define SUN8I_CDC_LUT_START		0x1000
++#define SUN8I_CDC_LUT_SIZE		0x5c00
++#define SUN8I_CDC_POINTS		17
++#define SUN8I_CDC_ENTRIES		(SUN8I_CDC_POINTS * SUN8I_CDC_POINTS * \
++					 SUN8I_CDC_POINTS)
++#define SUN8I_CDC_LUT_BITS		10
++
++struct sun8i_cdc {
++	struct drm_property *lut_property;
++	struct sun8i_rdma_unit *ctl;
++	struct sun8i_rdma_unit *lut;
++};
++
++struct sun8i_cdc_state {
++	struct drm_plane_state base;
++	struct drm_property_blob *lut;
++};
++
++static const struct reg_region sun8i_cdc_ctl_regions[] = {
++	{ 0, 1 }, { }
++};
++
++static const struct reg_region sun8i_cdc_ctl_csc_regions[] = {
++	{ 0, 1 }, { SUN8I_CDC_IN_CSC, 15 }, { SUN8I_CDC_OUT_CSC, 15 }, { }
++};
++
++/* Bank n holds the nodes whose x, y and z parities are bits 0, 1 and 2 of n. */
++static const struct reg_region sun8i_cdc_lut_regions[] = {
++	{ 0x0000, 729 }, { 0x0c00, 648 }, { 0x1800, 648 }, { 0x2400, 576 },
++	{ 0x3000, 648 }, { 0x3c00, 576 }, { 0x4800, 576 }, { 0x5400, 512 },
++	{ }
++};
++
++static struct sun8i_cdc_state *
++to_sun8i_cdc_state(const struct drm_plane_state *state)
++{
++	return container_of(state, struct sun8i_cdc_state, base);
++}
++
++void sun8i_cdc_destroy_state(struct drm_plane *plane,
++			     struct drm_plane_state *state)
++{
++	struct sun8i_cdc_state *cdc_state = to_sun8i_cdc_state(state);
++
++	drm_property_blob_put(cdc_state->lut);
++	__drm_atomic_helper_plane_destroy_state(state);
++	kfree(cdc_state);
++}
++
++void sun8i_cdc_reset(struct drm_plane *plane)
++{
++	struct sun8i_cdc_state *state;
++
++	if (plane->state)
++		sun8i_cdc_destroy_state(plane, plane->state);
++	plane->state = NULL;
++
++	state = kzalloc(sizeof(*state), GFP_KERNEL);
++	if (state)
++		__drm_atomic_helper_plane_reset(plane, &state->base);
++}
++
++struct drm_plane_state *sun8i_cdc_duplicate_state(struct drm_plane *plane)
++{
++	struct sun8i_cdc_state *state;
++
++	if (WARN_ON(!plane->state))
++		return NULL;
++
++	state = kmemdup(to_sun8i_cdc_state(plane->state), sizeof(*state),
++			GFP_KERNEL);
++	if (!state)
++		return NULL;
++
++	__drm_atomic_helper_plane_duplicate_state(plane, &state->base);
++	if (state->lut)
++		drm_property_blob_get(state->lut);
++
++	return &state->base;
++}
++
++int sun8i_cdc_set_property(struct drm_plane *plane,
++			   struct drm_plane_state *state,
++			   struct drm_property *property, u64 value)
++{
++	struct sun8i_cdc *cdc = plane_to_sun8i_layer(plane)->cdc;
++	struct sun8i_cdc_state *cdc_state = to_sun8i_cdc_state(state);
++	const struct drm_color_lut *entries;
++	bool replaced;
++	unsigned int i;
++	int ret;
++
++	if (!cdc || property != cdc->lut_property || value > U32_MAX)
++		return -EINVAL;
++
++	ret = drm_property_replace_blob_from_id(plane->dev, &cdc_state->lut,
++						value,
++						SUN8I_CDC_ENTRIES * sizeof(*entries),
++						-1, -1, &replaced);
++	if (ret || !cdc_state->lut)
++		return ret;
++
++	entries = cdc_state->lut->data;
++	for (i = 0; i < SUN8I_CDC_ENTRIES; i++)
++		if (entries[i].reserved)
++			return -EINVAL;
++
++	return 0;
++}
++
++int sun8i_cdc_get_property(struct drm_plane *plane,
++			   const struct drm_plane_state *state,
++			   struct drm_property *property, u64 *value)
++{
++	struct sun8i_cdc *cdc = plane_to_sun8i_layer(plane)->cdc;
++	struct drm_property_blob *lut = to_sun8i_cdc_state(state)->lut;
++
++	if (!cdc || property != cdc->lut_property)
++		return -EINVAL;
++
++	*value = lut ? lut->base.id : 0;
++
++	return 0;
++}
++
++void sun8i_cdc_disable(struct sun8i_layer *layer)
++{
++	if (layer->cdc)
++		sun8i_rdma_write(layer->cdc->ctl, 0, 0);
++}
++
++static u32 sun8i_cdc_pack(const struct drm_color_lut *entry)
++{
++	return drm_color_lut_extract(entry->red, SUN8I_CDC_LUT_BITS) << 20 |
++	       drm_color_lut_extract(entry->green, SUN8I_CDC_LUT_BITS) << 10 |
++	       drm_color_lut_extract(entry->blue, SUN8I_CDC_LUT_BITS);
++}
++
++static void sun8i_cdc_upload(struct sun8i_cdc *cdc,
++			     const struct drm_color_lut *entries)
++{
++	unsigned int bank, x, y, z, reg;
++
++	for (bank = 0; sun8i_cdc_lut_regions[bank].count; bank++) {
++		reg = sun8i_cdc_lut_regions[bank].offset;
++		for (z = (bank >> 2) & 1; z < SUN8I_CDC_POINTS; z += 2)
++			for (y = (bank >> 1) & 1; y < SUN8I_CDC_POINTS; y += 2)
++				for (x = bank & 1; x < SUN8I_CDC_POINTS; x += 2) {
++					sun8i_rdma_write(cdc->lut, reg,
++							 sun8i_cdc_pack(entries +
++							 (z * SUN8I_CDC_POINTS + y) *
++							 SUN8I_CDC_POINTS + x));
++					reg += sizeof(u32);
++				}
++	}
++}
++
++void sun8i_cdc_update(struct sun8i_layer *layer,
++		      const struct drm_plane_state *old_state,
++		      const struct drm_plane_state *new_state)
++{
++	struct drm_property_blob *lut = to_sun8i_cdc_state(new_state)->lut;
++	struct sun8i_cdc *cdc = layer->cdc;
++
++	if (!cdc)
++		return;
++
++	if (!lut) {
++		sun8i_cdc_disable(layer);
++		return;
++	}
++
++	/* The LUT RAM keeps a table: upload it only when it changes. */
++	if (!old_state->visible || to_sun8i_cdc_state(old_state)->lut != lut)
++		sun8i_cdc_upload(cdc, lut->data);
++
++	sun8i_rdma_write(cdc->ctl, 0, SUN8I_CDC_CTL_EN);
++}
++
++int sun8i_cdc_init(struct sun8i_layer *layer, struct sun8i_rdma *rdma,
++		   void __iomem *reg_base)
++{
++	struct drm_device *drm = layer->plane.dev;
++	bool has_csc = layer->channel == SUN8I_CDC_CSC_CHANNEL;
++	struct drm_property *size_property;
++	struct sun8i_cdc *cdc;
++	unsigned int i;
++	u32 base;
++
++	if (layer->cfg->de_type != SUN8I_MIXER_DE33 ||
++	    layer->channel >= SUN8I_CDC_CHANNELS)
++		return 0;
++
++	cdc = devm_kzalloc(drm->dev, sizeof(*cdc), GFP_KERNEL);
++	if (!cdc)
++		return -ENOMEM;
++
++	base = layer->channel * DE33_CH_SIZE + SUN8I_CDC_OFFSET;
++	cdc->ctl = sun8i_rdma_add_unit(rdma, reg_base + base, 0x100000 + base,
++				       SUN8I_CDC_CTL_SIZE,
++				       has_csc ? sun8i_cdc_ctl_csc_regions :
++						 sun8i_cdc_ctl_regions);
++	base += SUN8I_CDC_LUT_START;
++	cdc->lut = sun8i_rdma_add_unit(rdma, reg_base + base, 0x100000 + base,
++				       SUN8I_CDC_LUT_SIZE,
++				       sun8i_cdc_lut_regions);
++	if (!cdc->ctl || !cdc->lut)
++		return -ENOMEM;
++
++	/* The CSC stages around the LUT pass its signal through unchanged. */
++	if (has_csc)
++		for (i = 0; i < 3; i++) {
++			sun8i_rdma_write(cdc->ctl,
++					 SUN8I_CDC_CSC_DIAGONAL(SUN8I_CDC_IN_CSC, i),
++					 SUN8I_CDC_CSC_ONE);
++			sun8i_rdma_write(cdc->ctl,
++					 SUN8I_CDC_CSC_DIAGONAL(SUN8I_CDC_OUT_CSC, i),
++					 SUN8I_CDC_CSC_ONE);
++		}
++
++	cdc->lut_property = drm_property_create(drm, DRM_MODE_PROP_BLOB,
++						"SUNXI_CDC_LUT3D", 0);
++	size_property = drm_property_create_range(drm, DRM_MODE_PROP_IMMUTABLE,
++						  "SUNXI_CDC_LUT3D_SIZE",
++						  0, SUN8I_CDC_POINTS);
++	if (!cdc->lut_property || !size_property)
++		return -ENOMEM;
++
++	drm_object_attach_property(&layer->plane.base, cdc->lut_property, 0);
++	drm_object_attach_property(&layer->plane.base, size_property,
++				   SUN8I_CDC_POINTS);
++	layer->cdc = cdc;
++
++	return 0;
++}
+diff -urN a/drivers/gpu/drm/sun4i/sun8i_cdc.h b/drivers/gpu/drm/sun4i/sun8i_cdc.h
+--- a/drivers/gpu/drm/sun4i/sun8i_cdc.h
++++ b/drivers/gpu/drm/sun4i/sun8i_cdc.h
+@@ -0,0 +1,32 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#ifndef _SUN8I_CDC_H_
++#define _SUN8I_CDC_H_
++
++#include <linux/types.h>
++
++struct drm_plane;
++struct drm_plane_state;
++struct drm_property;
++struct sun8i_layer;
++struct sun8i_rdma;
++
++int sun8i_cdc_init(struct sun8i_layer *layer, struct sun8i_rdma *rdma,
++		   void __iomem *reg_base);
++void sun8i_cdc_update(struct sun8i_layer *layer,
++		      const struct drm_plane_state *old_state,
++		      const struct drm_plane_state *new_state);
++void sun8i_cdc_disable(struct sun8i_layer *layer);
++
++/* VI plane state carrying the LUT blob, for every VI plane */
++void sun8i_cdc_reset(struct drm_plane *plane);
++struct drm_plane_state *sun8i_cdc_duplicate_state(struct drm_plane *plane);
++void sun8i_cdc_destroy_state(struct drm_plane *plane,
++			     struct drm_plane_state *state);
++int sun8i_cdc_set_property(struct drm_plane *plane,
++			   struct drm_plane_state *state,
++			   struct drm_property *property, u64 value);
++int sun8i_cdc_get_property(struct drm_plane *plane,
++			   const struct drm_plane_state *state,
++			   struct drm_property *property, u64 *value);
++
++#endif /* _SUN8I_CDC_H_ */
+diff -urN a/drivers/gpu/drm/sun4i/sun8i_mixer.h b/drivers/gpu/drm/sun4i/sun8i_mixer.h
+--- a/drivers/gpu/drm/sun4i/sun8i_mixer.h
++++ b/drivers/gpu/drm/sun4i/sun8i_mixer.h
+@@ -179,6 +179,7 @@
+ 	SUN8I_SCALER_VI_ED,
+ };
+ 
++struct sun8i_cdc;
+ struct sun8i_rdma;
+ 
+ /**
+@@ -267,6 +268,7 @@
+ 	struct sun8i_rdma_unit		*fcc_rdma;
+ 	struct sun8i_rdma_unit		*scaler_rdma;
+ 	struct sun8i_rdma_unit		*csc_rdma;
++	struct sun8i_cdc		*cdc;
+ };
+ 
+ static inline struct sun8i_layer *
+diff -urN a/drivers/gpu/drm/sun4i/sun8i_vi_layer.c b/drivers/gpu/drm/sun4i/sun8i_vi_layer.c
+--- a/drivers/gpu/drm/sun4i/sun8i_vi_layer.c
++++ b/drivers/gpu/drm/sun4i/sun8i_vi_layer.c
+@@ -17,6 +17,7 @@
+ 
+ #include "sun4i_crtc.h"
+ #include "sun50i_afbc.h"
++#include "sun8i_cdc.h"
+ #include "sun8i_csc.h"
+ #include "sun8i_mixer.h"
+ #include "sun8i_rdma.h"
+@@ -28,6 +29,7 @@
+ 	sun8i_rdma_write(layer->layer_rdma,
+ 			 SUN8I_MIXER_CHAN_VI_LAYER_ATTR(layer->overlay), 0);
+ 	sun50i_afbc_disable(layer);
++	sun8i_cdc_disable(layer);
+ }
+ 
+ static void sun8i_vi_layer_update_attributes(struct sun8i_layer *layer,
+@@ -308,6 +310,9 @@
+ 		return;
+ 	}
+ 
++	sun8i_cdc_update(layer, drm_atomic_get_old_plane_state(state, plane),
++			 new_state);
++
+ 	if (drm_is_afbc(new_state->fb->modifier)) {
+ 		sun8i_rdma_write(layer->layer_rdma,
+ 				 SUN8I_MIXER_CHAN_VI_LAYER_ATTR(layer->overlay), 0);
+@@ -338,11 +343,13 @@
+ };
+ 
+ static const struct drm_plane_funcs sun8i_vi_layer_funcs = {
+-	.atomic_destroy_state	= drm_atomic_helper_plane_destroy_state,
+-	.atomic_duplicate_state	= drm_atomic_helper_plane_duplicate_state,
++	.atomic_get_property	= sun8i_cdc_get_property,
++	.atomic_set_property	= sun8i_cdc_set_property,
++	.atomic_destroy_state	= sun8i_cdc_destroy_state,
++	.atomic_duplicate_state	= sun8i_cdc_duplicate_state,
+ 	.destroy		= drm_plane_cleanup,
+ 	.disable_plane		= drm_atomic_helper_disable_plane,
+-	.reset			= drm_atomic_helper_plane_reset,
++	.reset			= sun8i_cdc_reset,
+ 	.update_plane		= drm_atomic_helper_update_plane,
+ 	.format_mod_supported	= sun8i_vi_layer_format_mod_supported,
+ };
+@@ -604,6 +611,10 @@
+ 		}
+ 	}
+ 
++	ret = sun8i_cdc_init(layer, rdma, reg_base);
++	if (ret)
++		return ERR_PTR(ret);
++
+ 	drm_plane_helper_add(&layer->plane, &sun8i_vi_layer_helper_funcs);
+ 
+ 	return layer;
