@@ -621,7 +621,15 @@
  		android {
  			compatible = "android,firmware";
  
-@@ -1749,7 +1977,10 @@
+@@ -1733,7 +1961,6 @@
+ 
+ 	memory@00000000 {
+ 		device_type = "memory";
+-		linux,usable-memory = <0x100000 0x7ff00000>;
+ 	};
+ 
+ 	reserved-memory {
+@@ -1749,7 +1976,10 @@
  			ftrace-size = <0x40000>;
  		};
  
@@ -632,7 +640,7 @@
  			compatible = "shared-dma-pool";
  			reusable;
  			size = <0x400000>;
-@@ -1767,6 +1998,7 @@
+@@ -1767,6 +1997,7 @@
  		};
  
  		logo_reserved: linux,meson-fb {
@@ -640,7 +648,7 @@
  			compatible = "shared-dma-pool";
  			reusable;
  			size = <0x800000>;
-@@ -1776,6 +2008,7 @@
+@@ -1776,6 +2007,7 @@
  		};
  
  		di_cma_reserved: linux,di_cma {
@@ -648,7 +656,7 @@
  			compatible = "shared-dma-pool";
  			reusable;
  			size = <0x4400000>;
-@@ -1784,6 +2017,7 @@
+@@ -1784,6 +2016,7 @@
  		};
  
  		ion_reserved: linux,ion-dev {
@@ -656,7 +664,7 @@
  			compatible = "shared-dma-pool";
  			reusable;
  			size = <0x7c00000>;
-@@ -1793,12 +2027,14 @@
+@@ -1793,12 +2026,14 @@
  		};
  
  		ppmgr_reserved: linux,ppmgr {
@@ -671,7 +679,7 @@
  			compatible = "shared-dma-pool";
  			reusable;
  			size = <0x10400000>;
-@@ -1808,6 +2044,7 @@
+@@ -1808,6 +2043,7 @@
  		};
  
  		picdec_cma_reserved: linux,picdec {
@@ -679,7 +687,7 @@
  			compatible = "shared-dma-pool";
  			reusable;
  			size = <0x00>;
-@@ -1817,6 +2054,7 @@
+@@ -1817,6 +2053,7 @@
  		};
  
  		codec_mm_reserved: linux,codec_mm_reserved {
@@ -687,7 +695,7 @@
  			compatible = "amlogic, codec-mm-reserved";
  			size = <0x00>;
  			alignment = <0x100000>;
-@@ -1824,12 +2062,22 @@
+@@ -1824,12 +2061,22 @@
  		};
  
  		vdin1_cma_reserved: linux,vdin1_cma {
@@ -710,7 +718,7 @@
  	};
  
  	sysled {
-@@ -1844,17 +2092,17 @@
+@@ -1844,17 +2091,17 @@
  		compatible = "gpio-leds";
  		status = "okay";
  
@@ -737,7 +745,7 @@
  	};
  
  	gpio_keypad {
-@@ -1875,17 +2123,6 @@
+@@ -1875,17 +2122,6 @@
  		fr_auto_policy = <0x00>;
  	};
  
@@ -755,7 +763,7 @@
  
  	meson-fb {
  		compatible = "amlogic, meson-gxl";
-@@ -1901,15 +2138,6 @@
+@@ -1901,15 +2137,6 @@
  		logo_addr = "0x7f800000";
  	};
  
@@ -771,7 +779,7 @@
  
  	codec_io {
  		compatible = "amlogic, codec_io";
-@@ -1956,19 +2184,6 @@
+@@ -1956,19 +2183,6 @@
  		reg = <0xc8838000 0x400>;
  	};
  
@@ -791,7 +799,7 @@
  
  	vdec {
  		compatible = "amlogic, vdec";
-@@ -2127,18 +2342,168 @@
+@@ -2127,18 +2341,168 @@
  		};
  	};
  
@@ -972,7 +980,7 @@
  	};
  
  	rdma {
-@@ -2165,6 +2530,38 @@
+@@ -2165,6 +2529,38 @@
  		gpio_reset = <&gpio 99 GPIO_ACTIVE_HIGH>;
  	};
  
@@ -1011,7 +1019,7 @@
  	wifi {
  		compatible = "amlogic, aml_wifi";
  		dev_name = "aml_wifi";
-@@ -2196,20 +2593,29 @@
+@@ -2196,20 +2592,29 @@
  
  	sd_emmc_c: emmc@d0074000 {
  		status = "okay";
@@ -1047,7 +1055,7 @@
  		non-removable;
  		disable-wp;
  		phandle = <0xc8>;
-@@ -2229,21 +2635,20 @@
+@@ -2229,21 +2634,20 @@
  
  	sd_emmc_b: sd@d0072000 {
  		status = "okay";
@@ -1079,7 +1087,7 @@
  		         <&clkc CLKID_FCLK_DIV2>;
  		clock-names = "core", "clkin0", "clkin1";
  		bus-width = <4>;
-@@ -2268,22 +2673,34 @@
+@@ -2268,22 +2672,34 @@
  
  	sd_emmc_a: sdio@d0070000 {
  		status = "okay";
@@ -1120,7 +1128,7 @@
  		phandle = <0xca>;
  
  		sdio {
-@@ -2373,7 +2790,12 @@
+@@ -2373,7 +2789,12 @@
  	};
  
  	ethmac: ethernet@0xc9410000 {
@@ -1134,7 +1142,7 @@
  		reg = <0xc9410000 0x10000 0xc8834540 0x08 0xc8834558 0x0c 0xc1104408 0x04>;
  		interrupts = <GIC_SPI 8 IRQ_TYPE_EDGE_RISING>;
  		pinctrl-names = "external_eth_pins";
-@@ -2391,53 +2813,73 @@
+@@ -2391,53 +2812,73 @@
  		phandle = <0xcb>;
  	};
  
@@ -1251,7 +1259,7 @@
  	unifykey {
  		compatible = "amlogic, unifykey";
  		status = "ok";
-@@ -2638,71 +3080,9 @@
+@@ -2638,71 +3079,9 @@
  		phandle = <0xce>;
  	};
  
@@ -1323,7 +1331,7 @@
  
  	i2s_plat: i2s_platform {
  		compatible = "amlogic, aml-i2s";
-@@ -2744,52 +3124,6 @@
+@@ -2744,52 +3123,6 @@
  		phandle = <0x7e>;
  	};
  
@@ -1376,7 +1384,7 @@
  
  	aml_sensor0: aml-sensor@0 {
  		compatible = "amlogic, aml-thermal";
-@@ -2851,67 +3185,50 @@
+@@ -2851,67 +3184,50 @@
  
  	thermal-zones {
  

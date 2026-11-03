@@ -1686,3 +1686,14 @@ The trip is now 85 °C; hot stays 90 °C and critical 110 °C. The idle reading 
 - CMA, no debugfs or sysfs here, `CmaTotal` less `CmaFree` with the clip resident first: the decoder
   takes 291-331 MiB at 4K as NV12, 139 MiB Main10 compressed, 87 VP9 compressed; the pool peaked at
   370 of 768 MiB, no display attached.
+
+## 2026-11-02 — RAM no longer capped at 2 GB
+
+The factory tree's memory node carried `linux,usable-memory = <0x100000 0x7ff00000>` and no `reg`.
+Mainline U-Boot writes `reg` and leaves that property, which the kernel prefers, so a bigger unit
+would have run on 2 GB. `board.patch` drops it.
+
+On the box, `tvb-h96max-m20` 3 built from this tree: after the reboot, 33 s, the node holds only
+U-Boot's `reg` (`0x0`, `0x80000000`), the kernel counts `2097152K`, `MemTotal` 2004492 kB (2004488
+before), CMA 768 MiB as before, `wlan0` connected, nothing failed. The previous tree is kept at
+`/root/board.dtb.known-good`.

@@ -52,11 +52,11 @@ and needs none: seventeen of the nineteen slots on this box are empty.
 
 ## Where they genuinely differ
 
-| Difference      | Factory      | Mainline p271      | Consequence                              |
-| --------------- | ------------ | ------------------ | ---------------------------------------- |
-| RAM in the tree | 2 GB variant | `0x40000000`, 1 GB | half the memory unless U-Boot patches it |
-| SoC compatible  | `gxlx2`      | `meson-gxlx`       | no `gxlx2` compatible exists mainline    |
-| Board           | `p291`       | `p271`             | a development board, not this box        |
+| Difference      | Factory                     | Mainline p271      | Consequence                                                                        |
+| --------------- | --------------------------- | ------------------ | ---------------------------------------------------------------------------------- |
+| RAM in the tree | `linux,usable-memory`, 2 GB | `0x40000000`, 1 GB | the factory's caps RAM whatever U-Boot finds; ours sets no size and takes U-Boot's |
+| SoC compatible  | `gxlx2`                     | `meson-gxlx`       | no `gxlx2` compatible exists mainline                                              |
+| Board           | `p291`                      | `p271`             | a development board, not this box                                                  |
 
 The factory container carries `gxlx`/`p271` **and** `gxlx2`/`p291` entries side by side, so the two
 platforms are siblings and the SoC gap is small. Every block a boot depends on — storage, USB,
