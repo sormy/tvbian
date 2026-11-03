@@ -40,6 +40,9 @@ supported board means the patch targets mainline's tree.
 - **Trust the PCB over the tree.** A factory tree is often an evaluation board's: it claims hardware
   the box lacks. Disabling a node needs a positive signal, a driver error or a probe reading
   nothing; silence is not absence. No graft without a consumer.
+- **Sizes come from the hardware, not the tree.** U-Boot writes the RAM it found into the memory
+  node's `reg`, and nothing else: a factory `linux,usable-memory`, which the kernel prefers, caps
+  every unit at the size it names. Drop it; the M20 carried one.
 - **Allwinner's legacy pin groups** (`allwinner,pins`, `function`, `drive`, `pull`) are read by
   Linux and skipped by U-Boot without a word: translate them to `pins`, `function`, `drive-strength`
   ((n + 1) × 10 mA) and `bias-*`.
@@ -59,3 +62,4 @@ supported board means the patch targets mainline's tree.
 - [ ] **T5** The IOMMU's line in `/proc/interrupts` stays still at idle
 - [ ] **T6** `dtb.md` records every change, reverted ones too
 - [ ] **T7** The suspend setup is the best-measured candidate, the others in `dtb.md`
+- [ ] **T8** The booted memory node holds U-Boot's `reg` and no `linux,usable-memory`
