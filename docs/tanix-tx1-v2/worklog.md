@@ -1356,32 +1356,58 @@ clear it.
 
 The 4K TV does not support HLG, so a player cannot be checked on it.
 
-## 2026-11-02 — the display engine's colour table, `0276`
+## 2026-11-02 — the display engine's tone mapping, `0276`
 
-- The vendor's DE330 driver: a CDC on VI channels 0 and 1, channel 0's with a CSC on each side, a
-  17-point LUT of 30-bit nodes in eight parity banks at `0x1000`–`0x6400`. Its RCQ path marks the
-  banks dirty every frame; ours uploads them once a blob, and 300 flips on one blob kept the table
-  in all 30 captures. LUT RAM read back while the CDC runs differs from what was written; after it
-  stops, every node matches.
-- This driver's fixed channel map gives mixer 0 VI 0 (plane 33 here) and UI 6, 7; mixer 1 VI 1, VI 2
-  and UI 8. One VI plane with a CDC on the HDMI mixer; the UI channels have a matrix CSC only.
-- `0276` on 6.18.60, kexec'd with the writeback tree: blobs short, with a reserved field set,
+Fuseamp's side: its commits `c78a1e5` and `27be9b3`, its `docs/prism.md` "Display-engine LUT
+experiment", its `tools/kernel/` (the experimental patch and its README).
+
+- Allwinner's DE330 driver (`de_cdc.c`, `de330_feat.c`, Orange Pi's 5.4 `sun50iw9` tree): a CDC on
+  VI channels 0 and 1, channel 0's with a CSC on each side of the LUT; a 17-point LUT of 30-bit
+  nodes in eight parity banks at `0x1000`–`0x6400` of the channel's `0x8000`; vendor tables per SDR,
+  WCG, HDR10, HLG and HDR10+ pair. Its RCQ path marks the banks dirty every frame.
+- First probes, by `/dev/mem` on the installed kernel: the vendor's HDR10-to-SDR table and a Prism
+  table on AFBC 4K, a 1:1 crop on the 2256x1504 monitor: 216 / 215 shown in 4 s, all 4,913 nodes
+  read back. Python's bulk writes took a bus error; 32-bit aligned writes from C++ do not.
+- The experimental patch (Fuseamp's `tools/kernel/0001`): plane properties `SUNXI_CDC_LUT3D_SIZE`
+  and `SUNXI_CDC_LUT3D` on the RCQ, built on the cached 6.18.60 tree in a container of its own.
+  Booted by kexec, never installed: the Image, the installed initrd, the live tree from
+  `/sys/firmware/fdt` (U-Boot's memory size in it) with a writeback node added by `fdtput`
+  (`allwinner,sun50i-h616-de33-wb` at `0x11000`, both mixers' `port@1` `endpoint@1`), and
+  `systemd.mask=fuseamp.service` on the command line. A kexec without `--initrd` panics, no root
+  device, and the watchdog boots the installed kernel.
+- LUT RAM read back while the CDC runs differs from what was written; after it stops, every node
+  matches. Writeback is the check, not readback.
+- `0276`, the patch reviewed: the table uploaded once a blob and on becoming visible (300 flips on
+  one blob kept it in all 30 captures), channel 1's CDC without the CSC regions, the new state
+  passed to the update, properties per plane as `COLOR_ENCODING`'s are. Built by
+  `./build.sh kernel kernel/sunxi64.conf`; its Image kexec'd: short blobs, a reserved field set,
   unknown or past 32 bits refused; RGB bypass, identity, a channel mix, an inversion switched while
   active and back, disabled again, NV12 bypass, identity and Y inverted, all within one 8-bit code.
-  A constant table on NV12 shows red, green and blue carrying Y, Cb, Cr.
+  A constant table on NV12: red, green and blue carry Y, Cb, Cr.
+- This driver's fixed channel map: mixer 0 VI 0 (plane 33 here), UI 6 and 7; mixer 1 VI 1, VI 2 and
+  UI 8. One VI plane with a CDC on the HDMI mixer; the UI channels have a matrix CSC only. The
+  vendor's single-screen map puts VI 1, CDC and all, on mixer 0 too.
 - Prism's tables against libplacebo, 64 YUV patches each, writeback in 8-bit RGB: the engine is
   within 1–2 codes of the 17-point table interpolated trilinearly, 32 off tetrahedrally. Against a
   65-point bake, max and mean: HDR10 to SDR 72 / 4.0 (the 72 one saturated out-of-gamut patch, the
   next 15), HLG to SDR 11 / 2.4, SDR BT.2020 to BT.709 8 / 1.7, SDR BT.709 8-bit to PQ 2 / 0.6, HLG
   to PQ 10 / 1.2, HDR10 to HLG 56 / 5.6.
-- HDMI out: `HDR_OUTPUT_METADATA` with PQ, `Colorspace` `BT2020_RGB`: `FC_PACKET_TX_EN` 0x9f, the
-  DRM InfoFrame version 1, 26 bytes, EOTF 2 and the metadata as sent; AVI C 3, EC 6. Output stays
-  RGB 8-bit (`VP_PR_CD` 0x40) whatever `max bpc`: the mixer offers RGB888 and 4:2:0 alone.
-- 10-bit 4:4:4 on the 2256x1504 monitor (TMDS 294.6 MHz of its 300): `TX_INVID0` 0x19, `VP_PR_CD`
-  0x50, but the `hdmi` clock came out 269.1 MHz for 294.4: the video PLL is integer, 12 MHz steps,
-  and the TCON took 471 MHz / 2. 5/4 of a pixel clock has no exact divider; deep 4:4:4 dropped.
+- HDMI: `HDR_OUTPUT_METADATA` with PQ and `Colorspace` `BT2020_RGB`: `FC_PACKET_TX_EN` 0x9f, the DRM
+  InfoFrame version 1, 26 bytes, EOTF 2 and the metadata as sent; AVI C 3, EC 6. The output stays
+  RGB 8-bit (`VP_PR_CD` 0x40) whatever `max bpc`: the mixer offers RGB888 and 4:2:0 alone, and
+  dw-hdmi lists RGB888 ahead of every deeper format.
+- 10-bit 4:4:4 tried on the monitor (TMDS 294.6 MHz of its 300): `TX_INVID0` 0x19, `VP_PR_CD` 0x50,
+  but the `hdmi` clock came out 269.1 MHz for 294.4. The video PLL steps by 12 MHz and divides by
+  whole numbers; the TCON took 471 / 2, and 5/4 of that has no divider. Dropped for 4:2:2, whose
+  12-bit container runs at the pixel clock: offered for HDR alone (`max bpc` 10 or more, an
+  `HDR_OUTPUT_METADATA` EOTF other than SDR, a sink with YCbCr 4:2:2); SDR stays RGB 8-bit. On the
+  wire unchecked yet.
 - Pixel clocks the CCU picks, by its own rounding (2256x1504 checked: 235.5 MHz from 471 / 2):
   3840x2160 at 23.976 295.5 MHz (−4056 ppm), at 59.94 591.0 (−4056 ppm), 1920x1080 at 23.976 74.143
   (−444 ppm), at 59.94 148.0 (−2370 ppm); 24, 30, 50, 60 Hz exact.
-- A sigma-delta table on `pll-video0` for the four 1000/1001 clocks hung the box at a mode set to
-  1920x1080 at 59.94: not taken.
+- Tried: a sigma-delta table on `pll-video0` for the four 1000/1001 clocks, 74.176, 148.352, 296.703
+  and 593.407 MHz (24 MHz × (n + pattern / 2^17), the audio PLL's form, pattern register `0x140`,
+  enable bit 24). A first mode set to 1920x1080 at 59.94 left `PAT0` 0x4001735f (the pattern, its
+  enable cleared) and the PLL integer at 471 MHz; the second hung the box, no network and no
+  watchdog reset, until power was cut. Without a serial console the cause is unseen: the pattern
+  register, the enable order, or the TCON losing its clock while the mixer runs. Not taken.
