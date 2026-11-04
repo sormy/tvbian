@@ -1485,3 +1485,18 @@ gain, the unit's own DRAM init on the eMMC, is not worth it; the install keeps w
   the CTA VIC. Not seen on the wire: the monitor lists no 4K mode.
 - 7.3: `0280` applies as it is; `0281` rewritten for `drm_atomic_commit` and the blob replace's
   `max_size`, its objects built clean.
+
+## 2026-11-03 — 1000/1001 refresh by the closest rate, `0282`–`0283`
+
+- The video PLLs are integer, 24 MHz × N / M, M 1 or 2, the TCON dividing by M × P and the HDMI
+  clock by 1–16. Searched over every N, M and divider with the TCON and HDMI clocks equal: 80.8 ppm
+  at 4K 23.976 and 29.97, 1080p 23.976 and 59.94 (816 MHz × 4 / 11 and its halves), −444 ppm at 4K
+  59.94. The CCU rounds down and never reached them; the fractional PLL, which hung the box, is not
+  needed.
+- `CCU_FEATURE_CLOSEST_RATE`, A64's flag: NM, divider and mux clocks honour it, MP did not. With MP
+  honouring it and the H616's video PLLs, TV TCONs and HDMI clock flagged, measured from the clock
+  tree during each mode: 1080p 59.94 148.2857 → 148.3636 MHz (−444 → +80.8 ppm), 720p 59.94 74.1429
+  → 74.1818 MHz, the HDMI clock equal to the TCON's; 60 Hz modes and 2256x1504 unchanged. No 4K mode
+  on the monitor. `display.py` 24 passed on the combined build.
+- Before and after: 640x480 at 59.94, the TCON 453 MHz / 18, 25.167 MHz, the HDMI clock's divider
+  stops at 16, so it takes `pll-video2`, 24.750 MHz.

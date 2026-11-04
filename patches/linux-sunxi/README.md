@@ -4,7 +4,7 @@ Applied through `kernel/sunxi64.conf` (6.18) and `kernel/sunxi64-next.conf` (new
 each listing its patches one by one; each leaves on the bump that brings it from upstream. The top
 level is the current kernel's series, 6.18's; `next/` holds what only `-next` does: patches written
 for its API, and rewrites of top-level ones it takes in their place (`0103`, `0246`, `0257`, `0263`,
-`0265`, `0276`, `0278`, `0281`, for 7.3).
+`0265`, `0276`, `0278`, `0281`, `0282`, for 7.3).
 
 | Patch         | Holds                                            |
 | ------------- | ------------------------------------------------ |
@@ -46,6 +46,8 @@ for its API, and rewrites of top-level ones it takes in their place (`0103`, `02
 | `0279`        | UI layers: no scaling past the line buffer       |
 | `0280`        | dw-hdmi: an HDR10+ VSIF, sent in place           |
 | `0281`        | CRTC: `HDR10PLUS_VSIF`, no mode set to change it |
+| `0282`        | ccu: MP clocks round to the closest rate         |
+| `0283`        | H616: video clocks round to the closest rate     |
 | `0800`–`0804` | Cedrus: VP8 to 4096 wide, JPEG both ways         |
 | `0805`–`0806` | Cedrus: MPEG-4 Part 2 and H.263 decode           |
 | `0807`        | Cedrus: a coded format sized by its own engine   |
@@ -121,6 +123,7 @@ keys. Not yet submitted.
 | `0103`, `0257`, `0265` | the dw-hdmi bridge on 7.3's encoder and state API |
 | `0246`, `0263`         | AFBC framebuffers, the writeback check on 7.3     |
 | `0276`, `0278`, `0281` | the CDC LUT, HDR 4:2:2, HDR10+ on 7.3's DRM API   |
+| `0282`                 | the MP closest rate on 7.3's `determine_rate`     |
 
 ## LibreELEC's series and ours
 
@@ -206,6 +209,13 @@ slot back to HDMI's VSIF. A 3D mode keeps HDMI's; on a mode HDMI's VSIF names by
 `HDR10PLUS_VSIF` on each CRTC, a blob of the 27-byte payload, PB1–PB27, the OUI `8b 84 90` first;
 another size or OUI is refused. Where only the payload changes, the commit tail has the CRTC's TMDS
 encoder hand it to dw-hdmi again. Not yet submitted.
+
+`0282` and `0283` are ours. The video PLLs are integer and the TCON and HDMI clocks divide them;
+rounding down, a 1000/1001 pixel clock settled on the rate below, 4K at 23.976 Hz 4056 ppm slow, a
+picture held about every 10 s. `0282` lets an MP clock round to the closest rate where
+`CCU_FEATURE_CLOSEST_RATE` is set, as NM, divider and mux clocks already do; `0283` sets it on the
+H616's video PLLs, TV TCONs and HDMI clock: 80.8 ppm fast at 4K 23.976 and 29.97 Hz, 1080p 23.976
+and 59.94 Hz and 720p 59.94 Hz, 444 ppm slow at 4K 59.94 Hz. Not yet submitted.
 
 `0089` adds the H616 TV encoder to `sun4i_tv`, on both kernels, its DAC load detection left off:
 armed, it clicks on the AV jack, and it sensed no cable here; `0090` keeps the encoder's clock on
