@@ -1,5 +1,6 @@
 /backup/
 /build/
+/tmp/
 # rkdeveloptool's own log, written where it runs
 /log/
 *.tmp

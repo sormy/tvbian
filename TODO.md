@@ -58,6 +58,10 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
       still name others, the board docs up to five. Each goes: the fact stated where it is needed,
       or the reference dropped.
 
+- [ ] **Docs: the family READMEs, one structure.** The same sections in the same order, each install
+      route with its commands: only `README_ROCKCHIP.md` spells out the OTG install today;
+      `README_AMLOGIC.md` and `README_ALLWINNER.md` defer or leave steps out.
+
 - [ ] **`tools/dtcx/bases/`: out of `tools/`.** Each `.conf` describes a kernel's or a U-Boot's
       trees, headers and vendor properties: data beside what it describes, not tool code. The
       boards' `BOARD_*_DTB_SOURCE` and `_TARGET` name them.
