@@ -3167,3 +3167,13 @@ driver loads, brings in `skw_sdio_lite`, and the devices it creates bring in the
 - With `tvb-swt6621s-modules` and `tvb-firmware-swt6621s` built locally with `0007` and without the
   conf: `systemd-modules-load` inserted nothing, `wlan0` at 10.8 s, `hci0` up, nothing failed; a
   fallback unit found all three loaded at 60 s.
+
+## 2026-11-03 — `PREEMPT`
+
+- The `rk35xx` kernel with `PREEMPT` and no `RT_GROUP_SCHED`, on this box's eMMC. `cyclictest` under
+  `stress-ng`, 60 s, every CPU: an ordinary thread's worst wakeup 16.3 ms voluntary, 1.2 ms
+  preemptible, the average 100 and 97 µs; a real-time thread's worst 681 and 331 µs.
+- Seekwave `swt6621s`, shared TDD, under `stress-ng`: `iperf3` to `plex` 4 streams, five rounds of
+  60 s each way, 278–320 Mbit/s up and 216–302 down; five `wlan0` down/up cycles, back in 2–5 s; no
+  `scheduling while atomic`, `BUG`, `WARNING` or lockup; the driver's errors 13 on the voluntary
+  boot, 0 here. `display.py` 18 passed, largest 4K60, fastest 1080p120.

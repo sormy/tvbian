@@ -2348,3 +2348,18 @@ card once the same DDR blob was on its eMMC. The eMMC's FIT is 2026.10 again.
   1080p120; 18 passed.
 - The kernel ignores an HDMI Forum VSDB under 7 payload bytes: with 6 it kept HDMI 1.4's 340 MHz and
   pruned 4K60 as `BAD` in `dw_hdmi_rockchip_mode_valid`.
+
+## 2026-11-03 — `PREEMPT`, and real-time priority
+
+- `kernel/rk35xx.fragment`: `PREEMPT` from `PREEMPT_VOLUNTARY`, `HZ` 300 as it was, and no
+  `RT_GROUP_SCHED`: with it, `cyclictest -p 80` in an ssh session was refused ("Unable to change
+  scheduling policy") even as root, the session's cgroup holding no real-time budget, as an audio
+  server's threads would be.
+- `cyclictest` under `stress-ng --cpu 4 --io 2 --vm 1`, 60 s, every CPU: an ordinary thread's worst
+  wakeup 13.3 ms voluntary, 5.3 ms preemptible, the average 94 and 90 µs; a real-time thread's worst
+  625 and 409 µs.
+- Seekwave `swt6621s`, standalone FDD, under `stress-ng`: `iperf3` to `plex` 4 streams, five rounds
+  of 60 s each way, 251–353 Mbit/s up and 242–283 down; five `wlan0` down/up cycles, the link up and
+  the gateway answering in 2–5 s; no `scheduling while atomic`, `BUG`, `WARNING` or lockup. The
+  driver's `SKW_CMD_GET_STA expect len: 385, recv len: 172` warning, three on the voluntary boot,
+  rose with the cycles; its errors held at 3. `display.py` 18 passed.
