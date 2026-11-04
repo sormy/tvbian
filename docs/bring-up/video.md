@@ -34,6 +34,9 @@ screen in a player, before any one stage is judged.
 - **Capability by doing.** A plane's formats are proven by `drmModeAddFB2WithModifiers` and a
   TEST_ONLY atomic commit, never a tool's listing: `modetest`'s list misdecodes here.
 
+- **Real time is per codec, through the player's path**: on the H616, scaled 4K H.264 dropped a
+  quarter of its pictures while HEVC kept up. An engine busy between pictures is memory-bound: check
+  the reference layout before the clock.
 - **At 4K60 memory is the limit**: the handover to the display must keep up, not only the decoder.
   On LPDDR3 or a 32-bit bus a 4K60 claim stands on AFBC.
 - **A fault must leave the engine usable**: every clip past each limit is followed by a supported

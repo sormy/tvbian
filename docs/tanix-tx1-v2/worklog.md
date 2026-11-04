@@ -1531,6 +1531,18 @@ gain, the unit's own DRAM init on the eMMC, is not worth it; the install keeps w
   of 198 dropped twice, the seek at 2.5 s; VP9 1080p and HEVC 4K 0 dropped; `display.py` 24 passed.
   Fuseamp's frame sums, all 288 scaled pictures, identical to the linear reference's.
 
+## 2026-11-03 — `display.py` unattended
+
+- 32 passed on the 0284 + 0810 kernel: the CDC LUT cases, planes 33 and 41 composed exactly with the
+  video scaled, the LUT mapping its plane alone, 3598 paced nonblocking commits in 60 s none
+  refused, HDMI, HDR10+, underruns, and the four synthetic screens. The monitor lists HDR itself, so
+  the main pass ran on it; its EDID and 2256x1504 came back after the synthetic ones.
+- The writeback takes no full-size capture at 2256x1504; half size, which it scales to, does.
+- Mainline dw-hdmi sends PQ or HLG to a screen that lists neither; Rockchip's sends neither.
+- `display.py` `rating`: 4K60, 4K30, 4K24, 1080p120, 1080p60, 1080p24, 720p120 and 720p60 sustained,
+  10 s each, the video at the mode's size, no TCON underflow, no kernel warning; 4K120 and 8K
+  pruned. Largest 4K60, fastest 1080p120; 33 passed.
+
 ## 2026-11-03 — `HZ` 300
 
 - `kernel/sunxi64.fragment`: `PREEMPT`, already on, and `HZ` 300 from 250. `cyclictest` under

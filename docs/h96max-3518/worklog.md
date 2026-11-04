@@ -2320,3 +2320,31 @@ card once the same DDR blob was on its eMMC. The eMMC's FIT is 2026.10 again.
   the bottom plane as the HDR film and maps the SDR planes above it, exact by writeback; the film
   itself comes out black, Rockchip's own blob too, with `POST_BUF_EMPTY`, on this screenless SDR
   output. Open until an HDR screen.
+
+## 2026-11-03 — `display.py` unattended, a synthetic HDR screen
+
+- Headless, `display.py` writes a synthetic EDID to debugfs `edid_override` and forces the connector
+  on: 1080p60, RGB only, BT.2020, HDR static metadata for SDR, PQ and HLG. With YCbCr in the EDID
+  the output went YCbCr, which the writeback refuses ("YUV2RGB is not supported").
+- With no hot-plug signal Rockchip's dw-hdmi skips its InfoFrame update on an HDR change
+  (`dw_hdmi_connector_atomic_check` returns at `HDMI_PHY_STAT0 & HDMI_PHY_HPD`); a CRTC cycle after
+  each change sets them. Then PQ and HLG at 8 and 10 bits read back EOTF 2 and 3, EC 6; SDR none.
+- The four synthetic screens: HDR sent for exactly the EOTFs each lists, nothing for the rest.
+- Planes 59 and 75 compose exactly, the video scaled 3x; 3601 paced nonblocking commits in 60 s,
+  none refused; SDR to PQ maps the whole output, a PQ video plane included. 16 passed, the
+  short-blob case failing until the patched kernel.
+- The mixed mode with a real HDR output, the InfoFrame on and BT.2020 RGB: the SDR planes map
+  exactly, the PQ film plane still comes out black with `POST_BUF_EMPTY`, under Rockchip's own blob
+  too; with no stage the film passes unchanged. The register image, not the screen. After it the VOP
+  stays underrunning until a reboot: the black run earlier today was that, not leftover properties.
+
+## 2026-11-03 — the patched kernel, and the display's rating
+
+- `rk35xx` with `drm-rockchip-vop2-hdr-ext-data-size` installed: a short `HDR_EXT_DATA` refused
+  `EINVAL`; Rockchip's SDR to PQ and HLG unchanged. Wi-Fi back on the matching module packages.
+- `display.py` `rating`, a synthetic HDMI 2.0 screen: 4K60, 4K30, 4K24, 1080p120, 1080p60, 1080p24,
+  720p120 and 720p60 sustained, 10 s each with the video at the mode's size, no `POST_BUF_EMPTY`, no
+  kernel warning. 4K120 pruned by VP0's 600 MHz dclk, 8K by its 4096 width. Largest 4K60, fastest
+  1080p120; 18 passed.
+- The kernel ignores an HDMI Forum VSDB under 7 payload bytes: with 6 it kept HDMI 1.4's 340 MHz and
+  pruned 4K60 as `BAD` in `dw_hdmi_rockchip_mode_valid`.

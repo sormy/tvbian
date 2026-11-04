@@ -2,11 +2,11 @@
 
 One script a component, each run from the host or on the box as its header says.
 
-| Script        | Checks                                                    |
-| ------------- | --------------------------------------------------------- |
-| `validate.sh` | boot, watchdog, Wi-Fi, decode, audio: one regression pass |
-| `video.py`    | the hardware video matrix: decode, scale, encode          |
-| `display.py`  | the display's colour: the video plane's LUT, HDMI HDR out |
+| Script        | Checks                                                                            |
+| ------------- | --------------------------------------------------------------------------------- |
+| `validate.sh` | boot, watchdog, Wi-Fi, decode, audio: one regression pass                         |
+| `video.py`    | the hardware video matrix: decode, scale, encode                                  |
+| `display.py`  | the display: planes, composition, pacing, colour stages, HDMI HDR out, unattended |
 
 ## video.py
 
@@ -43,44 +43,25 @@ kernel and date; `compare` lists every case that got worse and exits 1 if any di
 
 ### What passes
 
-Each size once, smallest first; a codec stops after two failing sizes in a row, and its largest pass
-and first failure run again: a case that differs between them is flaky. A case gets 60 s.
-
-- **Decode:** as many frames as software, and every frame identical, or for MPEG-1/2/4, H.263 and
-  JPEG within 50 dB luma: their IDCT is the decoder's to round. A stream the decoder turns away, for
-  FFmpeg to play in software, is refused, not broken. Where frames cannot be read back (the RK3518's
-  10-bit NV15), frames decoded only, marked so.
-- **Scale:** a 3840×2160 clip asked for at most 1080 lines: the size given, within 30 dB of software
-  scaled to it; full size is a decoder that does not shrink that codec.
-- **Encode:** `testsrc2` at each size, every frame back at that size, 30 dB against the source.
-  Timed against the CPU's fastest encoder for the codec, sizes up to the first the hardware wins: 🟠
-  where the CPU is faster.
-- **Frame rate:** each pass timed again over 3 frames and over 12, or 60 where 12 end within a
-  second, the difference divided out so setup cancels; decoded frames stay in the engine's buffers,
-  encoded ones come from memory. The decoder's rate alone, on a synthetic clip, with nothing shown:
-  a ceiling, not playback. A pass under 24 fps cannot play a film: 🟠 in the grid.
-
-## display.py
-
-The display path's colour on a box with nothing else on the screen: a video plane's 3D LUT
-(`SUNXI_CDC_LUT3D`) applied as written, the HDMI output's InfoFrames and pixel format for SDR, PQ
-and HLG, and the TCON's underrun count. A case the box lacks the means for is skipped.
-
-### Run
-
-On the box, as root, the player stopped:
-
-```sh
-python3 display.py   # box
-```
-
-### What passes
-
-- **LUT:** malformed blobs refused; identity, a channel mix and an inversion, switched while active,
-  on RGB; the table held over 60 flips; HDR10 to SDR, HLG to SDR, SDR to PQ and HLG to PQ on 64 YUV
-  patches. Every capture, by writeback, within two 8-bit codes of the same table interpolated
-  trilinearly. The tables are the script's own colour science: what is checked is that the hardware
-  applies a table, not how good the table is.
-- **HDMI:** SDR, PQ and HLG at `max bpc` 8 and 10: the DRM InfoFrame sent with HDR alone, its EOTF
-  as asked, BT.2020 colorimetry with HDR, RGB for SDR and for HDR at 8 bits.
+- **Planes:** every plane listed; a YUV video plane and an interface plane that can sit above it.
+- **Compose:** the interface, opaque over the top half and transparent below, over a scaled video
+  plane, by writeback.
+- **LUT:** malformed blobs refused; tables applied while active and held over 60 flips; HDR10 to
+  SDR, HLG to SDR, SDR to PQ and HLG to PQ on 64 YUV patches, within two 8-bit codes of the same
+  table on the host. It checks that the hardware applies a table, not how good the table is.
+- **SDR to HDR:** a short `HDR_EXT_DATA` refused; seven colours to PQ and HLG within two codes of
+  BT.2408 (gamma 2.2, BT.709 to BT.2020, white at 203 nits).
+- **Scope:** which planes each stage maps: the interface left alone, or the whole output, recorded.
+- **Pacing:** 60 s of player-paced nonblocking commits, an idle plane in each: none refused.
+- **HDMI:** SDR, PQ and HLG at each `max bpc` the connector allows: the DRM InfoFrame with HDR only,
+  its EOTF as asked, BT.2020 colorimetry where the connector has `Colorspace`. On a synthetic screen
+  the output is cycled after each change, since Rockchip sets InfoFrames only as it comes up.
+- **HDR10+:** malformed payloads refused; payloads switched in place, none giving the slot back to
+  HDMI's VSIF; kept across a mode set.
 - **Underruns:** the count holds still over a static picture for 3 s.
+- **Rating:** each mode the driver keeps, from 8K60 to 720p60 at 24 to 120 Hz, 10 s at a player's
+  pace with the video at the mode's size: sustained with every flip on time, no underrun and no new
+  kernel warning. Underruns count from sun4i's counter or Rockchip's `POST_BUF_EMPTY`; elsewhere
+  they are marked unmeasured. The verdicts: `RATING display: largest 4K60, fastest 1080p120`.
+- **Sinks:** each synthetic screen gets HDR for every EOTF it lists; what the box sends for the rest
+  is recorded (Rockchip nothing, mainline everything), as are the mappings left to the GPU.

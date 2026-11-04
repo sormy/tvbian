@@ -1711,6 +1711,16 @@ before), CMA 768 MiB as before, `wlan0` connected, nothing failed. The previous 
 - `patches/linux-meson/0005` ends the map at `0x7fff`: eight full reads, 32768 registers each, no
   oops. kexec on this box hangs the new kernel; the watchdog reset it.
 
+## 2026-11-03 — no OSD HDR stage, and `display.py`
+
+- The S905L3 has no OSD EOTF/OETF stage: `VIU_OSD1_EOTF_CTL`, `OETF_CTL` and the EOTF matrix read 0
+  and keep no write; the OSD's RGB to YCbCr matrix does. `MESON_OSD_HDR` dropped: an SDR interface
+  over HDR video is the GPU's here.
+- `display.py`, headless on the synthetic screen, the box setting its own mode: 13 passed. HDMI is 8
+  bits only (`max bpc` 8 to 8); PQ and HLG InfoFrames sent, but with no `Colorspace` property the
+  AVI carries no BT.2020 colorimetry (EC 0). 3601 paced commits in 60 s, none refused. Rating 4K60
+  kept pace, underruns unmeasured: the driver reports none, and video at 4K60 is known to glitch.
+
 ## 2026-11-03 — `HZ` 300
 
 - `kernel/meson64.fragment`: `PREEMPT`, already on, and `HZ` 300 from 250. `cyclictest` under

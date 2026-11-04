@@ -147,6 +147,7 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
 | `docs/todo/media-stick.md`              | the universal media stick                   |
 | `docs/todo/kodi.md`                     | Kodi 22 on our FFmpeg, built on trixie      |
 | `docs/todo/extras-upstream.md`          | extras built from an upstream release       |
+| `docs/todo/rk35xx.md`                   | Rockchip boards, every one                  |
 | `docs/todo/rk35xx-boot-log.md`          | boot log cleanup                            |
 | `docs/todo/rk35xx-sd-uhs-warm-reset.md` | `dwmmc` first init after a warm reset       |
 | `docs/todo/rk35xx-uboot-usb.md`         | USB in our U-Boot                           |
