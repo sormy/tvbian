@@ -1516,3 +1516,17 @@ gain, the unit's own DRAM init on the eMMC, is not worth it; the install keeps w
   passed, writeback included.
 - `0281` moved after `0036` in `kernel/sunxi64.conf`: written against 6.18's `drm_atomic_state`, it
   did not apply where it was, among the 7.2 drivers' `drm_atomic_commit`.
+
+## 2026-11-03 — H.264 4K keeps up, `0810`
+
+- H.264 4K High 5.1 at 24 fps, AFBC and scaled to 2256x1504, dropped 52–55 of 198 pictures, and a
+  seek past its one early keyframe showed nothing. FFmpeg's `v4l2request` to a null sink, full size:
+  23 fps; HEVC 4K 37; H.264 1080p 119.
+- The engine is the limit: kprobes on the H.264 trigger and the IRQ, full size, 41.8 ms busy and 0.4
+  ms idle a picture, HEVC 25.8; scaled to 2256x1504, 38.5. `pll-ve` 600 → 648 → 696 MHz by register:
+  12.3, 12.0, 11.9 s, so memory, not clock. `VE_MODE` `BW_256` slower, 13.8 s; the 1 MiB write mode
+  11.9. Stock runs DRAM and `mbus` as we do.
+- Every picture referenced linear NV12, `cedrus_dec_format_picture_write` 3840x2160 `NV12`. `0810`
+  puts a scaled H.264 picture's hidden reconstruction in 32x32 tiles: 33 ms a picture, not 38.5; 0
+  of 198 dropped twice, the seek at 2.5 s; VP9 1080p and HEVC 4K 0 dropped; `display.py` 24 passed.
+  Fuseamp's frame sums, all 288 scaled pictures, identical to the linear reference's.

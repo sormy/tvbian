@@ -54,6 +54,7 @@ for its API, and rewrites of top-level ones it takes in their place (`0103`, `02
 | `0807`        | Cedrus: a coded format sized by its own engine   |
 | `0808`        | Cedrus: each decoder's largest picture, measured |
 | `0809`        | Cedrus: a missing HEVC reference skipped quietly |
+| `0810`        | Cedrus: scaled H.264 referenced from tiles       |
 
 The display stack is 7.2's on both kernels. `0034` takes 7.2.12's `drivers/gpu/drm/sun4i`,
 `bridge/synopsys`, `ccu-sun8i-de2.c`, `sun50i-iommu.c` and `dw_hdmi.h` as they are; LibreELEC's
@@ -179,6 +180,11 @@ count holds; JPEG to 6000x4000, 6144x6144 hanging. Not yet submitted.
 
 `0809` is ours: an HEVC reference the queue no longer holds, after a gap in the stream, is skipped
 with a rate-limited debug line, not a `WARN_ON`. Not yet submitted.
+
+`0810` is ours: a scaled H.264 picture's hidden reconstruction, the one the engine references, is in
+32x32 tiles, not linear NV12. Motion compensation reads tiles faster: a 4K High profile picture
+takes the H616's engine 33 ms, not 38.5, scaled, and 4K at 24 fps scaled to 2256x1504 keeps up. Not
+yet submitted.
 
 `0276` is ours: DE33's VI channel 0 carries a 17-point 3D LUT, CDC, ahead of the channel's CSC, on
 the channel's own signal: Y, Cb, Cr for YUV input in the red, green and blue fields; R, G, B for

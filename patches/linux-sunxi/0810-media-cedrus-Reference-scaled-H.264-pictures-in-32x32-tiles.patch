@@ -1,0 +1,75 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Tue, 3 Nov 2026 19:00:00 -0500
+Subject: [PATCH] media: cedrus: Reference scaled H.264 pictures in 32x32 tiles
+
+A scaled picture is written by the secondary output, and the engine
+reconstructs and references the full-size picture hidden after it, in
+linear NV12. H.264 motion compensation reads its references much faster
+from 32x32 tiles: a 4K High profile picture took the H616's engine 38.5 ms
+linear, 33 ms tiled, and with it 4K at 24 fps scaled to 2256x1504 drops
+no picture where it dropped a quarter. The engine's clock barely matters,
+600 to 696 MHz giving 3%.
+
+Reconstruct a scaled H.264 picture in 32x32 tiles, sized for them.
+---
+diff -urN a/drivers/staging/media/sunxi/cedrus/cedrus.h b/drivers/staging/media/sunxi/cedrus/cedrus.h
+--- a/drivers/staging/media/sunxi/cedrus/cedrus.h
++++ b/drivers/staging/media/sunxi/cedrus/cedrus.h
+@@ -210,6 +210,14 @@
+ 	return cedrus_picture_is_p010(ctx) || cedrus_picture_is_scaled(ctx);
+ }
+ 
++/* H.264 motion compensation reads 32x32 tiles faster than linear rows. */
++static inline bool cedrus_picture_recon_is_tiled(struct cedrus_context *ctx)
++{
++	return cedrus_picture_is_scaled(ctx) &&
++	       ctx->v4l2.format_coded.fmt.pix.pixelformat ==
++	       V4L2_PIX_FMT_H264_SLICE;
++}
++
+ /* Size of the visible picture before the hidden reconstruction. */
+ static inline unsigned int cedrus_picture_visible_size(unsigned int bytesperline,
+ 						       unsigned int height)
+@@ -233,7 +241,11 @@
+ 		pix_format.height = ALIGN(pix_format_coded->height, 16);
+ 	}
+ 
+-	if (cedrus_picture_is_secondary(ctx)) {
++	if (cedrus_picture_recon_is_tiled(ctx)) {
++		pix_format.pixelformat = V4L2_PIX_FMT_NV12_32L32;
++		pix_format.bytesperline = ALIGN(pix_format.width, 32);
++		pix_format.height = ALIGN(pix_format_coded->height, 32);
++	} else if (cedrus_picture_is_secondary(ctx)) {
+ 		pix_format.pixelformat = V4L2_PIX_FMT_NV12;
+ 		pix_format.bytesperline = ALIGN(pix_format.width, 16);
+ 	}
+diff -urN a/drivers/staging/media/sunxi/cedrus/cedrus_dec.c b/drivers/staging/media/sunxi/cedrus/cedrus_dec.c
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_dec.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec.c
+@@ -276,11 +276,11 @@
+ 		return -EINVAL;
+ 	}
+ 
+-	/* The full-size NV12 reconstruction follows the scaled picture. */
++	/* The full-size reconstruction, linear or tiled, follows the scaled picture. */
+ 	if (shift)
+ 		sizeimage = cedrus_picture_visible_size(bytesperline, height) +
+-			    ALIGN(pix_format_coded->width, 16) *
+-			    ALIGN(pix_format_coded->height, 16) * 3 / 2;
++			    ALIGN(pix_format_coded->width, 32) *
++			    ALIGN(pix_format_coded->height, 64) * 3 / 2;
+ 
+ 	pix_format->width = width;
+ 	pix_format->height = height;
+@@ -390,7 +390,9 @@
+ 		     VE_SECONDARY_OUT_FMT_EXT |
+ 		     VE_CHROMA_BUF_LEN_SDRT(chroma_size));
+ 	cedrus_write(dev, VE_PRIMARY_OUT_FMT,
+-		     VE_PRIMARY_OUT_FMT_NV12 | VE_SECONDARY_OUT_FMT_EXT_NV12);
++		     (cedrus_picture_recon_is_tiled(ctx) ?
++		      VE_PRIMARY_OUT_FMT_TILED_32_NV12 : VE_PRIMARY_OUT_FMT_NV12) |
++		     VE_SECONDARY_OUT_FMT_EXT_NV12);
+ }
+ 
+ /* The secondary output of the H.265 engine, which VP9 shares. */
