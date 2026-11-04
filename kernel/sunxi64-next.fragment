@@ -1,5 +1,7 @@
 # 6.19 made the hung-task panic a count: 0 keeps it off
 CONFIG_BOOTPARAM_HUNG_TASK_PANIC=0
+# 7.0 made the soft-lockup panic a count too: 1 panics on the first
+CONFIG_BOOTPARAM_SOFTLOCKUP_PANIC=1
 # 7.2 brings the old NTFS driver back under NTFS_FS, which named NTFS3 before
 # CONFIG_NTFS_FS is not set
 CONFIG_NTFS3_FS=m

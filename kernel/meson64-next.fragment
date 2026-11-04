@@ -1,0 +1,2 @@
+# 7.0 made the soft-lockup panic a count: 1 panics on the first
+CONFIG_BOOTPARAM_SOFTLOCKUP_PANIC=1

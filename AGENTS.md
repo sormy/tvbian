@@ -223,9 +223,9 @@ name, path or claim it touches is left stale elsewhere in the repo.
 
 ## Code
 
-**A `kernel/*.conf` lists every patch it applies, one path a line**: no loops, globs or `$(…)`. A
-`-next` conf may source its base and swap a patch with `${PATCHES/…/…}`. Where a patch comes from is
-its directory's README, never its path.
+**A `kernel/*.conf` lists every patch and fragment it applies, one path a line**: no loops, globs,
+`$(…)` or `${…}`. A `-next` conf sources its base for the rest. Where a patch comes from is its
+directory's README, never its path.
 
 **A driver refuses what it cannot show** rather than show garbage: an atomic check that fails is a
 player's cue to take another route; a picture that breaks is not.

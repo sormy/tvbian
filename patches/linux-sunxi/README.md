@@ -137,8 +137,9 @@ DI300. Eight are rebased onto 7.2.12, the rest are LibreELEC's as they are; 7.3 
 setup, the bridge state hook and the atomic check again, so `-next` takes five rewrites from
 `next/`. On top, ours LibreELEC lacks: `0042`–`0044`, `0047`, `0048`.
 
-`kernel/sunxi64-next.fragment` keeps the hung-task panic off, NTFS3 as 6.18 builds it, and
-LibreELEC's AC200 core built in, its PHY driver sharing the module name.
+`kernel/sunxi64-next.fragment` keeps the hung-task panic off and the soft-lockup panic on, both
+counts since 6.19 and 7.0, NTFS3 as 6.18 builds it, and LibreELEC's AC200 core built in, its PHY
+driver sharing the module name.
 
 `0092` is ours: the watchdog's timer runs on in s2idle, where nothing pings it, so any sleep past
 its 16 s hardware maximum reset the box. Stopped on suspend and restarted on resume, as

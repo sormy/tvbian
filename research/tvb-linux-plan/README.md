@@ -39,8 +39,8 @@ only what a change moved, so a board-only change builds no kernel.
 Each family has a `-next` kernel beside it, `kernel/<family>-next.conf`: the family's conf sourced,
 the pin moved to the next series, an opt-in metapackage. It is where the next series is made to work
 before the family moves, so a move is a pin change. A patch that differs by series keeps a copy per
-series, `patches/<topic>/<series>/`, which the `-next` conf substitutes into the family's list; a
-config change only one series needs is a second fragment, `kernel/<family>-next.fragment`.
+series, `patches/<topic>/<series>/`, which the `-next` conf lists in place of the family's; a config
+change only one series needs is a second fragment, `kernel/<family>-next.fragment`.
 
 ### A kernel is a pin plus patches
 
