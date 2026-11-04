@@ -1710,3 +1710,9 @@ before), CMA 768 MiB as before, `wlan0` connected, nothing failed. The previous 
   in pstore.
 - `patches/linux-meson/0005` ends the map at `0x7fff`: eight full reads, 32768 registers each, no
   oops. kexec on this box hangs the new kernel; the watchdog reset it.
+
+## 2026-11-03 — `HZ` 300
+
+- `kernel/meson64.fragment`: `PREEMPT`, already on, and `HZ` 300 from 250. `cyclictest` under
+  `stress-ng --cpu 4 --io 2 --vm 1`, 60 s, every CPU: an ordinary thread's worst wakeup 13.3 ms at
+  250, 9.95 ms at 300, the average 138 µs either way; a real-time thread's worst 610 µs against 698.

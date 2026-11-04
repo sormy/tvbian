@@ -1530,3 +1530,10 @@ gain, the unit's own DRAM init on the eMMC, is not worth it; the install keeps w
   puts a scaled H.264 picture's hidden reconstruction in 32x32 tiles: 33 ms a picture, not 38.5; 0
   of 198 dropped twice, the seek at 2.5 s; VP9 1080p and HEVC 4K 0 dropped; `display.py` 24 passed.
   Fuseamp's frame sums, all 288 scaled pictures, identical to the linear reference's.
+
+## 2026-11-03 — `HZ` 300
+
+- `kernel/sunxi64.fragment`: `PREEMPT`, already on, and `HZ` 300 from 250. `cyclictest` under
+  `stress-ng --cpu 4 --io 2 --vm 1`, 60 s, every CPU: an ordinary thread's worst wakeup 12.7 ms at
+  250, 10.4–11.2 ms at 300 over three runs, the average 170–177 µs either way; a real-time thread's
+  worst 1.0–1.7 ms against 1.25, within its run-to-run spread.

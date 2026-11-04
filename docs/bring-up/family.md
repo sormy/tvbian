@@ -26,9 +26,10 @@ In order: each stage is the way back for the next.
 5. **The patches, tested one subsystem at a time**: each set booted from RAM first, then on the box
    by `boot.md`'s procedure for changing a running box, its effect shown on the box before the next.
 6. **The family baseline**, diffed against an existing family's built config before the first board
-   boots: the console font (`TER16x32`), the watchdog armed past a reboot cycle, the kernel pinging
-   between the hardware's maximum and systemd's timeout, soft and hard lockups that panic, a panic
-   that reboots, `ramoops` with pstore built in, Debian's regulatory database key trusted.
+   boots: the console font (`TER16x32`), full preemption (`PREEMPT`) at `HZ` 300, which 50 and 60 Hz
+   frames both divide, the watchdog armed past a reboot cycle, the kernel pinging between the
+   hardware's maximum and systemd's timeout, soft and hard lockups that panic, a panic that reboots,
+   `ramoops` with pstore built in, Debian's regulatory database key trusted.
 
 ## Bites
 
