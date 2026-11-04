@@ -2291,3 +2291,32 @@ reboot with the card in. The kernel's `/chosen/u-boot,version` read 2026.10, the
 loads the card's FIT before the eMMC's. That the BootROM runs the eMMC's idbloader first follows
 from the R69 of issue #6, which booted Armbian's card with ROCK 2F loaders and stopped booting any
 card once the same DDR blob was on its eMMC. The eMMC's FIT is 2026.10 again.
+
+## 2026-11-03 — SDR to HDR on the VOP2, `drm-rockchip-vop2-hdr-ext-data-size`
+
+- The RK3528's HDR engine takes its whole register image from the CRTC's `HDR_EXT_DATA`
+  (`struct hdr_extend`). Rockchip builds it in `libhdr_params_parser.so`; its SDR to HDR10 and SDR
+  to HLG generators, disassembled, are fixed tables plus three numbers: the BT.709 inverse-gamma
+  segments, a Q13 matrix per SDR gamut (BT.2087's for BT.709), a uniform saturation gain, and
+  `s_fix = −round(k × log10(white))`, white 0.0203 of PQ's 10000 nits (k 1020) or 0.203 of HLG's
+  1000 (k 850). Ratios outside 0.5–1.5 fall back to 1.0.
+- A generator rebuilt from that, against the library itself on arm64 glibc: 14044 inputs (both
+  targets, three gamuts, each ratio 0.5–1.5 by 0.001, 2000 random pairs, out-of-range values),
+  byte-identical.
+- By writeback, seven colours: gamma 2.2 (not 2.4), BT.709 to BT.2020, SDR white at 203 nits, then
+  PQ, or BT.2100's inverse OOTF and HLG. Within one 8-bit code of that model; white 148 PQ, 191 HLG.
+- HDR to SDR is not offered for the RK3528: Rockchip's composer logs it unsupported, and the stage
+  gives black.
+- `HDR_EXT_DATA` had no size check, while the commit reads whichever union member `hdr_type` names
+  (DOVI LUTs, the dynamic metadata past Rockchip's own 3108-byte blobs). The patch requires the
+  whole 12428-byte struct, as `ACM_LUT_DATA` and `POST_CSC_DATA` already do; it applies to
+  `develop-6.12`, and refuses Rockchip's own 3108-byte blobs. Built; not run: `DRM_ROCKCHIP` is
+  built in, so it lands with the smoke test.
+- `display.py` `sdr2hdr` builds the blob itself: PQ and HLG pass at max 1; the short-blob check
+  fails until the patched kernel. Its HDMI PQ and HLG cases need an HDR screen: Rockchip's dw-hdmi
+  sends the DRM InfoFrame only for an EOTF the sink's EDID lists.
+- The SDR to HDR modes map every plane, a PQ- or HLG-tagged one too. The mixed mode Rockchip's
+  library emits for HDR10 to HDR10 (`hdr_type` 1 or 2, `hdrvivid_ctrl` `0x233`, `HDR_BYPASS`) takes
+  the bottom plane as the HDR film and maps the SDR planes above it, exact by writeback; the film
+  itself comes out black, Rockchip's own blob too, with `POST_BUF_EMPTY`, on this screenless SDR
+  output. Open until an HDR screen.

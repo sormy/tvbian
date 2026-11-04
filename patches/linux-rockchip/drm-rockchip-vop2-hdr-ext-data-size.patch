@@ -1,0 +1,38 @@
+From dffbe61c616cfb395b6dec2e3f4f431d63c05ed4 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Tue, 3 Nov 2026 10:56:26 -0500
+Subject: [PATCH] drm/rockchip: vop2: Require a whole hdr_extend in
+ HDR_EXT_DATA
+
+The HDR_EXT_DATA blob is set with no size check, but the commit path
+casts its data to struct hdr_extend and reads whichever union member
+hdr_type names: the DOVI LUTs, the HDR Vivid tables, the dynamic
+metadata. A shorter blob makes the VOP read past its end into the slab
+and program whatever it finds there.
+
+Check the length as ACM_LUT_DATA and POST_CSC_DATA already do, so a
+blob must carry the whole struct and unused tail is zeroes. Rockchip's
+own parser library sends 3108 bytes, the HDR Vivid registers without the
+dynamic metadata the commit still reads; those blobs are now refused.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ drivers/gpu/drm/rockchip/rockchip_drm_vop2.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
+index 2d74ccc..68eaef3 100644
+--- a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
++++ b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
+@@ -17094,7 +17094,7 @@ static int vop2_crtc_atomic_set_property(struct drm_crtc *crtc,
+ 		ret = vop2_atomic_replace_property_blob_from_id(drm_dev,
+ 								&vcstate->hdr_ext_data,
+ 								val,
+-								-1, -1,
++								sizeof(struct hdr_extend), -1,
+ 								&replaced);
+ 		return ret;
+ 	}
+-- 
+2.55.0
+

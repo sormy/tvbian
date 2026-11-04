@@ -10,6 +10,7 @@ carry only the rest.
 | `net-stmmac-skip-absent-mdio-reset-gpio` | a WARN + ~416 lines of trace at every boot; Rockchip fixed one call site    |
 | `bluetooth-hci-h4-serdev`                | serdev binding for `hci_h4`, so BT needs no `hciattach` unit                |
 | `bluetooth-hci-h4-aic8800-bdaddr`        | the AIC8800's BT on a made-up address: Wi-Fi's + 1 instead                  |
+| `drm-rockchip-vop2-hdr-ext-data-size`    | a short `HDR_EXT_DATA` blob read past its end; Rockchip's 3108-byte refused |
 | `mmc-dw-mmc-rockchip-per-host-inherit`   | `static bool inherit` in `dw_mci_v2_execute_tuning()` — **not needed here** |
 
 **`net-stmmac-skip-absent-mdio-reset-gpio` is worth more than the rest combined for log hygiene.**
