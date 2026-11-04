@@ -1500,3 +1500,19 @@ gain, the unit's own DRAM init on the eMMC, is not worth it; the install keeps w
   on the monitor. `display.py` 24 passed on the combined build.
 - Before and after: 640x480 at 59.94, the TCON 453 MHz / 18, 25.167 MHz, the HDMI clock's divider
   stops at 16, so it takes `pll-video2`, 24.750 MHz.
+
+## 2026-11-03 — no early flip event, `0284`
+
+- A player committing `NONBLOCK | PAGE_FLIP_EVENT` only after the previous flip event had 3 to 23
+  commits refused `EBUSY` in 8 s of 1080p VP9 AFBC on a video plane: each a dropped picture.
+- Return probes: every refusal came out of `drm_atomic_helper_setup_commit`,
+  `[PLANE:45:plane-2] busy with a previous commit`, plane-2 being one the player sets with no CRTC,
+  so tracked by the commit's fake commit, done only at `hw_done`. Before each, the accepted commit's
+  work started up to 10 ms late and a vblank in between sent a flip event:
+  `sun4i_crtc_finish_page_flip` falls back to `crtc->state->event`, which `0251` added for the
+  self-timed writeback CRTC, and a nonblocking commit's state is swapped in before its work runs.
+- `0284` takes that path only for a CRTC without vblank. Kexec'd: 0 refused in 6 runs, 5 of them
+  with 0 of 196 pictures dropped; the first after boot dropped 61 with none refused. `display.py` 24
+  passed, writeback included.
+- `0281` moved after `0036` in `kernel/sunxi64.conf`: written against 6.18's `drm_atomic_state`, it
+  did not apply where it was, among the 7.2 drivers' `drm_atomic_commit`.

@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Tue, 3 Nov 2026 17:30:00 -0500
+Subject: [PATCH] drm/sun4i: Complete a CRTC state's event only without vblank
+
+sun4i_crtc_finish_page_flip() sends crtc->state->event when no event is
+armed, so the writeback interrupt can complete a self-timed CRTC's flip.
+The TCON interrupt calls it too. A nonblocking commit swaps its state in
+before its commit work runs, so a vblank in between sends that commit's
+event before the hardware has it. Userspace then commits again while the
+previous commit has not reached hw_done, and a plane the commit carries
+without a CRTC, tracked by its fake commit, refuses it with -EBUSY: 3 to
+23 refused commits in 8 s of 1080p video.
+
+Send the state's event only for a CRTC without vblank. A TCON CRTC's
+event is armed in atomic_begin and sent by the vblank after it, as
+before the writeback support.
+---
+diff -urN a/drivers/gpu/drm/sun4i/sun4i_crtc.c b/drivers/gpu/drm/sun4i/sun4i_crtc.c
+--- a/drivers/gpu/drm/sun4i/sun4i_crtc.c
++++ b/drivers/gpu/drm/sun4i/sun4i_crtc.c
+@@ -58,7 +58,7 @@
+ 		drm_crtc_send_vblank_event(crtc, scrtc->event);
+ 		drm_crtc_vblank_put(crtc);
+ 		scrtc->event = NULL;
+-	} else if (crtc->state->event) {
++	} else if (crtc->state->no_vblank && crtc->state->event) {
+ 		drm_crtc_send_vblank_event(crtc, crtc->state->event);
+ 		crtc->state->event = NULL;
+ 	}
