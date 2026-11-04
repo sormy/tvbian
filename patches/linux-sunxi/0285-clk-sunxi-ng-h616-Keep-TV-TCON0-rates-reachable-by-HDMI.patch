@@ -1,0 +1,53 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Tue, 3 Nov 2026 19:30:00 -0500
+Subject: [PATCH] clk: sunxi-ng: h616: Keep TV TCON0 rates reachable by HDMI
+
+The TV TCON can divide its video PLL by M times 2^P, whereas HDMI
+only divides by M, from 1 to 16. At 25.175 MHz the closest TCON rate
+uses 453 MHz / 18. HDMI cannot reproduce it and switches to video2
+at 24.75 MHz.
+
+Limit TV TCON0, the one feeding HDMI, to the video0 outputs HDMI
+shares and to P = 0: clear its P field at probe and model the rest
+as an M divider like HDMI, with the same rounding. TV TCON1 feeds
+the TV encoder, which needs video1, and keeps its MP divider.
+---
+--- a/drivers/clk/sunxi-ng/ccu-sun50i-h616.c
++++ b/drivers/clk/sunxi-ng/ccu-sun50i-h616.c
+@@ -668,13 +668,17 @@
+ 		      0xb7c, BIT(0), 0);
+ static SUNXI_CCU_GATE(bus_tcon_lcd1_clk, "bus-tcon-lcd1", "ahb3",
+ 		      0xb7c, BIT(1), 0);
+-static SUNXI_CCU_MP_WITH_MUX_GATE_CLOSEST(tcon_tv0_clk, "tcon-tv0",
+-				  tcon_tv_parents, 0xb80,
+-				  0, 4,		/* M */
+-				  8, 2,		/* P */
+-				  24, 3,	/* mux */
+-				  BIT(31),	/* gate */
+-				  CLK_SET_RATE_PARENT);
++/* HDMI only shares video0 with the TV TCONs and has no P divider. */
++static const char * const tcon_tv_hdmi_parents[] = {
++	"pll-video0", "pll-video0-4x",
++};
++
++static SUNXI_CCU_M_WITH_MUX_GATE_CLOSEST(tcon_tv0_clk, "tcon-tv0",
++				 tcon_tv_hdmi_parents, 0xb80,
++				 0, 4,		/* M */
++				 24, 3,		/* mux */
++				 BIT(31),	/* gate */
++				 CLK_SET_RATE_PARENT);
+ static SUNXI_CCU_MP_WITH_MUX_GATE_CLOSEST(tcon_tv1_clk, "tcon-tv1",
+ 				  tcon_tv_parents, 0xb84,
+ 				  0, 4,		/* M */
+@@ -1196,6 +1200,10 @@
+ 		writel(val, reg + pll_video_regs[i]);
+ 	}
+ 
++	/* tcon-tv0 is modelled without its P divider */
++	val = readl(reg + 0xb80);
++	writel(val & ~GENMASK(9, 8), reg + 0xb80);
++
+ 	/*
+ 	 * Force OHCI 12M clock sources to 00 (12MHz divided from 48MHz)
+ 	 *

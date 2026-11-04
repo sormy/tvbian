@@ -1549,3 +1549,24 @@ gain, the unit's own DRAM init on the eMMC, is not worth it; the install keeps w
   `stress-ng --cpu 4 --io 2 --vm 1`, 60 s, every CPU: an ordinary thread's worst wakeup 12.7 ms at
   250, 10.4–11.2 ms at 300 over three runs, the average 170–177 µs either way; a real-time thread's
   worst 1.0–1.7 ms against 1.25, within its run-to-run spread.
+
+## 2026-11-03 — HDMI and TV TCON share a reachable rate, `0285`
+
+- Baseline, `modetest -M sun4i-drm -s 70:#22`: `tcon-tv0` 25,166,666 Hz from `pll-video0`, HDMI
+  24,750,000 Hz from `pll-video2`. All 23 monitor modes swept; 1680×945 also differs: TCON
+  131,333,333 Hz from `pll-video0-4x`, HDMI 132 MHz from `pll-video2-4x`.
+- Fractional modes on the same divider differ in reporting only: MP truncates, HDMI's M divider
+  rounds up; 1080p59.94 reports 148,363,636 / 148,363,637 Hz. An M divider on `tcon-tv0` reports as
+  HDMI does.
+- Kexec'd with `0285` on both TV TCONs: all 23 monitor modes and the 16 synthetic HDMI 2.0 modes of
+  `display.hdr_edid(ladder=True)` set; `hdmi` and `tcon-tv0` have identical `clk_rate` and
+  `clk_parent` in every mode. Synthetic-mode rates and parents match the baseline; 640×480 and
+  1680×945 move to reachable rates.
+- The baseline already gives 296,571,429 Hz at 4K 23.976 and 29.97 and 594 MHz at 4K 59.94: the
+  `0283` figures in the README were computed without the PLL rate bounds; corrected there.
+- `python3 /root/display.py`: 20 passed, 0 failed. Writeback checks skipped: the installed tree has
+  no writeback connector.
+- `tcon-tv1` feeds the TV encoder, 216 MHz on `pll-video1` by the tree; on video0 only, with HDMI at
+  2256×1504 holding it at 471 MHz, no M reaches 27 MHz. `0285` narrowed to `tcon-tv0`.
+- 7.3 does not take `CONFIG_BOOTPARAM_SOFTLOCKUP_PANIC=y`: 7.0 made it a count. The next fragments
+  set 1.

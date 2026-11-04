@@ -49,6 +49,7 @@ for its API, and rewrites of top-level ones it takes in their place (`0103`, `02
 | `0282`        | ccu: MP clocks round to the closest rate         |
 | `0283`        | H616: video clocks round to the closest rate     |
 | `0284`        | no early flip event on a TCON CRTC               |
+| `0285`        | H616: TV TCON rates reachable by HDMI            |
 | `0800`–`0804` | Cedrus: VP8 to 4096 wide, JPEG both ways         |
 | `0805`–`0806` | Cedrus: MPEG-4 Part 2 and H.263 decode           |
 | `0807`        | Cedrus: a coded format sized by its own engine   |
@@ -221,14 +222,20 @@ encoder hand it to dw-hdmi again. Not yet submitted.
 rounding down, a 1000/1001 pixel clock settled on the rate below, 4K at 23.976 Hz 4056 ppm slow, a
 picture held about every 10 s. `0282` lets an MP clock round to the closest rate where
 `CCU_FEATURE_CLOSEST_RATE` is set, as NM, divider and mux clocks already do; `0283` sets it on the
-H616's video PLLs, TV TCONs and HDMI clock: 80.8 ppm fast at 4K 23.976 and 29.97 Hz, 1080p 23.976
-and 59.94 Hz and 720p 59.94 Hz, 444 ppm slow at 4K 59.94 Hz. Not yet submitted.
+H616's video PLLs, TV TCONs and HDMI clock: 78 ppm fast at 1080p and 720p 59.94 Hz, 443 ppm slow at
+4K 23.976 and 29.97 Hz, 1000 ppm fast at 4K 59.94 Hz, the 60 Hz rate. Not yet submitted.
 
 `0284` is ours, a fix to `0251`. `0251` lets the writeback interrupt complete a self-timed CRTC's
 flip from its state's event, but the TCON interrupt took that path too: a vblank between a
 nonblocking commit's swap and its commit work sent the event before the hardware had the commit, and
 the next commit was refused with `-EBUSY`, a picture dropped each time. Only a CRTC without vblank
 takes it now. Not yet submitted.
+
+`0285` is ours. HDMI divides only by M, 1–16, and shares only video0 with the TV TCONs: at 640×480
+59.94 Hz the TCON took 453 MHz / 18 and HDMI fell to video2, a different rate. `0285` makes
+`tcon-tv0`, the HDMI one, an M divider on video0, its P cleared at probe, so the two always agree;
+640×480 59.94 Hz lands 840 ppm slow. `tcon-tv1` feeds the TV encoder from video1 and keeps its MP
+divider. Not yet submitted.
 
 `0089` adds the H616 TV encoder to `sun4i_tv`, on both kernels, its DAC load detection left off:
 armed, it clicks on the AV jack, and it sensed no cable here; `0090` keeps the encoder's clock on

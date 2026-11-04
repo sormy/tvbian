@@ -30,167 +30,168 @@ settings differ in four of eight words, and its Wi-Fi is another chip.
 In the bring-up checklist's order, each kernel's mark side by side; numbers read 6.x / 7.x, from one
 regression pass on each.
 
-| Check            | 6.x | 7.x | What shows it                                                    |
-| ---------------- | :-: | :-: | ---------------------------------------------------------------- |
-| photos           | 🟡  | 🟡  | `image1.jpg`, the unit and remote; no retail box or label        |
-| SoC              | ✅  | ✅  | H313; FEL reports `soc=00001823(H616)`                           |
-| kind             | ✅  | ✅  | board, chip (ATBM6031) and family (sunxi)                        |
-| backup           | ✅  | ✅  | `backup/tanix-tx1-v2-stock.img.xz`                               |
-| backup size      | ✅  | ✅  | 30777344 sectors, the eMMC's                                     |
-| backup read      | ✅  | ✅  | FEL read hash matches the Android-side read                      |
-| per-unit window  | ✅  | ✅  | `preserve-sectors`: secure storage 12288–12799                   |
-| DRAM init carved | ✅  | ✅  | `factory_boot0.bin`                                              |
-| stock boot log   | ✅  | ✅  | `stock/tanix-tx1-v2/boot.log`                                    |
-| ID searched      | ✅  | ✅  | the V1.1 PCB is another board                                    |
-| ID confirmed     | ✅  | ✅  | confirmed by the human                                           |
-| PCB photos       | ✅  | ✅  | `board1.jpg`, `board2.jpg`                                       |
-| serial pads      | ✅  | ✅  | outlined in red on `board2.jpg`                                  |
-| components       | 🟡  | 🟡  | SoC, eMCP and Wi-Fi markings hidden under the heat sink          |
-| doc sections     | ✅  | ✅  | every section, Addresses included                                |
-| PCB name, date   | ✅  | ✅  | `QHZIW_H313_TX1_EMCP_V2.0 2024-03-21`                            |
-| stock files      | ✅  | ✅  | `stock/tanix-tx1-v2/`                                            |
-| identity table   | ✅  | ✅  | its README's identity table                                      |
-| factory DTBs     | ✅  | ✅  | `factory_board.dtb`, `board-runtime.dtb`                         |
-| nothing kept out | ✅  | ✅  | nothing kept out is committed                                    |
-| source bases     | ✅  | ✅  | `kernel-h616-vendor-4.9`                                         |
-| family kernel    | ✅  | ➖  | 6.18 boots on the tree                                           |
-| -next kernel     | ➖  | ✅  | 7.2 boots on the tree                                            |
-| NOT FITTED hunks | ✅  | ✅  | one `NOT FITTED` hunk                                            |
-| hunks say why    | ✅  | ✅  | audited hunk by hunk; every change says why                      |
-| nodes intact     | ✅  | ✅  | eMMC first after every tree change                               |
-| dtb.md           | ✅  | ✅  | `dtb.md`                                                         |
-| suspend setup    | ✅  | ✅  | s2idle, the one candidate                                        |
-| README lists it  | ✅  | ✅  | `README_ALLWINNER.md`                                            |
-| support matrix   | ✅  | ✅  | its support matrix                                               |
-| firmware package | ✅  | ✅  | both images in `tvb-firmware-atbm6031`                           |
-| loaders on eMMC  | ➖  | ➖  | Rockchip's line                                                  |
-| board.dtb        | ✅  | ✅  | `board.dtb` identical                                            |
-| network boot     | ✅  | ✅  | Wi-Fi, no serial                                                 |
-| U-Boot on serial | ✅  | ✅  | U-Boot on serial                                                 |
-| kernel on serial | ✅  | ✅  | the kernel on serial                                             |
-| serial login     | ✅  | ✅  | a login on serial                                                |
-| boot on HDMI     | ✅  | 🟡  | HDMI console from early boot, by eye on 6.18                     |
-| dmesg accounted  | ✅  | ✅  | 14 warnings on both, each in Quirks                              |
-| boot blame       | ✅  | ✅  | 12.1 / 11.9 s: kernel 5.6, root device 2.4, NM 1.8               |
-| second boot time | ✅  | ✅  | the second boot, 12.2 s, recorded here                           |
-| board identity   | ✅  | ✅  | `tanix-tx1-v2`, its name and PCB                                 |
-| modules loaded   | ✅  | ✅  | `atbm6031` loaded                                                |
-| warm reboots     | ✅  | ✅  | ten reboots, 35–38 s each, every device back                     |
-| power cycles     | ✅  | ❓  | three cold boots, 2026-10-26: every device back                  |
-| RAM              | ✅  | ✅  | 1473 / 1472 MiB of 1.5 GiB                                       |
-| RAM under stress | ✅  | ✅  | `stress-ng --vm 90% --verify`, 5 min                             |
-| watchdog busy    | ✅  | ✅  | `wdctl`: busy                                                    |
-| watchdog timeout | ✅  | ✅  | 80 s, the largest the core grants                                |
-| no userspace MAC | ✅  | ✅  | no such service                                                  |
-| image contents   | ✅  | ✅  | `tvb-base`, the board's packages                                 |
-| watchdog resets  | ✅  | ✅  | armed at 80 s, left unpinged: reset ~89 / ~80 s in               |
-| CPU frequencies  | ✅  | ✅  | 480–1344 MHz, stock's top step                                   |
-| thermal          | ✅  | ✅  | 73 / 72 °C, held at 1200 MHz under four cores; stock's trips     |
-| decode           | ✅  | ✅  | six codecs bit exact; H.264 1080p 122–129 fps on both            |
-| encode           | ✅  | ✅  | H.264 encode decodes back at 46 dB                               |
-| 4K HEVC file     | 🟠  | 🟠  | 4K Main10 19.4 fps full, 25.2 at ½ (0097); 8-bit 36.7; CPU idle  |
-| 4K60 on screen   | 🟠  | 🟠  | 4K60 HEVC 42 / 46 fps, short of 60                               |
-| zero copy        | ✅  | ✅  | `import_dmabuf`, no copy                                         |
-| video scaling    | 🟠  | 🟠  | linear scales; AFBC past the scaler refused (0096); 2 `RCQ` open |
-| stream restart   | ✅  | ✅  | eleven stops: no warning, no fault                               |
-| 4K60 on AFBC     | ✅  | ❓  | 4K shrunk to 2256×1504: 232 of 232 shown, 0 underflows           |
-| AFBC shrink cap  | ✅  | ❓  | `afbc_shrink_margin` 90; underflows from 99.3% of a line time    |
-| 1080p on a TV    | ✅  | ❓  | 2026-10-31: 24, 25, 30, 50, 60, 120 Hz, `modetest -s`            |
-| 1440p on a TV    | ✅  | ❓  | 2026-10-31: 120 Hz, the only rate the TV offers                  |
-| 4K on a TV       | ✅  | ❓  | 2026-10-31: 24, 25, 30, 50, 60 Hz; 60 Hz as 10-bit 4:2:0         |
-| PC monitor modes | ✅  | ✅  | the monitor's native 2256×1504 at 60 Hz, a PC timing             |
-| colour table     | ✅  | ❓  | `0276`: VI plane 33, 17³, within 2 codes of the table            |
-| HDMI hotplug     | ✅  | ❓  | unplugged and replugged: the picture comes back                  |
-| HDMI audio       | ✅  | ❓  | heard on the TV, the default sink                                |
-| 5.1 LPCM         | ❓  | ❓  | needs a receiver                                                 |
-| passthrough      | ❓  | ❓  | needs a receiver                                                 |
-| HDR              | 🟠  | ❓  | 6.18.60: HDR InfoFrame follows (`0095`); frame rate needs a TV   |
-| CEC address      | ✅  | ✅  | `1.0.0.0` from the monitor's EDID                                |
-| CEC TV remote    | ✅  | ❓  | 2026-10-31: arrows, channel, colour keys on `cec-remote`         |
-| CEC TV power     | ✅  | ❓  | 2026-10-31: standby, then image view on wakes it                 |
-| DDC read         | ❌  | ❌  | DDC reaches only the PHY's pads                                  |
-| DDC write        | ❌  | ❌  | as DDC read                                                      |
-| S/PDIF           | ➖  | ➖  | no S/PDIF                                                        |
-| AV out           | ❌  | ❌  | no picture or sound on a composite-to-HDMI converter             |
-| GPU headless     | ✅  | ✅  | glmark2 off-screen 122 / 121                                     |
-| GPU on screen    | ✅  | ✅  | glmark2 on screen 121 / 120                                      |
-| console font     | ✅  | 🟡  | `TER16x32`, by eye on 6.18                                       |
-| audio timing     | ✅  | ✅  | 3 s in 3.05–3.13 s on the codec and HDMI, 44.1 and 48 kHz        |
-| sleep, wake      | ✅  | ✅  | the remote's power key, both ways                                |
-| off, on          | ❌  | ❌  | powered off, the IR receiver is unpowered; a replug              |
-| wake routes      | ✅  | ✅  | IR, the one route                                                |
-| resume stays up  | ✅  | 🟡  | the waking press lands in the suspend job                        |
-| deep sleep       | ❌  | ❌  | TF-A offers no system suspend                                    |
-| long suspend     | ✅  | ✅  | 120 s on the same boot, the timer re-armed                       |
-| RTC              | ✅  | ✅  | `sun6i-rtc` while powered; no battery, NTP after a cut           |
-| power draw       | ❓  | ❓  | draw not measured                                                |
-| eMMC fio         | ✅  | ✅  | 64.7 / 67.1 MB/s; 519 / 509 IOPS 4 KiB with fsync                |
-| SD fio           | ➖  | ➖  | no SD slot                                                       |
-| SD hotplug       | ➖  | ➖  | no SD slot                                                       |
-| eMMC speed modes | ✅  | ✅  | DDR52 through ten reboots                                        |
-| external boot    | ✅  | ✅  | a stick boots before the eMMC; unbootable, the eMMC boots        |
-| tvb-install      | ✅  | ✅  | `tvb-install` from a USB boot: the eMMC boots, new UUID          |
-| eMMC boot        | ✅  | ✅  | our loaders on the eMMC                                          |
-| window intact    | ✅  | ✅  | the window reads back as the backup                              |
-| service mode     | ✅  | ✅  | FEL from the button                                              |
-| service loader   | ✅  | ✅  | `fel_loader.bin`                                                 |
-| eMMC size        | ✅  | ✅  | 14.7 GiB                                                         |
-| full-disk read   | ✅  | ✅  | the backup's round-trip hash                                     |
-| window write     | ✅  | ✅  | a write around the window reads back                             |
-| install over it  | ✅  | ✅  | the image written over it booted                                 |
-| Ethernet speeds  | ➖  | ➖  | no Ethernet                                                      |
-| Ethernet rate    | ➖  | ➖  | no Ethernet                                                      |
-| Ethernet loaded  | ➖  | ➖  | no Ethernet                                                      |
-| Ethernet PHY     | ➖  | ➖  | no Ethernet                                                      |
-| Wi-Fi bands      | ✅  | ✅  | 2.4 GHz only; the AP's US, DE settable                           |
-| Wi-Fi rate       | ✅  | ✅  | 78–81 / 79 Mbit/s down at 40 MHz; 20 MHz halves it               |
-| Wi-Fi loaded     | ✅  | ✅  | under `stress-ng`, 7.2: 66.5 up, 77.0 down vs 65.5 / 79.1        |
-| Wi-Fi latching   | 🟠  | 🟠  | a restart clears a stuck receive; back in 2–3 s                  |
-| scan, no region  | ✅  | ✅  | scans with no region set                                         |
-| region set       | ✅  | ✅  | DE set, read back as an intersection                             |
-| BT up            | ✅  | ✅  | `hci0` UP RUNNING, `errors:0`, with BLE on                       |
-| BT scan          | ✅  | ✅  | LE scan: 6–8 devices on 6.18, 13 on 7.2                          |
-| remote pairs     | ➖  | ➖  | the bundled remote is IR                                         |
-| pairing persists | ➖  | ➖  | as remote pairs                                                  |
-| BLE wake         | ➖  | ➖  | as remote pairs                                                  |
-| addresses stable | ✅  | ✅  | the same MAC on every boot                                       |
-| addresses own    | ✅  | ✅  | the eFuse's MAC; BT one above it                                 |
-| unit firmware    | ➖  | ➖  | no per-unit firmware                                             |
-| IRQ tuning       | ➖  | ➖  | no tuning needed                                                 |
-| USB topology     | ✅  | ✅  | no hub before the port                                           |
-| USB 3 judged     | ➖  | ➖  | USB 2 only                                                       |
-| ports under load | ✅  | ✅  | a stick, 60 s mixed `fio` under `stress-ng`: 0 errors            |
-| USB 3 link       | ➖  | ➖  | USB 2 only                                                       |
-| USB 2 link       | ✅  | ❓  | `480M` at a cold boot, a warm reboot and hotplugged              |
-| USB hotplug      | ✅  | ❓  | a stick hotplugged on the USB-A port                             |
-| IR IRQ           | ✅  | ✅  | the receiver's IRQ counts                                        |
-| IR keymap        | ✅  | ✅  | 31 keys, the canonical keymap                                    |
-| BLE keymap       | ✅  | ✅  | a BLE remote's keys in `evtest`; on 7.2 by scan and bond         |
-| remote cold boot | ❌  | ❌  | as off, on: no power-on from off but a replug                    |
-| buttons          | ✅  | 🟡  | PH9: `KEY_VENDOR` on `/dev/input/recovery-button`                |
-| recovery button  | ✅  | ✅  | the FEL button reaches FEL                                       |
-| input names      | ✅  | ✅  | `recovery-button`, `cec-remote`, `ir-remote`                     |
-| LED on           | ✅  | ✅  | blue while running                                               |
-| LED off          | ✅  | ✅  | dark: the AXP313 cuts every rail                                 |
-| LED suspended    | ✅  | ✅  | red in s2idle, as the human expects of stock                     |
-| radio, family    | ✅  | ➖  | network lines on 6.18                                            |
-| radio, -next     | ➖  | ✅  | Wi-Fi and BLE on 7.2                                             |
-| any country      | ✅  | ✅  | any country settable                                             |
-| module reload    | ✅  | ✅  | five reloads, `wlan0` back in 3–4 / 2.6–2.7 s                    |
-| tool built       | ✅  | ✅  | `sunxi-fel` from source                                          |
-| tool reads       | ✅  | ✅  | the full eMMC read                                               |
-| tool writes      | ✅  | ✅  | a window written, an image booted                                |
-| kernel CI        | ❓  | ❓  | not yet in CI                                                    |
-| -next CI         | ❓  | ❓  | not yet in CI                                                    |
-| bootloader built | ✅  | ✅  | our U-Boot, `uboot/build.sh`                                     |
-| install path     | ✅  | ✅  | a USB stick, then `tvb-install`; FEL's USB disk too              |
-| image layout     | ✅  | ✅  | MBR, U-Boot at 16, rootfs at 32768                               |
-| release image    | ❓  | ❓  | no release run yet                                               |
-| no ❓ left       | ❌  | ❌  | ❓ lines remain                                                  |
-| daily use        | 🟡  | 🟡  | daily use begun, a media server                                  |
-| CI green         | ❓  | ❓  | not yet in CI                                                    |
-| untested named   | ❓  | ❓  | no PR yet                                                        |
-| no board patch   | ✅  | ✅  | `rc-tanix-tx1`, the one board-only patch, named here             |
+| Check            | 6.x | 7.x | What shows it                                                         |
+| ---------------- | :-: | :-: | --------------------------------------------------------------------- |
+| photos           | 🟡  | 🟡  | `image1.jpg`, the unit and remote; no retail box or label             |
+| SoC              | ✅  | ✅  | H313; FEL reports `soc=00001823(H616)`                                |
+| kind             | ✅  | ✅  | board, chip (ATBM6031) and family (sunxi)                             |
+| backup           | ✅  | ✅  | `backup/tanix-tx1-v2-stock.img.xz`                                    |
+| backup size      | ✅  | ✅  | 30777344 sectors, the eMMC's                                          |
+| backup read      | ✅  | ✅  | FEL read hash matches the Android-side read                           |
+| per-unit window  | ✅  | ✅  | `preserve-sectors`: secure storage 12288–12799                        |
+| DRAM init carved | ✅  | ✅  | `factory_boot0.bin`                                                   |
+| stock boot log   | ✅  | ✅  | `stock/tanix-tx1-v2/boot.log`                                         |
+| ID searched      | ✅  | ✅  | the V1.1 PCB is another board                                         |
+| ID confirmed     | ✅  | ✅  | confirmed by the human                                                |
+| PCB photos       | ✅  | ✅  | `board1.jpg`, `board2.jpg`                                            |
+| serial pads      | ✅  | ✅  | outlined in red on `board2.jpg`                                       |
+| components       | 🟡  | 🟡  | SoC, eMCP and Wi-Fi markings hidden under the heat sink               |
+| doc sections     | ✅  | ✅  | every section, Addresses included                                     |
+| PCB name, date   | ✅  | ✅  | `QHZIW_H313_TX1_EMCP_V2.0 2024-03-21`                                 |
+| stock files      | ✅  | ✅  | `stock/tanix-tx1-v2/`                                                 |
+| identity table   | ✅  | ✅  | its README's identity table                                           |
+| factory DTBs     | ✅  | ✅  | `factory_board.dtb`, `board-runtime.dtb`                              |
+| nothing kept out | ✅  | ✅  | nothing kept out is committed                                         |
+| source bases     | ✅  | ✅  | `kernel-h616-vendor-4.9`                                              |
+| family kernel    | ✅  | ➖  | 6.18 boots on the tree                                                |
+| -next kernel     | ➖  | ✅  | 7.2 boots on the tree                                                 |
+| NOT FITTED hunks | ✅  | ✅  | one `NOT FITTED` hunk                                                 |
+| hunks say why    | ✅  | ✅  | audited hunk by hunk; every change says why                           |
+| nodes intact     | ✅  | ✅  | eMMC first after every tree change                                    |
+| dtb.md           | ✅  | ✅  | `dtb.md`                                                              |
+| suspend setup    | ✅  | ✅  | s2idle, the one candidate                                             |
+| README lists it  | ✅  | ✅  | `README_ALLWINNER.md`                                                 |
+| support matrix   | ✅  | ✅  | its support matrix                                                    |
+| firmware package | ✅  | ✅  | both images in `tvb-firmware-atbm6031`                                |
+| loaders on eMMC  | ➖  | ➖  | Rockchip's line                                                       |
+| board.dtb        | ✅  | ✅  | `board.dtb` identical                                                 |
+| network boot     | ✅  | ✅  | Wi-Fi, no serial                                                      |
+| U-Boot on serial | ✅  | ✅  | U-Boot on serial                                                      |
+| kernel on serial | ✅  | ✅  | the kernel on serial                                                  |
+| serial login     | ✅  | ✅  | a login on serial                                                     |
+| boot on HDMI     | ✅  | 🟡  | HDMI console from early boot, by eye on 6.18                          |
+| dmesg accounted  | ✅  | ✅  | 14 warnings on both, each in Quirks                                   |
+| boot blame       | ✅  | ✅  | 12.1 / 11.9 s: kernel 5.6, root device 2.4, NM 1.8                    |
+| second boot time | ✅  | ✅  | the second boot, 12.2 s, recorded here                                |
+| board identity   | ✅  | ✅  | `tanix-tx1-v2`, its name and PCB                                      |
+| modules loaded   | ✅  | ✅  | `atbm6031` loaded                                                     |
+| warm reboots     | ✅  | ✅  | ten reboots, 35–38 s each, every device back                          |
+| power cycles     | ✅  | ❓  | three cold boots, 2026-10-26: every device back                       |
+| RAM              | ✅  | ✅  | 1473 / 1472 MiB of 1.5 GiB                                            |
+| RAM under stress | ✅  | ✅  | `stress-ng --vm 90% --verify`, 5 min                                  |
+| watchdog busy    | ✅  | ✅  | `wdctl`: busy                                                         |
+| watchdog timeout | ✅  | ✅  | 80 s, the largest the core grants                                     |
+| no userspace MAC | ✅  | ✅  | no such service                                                       |
+| image contents   | ✅  | ✅  | `tvb-base`, the board's packages                                      |
+| watchdog resets  | ✅  | ✅  | armed at 80 s, left unpinged: reset ~89 / ~80 s in                    |
+| CPU frequencies  | ✅  | ✅  | 480–1344 MHz, stock's top step                                        |
+| thermal          | ✅  | ✅  | 73 / 72 °C, held at 1200 MHz under four cores; stock's trips          |
+| decode           | ✅  | ✅  | six codecs bit exact; H.264 1080p 122–129 fps on both                 |
+| encode           | ✅  | ✅  | H.264 encode decodes back at 46 dB                                    |
+| 4K HEVC file     | 🟠  | 🟠  | 4K Main10 19.4 fps full, 25.2 at ½ (0097); 8-bit 36.7; CPU idle       |
+| 4K60 on screen   | 🟠  | 🟠  | 4K60 HEVC 42 / 46 fps, short of 60                                    |
+| zero copy        | ✅  | ✅  | `import_dmabuf`, no copy                                              |
+| video scaling    | 🟠  | 🟠  | linear scales; AFBC past the scaler refused (0096); 2 `RCQ` open      |
+| stream restart   | ✅  | ✅  | eleven stops: no warning, no fault                                    |
+| 4K60 on AFBC     | ✅  | ❓  | 4K shrunk to 2256×1504: 232 of 232 shown, 0 underflows                |
+| AFBC shrink cap  | ✅  | ❓  | `afbc_shrink_margin` 90; underflows from 99.3% of a line time         |
+| 1080p on a TV    | ✅  | ❓  | 2026-10-31: 24, 25, 30, 50, 60, 120 Hz, `modetest -s`                 |
+| 1440p on a TV    | ✅  | ❓  | 2026-10-31: 120 Hz, the only rate the TV offers                       |
+| 4K on a TV       | ✅  | ❓  | 2026-10-31: 24, 25, 30, 50, 60 Hz; 60 Hz as 10-bit 4:2:0              |
+| PC monitor modes | ✅  | ✅  | the monitor's native 2256×1504 at 60 Hz, a PC timing                  |
+| HDMI/TCON clocks | ✅  | ❓  | `modetest -s`: 23 monitor + 16 synthetic modes, equal clocks (`0285`) |
+| colour table     | ✅  | ❓  | `0276`: VI plane 33, 17³, within 2 codes of the table                 |
+| HDMI hotplug     | ✅  | ❓  | unplugged and replugged: the picture comes back                       |
+| HDMI audio       | ✅  | ❓  | heard on the TV, the default sink                                     |
+| 5.1 LPCM         | ❓  | ❓  | needs a receiver                                                      |
+| passthrough      | ❓  | ❓  | needs a receiver                                                      |
+| HDR              | 🟠  | ❓  | 6.18.60: HDR InfoFrame follows (`0095`); frame rate needs a TV        |
+| CEC address      | ✅  | ✅  | `1.0.0.0` from the monitor's EDID                                     |
+| CEC TV remote    | ✅  | ❓  | 2026-10-31: arrows, channel, colour keys on `cec-remote`              |
+| CEC TV power     | ✅  | ❓  | 2026-10-31: standby, then image view on wakes it                      |
+| DDC read         | ❌  | ❌  | DDC reaches only the PHY's pads                                       |
+| DDC write        | ❌  | ❌  | as DDC read                                                           |
+| S/PDIF           | ➖  | ➖  | no S/PDIF                                                             |
+| AV out           | ❌  | ❌  | no picture or sound on a composite-to-HDMI converter                  |
+| GPU headless     | ✅  | ✅  | glmark2 off-screen 122 / 121                                          |
+| GPU on screen    | ✅  | ✅  | glmark2 on screen 121 / 120                                           |
+| console font     | ✅  | 🟡  | `TER16x32`, by eye on 6.18                                            |
+| audio timing     | ✅  | ✅  | 3 s in 3.05–3.13 s on the codec and HDMI, 44.1 and 48 kHz             |
+| sleep, wake      | ✅  | ✅  | the remote's power key, both ways                                     |
+| off, on          | ❌  | ❌  | powered off, the IR receiver is unpowered; a replug                   |
+| wake routes      | ✅  | ✅  | IR, the one route                                                     |
+| resume stays up  | ✅  | 🟡  | the waking press lands in the suspend job                             |
+| deep sleep       | ❌  | ❌  | TF-A offers no system suspend                                         |
+| long suspend     | ✅  | ✅  | 120 s on the same boot, the timer re-armed                            |
+| RTC              | ✅  | ✅  | `sun6i-rtc` while powered; no battery, NTP after a cut                |
+| power draw       | ❓  | ❓  | draw not measured                                                     |
+| eMMC fio         | ✅  | ✅  | 64.7 / 67.1 MB/s; 519 / 509 IOPS 4 KiB with fsync                     |
+| SD fio           | ➖  | ➖  | no SD slot                                                            |
+| SD hotplug       | ➖  | ➖  | no SD slot                                                            |
+| eMMC speed modes | ✅  | ✅  | DDR52 through ten reboots                                             |
+| external boot    | ✅  | ✅  | a stick boots before the eMMC; unbootable, the eMMC boots             |
+| tvb-install      | ✅  | ✅  | `tvb-install` from a USB boot: the eMMC boots, new UUID               |
+| eMMC boot        | ✅  | ✅  | our loaders on the eMMC                                               |
+| window intact    | ✅  | ✅  | the window reads back as the backup                                   |
+| service mode     | ✅  | ✅  | FEL from the button                                                   |
+| service loader   | ✅  | ✅  | `fel_loader.bin`                                                      |
+| eMMC size        | ✅  | ✅  | 14.7 GiB                                                              |
+| full-disk read   | ✅  | ✅  | the backup's round-trip hash                                          |
+| window write     | ✅  | ✅  | a write around the window reads back                                  |
+| install over it  | ✅  | ✅  | the image written over it booted                                      |
+| Ethernet speeds  | ➖  | ➖  | no Ethernet                                                           |
+| Ethernet rate    | ➖  | ➖  | no Ethernet                                                           |
+| Ethernet loaded  | ➖  | ➖  | no Ethernet                                                           |
+| Ethernet PHY     | ➖  | ➖  | no Ethernet                                                           |
+| Wi-Fi bands      | ✅  | ✅  | 2.4 GHz only; the AP's US, DE settable                                |
+| Wi-Fi rate       | ✅  | ✅  | 78–81 / 79 Mbit/s down at 40 MHz; 20 MHz halves it                    |
+| Wi-Fi loaded     | ✅  | ✅  | under `stress-ng`, 7.2: 66.5 up, 77.0 down vs 65.5 / 79.1             |
+| Wi-Fi latching   | 🟠  | 🟠  | a restart clears a stuck receive; back in 2–3 s                       |
+| scan, no region  | ✅  | ✅  | scans with no region set                                              |
+| region set       | ✅  | ✅  | DE set, read back as an intersection                                  |
+| BT up            | ✅  | ✅  | `hci0` UP RUNNING, `errors:0`, with BLE on                            |
+| BT scan          | ✅  | ✅  | LE scan: 6–8 devices on 6.18, 13 on 7.2                               |
+| remote pairs     | ➖  | ➖  | the bundled remote is IR                                              |
+| pairing persists | ➖  | ➖  | as remote pairs                                                       |
+| BLE wake         | ➖  | ➖  | as remote pairs                                                       |
+| addresses stable | ✅  | ✅  | the same MAC on every boot                                            |
+| addresses own    | ✅  | ✅  | the eFuse's MAC; BT one above it                                      |
+| unit firmware    | ➖  | ➖  | no per-unit firmware                                                  |
+| IRQ tuning       | ➖  | ➖  | no tuning needed                                                      |
+| USB topology     | ✅  | ✅  | no hub before the port                                                |
+| USB 3 judged     | ➖  | ➖  | USB 2 only                                                            |
+| ports under load | ✅  | ✅  | a stick, 60 s mixed `fio` under `stress-ng`: 0 errors                 |
+| USB 3 link       | ➖  | ➖  | USB 2 only                                                            |
+| USB 2 link       | ✅  | ❓  | `480M` at a cold boot, a warm reboot and hotplugged                   |
+| USB hotplug      | ✅  | ❓  | a stick hotplugged on the USB-A port                                  |
+| IR IRQ           | ✅  | ✅  | the receiver's IRQ counts                                             |
+| IR keymap        | ✅  | ✅  | 31 keys, the canonical keymap                                         |
+| BLE keymap       | ✅  | ✅  | a BLE remote's keys in `evtest`; on 7.2 by scan and bond              |
+| remote cold boot | ❌  | ❌  | as off, on: no power-on from off but a replug                         |
+| buttons          | ✅  | 🟡  | PH9: `KEY_VENDOR` on `/dev/input/recovery-button`                     |
+| recovery button  | ✅  | ✅  | the FEL button reaches FEL                                            |
+| input names      | ✅  | ✅  | `recovery-button`, `cec-remote`, `ir-remote`                          |
+| LED on           | ✅  | ✅  | blue while running                                                    |
+| LED off          | ✅  | ✅  | dark: the AXP313 cuts every rail                                      |
+| LED suspended    | ✅  | ✅  | red in s2idle, as the human expects of stock                          |
+| radio, family    | ✅  | ➖  | network lines on 6.18                                                 |
+| radio, -next     | ➖  | ✅  | Wi-Fi and BLE on 7.2                                                  |
+| any country      | ✅  | ✅  | any country settable                                                  |
+| module reload    | ✅  | ✅  | five reloads, `wlan0` back in 3–4 / 2.6–2.7 s                         |
+| tool built       | ✅  | ✅  | `sunxi-fel` from source                                               |
+| tool reads       | ✅  | ✅  | the full eMMC read                                                    |
+| tool writes      | ✅  | ✅  | a window written, an image booted                                     |
+| kernel CI        | ❓  | ❓  | not yet in CI                                                         |
+| -next CI         | ❓  | ❓  | not yet in CI                                                         |
+| bootloader built | ✅  | ✅  | our U-Boot, `uboot/build.sh`                                          |
+| install path     | ✅  | ✅  | a USB stick, then `tvb-install`; FEL's USB disk too                   |
+| image layout     | ✅  | ✅  | MBR, U-Boot at 16, rootfs at 32768                                    |
+| release image    | ❓  | ❓  | no release run yet                                                    |
+| no ❓ left       | ❌  | ❌  | ❓ lines remain                                                       |
+| daily use        | 🟡  | 🟡  | daily use begun, a media server                                       |
+| CI green         | ❓  | ❓  | not yet in CI                                                         |
+| untested named   | ❓  | ❓  | no PR yet                                                             |
+| no board patch   | ✅  | ✅  | `rc-tanix-tx1`, the one board-only patch, named here                  |
 
 Beyond the checklist:
 
@@ -226,6 +227,28 @@ Beyond the checklist:
 | Reboot to Wi-Fi             | 33 s, 17 of it before the kernel           |
 | glmark2, full, 2256×1504    | 121; 42 on Debian's own Mesa               |
 | USB stick, `480M`           | 29.4 MB/s read, 22.3 write; 843 / 301 IOPS |
+
+## HDMI clocks — 2026-11-03
+
+6.18.60 with `0285`; RGB, 8 bpc. `modetest -M sun4i-drm -s` sweeps all 23 monitor modes and 16
+synthetic HDMI 2.0 modes; `clk_rate` and `clk_parent` match for `hdmi` and `tcon-tv0` throughout.
+Synthetic 4K verifies clocks, not a picture.
+
+| Mode             | Both clocks, Hz | Parent    | Off target, ppm |
+| ---------------- | --------------: | --------- | --------------: |
+| 640×480 59.94    |      25,153,847 | video0    |            −840 |
+| 640×480 60       |      25,200,000 | video0    |               0 |
+| 1680×945 60.02   |     131,250,000 | video0    |           −1757 |
+| 720p59.94        |      74,181,819 | video0-4x |             +78 |
+| 1080p59.94       |     148,363,637 | video0-4x |             +78 |
+| 4K23.976 / 29.97 |     296,571,429 | video0-4x |            −443 |
+| 4K59.94 / 60     |     594,000,000 | video0    |        +999 / 0 |
+
+Box, while `modetest` holds the mode:
+
+```sh
+for clock in tcon-tv0 hdmi; do cat /sys/kernel/debug/clk/$clock/clk_rate /sys/kernel/debug/clk/$clock/clk_parent; done
+```
 
 ## Video engine — 2026-10-25
 
