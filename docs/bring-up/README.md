@@ -51,6 +51,11 @@ records it before the next phase starts. A phase is done when each of its lines 
 What remains is read off the Test report: every line not ✅, ➖ or a recorded ❌. A line's ID lives
 in this folder and the Test report alone; the worklog, commits and messages name what it checks.
 
+**A box that resets itself comes first.** The watchdog and the kernel's lockup detectors
+(`system.md`) are what let the agent run unattended: a hang it causes resets the box, and the next
+attempt starts in a minute instead of waiting for someone to pull the power. Until they hold, every
+hang is a human's step.
+
 **The agent runs unattended**, in a loop such as Claude Code's `/loop`. It asks the human for:
 
 - a 👤 line's action, batched with the other waiting ones, one action at a time: what to wire, press

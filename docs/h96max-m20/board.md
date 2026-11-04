@@ -56,7 +56,7 @@ Kernel 6.18.44, image of 2026-09-17. `fio --direct=1`, `iperf3` to a wired host.
 | USB drive random 4K write       | 1644 IOPS ✅                                      |
 | USB throughput (via Gb NIC)     | 196 Mbit/s, idle and under 4-core load ✅         |
 | `stress-ng` 4×cpu + 2×vm        | 120 s `--verify`, 6 passed, 0 failed ✅           |
-| Watchdog                        | systemd 80 s, hardware 65.5 s; no reset ❌        |
+| Watchdog                        | systemd 80 s, hardware 65.5 s; lockups panic ✅   |
 | CPU, idle                       | 50 °C                                             |
 | CPU, 10 min `stress-ng --cpu 4` | 86 °C peak; 1.752 GHz for 5 min, then 1.4-1.5 GHz |
 | HDMI                            | 2256x1504 @ 60.00 Hz, the panel's native mode ✅  |
@@ -69,9 +69,9 @@ region was saved and restored byte-identical afterwards.
 The USB drive is USB 3, on this USB 2.0 host at `480M` through a hub, bound to `usb-storage`.
 
 The watchdog counts at 1 kHz into 16 bits, so the hardware stops at 65.5 s; systemd asks for the
-same 80 s as the Rockchip boards and the kernel pings the hardware in between. **A SoC hang is not
-reset**: none of seven video-decoder hangs on 2026-10-31 rebooted the box within minutes; each took
-a power cycle.
+same 80 s as the Rockchip boards and the kernel pings the hardware in between. A CPU stuck on a hung
+bus left systemd pinging from another, so no hang reset; the kernel's lockup detectors now panic on
+it and the box comes back by itself in about a minute.
 
 **The Ethernet number is a USB measurement.** No Ethernet is fitted, so it is a USB-attached RTL8153
 on a USB 2.0 host that is also serving the rootfs — 196 Mbit/s is the bus, not the NIC.

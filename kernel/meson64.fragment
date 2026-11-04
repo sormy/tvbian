@@ -10,6 +10,12 @@ CONFIG_VIDEO_MESON_VDEC=m
 # every family: a panic reboots, and leaves its log in pstore
 CONFIG_PSTORE_RAM=y
 CONFIG_PANIC_TIMEOUT=10
+# every family: a CPU stuck without timer interrupts, or one that never yields, panics into that
+# reboot; the watchdog only proves PID 1 runs, on another CPU
+CONFIG_SOFTLOCKUP_DETECTOR=y
+CONFIG_BOOTPARAM_SOFTLOCKUP_PANIC=y
+CONFIG_HARDLOCKUP_DETECTOR=y
+CONFIG_BOOTPARAM_HARDLOCKUP_PANIC=y
 # every family: file names on FAT, NTFS and exFAT disks in UTF-8
 CONFIG_NLS_DEFAULT="utf8"
 # Debian's wireless-regdb is signed by Debian's key: trusted beside the kernel's, or cfg80211

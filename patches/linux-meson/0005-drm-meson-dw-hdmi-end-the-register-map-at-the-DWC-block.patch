@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Tue, 3 Nov 2026 22:45:00 -0500
+Subject: [PATCH] drm/meson: dw-hdmi: end the register map at the DWC block
+
+The regmap dw-hdmi reaches the controller through claims registers up to
+0x10000, past the 64 KiB block the HDMI TX node maps. The DWC registers
+are 0x0000 to 0x7fff; TOP, from 0x8000 on the direct layout, has its own
+accessors. Reading the map through debugfs on GXLX2, which takes G12A's
+direct access, reads 0x10000 off the end: an oops in
+dw_hdmi_g12a_dwc_read() with the regmap lock held and interrupts off,
+and the next reader hard-locks the CPU.
+
+End the map at 0x7fff.
+---
+diff -urN a/drivers/gpu/drm/meson/meson_dw_hdmi.c b/drivers/gpu/drm/meson/meson_dw_hdmi.c
+--- a/drivers/gpu/drm/meson/meson_dw_hdmi.c
++++ b/drivers/gpu/drm/meson/meson_dw_hdmi.c
+@@ -569,7 +569,7 @@
+ 	.val_bits = 8,
+ 	.reg_read = meson_dw_hdmi_reg_read,
+ 	.reg_write = meson_dw_hdmi_reg_write,
+-	.max_register = 0x10000,
++	.max_register = 0x7fff,
+ 	.fast_io = true,
+ };
+ 

@@ -8,6 +8,7 @@ it from upstream.
 | `0001` | `meson-gx-socinfo`: GXLX2 `0x2a`, S905L3 | not sent; linux-amlogic list |
 | `0002` | staging `vdec` from meson-sm1-codecs     | not for upstream             |
 | `0003` | `venc`: DMT modes up to 3840x2160        | `26ce0b87a815`, 6.19         |
+| `0005` | `dw-hdmi`: the regmap ends at the DWC    | not sent                     |
 
 ## 0001
 
@@ -25,3 +26,10 @@ two encoders, vendor code over compat shims, are built out of tree: `modules/mes
 
 Upstream's, unchanged. 6.18 caps a DMT mode at 1920 pixels wide, so a monitor's native mode past
 that, such as 2256x1504, is pruned as `BAD_HVALUE` and a smaller one picked. meson64-next drops it.
+
+## 0005
+
+The regmap dw-hdmi reaches the controller through ended at `0x10000`, past the 64 KiB block the node
+maps; the DWC registers are `0x0000`–`0x7fff`, TOP has its own accessors. A full read of
+`regmap/da800000.hdmi-tx/registers` on the M20 took an oops at `0x10000` with the lock held and
+interrupts off, and the next reader hard-locked. Both kernels take it.

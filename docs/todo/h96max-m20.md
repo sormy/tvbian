@@ -17,11 +17,6 @@ The board's open items.
       and U-Boot, which takes bulk writes and BL2's USB stage — `pyamlboot` has both. Safe to try:
       `amlcmd set_usb_boot 2` enters the ROM, a power cut leaves it.
 
-- [ ] **The watchdog left a hard hang standing.** A VP9 4K decode hung the SoC at 13:51 on
-      2026-10-31; no reset followed, the box stayed down until power-cycled at 13:58. No hang that
-      day reset: each was a power cycle. `meson_gxbb_wdt` is active, 80 s, petted by systemd. The
-      previous boot's journal stops with no oops.
-
 - [ ] **The MT7668S's known gaps** in mainline mt76, as its patches list them.
 
 - [ ] **Wake the H96 Max M20 from `s2idle` on its Bluetooth remote**, its only remote. The SDIO

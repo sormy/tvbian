@@ -1697,3 +1697,16 @@ On the box, `tvb-h96max-m20` 3 built from this tree: after the reboot, 33 s, the
 U-Boot's `reg` (`0x0`, `0x80000000`), the kernel counts `2097152K`, `MemTotal` 2004492 kB (2004488
 before), CMA 768 MiB as before, `wlan0` connected, nothing failed. The previous tree is kept at
 `/root/board.dtb.known-good`.
+
+## 2026-11-03 — a hang that resets itself, `0005`
+
+- A full read of `regmap/da800000.hdmi-tx/registers` took an oops at register `0x10000`, past the 64
+  KiB the node maps, in `dw_hdmi_g12a_dwc_read()`: `cat` died with the regmap lock held and
+  interrupts off, and the next reader spun on it. systemd kept pinging from another CPU, so the
+  watchdog never fired: the hangs that needed a power cycle.
+- `kernel/meson64.fragment`: soft and hard lockup detectors that panic, the hard one the buddy
+  detector. The same read: `Watchdog detected hard LOCKUP on cpu 1`,
+  `Kernel panic - not syncing: Hard LOCKUP`, the box back by itself about a minute later, the record
+  in pstore.
+- `patches/linux-meson/0005` ends the map at `0x7fff`: eight full reads, 32768 registers each, no
+  oops. kexec on this box hangs the new kernel; the watchdog reset it.
