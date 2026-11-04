@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Wed, 4 Nov 2026 01:30:00 -0500
+Subject: [PATCH] avcodec/rkmppdec: add a cacheable option for frames the CPU
+ reads
+
+MPP's frame group is uncached by default: where /dev/dma_heap exists,
+an ION or DRM group lands on the system-uncached heap. A CPU that reads
+the frames, to convert or upload them, pays for it: a 1080p NV15
+picture took 73 ms on the RK3528's A53s, against 4.3 ms from a
+cacheable group, the sync included.
+
+cacheable allocates the group as MPP_BUFFER_TYPE_DRM with
+MPP_BUFFER_FLAGS_CACHABLE, the cached system heap. The decoder and the
+display still reach it through their IOMMUs; only the CPU's view
+changes. A CPU reader brackets its reads with DMA_BUF_IOCTL_SYNC on the
+frame's dma-buf. Off by default.
+---
+ libavcodec/rkmppdec.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/libavcodec/rkmppdec.c b/libavcodec/rkmppdec.c
+index 3e0baaa..96eae40 100644
+--- a/libavcodec/rkmppdec.c
++++ b/libavcodec/rkmppdec.c
+@@ -65,6 +65,7 @@ typedef struct {
+     int capture_max_width;
+     int capture_max_height;
+     int afbc;
++    int cacheable;
+ } RKMPPDecodeContext;
+ 
+ typedef struct {
+@@ -360,7 +361,10 @@ static av_cold int rkmpp_init_decoder(AVCodecContext *avctx)
+         av_log(avctx, AV_LOG_WARNING, "AFBC is not asked with the scaled picture: frames come uncompressed\n");
+     }
+ 
+-    ret = mpp_buffer_group_get_internal(&decoder->frame_group, MPP_BUFFER_TYPE_ION);
++    ret = mpp_buffer_group_get_internal(&decoder->frame_group,
++                                        rk_context->cacheable ?
++                                        MPP_BUFFER_TYPE_DRM | MPP_BUFFER_FLAGS_CACHABLE :
++                                        MPP_BUFFER_TYPE_ION);
+     if (ret) {
+        av_log(avctx, AV_LOG_ERROR, "Failed to retrieve buffer group (code = %d)\n", ret);
+        ret = AVERROR_UNKNOWN;
+@@ -715,6 +719,8 @@ static const AVOption rkmpp_options[] = {
+         OFFSET(capture_max_height), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, INT_MAX, VD },
+     { "afbc", "Ask for AFBC compressed frames, where the codec has them",
+         OFFSET(afbc), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, VD },
++    { "cacheable", "Allocate frames CPU-cacheable; a CPU reader brackets its reads with DMA_BUF_IOCTL_SYNC",
++        OFFSET(cacheable), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, VD },
+     { NULL },
+ };
+ 
+-- 
+2.55.0
+

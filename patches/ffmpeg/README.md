@@ -3,7 +3,7 @@
 FFmpeg has no hwaccel for stateless V4L2 decoders such as Cedrus, and its `v4l2_m2m` wrappers for
 stateful ones such as the Amlogic decoder stumble on raw streams, resolution changes and draining;
 its `rkmpp` codecs for Rockchip's MPP lack 10-bit, scaling and AFBC. One set on FFmpeg 9.0.2, the
-newest release, carries all three; `0001`–`0035` apply in order with `patch -p1`.
+newest release, carries all three; `0001`–`0036` apply in order with `patch -p1`.
 
 | Patch  | Adds                                                                | From      |
 | ------ | ------------------------------------------------------------------- | --------- |
@@ -42,6 +42,7 @@ newest release, carries all three; `0001`–`0035` apply in order with `patch -p
 | `0033` | `mjpeg_v4l2m2m` encoder, quality from `-q:v`, full range            | ours      |
 | `0034` | `mpeg1_rkmpp`, `h263_rkmpp` decoders                                | ours      |
 | `0035` | `rkmpp`: the stream ends on MPP's end of stream; 8K, seeks after it | ours      |
+| `0036` | `rkmpp`: option `cacheable`, frames on the cached system heap       | ours      |
 
 `0001`, `0002` and `0014` are LibreELEC's `packages/multimedia/ffmpeg/patches/v4l2-request` and
 `vf-deinterlace-v4l2m2m` at LibreELEC.tv `96d9f0f`: Jonas Karlman's request-API series, posted to
@@ -58,6 +59,11 @@ ffmpeg, MPEG-2 frames came out of order on MPP's microsecond parser, and `-b:v 8
 2.5 Mbit/s default. MPP writes the ½ picture after the full one in the same buffer; AFBC is never
 asked together with it, as MPP times out there. H.264 and HEVC AFBC frames are 4 lines taller,
 `crop_top` 4.
+
+`0036`'s `cacheable` is for a CPU that reads the frames: MPP's group is uncached by default, and a
+1080p NV15 frame read from it on the RK3528 took 73 ms against 4.3 ms from the cached system heap.
+The reader brackets its reads with `DMA_BUF_IOCTL_SYNC`; the decoder and the display reach the
+frames through their IOMMUs either way.
 
 `0027`–`0030` serve the Amlogic decoder through the `*_v4l2m2m` wrappers. `0028`'s `afbc` takes the
 bit depths as `0018`'s and `0025`'s do, and asks DRM PRIME frames in the decoder's own compressed
