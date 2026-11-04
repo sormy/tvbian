@@ -79,8 +79,8 @@ another, so nothing rots when one is rewritten.
 | `docs/hdmi-edid-override.md`             | banning a display mode the panel advertises but nothing should pick  |
 | `docs/remote-keymap.md`                  | validating IR and BLE keymaps separately; the `hwdb` override        |
 | `research/<experiment>/`                 | dead ends and partial results, kept so nobody re-walks them          |
-| `TODO.md`                                | small open items, and where the bigger ones live                     |
-| `docs/todo/`                             | open questions — `rk35xx-` is family-wide, `<board>-` is one box     |
+| `TODO.md`                                | project-wide items, and the index of every page in `docs/todo/`      |
+| `docs/todo/`                             | a page a scope: family, Wi-Fi/BT chip, box, or project-wide topic    |
 | `docs/<board>/board.md`                  | that board's identity, measured numbers, known gaps                  |
 | `docs/<board>/dtb.md`                    | that board's device-tree changes, tried and reverted ones too        |
 | `docs/<board>/worklog*.md`               | dated history, wrong turns included; split by topic once it grows    |
@@ -146,6 +146,11 @@ cannot be backed, say so rather than rounding up.
 - **Checklist IDs live in `docs/bring-up/` and the boards' Test reports, nowhere else**: worklogs,
   commits and messages name what a line checks. An ID is never renumbered; a new line takes the next
   free one.
+- **A todo goes where its scope is.** `TODO.md` holds what spans families, and indexes `docs/todo/`:
+  `<family>.md` for what spans a family's boards (`rk35xx`), `<chip>.md` for a Wi-Fi/BT chip
+  whatever board carries it (`aic8800`), `<board>.md` for one box, and `<topic>.md` for a
+  project-wide item too big for a line. A page grows topics as `<scope>-<topic>.md`. Every page has
+  its row in the index.
 - **Worklogs are written as work happens** — dated entries, wrong turns included. They are the raw
   material everything else derives from, and what the next port follows.
 - **Narrative lives in `docs/`**, never in scripts, payload files or DTB tables. Those stay terse.
