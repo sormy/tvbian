@@ -3,12 +3,14 @@
 Applied to the `meson64` kernel through `kernel/meson64.conf`; each leaves on the bump that brings
 it from upstream.
 
-| Patch  | Holds                                    | Upstream                     |
-| ------ | ---------------------------------------- | ---------------------------- |
-| `0001` | `meson-gx-socinfo`: GXLX2 `0x2a`, S905L3 | not sent; linux-amlogic list |
-| `0002` | staging `vdec` from meson-sm1-codecs     | not for upstream             |
-| `0003` | `venc`: DMT modes up to 3840x2160        | `26ce0b87a815`, 6.19         |
-| `0005` | `dw-hdmi`: the regmap ends at the DWC    | not sent                     |
+| Patch  | Holds                                        | Upstream                     |
+| ------ | -------------------------------------------- | ---------------------------- |
+| `0001` | `meson-gx-socinfo`: GXLX2 `0x2a`, S905L3     | not sent; linux-amlogic list |
+| `0002` | staging `vdec` from meson-sm1-codecs         | not for upstream             |
+| `0003` | `venc`: DMT modes up to 3840x2160            | `26ce0b87a815`, 6.19         |
+| `0005` | `dw-hdmi`: the regmap ends at the DWC        | not sent                     |
+| `0006` | `dw-hdmi`: AVI colorimetry from `Colorspace` | `linux-sunxi/0260`'s half    |
+| `0007` | meson HDMI: the `Colorspace` property        | not sent                     |
 
 ## 0001
 
@@ -33,3 +35,11 @@ The regmap dw-hdmi reaches the controller through ended at `0x10000`, past the 6
 maps; the DWC registers are `0x0000`–`0x7fff`, TOP has its own accessors. A full read of
 `regmap/da800000.hdmi-tx/registers` on the M20 took an oops at `0x10000` with the lock held and
 interrupts off, and the next reader hard-locked. Both kernels take it.
+
+## 0006, 0007
+
+The connector had HDR_OUTPUT_METADATA and no `Colorspace`, so under HDR the AVI InfoFrame kept
+dw-hdmi's BT.601/BT.709 colorimetry: EC 0, and a TV may show BT.2020 pictures as BT.709. `0006` is
+Jernej Skrabec's `linux-sunxi/0260` without its sun8i half: dw-hdmi takes the colorimetry from the
+property once userspace sets it. `0007` attaches it beside HDR_OUTPUT_METADATA and takes a change as
+a mode change. PQ and HLG now send EC 6, BT.2020.

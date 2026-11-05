@@ -17,9 +17,6 @@ The board's open items.
       and U-Boot, which takes bulk writes and BL2's USB stage — `pyamlboot` has both. Safe to try:
       `amlcmd set_usb_boot 2` enters the ROM, a power cut leaves it.
 
-- [ ] **HDR out without BT.2020 colorimetry.** The connector has no `Colorspace` property, so the
-      AVI InfoFrame says EC 0 under HDR, and a TV may show BT.2020 pictures as BT.709. Add the
-      property to meson's bridge connector.
 - [ ] **An underrun count for the VPU.** Without one the rating's 4K60 is unmeasured, and 4K60 NV12
       video is known to glitch.
 - [ ] **The MT7668S's known gaps** in mainline mt76, as its patches list them.

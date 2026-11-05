@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Wed, 4 Nov 2026 10:00:00 -0500
+Subject: [PATCH] drm/meson: encoder_hdmi: Attach the Colorspace property
+
+The connector offers HDR_OUTPUT_METADATA but no Colorspace, so under
+HDR the AVI InfoFrame keeps dw-hdmi's BT.601/BT.709 colorimetry and a
+sink may show BT.2020 pictures as BT.709.
+
+Attach the HDMI Colorspace property next to HDR_OUTPUT_METADATA, which
+dw-hdmi turns into the AVI InfoFrame's colorimetry, and take a change
+of it as a mode change, as a change of HDR metadata already is, so the
+InfoFrame follows.
+---
+ drivers/gpu/drm/meson/meson_encoder_hdmi.c | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/gpu/drm/meson/meson_encoder_hdmi.c b/drivers/gpu/drm/meson/meson_encoder_hdmi.c
+index 8205ee5..9f136e0 100644
+--- a/drivers/gpu/drm/meson/meson_encoder_hdmi.c
++++ b/drivers/gpu/drm/meson/meson_encoder_hdmi.c
+@@ -316,7 +316,8 @@ static int meson_encoder_hdmi_atomic_check(struct drm_bridge *bridge,
+ 
+ 	dev_dbg(priv->dev, "output_bus_fmt %lx\n", encoder_hdmi->output_bus_fmt);
+ 
+-	if (!drm_connector_atomic_hdr_metadata_equal(old_conn_state, conn_state))
++	if (!drm_connector_atomic_hdr_metadata_equal(old_conn_state, conn_state) ||
++	    old_conn_state->colorspace != conn_state->colorspace)
+ 		crtc_state->mode_changed = true;
+ 
+ 	return 0;
+@@ -449,9 +450,13 @@ int meson_encoder_hdmi_probe(struct meson_drm *priv)
+ 
+ 	if (meson_vpu_is_compatible(priv, VPU_COMPATIBLE_GXL) ||
+ 	    meson_vpu_is_compatible(priv, VPU_COMPATIBLE_GXM) ||
+-	    meson_vpu_is_compatible(priv, VPU_COMPATIBLE_G12A))
++	    meson_vpu_is_compatible(priv, VPU_COMPATIBLE_G12A)) {
+ 		drm_connector_attach_hdr_output_metadata_property(meson_encoder_hdmi->connector);
+ 
++		if (!drm_mode_create_hdmi_colorspace_property(meson_encoder_hdmi->connector, 0))
++			drm_connector_attach_colorspace_property(meson_encoder_hdmi->connector);
++	}
++
+ 	drm_connector_attach_max_bpc_property(meson_encoder_hdmi->connector, 8, 8);
+ 
+ 	/* Handle this here until handled by drm_bridge_connector_init() */
+-- 
+2.55.0
+
