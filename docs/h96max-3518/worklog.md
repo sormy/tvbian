@@ -2363,3 +2363,14 @@ card once the same DDR blob was on its eMMC. The eMMC's FIT is 2026.10 again.
   the gateway answering in 2–5 s; no `scheduling while atomic`, `BUG`, `WARNING` or lockup. The
   driver's `SKW_CMD_GET_STA expect len: 385, recv len: 172` warning, three on the voluntary boot,
   rose with the cycles; its errors held at 3. `display.py` 18 passed.
+
+## 2026-11-04 — lockups panic, a whole-box hang the watchdog resets
+
+- `lib/test_lockup.c` built out of tree against the 6.1.172 tree. `disable_preempt=1` on one CPU, 30
+  s, `softlockup_panic` 0: `BUG: soft lockup - CPU#0 stuck for 22s!` 22.7 s in; at 1 the box was
+  back 75 s after the trigger, reset about 49 s in.
+- `disable_irq=1` on one CPU: `Watchdog detected hard LOCKUP on cpu 2` 23.5 s in, though
+  `nmi_watchdog` reads 0 and refuses 1: the other-CPU detector runs from the softlockup timer, the
+  sysctl names the perf one. With `hardlockup_panic` 1 the box reset 44 s in; ramoops kept
+  `Kernel panic - not syncing: Watchdog detected hard LOCKUP on cpu 0`.
+- `disable_irq=1 all_cpus=1`: no CPU left to detect it; the hardware watchdog reset the box 86 s in.

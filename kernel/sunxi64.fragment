@@ -37,6 +37,9 @@ CONFIG_SOFTLOCKUP_DETECTOR=y
 CONFIG_BOOTPARAM_SOFTLOCKUP_PANIC=y
 CONFIG_HARDLOCKUP_DETECTOR=y
 CONFIG_BOOTPARAM_HARDLOCKUP_PANIC=y
+# the RCU stall warning, at mainline's 21 s, resets the soft-lockup clock: a stuck CPU panicked past
+# 45 s, or not at all. 60, as Rockchip's kernel has
+CONFIG_RCU_CPU_STALL_TIMEOUT=60
 # kexec: a one-shot test boot over the network, as meson64
 CONFIG_KEXEC=y
 # every family: no boot logo, as rk35xx and meson64
