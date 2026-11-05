@@ -13,4 +13,7 @@
 ## Parked
 
 - [ ] Check on stock whether PH9, or the remote's Menu, held at power-on reaches Android's recovery.
-- [ ] Bring up the AV port: picture and sound.
+- [ ] Bring up the AV port: picture and sound. The last try drove the DAC, the converter's audio
+      hissing, with no picture: through a 3.5 mm cable grounded on ring 2, where TV-box jacks ground
+      on the sleeve. Next: the jack's ground by meter, a CTIA-to-OMTP adapter, then the vendor's
+      composite enable (TVE `0x004` bit 16) into the driver.

@@ -1,6 +1,7 @@
 # TODO
 
-Small items live here. An item that needs its own page gets one in `docs/todo/`, listed below.
+What spans families lives here. An item that needs its own page gets one beside this file, listed
+below.
 
 ## Open
 
@@ -80,11 +81,6 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
 - [ ] **Every board: the Test report keyed by checklist ID.** `docs/bring-up/` asks for it; no
       board's report is, so a line never run stays invisible. The Tanix TX1 V2.0 first.
 
-- [ ] **RK3518 boards: revisit the GPU against the H96 Max M20.** Same Mali-450 and the same BOE
-      2256x1504 panel: the M20 scores glmark2 **64** at it native; the RK3528 boards scored 41 at
-      1080p and 2048x1152, before today's vendor kernel clocked the native mode. Record each board's
-      GPU clock and devfreq governor, then rerun glmark2 on the same panel.
-
 - [ ] **An AI review on every pull request, against `AGENTS.md`.** A fork PR runs without our
       secrets, so a GitHub App fits: CodeRabbit's open-source plan, free for a public repo and
       rate-limited per developer, pointed at `AGENTS.md`. Gemini Code Assist's free GitHub app is
@@ -93,8 +89,6 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
       since a comment from a maintainer runs with the repo's token and a fork PR does not. ❓
       CodeRabbit's current limits, and the file it reads guidelines from.
 
-- [ ] **Check the `ttyFIQ0` login on a serial header.** Every Rockchip board's console is `ttyFIQ0`,
-      seen in `/proc/consoles` with its getty running; never on a cable.
 - [ ] **The repo restructure.** Folders named for what they hold, every patch in `patches/`, docs
       current or in `research/`: `docs/todo/repo-layout.md`.
 
@@ -102,15 +96,6 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
       the 3518, never past it: the 3518 from its SD to the eMMC, keeping `DVKR`/`SSKR`; the M20
       image from a stick to the eMMC, then back from the eMMC to a stick. Together they test phases
       4 and 5.
-- [ ] **Keep an Amlogic board's Ethernet address, as `LAN_MAC` is kept on Rockchip.** It is the
-      unifykey `mac` slot, encrypted, so only the vendor U-Boot reads it (`keyman read mac`); the
-      stock env hands it to Android as `mac=`. Our `aml_autoscript` runs in that U-Boot: read it,
-      then `env export -t` `ethaddr` to fixed RAM for `boot.scr` to `env import` in the chained
-      U-Boot, which sets `local-mac-address`. ❓ `env export` in this U-Boot; a RAM address neither
-      relocates over.
-- [ ] **No kernel self-tests in meson64.** 146 of its 4433 modules are KUnit and test modules, from
-      Armbian's config: off in `kernel/meson64.fragment` (`CONFIG_KUNIT`), then a boot on the M20.
-      The rest of its breadth stays: USB Wi-Fi, tuners and cameras are why a box is general.
 - [ ] **Low priority: `tvb-firstlogin`, the first-login wizard.** Until then, `docs/first-login.md`
       gives the commands. Runs once, from `/etc/profile.d/`, at root's first interactive login; Esc
       skips a step; `/var/lib/tvb/firstlogin.done` marks it finished, so an interrupted run starts
@@ -120,13 +105,6 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
   - the locale: `SUPPORTED`'s UTF-8 lines through `fzf`, then `locale-gen`;
   - Wi-Fi, where a Wi-Fi device exists: `nmcli device wifi list` through `fzf`, then
     `nmcli --ask device wifi connect`.
-- [ ] **RK3528 boards: a 4K display on the R69 and the 3518.** Every RK3528 `board.dts` sets
-      `esmart_lb_mode = [02]`, a 4K line buffer for Esmart0, where the factory's `[03]` corrupts the
-      right third of a 4K frame; ✅ on the 3518D only. Check `3840x2160p60` full-screen with no
-      fringe on the right, then that a 1080p display still comes up clean.
-- [ ] **R69 and the 3518: their IR tables onto the canonical keymap** in `docs/remote-keymap.md`.
-      Each `ir_keyN` table in `board.patch` gives its own keys today (OK is `KEY_ENTER` on the R69,
-      `KEY_REPLY` on the 3518); then its pass over both transports, once a box has the remote.
 - [ ] **A USB keyboard's keymap on `tty1`:** `console-setup` in the image and a README line, or US
       only.
 - [ ] **BTF:** dropped with debug info by `CONFIG_DEBUG_INFO_NONE`, or kept for BPF tools at the
@@ -161,6 +139,7 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
 | `docs/todo/rk35xx-sd-uhs-warm-reset.md` | `dwmmc` first init after a warm reset       |
 | `docs/todo/rk35xx-uboot-usb.md`         | USB in our U-Boot                           |
 | `docs/todo/allwinner.md`                | Allwinner boards, every one                 |
+| `docs/todo/amlogic.md`                  | Amlogic boards, every one                   |
 | `docs/todo/tanix-tx1-v2.md`             | the Tanix TX1 V2.0: what is left            |
 | `docs/todo/h96max-m20.md`               | the H96 Max M20: what is left               |
 | `docs/todo/swt6621s.md`                 | the SWT6621S Wi-Fi/BT: what is left         |

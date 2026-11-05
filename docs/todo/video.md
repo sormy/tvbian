@@ -19,8 +19,6 @@ FFmpeg's, and what no chip has measured yet.
       RGB or YUV black from the output format at mode set: either the format changes after it, or on
       DE33 the blender works in RGB before the formatter and YUV black is the wrong one.
 - [ ] VP9 at 3840x2160 decodes at 43 fps; the datasheet gives 60.
-- [ ] FFmpeg's `mjpeg_v4l2m2m` segfaults when Cedrus refuses a JPEG past 24 Mpixel (6144x4096 and
-      up); the box is unharmed.
 - [ ] Sizes not probed: MPEG-2 and MPEG-4 to the registers' 4096x4080, VP8 4096 wide past 2304
       lines, both encoders past 4096.
 - [ ] Decoder scaling for VP9, VP8, MPEG-2 and JPEG: the register map below.
@@ -81,8 +79,9 @@ FFmpeg's, and what no chip has measured yet.
 - [ ] A package: `patches/ffmpeg/` on 9.0.2 is built by hand today (`research/ffmpeg-v4l2m2m/`); an
       `extras/` package built by `./build.sh` and deployed as a deb, MPP linked static for Rockchip,
       the research build retired. Then the patches sent upstream.
-- [ ] `*_v4l2m2m` decoders take a coded size the driver clamped: the H313's JPEG past its limit
-      fails every frame instead of refusing at open. `0032` refuses it for the encoders.
+- [ ] `*_v4l2m2m` decoders take a coded size the driver clamped: the H313's JPEG past 24 Mpixel
+      fails every frame instead of refusing at open, and `mjpeg_v4l2m2m` then segfaults; the box is
+      unharmed. `0032` refuses it for the encoders.
 - [ ] `*_v4l2m2m` decoders decode nothing after an end of stream: a seek back from the end or a
       looped input gets no frames. The restart command goes out; the capture queue stays done.
 - [ ] fuseamp asks for compressed frames: `afbc` on `v4l2request` and `*_rkmpp`, `-afbc` on

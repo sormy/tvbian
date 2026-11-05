@@ -30,8 +30,8 @@ Locale and the first root-password login are image state, not packaged.
 `tvb-base` holds what every box gets, `image/rootfs/` the image's own state. `stock/`, `research/`,
 `docs/` and `keyring/` stay where they are.
 
-The repo root ends with `build.sh`, the READMEs, `AGENTS.md`, `TODO.md` and folders. Build outputs
-go under `build/`, which is gitignored whole.
+The repo root ends with `build.sh`, the READMEs, `AGENTS.md` and folders. Build outputs go under
+`build/`, which is gitignored whole.
 
 ## Docs
 
