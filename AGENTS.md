@@ -169,6 +169,8 @@ cannot be backed, say so rather than rounding up.
 - **The claim, not its proof.** Dates, evidence and the session's narration go in the worklog; a
   table is never restated in prose; a line that fails "do we even need this?" goes.
 - **No media file names** in docs, patches or commits: tests use synthetic streams.
+- **Short and plain**: docs, instructions and comments, an agent's most of all. Leave out the
+  obvious; no flourish.
 
 ## Markdown
 
@@ -275,6 +277,9 @@ higher one and record why.
 - **The first login asks for a new root password**: the image ships `1234`, expired. With a network,
   copy an SSH key into `/root/.ssh/authorized_keys` over serial once, and the rest of bring-up runs
   as `ssh root@<BOARD_HOSTNAME>.local`.
+- **Bring-up and fixes run unattended.** Exhaust the box's readback, the repo and `backup/` before
+  asking a person to look, listen or plug in. Make the ask one step, and add the test it shows is
+  missing.
 - `mmcblk` numbering is **not stable** across images or boots. Identify the eMMC by its
   `boot0`/`boot1` companions, never by a remembered number.
 - **After any refactor, rebuild the image and diff every payload file against a pre-change build.**
