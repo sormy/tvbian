@@ -1571,6 +1571,27 @@ gain, the unit's own DRAM init on the eMMC, is not worth it; the install keeps w
 - 7.3 does not take `CONFIG_BOOTPARAM_SOFTLOCKUP_PANIC=y`: 7.0 made it a count. The next fragments
   set 1.
 
+## 2026-11-04 — lockups, the RCU stall timeout, Cedrus fixes
+
+- `lib/test_lockup.c` built out of tree. One CPU, interrupts off:
+  `CPU0: Watchdog detected hard LOCKUP on cpu 1` 15.3 s in; with `hardlockup_panic` 1 the box reset
+  43 s in. All CPUs: the 16 s hardware watchdog reset it 32 s in.
+- One CPU, preemption off, 30 s: no soft-lockup report. `rcu_preempt self-detected stall` came
+  first, 21.0 s in, and its report touches the soft-lockup clock: a 50 s spin reported
+  `stuck for 49s` at 48.6 s. `rcupdate.rcu_cpu_stall_timeout` 60, Rockchip's: the report at 24.9 s,
+  the box reset about 53 s in. The fragment sets `CONFIG_RCU_CPU_STALL_TIMEOUT=60` on sunxi64 and
+  meson64.
+- VP9 profile 2: key frames exact, every inter frame of 1920x1080 and 1280x1080 wrong, 64 dB;
+  640x480, 1280x720, 1920x1072 and 1920x1088 exact. A test kernel with the low 2 bits plane placed
+  after the chroma at the frame's height, not the buffer's 1088, decodes every size exact: `0811`.
+- H.263's run-to-run difference was the suite: `-v verbose` merged into the `framemd5` output put a
+  log prefix on a record now and then, 5 of 40 runs one frame short while FFmpeg reported 3 decoded.
+  `md5_lines` finds a record anywhere on its line; three ladders since, 12 of 12 pass.
+- `0808`'s JPEG and MPEG-4 sizes moved into `0803` and `0806`; the series' end state is unchanged,
+  both kernels build.
+- `0096`'s default margin 98: the 2026-11-03 sweep's lowest failure needed 99.3%, 1400x1050 at 97.9%
+  plays with 0 underflows.
+
 ## 2026-11-04 — CMA from `BOARD_CMA`, 16 MiB
 
 - In use, `CmaTotal` less `CmaFree` every 50 ms: a 4K60 synthetic screen with a 4K NV12 video plane
@@ -1580,3 +1601,90 @@ gain, the unit's own DRAM init on the eMMC, is not worth it; the install keeps w
   attached.
 - `cma=16M` by `tvb.conf` and `u-boot-update`: pool 16 MiB, idle 1.5 MiB, the same load 1.5 MiB,
   1737 commits, none refused; `display.py` 20 passed.
+
+## 2026-11-04 — Wi-Fi silent after a group rekey
+
+- 16:07:10 UTC `wpa_supplicant` completed a group rekey (`GTK=CCMP`), `atbm_log` `2/2 Group`. From
+  16:08:55 every NTP request timed out, and the Mac's ARP entry for the box stayed incomplete; no
+  disconnect, no driver message. Traffic came back at 16:44:47 by itself.
+- The boot ran on throughout (`journalctl --list-boots`: one boot from 15:59 UTC): no hang, so the
+  watchdog had nothing to fire on. No allocation failure on `cma=16M`.
+
+## 2026-11-04 — H.264 and HEVC at a 32-byte pitch, `0812`; JPEG by area
+
+- HEVC 4080x4080 never passed on the Tanix: the 2026-10-31 passes are the H96 Max's (RK3518) runs.
+  Intra pictures exact, every inter picture's chroma wrong (15 dB), whole width, worst at the left.
+- By width: HEVC 1936, 2000, 4048, 4080 wide fail; 1920, 3840, 4064 and 3840x4080 are exact; H.264
+  1936 fails, 1920 exact; VP9 and VP9 profile 2 at 1936 exact. An odd multiple of 16 breaks H.264
+  and HEVC.
+- Lines at 32 bytes alone broke intra pictures too: the stride registers were computed from the
+  width, not `bytesperline`. Registers from `bytesperline` and 32-byte lines: H.264 and HEVC exact,
+  VP9 broken, so VP9 fetches at the stride it is given and keeps 16. `0812`.
+- MJPEG 4096x4096: `failed to configure engine job: -22` on every frame. `0807` sizes a coded format
+  by its own engine; JPEG's 6000x4000 limit then clamped 4096 lines to 4000 and the header check
+  refused the frame. With the limit opened: 4096x4096, 6000x4000, 4000x6000, 4096x5120 at 78–81 dB.
+  `0803` now takes 6000 a side and 24 Mpixel; 6144x4096 is refused frame by frame, the box up.
+- `video.py` decode and scale on the result: HEVC 4080x4080 and MJPEG 4096x4096 pass, nothing worse
+  than the 0811 run; HEVC 16384x8640 refused as before, its software reference OOM-killed as before.
+
+## 2026-11-04 — Wi-Fi across forced group rekeys
+
+- The H96 Max 3518D as a WPA2-PSK CCMP access point on 2.4 GHz channel 1, `wpa_group_rekey=20`, PTK
+  rekey off, beside its own client link; the Tanix joined it from a NetworkManager profile that a
+  script left after 540 s.
+- 27 group rekeys (hostapd's `group key handshake completed`, the Tanix's
+  `Group rekeying completed`): 505 of 505 one-second probes answered, a unicast ping to a pinned
+  neighbour and one behind a fresh ARP broadcast, the broadcast under the group key. No stall.
+- An idle soak on the home network, 18:09–20:20 UTC, 30 s pings: 258 of 262, the 4 misses single and
+  apart; the home access point did not rekey in that time.
+
+## 2026-11-04 — `RCQ sync timed out`, not reproduced
+
+- The warning is `sun8i_rdma_sync`'s, from `0252`'s CRTC disable and `0238`'s writeback: a 40 ms
+  poll for the queue's fetch, which comes at the next frame start, 41.7 ms away at 24 Hz.
+- 159 mode sets between 1920x1080@24 and @60 on a synthetic HDMI 2.0 screen, a plane up: 0 timeouts.
+  The 40 ms bound is not shown to be the cause; nothing changed.
+- `0813` and FFmpeg `0037`: a 10-bit 1080p HEVC picture read by the CPU, 63.6 ms from coherent
+  CAPTURE buffers, 8.1 ms with `cacheable=1`; frame md5s identical.
+
+## 2026-11-05 — HDMI PCM rewind refused by the audio hub
+
+- Installed `alsa-utils` and `libasound2-dev`; GCC was present. `aplay -l`: HDMI card 1, device 0;
+  kernel `6.18.60-tvb-sunxi64`, alsa-lib `1.2.14-1+deb13u1`.
+- Fuseamp stopped for the runs. Raw `hw:1,0`, bypassing plugins: S16_LE and S32_LE twice each, 48
+  kHz stereo, 9600-frame buffer, 1200-frame periods, 300 ms tone before rewind. Initial full
+  request: `rewindable=9600 rewind=0 state=RUNNING` in all four runs.
+- `tools/validate/pcm-rewind.c` leaves two periods queued for the post-fix no-xrun check:
+  `rewindable=9600 requested=7200 rewind=0 state=RUNNING`, both formats twice; refill and
+  drop/prepare/restart: `restart=ok xruns=0`, no recovery, all exit 0. Logs:
+  `build/logs/tanix-tx1-v2/20261105-hdmi-rewind.log` and
+  `build/logs/tanix-tx1-v2/20261105-hdmi-rewind-guarded.log`.
+- Extracted `build/kernel-tarballs/linux-6.18.44.tar.xz` into `/tmp/tvb-hdmi-rewind/`; attempted
+  every `kernel/sunxi64.conf` patch in order. Existing failures: `0214`, `0215`, `0226`, `0072`,
+  `0073`, `0074`; audio patches apply. Application log: `/tmp/tvb-hdmi-rewind/apply.log`. No
+  unrelated patch changed.
+- `sound/soc/sunxi/sun50i-h616-ahub.c:1003–1006` sets `NO_REWINDS` on every HDMI playback stream.
+  Its ack at line 1083 skips conversion for ordinary PCM. `sound/core/pcm_lib.c:2246` rejects
+  backward pointer updates under that flag; `sound/core/pcm_native.c:3023` maps the error to zero
+  frames. The pointer uses `snd_dmaengine_pcm_pointer`; sun6i DMA advertises burst residue at
+  `drivers/dma/sun6i-dma.c:1371`, not descriptor-only residue.
+- alsa-lib v1.2.14 `src/pcm/pcm_hw.c:821–845`: rewindable uses the mapped pointer distance; rewind
+  uses the ioctl. No hub module parameter or sysfs switch exposes `NO_REWINDS`. Switching
+  S16_LE/S32_LE twice each leaves the failure unchanged; the flag itself cannot be toggled without a
+  new kernel. No kernel build or kernel swap performed here.
+- `0904` keeps `SYNC_APPLPTR` and applies `NO_REWINDS` only to IEC958 in `hw_params`;
+  `sound/core/pcm_native.c:822` copies the resulting `params->info` into `runtime->info`. Listed in
+  both kernel configs; `patch --dry-run --batch -p1` passes on the audio-patched 6.18.44 tree.
+  IEC958's restriction stays in place. Hardware result pending the host build.
+- Post-build box test: stop Fuseamp, compile the copied reproducer with
+  `gcc -O2 -Wall -Wextra /tmp/pcm-rewind.c -lasound -lm -o /tmp/pcm-rewind`; run
+  `timeout 5 /tmp/pcm-rewind hw:1,0 S16_LE` and `timeout 5 /tmp/pcm-rewind hw:1,0 S32_LE`, twice
+  each. Expected: `rewindable=9600 requested=7200 rewind=7200` (pointer timing may lower the first
+  two), `rewind=requested > 0`, `state=RUNNING`, `restart=ok xruns=0`, exit 0. Check the kernel
+  journal for new audio/DMA warnings. Then restart Fuseamp and check seek/stop by ear.
+
+- Fuseamp restarted with the requested `setsid -f` command; `pgrep -a -x fuseamp`:
+  `4223 ./fuseamp -platform eglfs`. Kernel journal over the preceding ten minutes: no entries.
+- Prettier ran with `--print-width 100 --prose-wrap always` on the four changed Markdown files;
+  `git diff --check` passed for the touched files. The full-tree check reports existing whitespace
+  in `boards/h96max-m20/board.patch`. Nothing staged, committed, pushed or branched.

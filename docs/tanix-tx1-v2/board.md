@@ -269,7 +269,7 @@ CPU's own beside each encoder:
 | VC-1 SP/MP/AP        | 1080p@60             | 304 at 720p       | 🟠 SP/AP; MP refused         |
 | MPEG-4 SP/ASP, H.263 | 1080p@60             | 32                | 🟠 `0806`, `ffmpeg/0019`     |
 | AVS/AVS+, AVS2       | 1080p@60; AVS2 4K@60 | ❓                | ❌ no uAPI to adopt          |
-| JPEG decode          | 45 Mpixel/s          | 28                | ✅ `0803`, to 6000×4000      |
+| JPEG decode          | 45 Mpixel/s          | 28                | ✅ `0803`, to 24 Mpixel      |
 | H.264 encode         | 4K@25, CBR/VBR       | 24, CPU 8.4       | ✅ `0069`–`0084`             |
 | JPEG encode          | 1080p@60             | 10.8, CPU 6.9     | ✅ `0804`, to 4096           |
 | Deinterlace (DI300)  | —                    | 121, 1080i        | ✅ `0067`, `ffmpeg/0014`     |
@@ -309,11 +309,11 @@ NEC, address 0x80; the stock remote is the Tanix TX3 mini's. `linux-sunxi/0088`,
   `allwinner,sample-delay = <20>`); at mainline's defaults writes fail and the request hangs.
 - **GPU:** one Mali-G31 shader core (`shader_present=0x1`, the hardware's own count).
 - **Video engine:** decode bit exact, H.264 and VP8 to 4096×2304, HEVC and VP9 to 8192×4320, at 10
-  bits to 6144×3456, MPEG-2 to 4000×2250; JPEG to 6000×4000, 4:2:2 and 4:4:4 as 4:2:0. MPEG-4 Part 2
-  and H.263 baseline to 4080×2160 by PSNR against software, the IDCTs differing: 60–70 dB on
-  FFmpeg's encodes, Xvid and DivX 48–73 on average; quarter-sample luma 45–57 dB; interlaced streams
-  with B-VOPs and H.263 annexes left to software. H.264 encode runs 176×144 to 4096×4096 at any even
-  size, JPEG encode 16×16 to 4096×4096; `/dev/video*` named `cedrus-enc`.
+  bits to 6144×3456, MPEG-2 to 4000×2250; JPEG to 24 Mpixel and 6000 a side, 4:2:2 and 4:4:4 as
+  4:2:0. MPEG-4 Part 2 and H.263 baseline to 4080×2160 by PSNR against software, the IDCTs
+  differing: 60–70 dB on FFmpeg's encodes, Xvid and DivX 48–73 on average; quarter-sample luma 45–57
+  dB; interlaced streams with B-VOPs and H.263 annexes left to software. H.264 encode runs 176×144
+  to 4096×4096 at any even size, JPEG encode 16×16 to 4096×4096; `/dev/video*` named `cedrus-enc`.
 - **Tolerated log line:** `hdmi-audio-codec …: HDMI: Unknown ELD version 0` at each HDMI plug event;
   HDMI audio plays after the replug.
 - **Boot warnings, all tolerated:** the kernel's KASLR without a seed, two GPIO bases, two dummy
