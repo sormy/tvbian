@@ -3,11 +3,20 @@
 Rules for anyone — human or agent — adding a board or changing this repo. Most have a corpse in
 `docs/*/worklog.md` behind them. The procedure itself lives in the docs indexed below.
 
+Notes for agents live here and in the docs, never in a tool's private memory; what can't be public
+goes in `AGENTS.local.md` (gitignored).
+
 ## What this repo is
 
 Debian with our own kernel, drivers and board packages, not a fork of a distro. Kernel sources and
 userspace come from upstream; we carry only what upstream can't know. **Adding a board is data, not
 code** — one `boards/<board>/` directory. If a change needs new code per board, the design is wrong.
+TVBian is based on Debian; it is never called Debian.
+
+**Boards stay downstream**: no board tree or config goes upstream. Mainline patches are written
+upstream-shaped, to be sent. Vendor-kernel patches (`linux-rockchip`, the out-of-tree drivers) have
+no upstream path, and are written for the least code that is correct on our boxes. A board's key
+names its model (`h96max-m20`), never its SoC.
 
 | Tree                | Holds                                                                                          |
 | ------------------- | ---------------------------------------------------------------------------------------------- |
@@ -155,6 +164,9 @@ cannot be backed, say so rather than rounding up.
   material everything else derives from, and what the next port follows.
 - **Narrative lives in `docs/`**, never in scripts, payload files or DTB tables. Those stay terse.
 - **Measured numbers live in `docs/<board>/board.md`** — they're per-unit and they decay.
+- **The claim, not its proof.** Dates, evidence and the session's narration go in the worklog; a
+  table is never restated in prose; a line that fails "do we even need this?" goes.
+- **No media file names** in docs, patches or commits: tests use synthetic streams.
 
 ## Markdown
 
@@ -226,6 +238,9 @@ name, path or claim it touches is left stale elsewhere in the repo.
 **A `kernel/*.conf` lists every patch and fragment it applies, one path a line**: no loops, globs,
 `$(…)` or `${…}`. A `-next` conf sources its base for the rest. Where a patch comes from is its
 directory's README, never its path.
+
+**U-Boot handles the SoC and vendor storage only**: it may set the SoC's Ethernet address and pass
+vendor-storage entries on; a radio's address belongs to that radio's driver.
 
 **A driver refuses what it cannot show** rather than show garbage: an atomic check that fails is a
 player's cue to take another route; a picture that breaks is not.

@@ -143,6 +143,11 @@ Small items live here. An item that needs its own page gets one in `docs/todo/`,
       `video.py`'s host and box split: JSON out, `report`, `matrix` for a board's `board.md`,
       `compare` as the regression check.
 
+- [ ] **Unattended board enrollment: the goal.** A new box brought up with as few human actions as
+      possible: the factory evidence harvested before the wipe, an image matched, bring-up driven
+      over serial, and each subsystem proven by an automated check: display, video, audio, Wi-Fi,
+      Bluetooth and its remote, input, power, storage.
+
 ## Bigger todos
 
 | File                                    | Open question                               |

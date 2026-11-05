@@ -111,7 +111,13 @@ host's CPUs and memory. A scratch script is a bug to remove the same day; one co
 build volume at a time; a script is never edited while it runs. Even a one-module change builds on
 the host and goes to the box built: a stick or a small box with poor cooling compiles slowly,
 throttles, and its heat disturbs what is being measured. A box with the headroom may build; the host
-is still the default.
+is still the default. Iterate with host-built modules or a kexec'd kernel; a full redeploy is the
+final smoke test only.
+
+**Experiments fail fast.** Every run has a hard cap and exits the moment the answer is known; its
+worst case is stated before it starts. An event is driven, never waited for: a test access point
+with `wpa_group_rekey=20`, not a router's hourly rekey. While something long runs, the work that
+doesn't need it goes on, and its completion wakes the next step, not a timer.
 
 **An intermittent fault**, in this order: the journal's timeline around every occurrence, each
 driver warning in it traced to its source and to any handling the vendor commented out; a scenario
