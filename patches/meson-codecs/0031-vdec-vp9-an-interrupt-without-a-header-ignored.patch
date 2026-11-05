@@ -1,0 +1,47 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Wed, 4 Nov 2026 11:30:00 -0500
+Subject: [PATCH] media: meson: vdec: vp9: an interrupt without a parsed header
+ is no error
+
+The microcode also interrupts with no header parsed: dec_status 0, as
+for its debug messages through DEBUG_REG1, which Amlogic's driver
+clears. The driver took every such interrupt for a fault and aborted.
+With CMA full of movable pages, the first 4K decode's CAPTURE buffers
+took a second to migrate in, and the session aborted on one of these.
+
+Ignore an interrupt without a parsed header, as Amlogic's driver does,
+and clear the debug tag.
+---
+ vdec/codec_vp9.c | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/vdec/codec_vp9.c b/vdec/codec_vp9.c
+index 180ad8c..86d1d70 100644
+--- a/vdec/codec_vp9.c
++++ b/vdec/codec_vp9.c
+@@ -20,6 +20,8 @@
+ #define VP9_RPM_BUFFER		HEVC_ASSIST_SCRATCH_1
+ #define VP9_SHORT_TERM_RPS	HEVC_ASSIST_SCRATCH_2
+ #define VP9_ADAPT_PROB_REG	HEVC_ASSIST_SCRATCH_3
++/* the microcode's debug tag, which it also interrupts for */
++#define VP9_DEBUG_REG		HEVC_ASSIST_SCRATCH_G
+ #define VP9_MMU_MAP_BUFFER	HEVC_ASSIST_SCRATCH_4
+ #define VP9_PPS_BUFFER		HEVC_ASSIST_SCRATCH_5
+ #define VP9_SAO_UP		HEVC_ASSIST_SCRATCH_6
+@@ -2225,9 +2227,9 @@ static irqreturn_t codec_vp9_threaded_isr(struct amvdec_session *sess)
+ 
+ 	mutex_lock(&vp9->lock);
+ 	if (dec_status != VP9_HEAD_PARSER_DONE) {
+-		dev_err(core->dev_dec, "Unrecognized dec_status: %08X\n",
+-			dec_status);
+-		amvdec_abort(sess);
++		dev_dbg(core->dev_dec, "dec_status %08X, debug tag %08X: no header, ignored\n",
++			dec_status, amvdec_read_dos(core, VP9_DEBUG_REG));
++		amvdec_write_dos(core, VP9_DEBUG_REG, 0);
+ 		goto unlock;
+ 	}
+ 
+-- 
+2.55.0
+

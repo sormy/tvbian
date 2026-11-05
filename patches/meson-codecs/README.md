@@ -37,6 +37,7 @@ in-tree: `patches/linux-meson/` `0002` puts meson-sm1-codecs's decoder under
 | `0028` | a canvas for every CAPTURE buffer, kept across a seek               |
 | `0029` | HEVC: an IDR or BLA picture releases every earlier reference        |
 | `0030` | H.264 and VP9 past their largest picture refused, H.264 past 8 bits |
+| `0031` | VP9: an interrupt without a parsed header is no error               |
 
 | Overlay package     | Module        | Device                |
 | ------------------- | ------------- | --------------------- |
@@ -159,6 +160,13 @@ refuses past its size; a source change to an empty picture aborts. HEVC refused 
 
 The session aborts with both queues in error. MPEG-1/2/4, VC-1 and MJPEG take their size from the
 client's format, which the driver clamps: the client must see the clamp.
+
+## 0031
+
+The microcode also interrupts with no header parsed, `dec_status` 0, as for its debug messages
+through `DEBUG_REG1`. The driver aborted on each: with CMA full of movable pages, the first 4K VP9
+decode after a boot failed every packet. Amlogic's driver ignores them; so does this one, clearing
+the debug tag.
 
 ## Upstream
 

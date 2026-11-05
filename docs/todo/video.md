@@ -61,8 +61,6 @@ FFmpeg's, and what no chip has measured yet.
       logged; either alone passes, HEVC and H.264 at 4K pass both, and the module before
       `meson-codecs/0021` hangs the same. The write's dirty pages were moving into CMA beside the
       decoder's: a VP9 DMA past its buffers is the suspect.
-- [ ] The first VP9 4K decode after a boot fails every packet, `Unrecognized dec_status: 00000000`;
-      later ones pass.
 - [ ] H.264 decoder scaling: only through the multi-instance microcode, `MDEC_DOUBLEW_CFG0`.
       `codec_h264_g12a` with `g12a_h264_multi` or `gxl_h264_multi` from the factory
       `video_ucode.bin` takes the sequence (`CONFIG_REQUEST` twice, `CONFIG_DONE`), then raises no
