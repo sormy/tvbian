@@ -18,7 +18,8 @@ The board's open items.
       `amlcmd set_usb_boot 2` enters the ROM, a power cut leaves it.
 
 - [ ] **An underrun count for the VPU.** Without one the rating's 4K60 is unmeasured, and 4K60 NV12
-      video is known to glitch.
+      video is known to glitch. `VIU_OSD1_FIFO_CTRL_STAT` bit 20 moves only when memory is starved,
+      but it is no sticky flag: a screen, to tie it to what shows, or the register's documentation.
 - [ ] **The MT7668S's known gaps** in mainline mt76, as its patches list them.
 
 - [ ] **Wake the H96 Max M20 from `s2idle` on its Bluetooth remote**, its only remote. The SDIO

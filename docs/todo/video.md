@@ -81,7 +81,8 @@ FFmpeg's, and what no chip has measured yet.
 - [ ] FBC for H.264 and the other codecs; HEVC and VP9 have it.
 - [ ] FBC body pages live as long as the decoder's CAPTURE buffers: a plane still showing the last
       frame after the decoder closes reads freed pages.
-- [ ] `meson-codecs/0029` on 7.3.1.
+- [ ] The first HEVC 1080p decode after a 7.3.1 boot gave no frame in 60 s, nothing logged; three
+      repeats passed.
 - [ ] Every size past 3840x2160.
 
 ## FFmpeg

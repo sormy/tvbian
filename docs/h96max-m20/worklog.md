@@ -1709,7 +1709,8 @@ before), CMA 768 MiB as before, `wlan0` connected, nothing failed. The previous 
   `Kernel panic - not syncing: Hard LOCKUP`, the box back by itself about a minute later, the record
   in pstore.
 - `patches/linux-meson/0005` ends the map at `0x7fff`: eight full reads, 32768 registers each, no
-  oops. kexec on this box hangs the new kernel; the watchdog reset it.
+  oops. A kexec of that build hung and the watchdog reset it; kexec with the installed initrd and
+  the live tree boots since, 2026-11-04.
 
 ## 2026-11-03 — no OSD HDR stage, and `display.py`
 
@@ -1726,3 +1727,38 @@ before), CMA 768 MiB as before, `wlan0` connected, nothing failed. The previous 
 - `kernel/meson64.fragment`: `PREEMPT`, already on, and `HZ` 300 from 250. `cyclictest` under
   `stress-ng --cpu 4 --io 2 --vm 1`, 60 s, every CPU: an ordinary thread's worst wakeup 13.3 ms at
   250, 9.95 ms at 300, the average 138 µs either way; a real-time thread's worst 610 µs against 698.
+
+## 2026-11-04 — BT.2020 colorimetry, refusals, a stray VP9 interrupt, `0029` on 7.3.1
+
+- No sink: meson drives a forced connector with the synthetic EDID and sends its InfoFrames, so
+  `display.py` runs headless here.
+- A tree built in a private work volume reproduced the installed 6.18.60 byte for byte: `Image`,
+  `mt76.ko`, `meson-vdec.ko`. kexec with the installed initrd and the live tree booted three times
+  today, Wi-Fi up each time.
+- `linux-meson/0006`, `0007`, kexec'd: the connector gains `Colorspace`; `display.py` 10 passed, PQ
+  and HLG with EC 6, SDR EC 0.
+- Before `meson-codecs/0030`: H.264 4096x2160 gave no frame and 41 `vb2_core_reqbufs` warnings in
+  one decode, at `videobuf2-core.c:957`, `WARN_ON(!plane_sizes[i])` on REQBUFS: the 8-bit macroblock
+  width wraps to 0 at 4096. High 10 at 1080p decoded at 7.8 dB.
+- With `0030`, module swapped on the installed kernel: H.264 and VP9 at 1920x1080 and 3840x2160
+  bit-exact; H.264 4096x2160, High 10 1080p and VP9 4096x2160 refused with their sizes, no warning.
+  FFmpeg's `h264_v4l2m2m` then waits in poll and ignores SIGTERM; `vp9_v4l2m2m` exits in 1.9 s.
+- `video.py` decode, H.264, High 10, HEVC, Main10, VP9 and profile 2 from 1920x1080 to 4096x2304, 27
+  cases on the module with `0030` and `0031`: no `vb2_core_reqbufs` warning, 12 refusals, every size
+  inside a format's limit passing as before. A refusal reads `broken`: FFmpeg fails after opening,
+  past `video.py`'s fallback pattern.
+- A killed FFmpeg left holding the device keeps every later session from the decoder: 0 frames in
+  0.1 s each, until it is killed.
+- The first 4K VP9 decode after a boot, with `stress-ng --vm` holding CMA down to 134 MiB free:
+  `Unrecognized dec_status: 00000000`, 1 of 3 frames, then 3 of 3 once the load stopped. With debug
+  logging on it passed; stock passed 3 fresh boots more. With `0031`, the first patched boot caught
+  it: `dec_status 00000000, debug tag 50ED7E00: no header, ignored`, 3 of 3 frames.
+- 7.3.1 with `0029`, its modules and an initrd of its own, kexec'd: HEVC 3840x2160 and 4096x2304
+  bit-exact, their rates timed, 49.5 and 44 fps; Main10 198 and 60.4 fps; Main10 4096x2304 0 frames,
+  as on 6.18.60. The first HEVC decode after that boot gave 0 frames in 60 s, three repeats passed:
+  open.
+- A VPU underrun bit, looked for: at 4K60, `VIU_OSD1_FIFO_CTRL_STAT` bit 20 holds 0 idle and toggles
+  under `stress-ng --stream 4`, then keeps toggling about 11,000 times a second after the load stops
+  until the output goes off. Not sticky: `CLEAR_ERR`, bit 4, finds nothing to clear, and
+  `fifo_sync_rst`, bit 3, does not stop it. Its meaning is unconfirmed without a screen or the
+  register's documentation.
