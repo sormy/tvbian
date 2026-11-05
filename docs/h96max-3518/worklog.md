@@ -2382,3 +2382,13 @@ card once the same DDR blob was on its eMMC. The eMMC's FIT is 2026.10 again.
   the dumb buffer without `DRM_RDWR`.
 - With `libegl-mesa0`, `libgbm1` and `mesa-libgallium` rebuilt with `0002`: the map takes
   `PROT_WRITE`, and a written word reads back through a second mapping.
+
+## 2026-11-04 — CMA from `BOARD_CMA`, 16 MiB
+
+- In use, `CmaTotal` less `CmaFree` every 50 ms, on `cma=256M`: a 4K60 synthetic screen with a 4K
+  NV12 video plane and the interface over it, flipped at a player's pace, while the engine decoded
+  8K HEVC with AFBC frames through `hevc_rkmpp`, iperf3 from plex on Wi-Fi: 2.3 MiB, flat at idle;
+  1764 commits, 0 refused. A 4K HEVC encode the same. MPP's buffers come from the system heap, and
+  every engine has an IOMMU.
+- `cma=16M`: pool 16 MiB, idle 2.3 MiB, both loads 2.3 MiB, 1779 commits, none refused; `display.py`
+  18 passed. `node cma compatible matching fail` is logged at 256M too.

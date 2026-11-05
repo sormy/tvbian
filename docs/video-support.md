@@ -46,7 +46,7 @@ the CPU instead, on its own.
 | VC-1 Advanced          | ✅ 1920×1080   | ❓              | 🟠 1920×1080 ¹¹ |
 | VC-1 Simple            | 🟡 ⁴           | ❓              | ❌ ⁹            |
 | VC-1 Main (WMV9)       | ❌ ⁵           | ❓              | ❌ ⁹            |
-| JPEG, MJPEG            | ✅ 6000×4000   | ❌ ⁶            | ✅ 1920×1080    |
+| JPEG, MJPEG            | ✅ 24 Mpixel   | ❌ ⁶            | ✅ 1920×1080    |
 | AVS, AVS+              | ❌             | ❌ ⁶            | ❌ ⁹            |
 | RealVideo 8, 9         | ❓             | ❓              | ❌ ⁹            |
 
@@ -143,22 +143,25 @@ Where a video engine has no IOMMU, its pictures come from CMA, a contiguous pool
 that the rest of the system borrows back only for movable pages. The decoder's share at its peak,
 with the clip already in memory:
 
-| Case                           | Allwinner H313 | Rockchip RK3518 | Amlogic S905L3 |
-| ------------------------------ | -------------- | --------------- | -------------- |
-| Pool                           | 64 MiB         | 256 MiB         | 768 MiB        |
-| Set by                         | kernel config  | `BOARD_CMA`     | device tree    |
-| Video and display IOMMU        | yes            | yes             | no             |
-| Idle use                       | 1.5 MiB        | 5 MiB           | ≤ 42 MiB       |
-| 4K H.264, HEVC, VP9            | ❓             | ❓              | 291-294 MiB    |
-| 4K HEVC Main10                 | ❓             | ❓              | 331 MiB        |
-| 4K Main10, compressed frames   | ❓             | ❓              | 139 MiB        |
-| 4K VP9, compressed frames      | ❓             | ❓              | 87 MiB         |
-| Seek, 4K VP9                   | ❓             | ❓              | 311 MiB        |
-| Resolution change, 720p, 1080p | ❓             | ❓              | 90-96 MiB      |
+| Case                                         | Allwinner H313 | Rockchip RK3518 | Amlogic S905L3 |
+| -------------------------------------------- | -------------- | --------------- | -------------- |
+| Pool, `BOARD_CMA`                            | 16 MiB         | 16 MiB          | 512 MiB        |
+| Video and display IOMMU                      | yes            | yes             | no             |
+| Idle use                                     | 1.5 MiB        | 1.2-2.3 MiB     | ≤ 42 MiB       |
+| 4K H.264, HEVC, VP9                          | ❓             | ❓              | 291-294 MiB    |
+| 4K HEVC Main10                               | ❓             | ❓              | 331 MiB        |
+| 4K Main10, compressed frames                 | ❓             | ❓              | 139 MiB        |
+| 4K VP9, compressed frames                    | ❓             | ❓              | 87 MiB         |
+| Seek, 4K VP9                                 | ❓             | ❓              | 311 MiB        |
+| Resolution change, 720p, 1080p               | ❓             | ❓              | 90-96 MiB      |
+| A player's peak, the system's share included | 1.5 MiB        | 2.3 MiB         | 397 MiB        |
 
-The S905L3's pool peaked at 370 MiB in use, the system's share included, with no display attached.
-Its kernel has no CMA debugfs or sysfs: in use is `CmaTotal` less `CmaFree` from `/proc/meminfo`,
-which counts page cache in the pool too.
+A player's peak is a 4K60 screen with a 4K video plane and the interface, flipped at a player's
+pace, while the engine decodes: on the H313 4K Main10 with AFBC frames and Wi-Fi busy, on the RK3518
+8K HEVC with AFBC frames, on the S905L3 4K60 HEVC and VP9, 8 and 10 bits, copied out. A pool is that
+peak plus a margin: 16 MiB where the IOMMUs leave CMA to devices without one, 29% on the S905L3 for
+fragmentation and a seek's reallocation. The S905L3's kernel has no CMA debugfs or sysfs: in use is
+`CmaTotal` less `CmaFree` from `/proc/meminfo`, which counts page cache in the pool too.
 
 ## Output and display
 

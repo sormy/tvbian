@@ -7,10 +7,11 @@ BOARDS_DIR=/repo/boards
 # shellcheck source=/dev/null
 . "$BOARDS_DIR/$BOARD/board.conf"
 : "${BOARD_FAMILY:?boards/$BOARD/board.conf names no BOARD_FAMILY}" "${BOARD_NAME:?boards/$BOARD/board.conf names no BOARD_NAME}"
+: "${BOARD_CMA:?boards/$BOARD/board.conf names no BOARD_CMA}"
 [ "${BOARD_ID:-}" = "$BOARD" ] || { echo "boards/$BOARD/board.conf: BOARD_ID=${BOARD_ID:-} is not its directory" >&2; exit 1; }
-# Rockchip's defaults: the vendor's ttyFIQ0 console, and CMA for a 4K frame (the tree has 8 MiB)
+# Rockchip's default: the vendor's ttyFIQ0 console
 if [ "$BOARD_FAMILY" = rk35xx ]; then
-  : "${BOARD_SERIALCON:=earlycon=uart8250,mmio32,0xff9f0000 console=ttyFIQ0}" "${BOARD_CMA:=256M}"
+  : "${BOARD_SERIALCON:=earlycon=uart8250,mmio32,0xff9f0000 console=ttyFIQ0}"
 fi
 VERSION=${TVB_BUILD_REVISION:-0~local}
 ROOT=/work/package/$BOARD
@@ -33,7 +34,8 @@ mkdir -p "$ROOT/usr/share/u-boot-menu/conf.d"
 cmdline="rootwait ro ${BOARD_SERIALCON:-} console=tty1 consoleblank=0 net.ifnames=0"
 # the board's firmware ahead of every package's
 cmdline="$cmdline firmware_class.path=/usr/lib/tvb/firmware"
-[ -z "${BOARD_CMA:-}" ] || cmdline="$cmdline cma=$BOARD_CMA"
+# cma= overrides a tree's own linux,cma-default pool
+cmdline="$cmdline cma=$BOARD_CMA"
 cat >"$ROOT/usr/share/u-boot-menu/conf.d/tvb.conf" <<CONF
 U_BOOT_FDT=/usr/lib/tvb/board.dtb
 U_BOOT_TIMEOUT=10

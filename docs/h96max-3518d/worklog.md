@@ -3177,3 +3177,9 @@ driver loads, brings in `skw_sdio_lite`, and the devices it creates bring in the
   60 s each way, 278–320 Mbit/s up and 216–302 down; five `wlan0` down/up cycles, back in 2–5 s; no
   `scheduling while atomic`, `BUG`, `WARNING` or lockup; the driver's errors 13 on the voluntary
   boot, 0 here. `display.py` 18 passed, largest 4K60, fastest 1080p120.
+
+## 2026-11-04 — CMA from `BOARD_CMA`, 16 MiB
+
+- `cma=16M`: pool 16 MiB, idle 1.2 MiB; a 4K60 synthetic screen with a 4K NV12 video plane and the
+  interface over it, flipped at a player's pace, while the engine decoded 8K HEVC with AFBC frames,
+  iperf3 from plex: 1.2 MiB, 1643 commits, none refused; `display.py` 18 passed.

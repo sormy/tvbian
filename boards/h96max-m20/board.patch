@@ -206,11 +206,6 @@
 +		#address-cells = <1>;
 +		#size-cells = <1>;
 +		ranges = <0x00 0xc8000000 0x14000>;
-+
-+		cpu_scp_lpri: scp-sram@13000 {
-+			compatible = "amlogic,meson-gxbb-scp-shmem";
-+			reg = <0x13000 0x400>;
-+		};
  
 -		scpi_dvfs: scpi_clocks@0 {
 -			compatible = "arm, scpi-clk-indexed";
@@ -218,6 +213,11 @@
 -			clock-indices = <0x00>;
 -			clock-output-names = "vcpu";
 -			phandle = <0x0d>;
++		cpu_scp_lpri: scp-sram@13000 {
++			compatible = "amlogic,meson-gxbb-scp-shmem";
++			reg = <0x13000 0x400>;
++		};
++
 +		cpu_scp_hpri: scp-sram@13400 {
 +			compatible = "amlogic,meson-gxbb-scp-shmem";
 +			reg = <0x13400 0x400>;
@@ -695,7 +695,7 @@
  			compatible = "amlogic, codec-mm-reserved";
  			size = <0x00>;
  			alignment = <0x100000>;
-@@ -1824,12 +2061,22 @@
+@@ -1824,6 +2061,7 @@
  		};
  
  		vdin1_cma_reserved: linux,vdin1_cma {
@@ -703,22 +703,7 @@
  			compatible = "shared-dma-pool";
  			reusable;
  			size = <0x1000000>;
- 			alignment = <0x400000>;
- 			phandle = <0x43>;
- 		};
-+
-+		/* 4K at 60 fps, decoded and copied into render buffers, outgrows 384 MiB */
-+		linux,cma {
-+			compatible = "shared-dma-pool";
-+			reusable;
-+			size = <0x30000000>;
-+			alignment = <0x400000>;
-+			linux,cma-default;
-+		};
- 	};
- 
- 	sysled {
-@@ -1844,17 +2091,17 @@
+@@ -1844,17 +2082,17 @@
  		compatible = "gpio-leds";
  		status = "okay";
  
@@ -745,7 +730,7 @@
  	};
  
  	gpio_keypad {
-@@ -1875,17 +2122,6 @@
+@@ -1875,17 +2113,6 @@
  		fr_auto_policy = <0x00>;
  	};
  
@@ -763,7 +748,7 @@
  
  	meson-fb {
  		compatible = "amlogic, meson-gxl";
-@@ -1901,15 +2137,6 @@
+@@ -1901,15 +2128,6 @@
  		logo_addr = "0x7f800000";
  	};
  
@@ -779,7 +764,7 @@
  
  	codec_io {
  		compatible = "amlogic, codec_io";
-@@ -1956,19 +2183,6 @@
+@@ -1956,19 +2174,6 @@
  		reg = <0xc8838000 0x400>;
  	};
  
@@ -799,7 +784,7 @@
  
  	vdec {
  		compatible = "amlogic, vdec";
-@@ -2127,18 +2341,168 @@
+@@ -2127,18 +2332,168 @@
  		};
  	};
  
@@ -980,7 +965,7 @@
  	};
  
  	rdma {
-@@ -2165,6 +2529,38 @@
+@@ -2165,6 +2520,38 @@
  		gpio_reset = <&gpio 99 GPIO_ACTIVE_HIGH>;
  	};
  
@@ -1019,7 +1004,7 @@
  	wifi {
  		compatible = "amlogic, aml_wifi";
  		dev_name = "aml_wifi";
-@@ -2196,20 +2592,29 @@
+@@ -2196,20 +2583,29 @@
  
  	sd_emmc_c: emmc@d0074000 {
  		status = "okay";
@@ -1055,7 +1040,7 @@
  		non-removable;
  		disable-wp;
  		phandle = <0xc8>;
-@@ -2229,21 +2634,20 @@
+@@ -2229,21 +2625,20 @@
  
  	sd_emmc_b: sd@d0072000 {
  		status = "okay";
@@ -1087,7 +1072,7 @@
  		         <&clkc CLKID_FCLK_DIV2>;
  		clock-names = "core", "clkin0", "clkin1";
  		bus-width = <4>;
-@@ -2268,22 +2672,34 @@
+@@ -2268,22 +2663,34 @@
  
  	sd_emmc_a: sdio@d0070000 {
  		status = "okay";
@@ -1128,7 +1113,7 @@
  		phandle = <0xca>;
  
  		sdio {
-@@ -2373,7 +2789,12 @@
+@@ -2373,7 +2780,12 @@
  	};
  
  	ethmac: ethernet@0xc9410000 {
@@ -1142,7 +1127,7 @@
  		reg = <0xc9410000 0x10000 0xc8834540 0x08 0xc8834558 0x0c 0xc1104408 0x04>;
  		interrupts = <GIC_SPI 8 IRQ_TYPE_EDGE_RISING>;
  		pinctrl-names = "external_eth_pins";
-@@ -2391,53 +2812,73 @@
+@@ -2391,53 +2803,73 @@
  		phandle = <0xcb>;
  	};
  
@@ -1214,8 +1199,8 @@
 +		resets = <&reset RESET_USB_OTG>;
 +		reset-names = "phy";
 +		status = "okay";
-+	};
-+
+ 	};
+ 
 +	usb: usb@d0078080 {
 +		compatible = "amlogic,meson-gxl-usb-ctrl";
 +		reg = <0xd0078080 0x20>;
@@ -1252,14 +1237,14 @@
 +			maximum-speed = "high-speed";
 +			snps,dis_u2_susphy_quirk;
 +		};
- 	};
- 
++	};
++
 +
 +
  	unifykey {
  		compatible = "amlogic, unifykey";
  		status = "ok";
-@@ -2638,71 +3079,9 @@
+@@ -2638,71 +3070,9 @@
  		phandle = <0xce>;
  	};
  
@@ -1331,7 +1316,7 @@
  
  	i2s_plat: i2s_platform {
  		compatible = "amlogic, aml-i2s";
-@@ -2744,52 +3123,6 @@
+@@ -2744,52 +3114,6 @@
  		phandle = <0x7e>;
  	};
  
@@ -1384,7 +1369,7 @@
  
  	aml_sensor0: aml-sensor@0 {
  		compatible = "amlogic, aml-thermal";
-@@ -2851,67 +3184,50 @@
+@@ -2851,67 +3175,50 @@
  
  	thermal-zones {
  

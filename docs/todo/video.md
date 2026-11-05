@@ -89,17 +89,6 @@ FFmpeg's, and what no chip has measured yet.
 - [ ] fuseamp asks for compressed frames: `afbc` on `v4l2request` and `*_rkmpp`, `-afbc` on
       `*_v4l2m2m`, where the plane takes the modifier.
 
-## CMA
-
-- [ ] Every family's pool from `BOARD_CMA`, the kernel command line's `cma=`, which overrides a
-      tree's `linux,cma`. Today only Rockchip boards take it, 256M by default; Allwinner keeps the
-      kernel config's, Amlogic the board tree's 768 MiB.
-- [ ] Each board's `board.conf` sets `BOARD_CMA` to its measured peak plus a margin, and the family
-      defaults go:
-  - H313: 4K Main10 AFBC to the display, Wi-Fi and USB busy.
-  - RK3518: 8K HEVC, AFBC frames and the display; its IOMMUs predict a few MiB.
-  - S905L3: 4K60 with a player copying frames, HDMI attached; 384 MiB failed once that way.
-
 ## Not measured yet
 
 - [ ] Playback end to end, every chip: a real 4K60 stream per codec, at the datasheet's rate,

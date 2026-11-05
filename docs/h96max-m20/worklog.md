@@ -1762,3 +1762,13 @@ before), CMA 768 MiB as before, `wlan0` connected, nothing failed. The previous 
   until the output goes off. Not sticky: `CLEAR_ERR`, bit 4, finds nothing to clear, and
   `fifo_sync_rst`, bit 3, does not stop it. Its meaning is unconfirmed without a screen or the
   register's documentation.
+
+## 2026-11-04 — CMA from `BOARD_CMA`, 512 MiB
+
+- In use, `CmaTotal` less `CmaFree` every 50 ms, on the tree's 768 MiB: a 4K60 synthetic screen with
+  a 4K NV12 video plane and the interface over it, flipped at a player's pace, while the engine
+  decoded 4K60 HEVC and VP9 at 8 bits, 4K HEVC Main10 and VP9 profile 2, twice each, frames copied
+  out by `*_v4l2m2m`: 396.5 MiB; 4500 commits, 60.0/s, every decode whole.
+- The tree's `linux,cma` node removed from `board.patch`; `cma=512M`: pool 512 MiB, idle 5.5 MiB,
+  the same load 396.7 MiB, 4493 commits, none refused, no allocation failure; `display.py` 10
+  passed.

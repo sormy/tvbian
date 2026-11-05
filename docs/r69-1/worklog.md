@@ -1874,3 +1874,8 @@ became `r69-1,rk3518-tvbox`.
 one run, ordering them itself. Two reboots, 29 s and 27 s: compatible `r69-1,rk3518-tvbox`,
 `board-id` `r69-1`, hostname still `cnc`, `wlan0` up, `cncjs`, NetworkManager and Bluetooth active,
 nothing failed. The previous tree is kept at `/root/board.dtb.known-good`.
+
+## 2026-11-04 — CMA from `BOARD_CMA`, 16 MiB
+
+- `BOARD_CMA=16M` from the H96 Max 3518 and 3518D, the same RK3518: their peak 2.3 MiB under 8K HEVC
+  with AFBC frames and a 4K60 display. Not booted on this box.

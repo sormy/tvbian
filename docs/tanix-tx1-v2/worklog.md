@@ -1570,3 +1570,13 @@ gain, the unit's own DRAM init on the eMMC, is not worth it; the install keeps w
   2256×1504 holding it at 471 MHz, no M reaches 27 MHz. `0285` narrowed to `tcon-tv0`.
 - 7.3 does not take `CONFIG_BOOTPARAM_SOFTLOCKUP_PANIC=y`: 7.0 made it a count. The next fragments
   set 1.
+
+## 2026-11-04 — CMA from `BOARD_CMA`, 16 MiB
+
+- In use, `CmaTotal` less `CmaFree` every 50 ms: a 4K60 synthetic screen with a 4K NV12 video plane
+  and the interface over it, flipped at a player's pace, while the engine decoded 4K HEVC Main10
+  with AFBC frames through `v4l2request`, iperf3 from plex on Wi-Fi: 2.5 MiB, flat at idle; 1726
+  commits, 57.5/s. Cedrus and the mixer allocate through their IOMMUs. USB was idle: nothing is
+  attached.
+- `cma=16M` by `tvb.conf` and `u-boot-update`: pool 16 MiB, idle 1.5 MiB, the same load 1.5 MiB,
+  1737 commits, none refused; `display.py` 20 passed.

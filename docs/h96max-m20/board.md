@@ -92,7 +92,6 @@ Every warning and error a running box logs, known here, at loglevel `warn` and a
 | `unaligned sg offset`                         | one mt76 transfer, sent without DMA   |
 | `meson-dw-hdmi` fails to bind                 | built-in GXL driver; `-gxlx2` binds   |
 | `loading out-of-tree module taints kernel`    | the `tvb-meson-venc` encoders         |
-| `Skipping dt linux,cma-default for "cma="`    | a `cma=` on the command line          |
 | `Read Local Supported Commands not supported` | `btmtksdio-mt7668` `0001`             |
 | `Missing L0 reference POC`                    | HEVC entered mid-stream, after a seek |
 | `invalid device node of gpio INTC`            | a GPIO request on the AO bank         |

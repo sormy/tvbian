@@ -7,7 +7,8 @@ From loaders to an installed system, and how a running box is changed without lo
 1. **The board data**: copy the closest `boards/<board>/`, change only what the dump says.
    - `board.conf`: `BOARD_ID`, `BOARD_NAME`, `BOARD_PCB`, `BOARD_DATE`, `BOARD_FAMILY`,
      `BOARD_HOSTNAME`, `BOARD_KERNEL`, `BOARD_UBOOT`, `BOARD_DEPENDS`, the `_DTB_SOURCE` and
-     `_DTB_TARGET` bases, `BOARD_HOME` and `BOARD_STORE`, and the family's own keys.
+     `_DTB_TARGET` bases, `BOARD_HOME` and `BOARD_STORE`, and the family's own keys. `BOARD_CMA` is
+     the CMA pool: a player's peak plus a margin, as `docs/video-support.md` measures it.
    - `package.list`: mode, repo file, install path, at Debian's paths; `link <target> <dest>` makes
      a symlink.
    - **Firmware is per chip, the SoC's blocks counted**: `tvb-firmware-<chip>` from
