@@ -54,12 +54,9 @@ FFmpeg's, and what no chip has measured yet.
 
 ## Amlogic S905L3
 
-- [ ] `meson_vdec` takes pictures past each codec's limit and decodes them broken: H.264 and VP9
-      past 3840x2160, HEVC past 4096x2304, MPEG-1/2/4 and JPEG past 1920x1080, H.264 10-bit at any
-      size. Each codec's largest picture in its format's frame sizes, refused past it.
-- [ ] `vb2_core_reqbufs` warns (`videobuf2-core.c:957`): buffers still owned by the driver when a
-      queue is freed, as Cedrus's before `linux-sunxi/0801`. 39 times in a suite run; first seen
-      from fuseamp, buffers 0-13.
+- [ ] `meson_vdec`'s MPEG-1/2/4, VC-1 and JPEG take their size from the client's format, clamped to
+      1920x1080: a bigger picture decodes broken until the client refuses the clamp, below. H.264,
+      VP9 and HEVC refuse past their size, `meson-codecs/0030`.
 - [ ] VP9 at 3840x2160 hangs the SoC while ~1.5 GB goes to eMMC, 5 s into the decode, nothing
       logged; either alone passes, HEVC and H.264 at 4K pass both, and the module before
       `meson-codecs/0021` hangs the same. The write's dirty pages were moving into CMA beside the

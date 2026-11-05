@@ -1,0 +1,221 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Wed, 4 Nov 2026 11:00:00 -0500
+Subject: [PATCH] media: meson: vdec: refuse a picture past the decoder's limit
+
+A stream past its format's largest picture decoded to nothing or to
+garbage. GXL's H.264 decoder reads the width from an 8-bit macroblock
+count, so 4096 wide came out 0 wide: zero-sized CAPTURE planes, which
+videobuf2 warns about and refuses. Its microcode decodes 8-bit only,
+and 10-bit pictures came out wrong. VP9 kept going past 3840x2160.
+
+H.264 now reads a wrapped width as 256 macroblocks, as G12A's path
+does, takes a total that leaves part of a line as wrapped too, and
+refuses a picture past the format's size or an SPS past 8 bits. VP9
+refuses past its size. A source change to an empty picture aborts.
+---
+ vdec/codec_h264.c   | 128 ++++++++++++++++++++++++++++++++++++++++++++
+ vdec/codec_vp9.c    |   8 +++
+ vdec/vdec_helpers.c |   7 +++
+ 3 files changed, 143 insertions(+)
+
+diff --git a/vdec/codec_h264.c b/vdec/codec_h264.c
+index 911930a..d95eab9 100644
+--- a/vdec/codec_h264.c
++++ b/vdec/codec_h264.c
+@@ -143,8 +143,115 @@ struct codec_h264 {
+ 	u32 mb_width;
+ 	u32 mb_height;
+ 	u32 max_refs;
++	/* the luma bit depth of the last SPS queued, 0 before one */
++	u32 bit_depth;
+ };
+ 
++/* An SPS's RBSP, read past its emulation prevention bytes */
++struct h264_rbsp {
++	const u8 *data;
++	u32 size;
++	u32 byte;
++	u32 bit;
++	u32 zeros;
++};
++
++static int h264_rbsp_bit(struct h264_rbsp *r)
++{
++	int bit;
++
++	if (!r->bit && r->zeros >= 2 && r->byte < r->size && r->data[r->byte] == 3) {
++		r->byte++;
++		r->zeros = 0;
++	}
++	if (r->byte >= r->size)
++		return -1;
++	bit = r->data[r->byte] >> (7 - r->bit) & 1;
++	if (++r->bit == 8) {
++		r->zeros = r->data[r->byte] ? 0 : r->zeros + 1;
++		r->bit = 0;
++		r->byte++;
++	}
++	return bit;
++}
++
++static int h264_rbsp_bits(struct h264_rbsp *r, u32 count)
++{
++	int value = 0, bit;
++
++	while (count--) {
++		bit = h264_rbsp_bit(r);
++		if (bit < 0)
++			return -1;
++		value = value << 1 | bit;
++	}
++	return value;
++}
++
++static int h264_rbsp_ue(struct h264_rbsp *r)
++{
++	u32 zeros = 0;
++	int bit, rest;
++
++	while ((bit = h264_rbsp_bit(r)) == 0)
++		if (++zeros > 31)
++			return -1;
++	if (bit < 0)
++		return -1;
++	rest = h264_rbsp_bits(r, zeros);
++	return rest < 0 ? -1 : (1 << zeros) - 1 + rest;
++}
++
++/* The profiles whose SPS carries chroma_format_idc and the bit depths */
++static bool h264_profile_has_bit_depth(int profile_idc)
++{
++	switch (profile_idc) {
++	case 44: case 83: case 86: case 100: case 110: case 118:
++	case 122: case 128: case 134: case 135: case 138: case 139: case 244:
++		return true;
++	default:
++		return false;
++	}
++}
++
++/* The luma bit depth an SPS's RBSP names, 0 if it cannot be read */
++static u32 h264_sps_bit_depth(const u8 *data, u32 size)
++{
++	struct h264_rbsp r = { .data = data, .size = size };
++	int profile_idc = h264_rbsp_bits(&r, 8);
++	int chroma_format_idc, bit_depth;
++
++	if (profile_idc < 0 || h264_rbsp_bits(&r, 16) < 0 || h264_rbsp_ue(&r) < 0)
++		return 0;
++	if (!h264_profile_has_bit_depth(profile_idc))
++		return 8;
++	chroma_format_idc = h264_rbsp_ue(&r);
++	if (chroma_format_idc < 0 || (chroma_format_idc == 3 && h264_rbsp_bit(&r) < 0))
++		return 0;
++	bit_depth = h264_rbsp_ue(&r);
++	return bit_depth < 0 ? 0 : bit_depth + 8;
++}
++
++/* Notes the bit depth of an SPS in the packet: the decoder takes 8 bits only */
++static u32 codec_h264_wrap_input(struct amvdec_session *sess,
++				 struct vb2_buffer *vb, u32 payload_size)
++{
++	struct codec_h264 *h264 = sess->priv;
++	const u8 *data = vb2_plane_vaddr(vb, 0);
++	u32 i, bit_depth;
++
++	if (!h264 || !data)
++		return payload_size;
++	for (i = 0; i + 4 < payload_size; i++) {
++		if (data[i] || data[i + 1] || data[i + 2] != 1 || (data[i + 3] & 0x1f) != 7)
++			continue;
++		bit_depth = h264_sps_bit_depth(data + i + 4, payload_size - i - 4);
++		if (bit_depth)
++			h264->bit_depth = bit_depth;
++	}
++	return payload_size;
++}
++
+ static int codec_h264_can_recycle(struct amvdec_core *core)
+ {
+ 	return !amvdec_read_dos(core, AV_SCRATCH_7) ||
+@@ -342,6 +449,17 @@ static void codec_h264_src_change(struct amvdec_session *sess)
+ 	mb_total = (parsed_info >> MB_TOTAL_BIT) & MB_TOTAL_MASK;
+ 	/* Number of macroblocks per line */
+ 	h264->mb_width = parsed_info & MB_WIDTH_MASK;
++	/* the 8-bit field wraps: 0 is 256 macroblocks wide, as on G12A */
++	if (!h264->mb_width)
++		h264->mb_width = 256;
++	/* a total that is no whole number of lines wrapped its 16 bits too */
++	if (mb_total % h264->mb_width) {
++		dev_err(core->dev, "H.264 %u macroblocks in lines of %u: past the decoder's %ux%u\n",
++			mb_total, h264->mb_width,
++			sess->fmt_out->max_width, sess->fmt_out->max_height);
++		amvdec_abort(sess);
++		return;
++	}
+ 	/* Number of macroblock lines */
+ 	h264->mb_height = mb_total / h264->mb_width;
+ 
+@@ -357,6 +475,15 @@ static void codec_h264_src_change(struct amvdec_session *sess)
+ 	dev_dbg(core->dev, "frame: %ux%u; crop: %u %u\n",
+ 		frame_width, frame_height, crop_right, crop_bottom);
+ 
++	if (frame_width > sess->fmt_out->max_width ||
++	    frame_height > sess->fmt_out->max_height || h264->bit_depth > 8) {
++		dev_err(core->dev, "H.264 %ux%u at %u bits: past the decoder's %ux%u at 8\n",
++			frame_width, frame_height, h264->bit_depth,
++			sess->fmt_out->max_width, sess->fmt_out->max_height);
++		amvdec_abort(sess);
++		return;
++	}
++
+ 	codec_h264_set_par(sess);
+ 	amvdec_src_change(sess, frame_width, frame_height, h264->max_refs + 5, 8);
+ }
+@@ -489,4 +616,5 @@ struct amvdec_codec_ops codec_h264_ops = {
+ 	.async_drain = true,
+ 	.eos_sequence = codec_h264_eos_sequence,
+ 	.resume = codec_h264_resume,
++	.wrap_input = codec_h264_wrap_input,
+ };
+diff --git a/vdec/codec_vp9.c b/vdec/codec_vp9.c
+index 9cfb9ba..180ad8c 100644
+--- a/vdec/codec_vp9.c
++++ b/vdec/codec_vp9.c
+@@ -2268,6 +2268,14 @@ static irqreturn_t codec_vp9_threaded_isr(struct amvdec_session *sess)
+ 
+ 	codec_vp9_fetch_rpm(sess);
+ 	if (codec_vp9_process_rpm(vp9)) {
++		if (vp9->width > sess->fmt_out->max_width ||
++		    vp9->height > sess->fmt_out->max_height) {
++			dev_err(core->dev, "VP9 %ux%u: past the decoder's %ux%u\n",
++				vp9->width, vp9->height,
++				sess->fmt_out->max_width, sess->fmt_out->max_height);
++			amvdec_abort(sess);
++			goto unlock;
++		}
+ 		sess->ref_width = vp9->width;
+ 		sess->ref_height = vp9->height;
+ 		sess->dw_ratio = amvdec_dw_ratio(sess, vp9->width, vp9->height);
+diff --git a/vdec/vdec_helpers.c b/vdec/vdec_helpers.c
+index 9d93546..88c902e 100644
+--- a/vdec/vdec_helpers.c
++++ b/vdec/vdec_helpers.c
+@@ -741,6 +741,13 @@ void amvdec_src_change(struct amvdec_session *sess, u32 width,
+ {
+ 	bool capture_ready;
+ 
++	/* CAPTURE buffers sized for no picture would be refused by videobuf2 */
++	if (!width || !height) {
++		dev_err(sess->core->dev, "Source change to %ux%u: no picture\n", width, height);
++		amvdec_abort(sess);
++		return;
++	}
++
+ 	v4l2_ctrl_s_ctrl(sess->ctrl_min_buf_capture, dpb_size);
+ 
+ 	capture_ready = sess->width == width && sess->height == height &&
+-- 
+2.55.0
+

@@ -6,36 +6,37 @@ in-tree: `patches/linux-meson/` `0002` puts meson-sm1-codecs's decoder under
 `drivers/staging/media/meson/vdec/`, and the `vdec` patches here apply there. The encoders, `0004`,
 `0005`, `0016` and `0019`, build out of tree from the same pin, `modules/meson-venc.conf`.
 
-| Patch  | Holds                                                             |
-| ------ | ----------------------------------------------------------------- |
-| `0001` | the decoder runs GXLX2 as G12A-class, minus two G12A settings     |
-| `0002` | no `EPOLLERR` before CAPTURE streams                              |
-| `0004` | the H.264 encoder (HCodec) on GXLX2                               |
-| `0005` | the HEVC encoder (WAVE420L) on GXLX2                              |
-| `0006` | MPEG-1/2 canvases mapped once every CAPTURE buffer is queued      |
-| `0007` | CAPTURE formats other than NV12M                                  |
-| `0008` | helpers to reboot a microcode and end a drain with LAST           |
-| `0009` | MPEG-4 Part 2                                                     |
-| `0010` | MJPEG                                                             |
-| `0011` | `wrap_input`: a codec frames its input before the parser          |
-| `0012` | VC-1, Advanced profile                                            |
-| `0013` | the VIFIFO level read while the VLD is reset                      |
-| `0014` | at most 16 CAPTURE buffers above 1080p, for CMA                   |
-| `0015` | the drain on `STOP` runs from a worker, not the ioctl             |
-| `0016` | the HEVC encoder logs errors only, unless `print_level` asks      |
-| `0017` | HEVC and VP9 CAPTURE scaled by 2 or 4, per stream through COMPOSE |
-| `0018` | HEVC coded up to 4096x2304 on GXLX2                               |
-| `0019` | the H.264 encoder finds its canvas run past held canvases         |
-| `0020` | one drain at a time: end of stream against a stop's               |
-| `0021` | the end-of-stream sequence ends with the parser's search pattern  |
-| `0022` | the end-of-stream drain waits while the VIFIFO drains             |
-| `0023` | a CAPTURE plane holds the canvas the decoder writes               |
-| `0024` | an offset in a packet's padding belongs to the next packet        |
-| `0025` | HEVC and VP9 CAPTURE as Amlogic FBC, scatter layout, 8 or 10 bits |
-| `0026` | a seek's drained pictures end nothing with LAST                   |
-| `0027` | resume on the client's answer to a source change                  |
-| `0028` | a canvas for every CAPTURE buffer, kept across a seek             |
-| `0029` | HEVC: an IDR or BLA picture releases every earlier reference      |
+| Patch  | Holds                                                               |
+| ------ | ------------------------------------------------------------------- |
+| `0001` | the decoder runs GXLX2 as G12A-class, minus two G12A settings       |
+| `0002` | no `EPOLLERR` before CAPTURE streams                                |
+| `0004` | the H.264 encoder (HCodec) on GXLX2                                 |
+| `0005` | the HEVC encoder (WAVE420L) on GXLX2                                |
+| `0006` | MPEG-1/2 canvases mapped once every CAPTURE buffer is queued        |
+| `0007` | CAPTURE formats other than NV12M                                    |
+| `0008` | helpers to reboot a microcode and end a drain with LAST             |
+| `0009` | MPEG-4 Part 2                                                       |
+| `0010` | MJPEG                                                               |
+| `0011` | `wrap_input`: a codec frames its input before the parser            |
+| `0012` | VC-1, Advanced profile                                              |
+| `0013` | the VIFIFO level read while the VLD is reset                        |
+| `0014` | at most 16 CAPTURE buffers above 1080p, for CMA                     |
+| `0015` | the drain on `STOP` runs from a worker, not the ioctl               |
+| `0016` | the HEVC encoder logs errors only, unless `print_level` asks        |
+| `0017` | HEVC and VP9 CAPTURE scaled by 2 or 4, per stream through COMPOSE   |
+| `0018` | HEVC coded up to 4096x2304 on GXLX2                                 |
+| `0019` | the H.264 encoder finds its canvas run past held canvases           |
+| `0020` | one drain at a time: end of stream against a stop's                 |
+| `0021` | the end-of-stream sequence ends with the parser's search pattern    |
+| `0022` | the end-of-stream drain waits while the VIFIFO drains               |
+| `0023` | a CAPTURE plane holds the canvas the decoder writes                 |
+| `0024` | an offset in a packet's padding belongs to the next packet          |
+| `0025` | HEVC and VP9 CAPTURE as Amlogic FBC, scatter layout, 8 or 10 bits   |
+| `0026` | a seek's drained pictures end nothing with LAST                     |
+| `0027` | resume on the client's answer to a source change                    |
+| `0028` | a canvas for every CAPTURE buffer, kept across a seek               |
+| `0029` | HEVC: an IDR or BLA picture releases every earlier reference        |
+| `0030` | H.264 and VP9 past their largest picture refused, H.264 past 8 bits |
 
 | Overlay package     | Module        | Device                |
 | ------------------- | ------------- | --------------------- |
@@ -147,6 +148,17 @@ HEVC marks references by POC, and every IDR has POC 0: pictures after an IDR kep
 referenced with it, one CAPTURE buffer each, until a reference set no longer named POC 0. Short GOPs
 ran out of buffers and stalled, an end of stream never answered. An IDR or BLA picture now releases
 every earlier one.
+
+## 0030
+
+GXL's H.264 decoder reads the width from an 8-bit macroblock count: 4096 wide came out 0 wide, and
+CAPTURE planes of size 0 drew videobuf2's `vb2_core_reqbufs` warning on every REQBUFS. Its microcode
+decodes 8 bits only, and High 10 came out wrong. H.264 now reads a wrapped width as 256 macroblocks,
+as G12A's path does, and refuses past its format's largest picture or an SPS past 8 bits; VP9
+refuses past its size; a source change to an empty picture aborts. HEVC refused already.
+
+The session aborts with both queues in error. MPEG-1/2/4, VC-1 and MJPEG take their size from the
+client's format, which the driver clamps: the client must see the clamp.
 
 ## Upstream
 
