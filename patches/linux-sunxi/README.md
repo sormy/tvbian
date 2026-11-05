@@ -58,6 +58,7 @@ for its API, and rewrites of top-level ones it takes in their place (`0103`, `02
 | `0810`        | Cedrus: scaled H.264 referenced from tiles       |
 | `0811`        | Cedrus: VP9's low 2 bits plane by frame height   |
 | `0812`        | Cedrus: H.264 and HEVC lines at a 32-byte pitch  |
+| `0813`        | Cedrus: cache hints on the capture queue         |
 
 The display stack is 7.2's on both kernels. `0034` takes 7.2.12's `drivers/gpu/drm/sun4i`,
 `bridge/synopsys`, `ccu-sun8i-de2.c`, `sun50i-iommu.c` and `dw_hdmi.h` as they are; LibreELEC's
@@ -165,7 +166,7 @@ Motion JPEG to 24 million pixels and 6000 on a side, as NV12, the Annex K tables
 missing ones; the engine parses the headers itself, so it takes no request and drains as a stateful
 decoder. `0804` is ours, the H616 encoder's JPEG mode after the vendor library: the Annex K Huffman
 tables fixed in the engine, the quantisation tables loaded at `0xe0`/`0xe4`, the headers put through
-the engine and the end marker by the CPU. `0800`–`0812` apply last on both kernels, in order. Not
+the engine and the end marker by the CPU. `0800`–`0813` apply last on both kernels, in order. Not
 yet submitted.
 
 `0805`–`0806` are ours. `0805` adds private stateless MPEG-4 Part 2 controls, as `0064` does VC-1's:
@@ -199,6 +200,9 @@ the stride registers say, so a picture 16 but not 32 aligned in width, 1936 or 4
 inter pictures with the chroma wrong, 15 dB at 4080x4080. Their pictures and hidden reconstructions
 are laid out at 32 bytes, and the stride registers follow the layout; VP9 keeps 16. Not yet
 submitted.
+
+`0813` is ours: the capture queue takes `V4L2_MEMORY_FLAG_NON_COHERENT`, so a CPU reading decoded
+pictures reads them cached; videobuf2 syncs them at dequeue and queue. Not yet submitted.
 
 `0276` is ours: DE33's VI channel 0 carries a 17-point 3D LUT, CDC, ahead of the channel's CSC, on
 the channel's own signal: Y, Cb, Cr for YUV input in the red, green and blue fields; R, G, B for

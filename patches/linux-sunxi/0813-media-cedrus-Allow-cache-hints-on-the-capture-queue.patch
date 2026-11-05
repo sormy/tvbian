@@ -1,0 +1,22 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Wed, 4 Nov 2026 17:30:00 -0500
+Subject: [PATCH] media: cedrus: Allow cache hints on the capture queue
+
+A CPU that reads decoded pictures, to convert or tone map them, reads
+them from write-combined memory: dma-contig allocates the capture
+queue coherent. Let userspace ask for non-coherent buffers with
+V4L2_MEMORY_FLAG_NON_COHERENT; videobuf2 then syncs them for the CPU
+when they are dequeued and for the device when they are queued.
+---
+diff -urN a/drivers/staging/media/sunxi/cedrus/cedrus_context.c b/drivers/staging/media/sunxi/cedrus/cedrus_context.c
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_context.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_context.c
+@@ -701,6 +701,7 @@
+ 
+ 	dst_queue->type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+ 	dst_queue->io_modes = VB2_MMAP | VB2_DMABUF;
++	dst_queue->allow_cache_hints = 1;
+ 	dst_queue->buf_struct_size = sizeof(struct cedrus_buffer);
+ 	dst_queue->ops = &cedrus_context_queue_ops;
+ 	dst_queue->mem_ops = &vb2_dma_contig_memops;
