@@ -37,3 +37,5 @@ CONFIG_NLS_DEFAULT="utf8"
 # rejects it and every country stays 00
 CONFIG_CFG80211_CERTIFICATION_ONUS=y
 CONFIG_CFG80211_EXTRA_REGDB_KEYDIR="/repo/kernel/regdb-certs"
+# the AV jack's composite output, the R69's and the 3518's; a tree without the jack disables its TVE
+CONFIG_ROCKCHIP_DRM_TVE=y
