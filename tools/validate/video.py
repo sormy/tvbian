@@ -144,8 +144,12 @@ def cmd_clips(args):
 
 # box: one case at a time
 
+# a framemd5 record; stderr, merged in, can land a log prefix on its line
+FRAMEMD5_RECORD = re.compile(r"(?:\d+,\s*){5}([0-9a-f]{32})$")
+
+
 def md5_lines(out):
-    return [line.split(",")[-1].strip() for line in out.splitlines() if re.match(r"^\d+,", line)]
+    return [m.group(1) for line in out.splitlines() if (m := FRAMEMD5_RECORD.search(line))]
 
 
 def frames_of(log):
