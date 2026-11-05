@@ -145,7 +145,7 @@ with the clip already in memory:
 
 | Case                                         | Allwinner H313 | Rockchip RK3518 | Amlogic S905L3 |
 | -------------------------------------------- | -------------- | --------------- | -------------- |
-| Pool, `BOARD_CMA`                            | 512 MiB        | 512 MiB         | 512 MiB        |
+| Pool, `BOARD_CMA`                            | 16 MiB         | 512 MiB         | 512 MiB        |
 | Video and display IOMMU                      | yes            | yes             | no             |
 | Idle use                                     | 1.5 MiB        | 1.2-2.3 MiB     | ≤ 42 MiB       |
 | 4K H.264, HEVC, VP9                          | ❓             | ❓              | 291-294 MiB    |
@@ -159,10 +159,10 @@ with the clip already in memory:
 A player's peak is a 4K60 screen with a 4K video plane and the interface, flipped at a player's
 pace, while the engine decodes: on the H313 4K Main10 with AFBC frames and Wi-Fi busy, on the RK3518
 8K HEVC with AFBC frames, on the S905L3 4K60 HEVC and VP9, 8 and 10 bits, copied out. A pool is that
-peak plus a margin, 29% on the S905L3 for fragmentation and a seek's reallocation. Where the IOMMUs
-leave CMA unused today, the pool still holds a 4K decode that would need it: 512 MiB on every box.
-The S905L3's kernel has no CMA debugfs or sysfs: in use is `CmaTotal` less `CmaFree` from
-`/proc/meminfo`, which counts page cache in the pool too.
+peak plus a margin, 29% on the S905L3 for fragmentation and a seek's reallocation. The H313's
+decoder allocates through its IOMMU from ordinary memory: a large pool starves it, and on 512 MiB a
+24 Mpixel JPEG exhausted the 1.5 GiB box. The S905L3's kernel has no CMA debugfs or sysfs: in use is
+`CmaTotal` less `CmaFree` from `/proc/meminfo`, which counts page cache in the pool too.
 
 ## Output and display
 
