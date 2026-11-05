@@ -154,7 +154,7 @@ months of daily use proves a board, and a ✅ that fails later turns ❌, the ca
 
 | Item                                   | For                                      |
 | -------------------------------------- | ---------------------------------------- |
-| multimeter, any cheap one              | finding the serial pins                  |
+| multimeter, any cheap one              | serial pins; the AV jack's ground        |
 | TTL adapter: 1.8/3.3/5 V jumper, FT232 | serial; a CP2102 cannot do 1.5 Mbaud     |
 | test hooks, or a soldering iron        | holding the serial pads                  |
 | USB-A male-to-male cable               | the USB service mode                     |
@@ -163,6 +163,7 @@ months of daily use proves a board, and a ✅ that fails later turns ❌, the ca
 | USB camera                             | the agent watching the screen            |
 | TV with CEC; PC monitor with DDC/CI    | the HDMI checks                          |
 | 3.5 mm AV to 3×RCA, RCA to HDMI        | the AV jack's picture on any HDMI screen |
+| 3.5 mm CTIA-to-OMTP adapter            | AV cables grounded on ring 2             |
 | stereo headphones; S/PDIF to RCA       | the AV jack's and S/PDIF's audio, by ear |
 | AV receiver, where there is one        | passthrough                              |
 | SD card, USB stick, SSD in a USB case  | booting images; the USB stress test      |
