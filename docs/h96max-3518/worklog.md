@@ -2374,3 +2374,11 @@ card once the same DDR blob was on its eMMC. The eMMC's FIT is 2026.10 again.
   sysctl names the perf one. With `hardlockup_panic` 1 the box reset 44 s in; ramoops kept
   `Kernel panic - not syncing: Watchdog detected hard LOCKUP on cpu 0`.
 - `disable_irq=1 all_cpus=1`: no CPU left to detect it; the hardware watchdog reset the box 86 s in.
+
+## 2026-11-04 — GBM buffers exported read-only, `mesa/0002`
+
+- A scanout `gbm_bo` (1920x1080 XRGB8888, `SCANOUT | RENDERING`, lima through kmsro): its
+  `gbm_bo_get_fd` refused `mmap(PROT_WRITE)` with `EACCES` on Debian's Mesa 25.0.7; Mesa exported
+  the dumb buffer without `DRM_RDWR`.
+- With `libegl-mesa0`, `libgbm1` and `mesa-libgallium` rebuilt with `0002`: the map takes
+  `PROT_WRITE`, and a written word reads back through a second mapping.

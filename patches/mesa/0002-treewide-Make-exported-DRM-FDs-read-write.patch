@@ -1,0 +1,60 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Emma Anholt <anholt@igalia.com>
+Date: Fri, 12 Sep 2025 10:01:08 -0700
+Subject: [PATCH] treewide: Make exported DRM FDs read-write.
+
+Without this, somebody trying to map a buffer for write by the CPU would
+fail.  This is not common to do in hardware driver environments, but it
+shouldn't be disallowed, and there's no downside to allowing it.
+
+Part-of: <https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/37339>
+(cherry picked from commit 4531b8ace44342be53311d4abe54fe21632f28c1,
+ its renderonly, lima and panfrost hunks only)
+---
+ src/gallium/auxiliary/renderonly/renderonly.c         | 2 +-
+ src/gallium/drivers/lima/lima_bo.c                    | 2 +-
+ src/gallium/winsys/panfrost/drm/panfrost_drm_winsys.c | 2 +-
+ 3 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/src/gallium/auxiliary/renderonly/renderonly.c b/src/gallium/auxiliary/renderonly/renderonly.c
+index 8ec58e6..6eef804 100644
+--- a/src/gallium/auxiliary/renderonly/renderonly.c
++++ b/src/gallium/auxiliary/renderonly/renderonly.c
+@@ -105,7 +105,7 @@ renderonly_create_kms_dumb_buffer_for_resource(struct pipe_resource *rsc,
+    out_handle->type = WINSYS_HANDLE_TYPE_FD;
+    out_handle->stride = create_dumb.pitch;
+ 
+-   err = drmPrimeHandleToFD(ro->kms_fd, create_dumb.handle, O_CLOEXEC,
++   err = drmPrimeHandleToFD(ro->kms_fd, create_dumb.handle, DRM_CLOEXEC | DRM_RDWR,
+          (int *)&out_handle->handle);
+    if (err < 0) {
+       fprintf(stderr, "failed to export dumb buffer: %s\n", strerror(errno));
+diff --git a/src/gallium/drivers/lima/lima_bo.c b/src/gallium/drivers/lima/lima_bo.c
+index e2daba7..d92bc50 100644
+--- a/src/gallium/drivers/lima/lima_bo.c
++++ b/src/gallium/drivers/lima/lima_bo.c
+@@ -395,7 +395,7 @@ bool lima_bo_export(struct lima_bo *bo, struct winsys_handle *handle)
+       return true;
+ 
+    case WINSYS_HANDLE_TYPE_FD:
+-      if (drmPrimeHandleToFD(screen->fd, bo->handle, DRM_CLOEXEC,
++      if (drmPrimeHandleToFD(screen->fd, bo->handle, DRM_CLOEXEC | DRM_RDWR,
+                              (int*)&handle->handle))
+          return false;
+ 
+diff --git a/src/gallium/winsys/panfrost/drm/panfrost_drm_winsys.c b/src/gallium/winsys/panfrost/drm/panfrost_drm_winsys.c
+index de80759..f064209 100644
+--- a/src/gallium/winsys/panfrost/drm/panfrost_drm_winsys.c
++++ b/src/gallium/winsys/panfrost/drm/panfrost_drm_winsys.c
+@@ -96,7 +96,7 @@ panfrost_create_kms_dumb_buffer_for_resource(struct pipe_resource *rsc,
+    out_handle->type = WINSYS_HANDLE_TYPE_FD;
+    out_handle->stride = create_dumb.pitch;
+ 
+-   err = drmPrimeHandleToFD(ro->kms_fd, create_dumb.handle, O_CLOEXEC,
++   err = drmPrimeHandleToFD(ro->kms_fd, create_dumb.handle, DRM_CLOEXEC | DRM_RDWR,
+                             (int *)&out_handle->handle);
+    if (err < 0) {
+       fprintf(stderr, "failed to export dumb buffer: %s\n", strerror(errno));
+-- 
+2.55.0
+
