@@ -40,16 +40,18 @@
  		assigned-clocks = <&scmi_clk SCMI_CLK_GPU>;
  		assigned-clock-rates = <300000000>;
  		power-domains = <&power RK3528_PD_GPU>;
-@@ -1148,7 +1154,8 @@
+@@ -1148,8 +1154,9 @@
  		iommus = <&vop_mmu>;
  		rockchip,grf = <&grf>;
  		status = "okay";
 -		esmart_lb_mode = [03];
+-		support-multi-area;
 +		/* factory 03 caps every Esmart window at 2K; 02 gives Esmart0 a 4K line buffer */
 +		esmart_lb_mode = [02];
- 		support-multi-area;
++		/* support-multi-area dropped: an Esmart sub-window (win1-3) never reaches HDMI */
  		phandle = <0xea>;
  
+ 		vop_out: ports {
 @@ -1746,7 +1753,8 @@
  		status = "okay";
  		remote_pwm_id = <0x03>;

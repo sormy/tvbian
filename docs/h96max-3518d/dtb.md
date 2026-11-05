@@ -130,6 +130,11 @@ likelier owner. Read off the arithmetic, not the TRM.
 `[01]` is the only alternative leaving two 4K planes on vp0, Esmart0 and Esmart2. It costs Esmart3,
 which is vp1's primary — the TVE output this board does not have.
 
+**`support-multi-area` is dropped.** With it, the driver offers each Esmart's sub-windows
+(`Esmart0-win1` to `-win3`) as planes. Writeback reads them back, but HDMI shows black. Verified
+2026-11-05 on a 2256x1504 monitor. Without it, the VOP offers `Esmart0`, `Esmart2`, `Esmart3` and
+`Cluster0-win0`, and `display.py` fails on any sub-window.
+
 **Refresh rate is a red herring.** 4K30 (297 MHz, half the pixel clock of 4K60) failed in exactly
 the same way. The limit is line width, not bandwidth or TMDS rate — which is what rules out the HDMI
 PHY, the DMC and every clock as suspects.

@@ -11,8 +11,8 @@ debugfs for the run; then the connector meets SDR, HDR10, HLG and HDR10-and-HLG 
 The connector's own EDID and force state come back after.
 
 Checks, each skipped where the box lacks what it needs:
-  - planes: every plane the CRTC offers, listed (type, zpos, alpha, modifiers, formats), and a YUV
-    video plane with an interface plane that can sit above it;
+  - planes: every plane the CRTC offers, listed (type, zpos, alpha, modifiers, formats), a YUV
+    video plane with an interface plane that can sit above it, and no Esmart sub-window;
   - compose: the interface over the scaled video plane, opaque and transparent, by writeback;
   - lut: a plane's SUNXI_CDC_LUT3D refuses malformed blobs, and tables (identity, a channel mix,
     an inversion switched while active, held across flips, then the tone mappings HDR10 to SDR,
@@ -117,6 +117,8 @@ PACING_SECONDS = 60
 RUNG_SECONDS = 10
 # Kernel log lines that only a screen absent from the bus raises, not a box falling behind.
 NO_SCREEN_NOISE = re.compile(r"scdc|ddc|i2c|edid|hpd|hot.?plug|phy", re.I)
+PLANE_STATE_LINE = re.compile(r"^plane\[(\d+)\]: (\S+)", re.M)
+ESMART_SUB_WINDOW = re.compile(r"Esmart\d-win[1-3]")
 EBUSY = 16
 XRGB8888, ARGB8888, NV12, P010 = 0x34325258, 0x34325241, 0x3231564E, 0x30313050
 LUT_POINTS = 17
@@ -532,6 +534,15 @@ def kernel_log():
     return result.stdout.splitlines()
 
 
+def plane_names():
+    """Each plane's driver name, by id, from the DRM state in debugfs."""
+    names = {}
+    for path in glob.glob("/sys/kernel/debug/dri/*/state"):
+        with open(path) as f:
+            names.update({int(m[1]): m[2] for m in PLANE_STATE_LINE.finditer(f.read())})
+    return names
+
+
 def underrun_count():
     """Underruns so far: sun4i's debugfs counter, Rockchip's per-line POST_BUF_EMPTY in the log, or None
     where the driver reports none."""
@@ -667,6 +678,9 @@ class Box:
             self.ui_plane = ui[0] if ui else None
         self.check("planes: a YUV video plane and an interface plane above it", bool(self.video_plane and self.ui_plane),
                    f"(video {self.video_plane}, interface {self.ui_plane})")
+        sub_windows = [n for p, n in plane_names().items() if p in self.planes and ESMART_SUB_WINDOW.fullmatch(n)]
+        self.check("planes: no Esmart sub-window, which reaches writeback but never HDMI", not sub_windows,
+                   f"({' '.join(sub_windows)})" if sub_windows else "")
 
     def layer_zpos(self, plane, level):
         """A zpos that puts the plane at level (0 below, 1 above) where it can be set."""

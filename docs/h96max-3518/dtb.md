@@ -16,6 +16,7 @@ consumer needs otherwise; `compatible` and `model` are the two that do.
 | `pwm@ffa90030` (IR) | `remote_support_psci` `0` → `1`                                      | IR as ATF wake source (remote wake)                                       |
 | `gpu@ff700000`      | `interrupt-names`/`clocks`/`clock-names` → lima style (`bus`/`core`) | the kernel uses mainline `lima`, not the vendor Mali blob                 |
 | `vop@ff840000`      | `esmart_lb_mode` `[03]` → `[02]`                                     | 🟡 4K line buffer for Esmart0; `03` caps at 2K — no 4K display tried here |
+| `vop@ff840000`      | `support-multi-area` dropped                                         | an Esmart sub-window (`win1`-`win3`) reaches writeback but never HDMI     |
 | `gpio-leds`         | node names `work-green`/`work-red` → `power`/`standby`               | family-uniform `/sys/class/leds` names (shared LED hooks)                 |
 | `watchdog@ffac0000` | `status` → `okay`                                                    | `/dev/watchdog` for systemd's `RuntimeWatchdogSec` (verified)             |
 | `mmc@ffc30000` (SD) | `sd-uhs-sdr12/25/50/104` **removed**                                 | warm reboot intermittently lost the SD root                               |

@@ -1156,7 +1156,7 @@
 		status = "okay";
 		/* factory 03 caps every Esmart window at 2K; 02 gives Esmart0 a 4K line buffer */
 		esmart_lb_mode = [02];
-		support-multi-area;
+		/* support-multi-area dropped: an Esmart sub-window (win1-3) never reaches HDMI */
 		phandle = <0xea>;
 
 		vop_out: ports {
