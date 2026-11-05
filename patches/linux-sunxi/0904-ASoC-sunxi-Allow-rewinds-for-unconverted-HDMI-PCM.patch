@@ -1,0 +1,46 @@
+Subject: [PATCH] ASoC: sunxi: Allow rewinds for unconverted HDMI PCM
+
+The H616 audio hub sets NO_REWINDS on all HDMI playback streams at open.
+This is needed for IEC958 subframes rewritten in place by the ack
+callback, but ordinary PCM samples are not converted. The PCM core
+therefore rejects backward application pointer updates even for linear
+PCM, and the rewind ioctl returns zero despite queued frames.
+
+Keep SYNC_APPLPTR for HDMI, but set NO_REWINDS in hw_params only when
+the selected format requires conversion. The PCM core copies params->info
+to runtime->info after the component's hw_params callback returns.
+
+---
+ sound/soc/sunxi/sun50i-h616-ahub.c | 13 ++++++++++---
+ 1 file changed, 10 insertions(+), 3 deletions(-)
+
+diff --git a/sound/soc/sunxi/sun50i-h616-ahub.c b/sound/soc/sunxi/sun50i-h616-ahub.c
+--- a/sound/soc/sunxi/sun50i-h616-ahub.c
++++ b/sound/soc/sunxi/sun50i-h616-ahub.c
+@@ -1002,8 +1002,7 @@
+ 	 */
+ 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK &&
+ 	    sun50i_ahub_is_hdmi(substream))
+-		substream->runtime->hw.info |= SNDRV_PCM_INFO_SYNC_APPLPTR |
+-					       SNDRV_PCM_INFO_NO_REWINDS;
++		substream->runtime->hw.info |= SNDRV_PCM_INFO_SYNC_APPLPTR;
+ 
+ 	return snd_dmaengine_pcm_open(substream, chan);
+ }
+@@ -1033,7 +1032,15 @@
+ 
+ 	snd_dmaengine_pcm_set_config_from_dai_data(substream, dma_data, &config);
+ 
+-	return dmaengine_slave_config(chan, &config);
++	ret = dmaengine_slave_config(chan, &config);
++	if (ret)
++		return ret;
++
++	/* Only IEC958 subframes are converted in place by the ack callback. */
++	if (params_format(params) == SNDRV_PCM_FORMAT_IEC958_SUBFRAME_LE)
++		params->info |= SNDRV_PCM_INFO_NO_REWINDS;
++
++	return 0;
+ }
+ 
+ static snd_pcm_uframes_t sun50i_ahub_pcm_pointer(struct snd_soc_component *component,

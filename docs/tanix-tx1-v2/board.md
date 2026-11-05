@@ -388,3 +388,14 @@ complement in the high byte, so `0x7f80` is address `0x80`:
 ## Known gaps
 
 Open items, with their state, are in the board's todo.
+
+## HDMI PCM rewind — 2026-11-05
+
+| Kernel  | Format | Rewindable | Requested | Rewound |
+| ------- | ------ | ---------- | --------- | ------- |
+| 6.18.60 | S16_LE | 9600       | 7200      | 0       |
+| 6.18.60 | S32_LE | 9600       | 7200      | 0       |
+| `0904`  | S16_LE | 9600       | 7200      | 7200    |
+| `0904`  | S32_LE | 9600       | 7200      | 7200    |
+
+48 kHz stereo, 9600-frame buffer, 1200-frame periods; `pcm-rewind` on `hw:1,0`; 0 xruns.

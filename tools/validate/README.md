@@ -65,3 +65,24 @@ kernel and date; `compare` lists every case that got worse and exits 1 if any di
   they are marked unmeasured. The verdicts: `RATING display: largest 4K60, fastest 1080p120`.
 - **Sinks:** each synthetic screen gets HDR for every EOTF it lists; what the box sends for the rest
   is recorded (Rockchip nothing, mainline everything), as are the mappings left to the GPU.
+
+## pcm-rewind.c
+
+On the box, with `gcc` and `libasound2-dev`, stop the player and compile the copied source:
+
+```sh
+gcc -O2 -Wall -Wextra /tmp/pcm-rewind.c -lasound -lm -o /tmp/pcm-rewind
+```
+
+Use the HDMI card and device from `aplay -l`:
+
+```sh
+timeout 5 /tmp/pcm-rewind hw:1,0 S16_LE
+timeout 5 /tmp/pcm-rewind hw:1,0 S32_LE
+```
+
+Each run plays a synthetic tone, reports rewindable, requested and returned frames, refills without
+recovery, then tests drop, prepare and restart. Two periods stay queued during rewind to avoid an
+intentional underrun. A fixed PCM returns `rewind=requested`, greater than zero; require
+`state=RUNNING`, `restart=ok xruns=0` and exit 0. Any ALSA error fails without recovery. Restart the
+player after the runs.
