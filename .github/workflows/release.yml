@@ -10,7 +10,9 @@ on:
         type: boolean
         default: false
       unguarded:
-        description: "Skip the guard on paths changing package: a box upgrading from the published debs would fail"
+        description:
+          "Skip the guard on paths changing package: a box upgrading from the published debs would
+          fail"
         type: boolean
         default: false
   push:
@@ -145,11 +147,15 @@ jobs:
   release:
     needs: [plan, kernel, test]
     # every kernel built, or none needed building; and the tests passed
-    if: always() && needs.plan.result == 'success' && needs.test.result == 'success' && contains(fromJSON('["success","skipped"]'), needs.kernel.result)
+    if:
+      always() && needs.plan.result == 'success' && needs.test.result == 'success' &&
+      contains(fromJSON('["success","skipped"]'), needs.kernel.result)
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 360
     permissions:
       contents: write
+    outputs:
+      tag: ${{ steps.publish.outputs.tag }}
     steps:
       - uses: actions/checkout@v7
       - name: Free disk
@@ -179,7 +185,20 @@ jobs:
           rm -f "$RUNNER_TEMP/signing.key"
           df -h / | tail -1
       - name: Publish
+        id: publish
         if: env.PUBLISH == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: ./build.sh publish
+
+  pages:
+    needs: release
+    if: needs.release.outputs.tag != ''
+    uses: ./.github/workflows/pages.yml
+    with:
+      tag: ${{ needs.release.outputs.tag }}
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+      actions: read

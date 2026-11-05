@@ -78,4 +78,5 @@ git tag "$tag" HEAD
 git push -q origin "$tag"
 gh release create "$tag" --verify-tag --title "TVBian $tag" \
   --notes-file "$OUT/release/notes.md" $images "$OUT/images/SHA256SUMS" "$OUT/images/SHA256SUMS.asc"
+[ -z "${GITHUB_OUTPUT:-}" ] || echo "tag=$tag" >>"$GITHUB_OUTPUT"
 echo "✓ published apt and $tag"

@@ -1,0 +1,78 @@
+name: Pages
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Image release to publish
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Image release (empty for latest)
+        type: string
+        default: ""
+  push:
+    branches: [main]
+    paths:
+      - site/**
+      - README.md
+      - README_*.md
+      - boards/**
+      - base/motd
+      - docs/**/image1.*
+      - tests/test_site_build.py
+      - .github/workflows/pages.yml
+  pull_request:
+    paths:
+      - site/**
+      - README.md
+      - README_*.md
+      - boards/**
+      - base/motd
+      - docs/**/image1.*
+      - tests/test_site_build.py
+      - .github/workflows/pages.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.event_name == 'pull_request' && github.ref || 'production' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Test
+        run: python3 -m unittest discover -s tests -p test_site_build.py -v
+      - name: Build
+        env:
+          TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          args=()
+          if [ -n "$TAG" ]; then args=(--tag "$TAG"); fi
+          python3 site/build.py --out _site "${args[@]}"
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
+      actions: read
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -177,6 +177,11 @@ deb [signed-by=/usr/share/keyrings/tvb-archive-keyring.gpg] https://github.com/s
 The key never expires: a box that missed a renewed keyring would fail `apt update` with `EXPKEYSIG`
 and could not fetch the fix. Rotation is in `keyring/README.md`.
 
+## Website
+
+`python3 site/build.py` writes `build/out/site/`. Its inputs, the deploy to GitHub Pages and its
+triggers are in `site/README.md`.
+
 ## Image
 
 `mmdebstrap --variant=minbase` of the suite, plus one list, `image/packages.list`, shared by every

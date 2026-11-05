@@ -38,6 +38,7 @@ names its model (`h96max-m20`), never its SoC.
 | `extras/<package>/` | a Debian package we shadow, rebuilt with our patches until Debian ships the fix                |
 | `image/`            | the image step, its package list, and the image's own state: locale, root's first SSH login    |
 | `release/`          | the release plan, the signed `apt` repo, and the upload to GitHub                              |
+| `site/`             | the public page and the script that builds it                                                  |
 | `tests/`            | the scripts' tests, one file a script, run by `./build.sh test` in the build container         |
 
 **Repo files carry no prefix**: each board's `package.list` names where a file installs. A board
@@ -78,6 +79,7 @@ another, so nothing rots when one is rewritten.
 | `docs/video-support.md`                  | each SoC's hardware decode, encode and display formats, by codec     |
 | `docs/emmc-layout.md`                    | the measured eMMC map: every replicated structure and its sectors    |
 | `docs/build.md`                          | `./build.sh`: hosts, steps, outputs, and making a release            |
+| `site/README.md`                         | the public page: one HTML file from the repo, deployed on a release  |
 | `docs/sources.md`                        | every upstream we build from: what floats, what is pinned, and why   |
 | `docs/migrate.md`                        | moving a box off the overlay: in place on Rockchip, or a reinstall   |
 | `docs/uboot.md`                          | the bootloader pair: what we build, what stays factory, why          |
