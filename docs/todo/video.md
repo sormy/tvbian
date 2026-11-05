@@ -19,10 +19,10 @@ FFmpeg's, and what no chip has measured yet.
       RGB or YUV black from the output format at mode set: either the format changes after it, or on
       DE33 the blender works in RGB before the formatter and YUV black is the wrong one.
 - [ ] VP9 at 3840x2160 decodes at 43 fps; the datasheet gives 60.
-- [ ] JPEG: 24 Mpixel decodes (6000x4000, 4000x6000, 4096x5120), 6144x6144 hangs the SoC; the sizes
-      between are refused, not tried.
-- [ ] Sizes not probed: VP9 at 8192x8192 (HEVC there hangs), MPEG-2 and MPEG-4 to the registers'
-      4096x4080, VP8 4096 wide past 2304 lines, both encoders past 4096.
+- [ ] FFmpeg's `mjpeg_v4l2m2m` segfaults when Cedrus refuses a JPEG past 24 Mpixel (6144x4096 and
+      up); the box is unharmed.
+- [ ] Sizes not probed: MPEG-2 and MPEG-4 to the registers' 4096x4080, VP8 4096 wide past 2304
+      lines, both encoders past 4096.
 - [ ] Decoder scaling for VP9, VP8, MPEG-2 and JPEG: the register map below.
 - [ ] AFBC for H.264 and the other codecs; HEVC and VP9 have it.
 - [ ] AFBC and the scaled picture together: AFBC is the primary output's mode.
