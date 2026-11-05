@@ -18,6 +18,7 @@ link ../tvb-journal-spill.timer /usr/lib/systemd/system/timers.target.wants/tvb-
 # stable names for the inputs, and the bundled BLE remote's keymap
 0644 input-names.rules         /usr/lib/udev/rules.d/60-tvb-input-names.rules
 0644 bt-remote.hwdb            /usr/lib/udev/hwdb.d/60-tvb-bt-remote.hwdb
+0755 pair-remote               /usr/bin/tvb-pair-remote
 
 # Wi-Fi without power save, on the chip's own MAC
 0644 tvb-wifi.conf             /usr/lib/NetworkManager/conf.d/tvb-wifi.conf
