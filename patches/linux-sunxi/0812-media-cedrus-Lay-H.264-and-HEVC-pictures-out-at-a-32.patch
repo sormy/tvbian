@@ -1,0 +1,89 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Wed, 4 Nov 2026 12:45:00 -0500
+Subject: [PATCH] media: cedrus: Lay H.264 and HEVC pictures out at a 32-byte
+ pitch
+
+H.264 and HEVC motion compensation fetches its references at a 32-byte
+pitch, whatever the line stride registers say. A picture 16 but not 32
+aligned in width, 1936 or 4080 wide, decoded its intra pictures exact
+and every inter picture with the chroma wrong: 15 dB at 4080x4080. VP9,
+on the same engine, fetches at the stride it is given.
+
+Align the lines of an H.264 or HEVC picture, and of the hidden
+reconstruction a scaled or P010 picture references, to 32 bytes, and
+program the line stride and chroma length from the picture's
+bytesperline instead of recomputing them from its width.
+---
+diff -urN a/drivers/staging/media/sunxi/cedrus/cedrus.h b/drivers/staging/media/sunxi/cedrus/cedrus.h
+--- a/drivers/staging/media/sunxi/cedrus/cedrus.h
++++ b/drivers/staging/media/sunxi/cedrus/cedrus.h
+@@ -225,6 +225,19 @@
+ 	return ALIGN(bytesperline * height * 3 / 2, 256);
+ }
+ 
++/* H.264 and HEVC motion compensation fetches references at a 32-byte pitch. */
++static inline unsigned int cedrus_picture_stride(struct cedrus_context *ctx,
++						 unsigned int width)
++{
++	switch (ctx->v4l2.format_coded.fmt.pix.pixelformat) {
++	case V4L2_PIX_FMT_H264_SLICE:
++	case V4L2_PIX_FMT_HEVC_SLICE:
++		return ALIGN(width, 32);
++	default:
++		return ALIGN(width, 16);
++	}
++}
++
+ /*
+  * The 8-bit NV12 picture the engine reconstructs into and references: the
+  * picture itself, or a hidden full-size one after the visible picture.
+@@ -247,7 +260,7 @@
+ 		pix_format.height = ALIGN(pix_format_coded->height, 32);
+ 	} else if (cedrus_picture_is_secondary(ctx)) {
+ 		pix_format.pixelformat = V4L2_PIX_FMT_NV12;
+-		pix_format.bytesperline = ALIGN(pix_format.width, 16);
++		pix_format.bytesperline = cedrus_picture_stride(ctx, pix_format.width);
+ 	}
+ 
+ 	return pix_format;
+diff -urN a/drivers/staging/media/sunxi/cedrus/cedrus_dec.c b/drivers/staging/media/sunxi/cedrus/cedrus_dec.c
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_dec.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec.c
+@@ -236,8 +236,8 @@
+ 	case V4L2_PIX_FMT_NV21:
+ 	case V4L2_PIX_FMT_YUV420:
+ 	case V4L2_PIX_FMT_YVU420:
+-		/* 16-aligned stride. */
+-		bytesperline = ALIGN(width, 16);
++		/* The stride motion compensation reads references at. */
++		bytesperline = cedrus_picture_stride(ctx, width);
+ 
+ 		/* 16-aligned height. */
+ 		height = ALIGN(height, 16);
+@@ -329,11 +329,11 @@
+ 		}
+ 		cedrus_write(dev, VE_PRIMARY_OUT_FMT, value);
+ 
+-		chroma_size = ALIGN(pix_format->width, 16) *
++		chroma_size = pix_format->bytesperline *
+ 			      ALIGN(pix_format->height, 16) / 2;
+ 		cedrus_write(dev, VE_PRIMARY_CHROMA_BUF_LEN, chroma_size / 2);
+ 
+-		luma_stride = ALIGN(pix_format->width, 16);
++		luma_stride = pix_format->bytesperline;
+ 		chroma_stride = luma_stride / 2;
+ 
+ 		value = VE_PRIMARY_FB_LINE_STRIDE_LUMA(luma_stride) |
+@@ -435,7 +435,8 @@
+ 	extra = cedrus_picture_2bit_size(pix_format->width, pix_format->height);
+ 
+ 	if (pix_format->pixelformat == V4L2_PIX_FMT_P010)
+-		extra += ALIGN(pix_format->width, 16) * pix_format->height * 3 / 2;
++		extra += cedrus_picture_stride(ctx, pix_format->width) *
++			 pix_format->height * 3 / 2;
+ 
+ 	return extra;
+ }
+-- 
+2.47.3
