@@ -75,5 +75,5 @@ until it merges.
 
 ## License
 
-Scripts MIT. Device trees are decompiled from each box's factory DTB; vendor blobs keep their own
-licenses, and their own secrets.
+Scripts MIT, [`LICENSE`](LICENSE). Device trees are decompiled from each box's factory DTB; vendor
+blobs keep their own licenses, and their own secrets.
