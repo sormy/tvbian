@@ -80,6 +80,10 @@ for c in /proc/asound/card[0-9]*; do
     aplay -q -D "plughw:$n,0" -r $r -f S16_LE -c 2 -d 3 /dev/zero 2>/dev/null
     out "audio.$(cat "$c/id").$r.3s" "$(awk -v a="$a" -v b="$(date +%s.%N)" 'BEGIN {printf "%.2f", b - a}')"
   done
+  # a route left DISABLED plays at full rate into silence
+  out "audio.$(cat "$c/id").disabled" "$(amixer -c "$n" contents | awk -F"'" '
+    /^numid=/ {name = $2} /; Item #/ {split($1, a, "#"); item[a[2] + 0] = $2}
+    /: values=/ {split($0, v, "="); if (item[v[2] + 0] == "DISABLED") print name; delete item}' | xargs)"
 done
 out gpu.offscreen "$(glmark2-es2-drm --off-screen -b build -b texture -b shading 2>/dev/null | awk '/glmark2 Score/ {print $3}')"
 out emmc.write.mbs "$(fio --name=w --filename=/var/tmp/validate.fio --size=256M --rw=write --bs=1M --direct=1 \

@@ -7,6 +7,10 @@ link /usr/lib/firmware/updates/meson/gxlx2/g12a_hevc_mmu.bin /usr/lib/tvb/firmwa
 link /usr/lib/firmware/updates/meson/gxlx2/g12a_vp9.bin      /usr/lib/tvb/firmware/meson/vdec/g12a_vp9.bin
 link /usr/lib/firmware/updates/meson/gxlx2/gxl_mjpeg.bin     /usr/lib/tvb/firmware/meson/vdec/gxl_mjpeg.bin
 
+# HDMI sound: the AIU's HDMI source set to I2S as the card appears and after the boot's restore
+0644 h96max-m20/hdmi-audio.rules  /usr/lib/udev/rules.d/91-tvb-hdmi-audio.rules
+0644 h96max-m20/hdmi-audio.conf   /usr/lib/systemd/system/alsa-restore.service.d/zz-tvb-hdmi-audio.conf
+
 # keys neither suspend nor power off a box nothing can wake
 0644 h96max-m20/powerkey.conf    /usr/lib/systemd/logind.conf.d/zz-tvb-powerkey.conf
 

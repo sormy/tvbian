@@ -1,0 +1,2 @@
+# the AIU's HDMI source comes up DISABLED at every boot: the HDMI transmitter takes the I2S stream
+ACTION=="add", SUBSYSTEM=="sound", KERNEL=="controlC*", ATTRS{id}=="H96MAXM20", RUN+="/usr/bin/amixer -q -c %n cset name='AIU HDMI CTRL SRC' I2S"
