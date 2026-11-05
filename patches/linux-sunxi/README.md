@@ -53,7 +53,7 @@ for its API, and rewrites of top-level ones it takes in their place (`0103`, `02
 | `0800`–`0804` | Cedrus: VP8 to 4096 wide, JPEG both ways         |
 | `0805`–`0806` | Cedrus: MPEG-4 Part 2 and H.263 decode           |
 | `0807`        | Cedrus: a coded format sized by its own engine   |
-| `0808`        | Cedrus: each decoder's largest picture, measured |
+| `0808`        | Cedrus: HEVC and VP9's largest picture, measured |
 | `0809`        | Cedrus: a missing HEVC reference skipped quietly |
 | `0810`        | Cedrus: scaled H.264 referenced from tiles       |
 
@@ -159,26 +159,26 @@ H.265; `ffmpeg/0017` asks. Not yet submitted.
 as H.264 does, and reads 0x5400 bytes of probabilities, the vendor library's size. A stopped picture
 queue returns its buffers, and the empty last buffer a drain ends on carries no payload. `0803` is
 Emmanuel Gil Peyrot's JPEG decoder from his v1 series, ported to Bootlin's rework: baseline JPEG and
-Motion JPEG, as NV12, the Annex K tables standing in for missing ones; the engine parses the headers
-itself, so it takes no request and drains as a stateful decoder. `0804` is ours, the H616 encoder's
-JPEG mode after the vendor library: the Annex K Huffman tables fixed in the engine, the quantisation
-tables loaded at `0xe0`/`0xe4`, the headers put through the engine and the end marker by the CPU.
-`0800`–`0808` apply last on both kernels, in order. Not yet submitted.
+Motion JPEG to 24 million pixels and 6000 on a side, as NV12, the Annex K tables standing in for
+missing ones; the engine parses the headers itself, so it takes no request and drains as a stateful
+decoder. `0804` is ours, the H616 encoder's JPEG mode after the vendor library: the Annex K Huffman
+tables fixed in the engine, the quantisation tables loaded at `0xe0`/`0xe4`, the headers put through
+the engine and the end marker by the CPU. `0800`–`0808` apply last on both kernels, in order. Not
+yet submitted.
 
 `0805`–`0806` are ours. `0805` adds private stateless MPEG-4 Part 2 controls, as `0064` does VC-1's:
 VOL, VOP, quantisation matrices and a slice. `0806` decodes Simple and Advanced Simple profile and
 H.263 baseline in the MPEG engine after the vendor library's register map: a request per video
 packet or H.263 GOB, the engine parsing no packet header; GMC from the sprite trajectory; the DivX
-chroma-rounding bugs as the engine's own modes. Refused: interlaced B-VOPs, whose field direct mode
-the engine gets wrong, static sprites, data partitioning, RVLC. `ffmpeg/0019` drives it. Not yet
-submitted.
+chroma-rounding bugs as the engine's own modes; to 4080 wide, the most its 8-bit macroblock count
+holds. Refused: interlaced B-VOPs, whose field direct mode the engine gets wrong, static sprites,
+data partitioning, RVLC. `ffmpeg/0019` drives it. Not yet submitted.
 
 `0807` is ours: `S_FMT` sized a coded format by the engine it replaced, the MPEG-2 engine the
 context opens with, so JPEG took MPEG-2's 4096x2304 in place of its own. Not yet submitted.
 
-`0808` is ours: each decoder's largest picture, as measured. HEVC and VP9 to 8192x4320, 8192x8192
-hanging the SoC; 10-bit to 6144x3456, 7680x4320 hanging; MPEG-4 to the 4080 its 8-bit macroblock
-count holds; JPEG to 6000x4000, 6144x6144 hanging. Not yet submitted.
+`0808` is ours: HEVC and VP9's largest picture, as measured: 8192x4320, 8192x8192 hanging the SoC;
+10-bit to 6144x3456, 7680x4320 hanging. Not yet submitted.
 
 `0809` is ours: an HEVC reference the queue no longer holds, after a gap in the stream, is skipped
 with a rate-limited debug line, not a `WARN_ON`. Not yet submitted.

@@ -21,7 +21,8 @@ FFmpeg's, and what no chip has measured yet.
 - [ ] VP9 profile 2 at 1920x1080 decodes to 64 dB, not exact; 2560x1440 and up are exact.
 - [ ] VP9 at 3840x2160 decodes at 43 fps; the datasheet gives 60.
 - [ ] H.263 at 352x288 differs between two runs.
-- [ ] JPEG: 6000x4000 decodes, 6144x6144 hangs the SoC; 6144x4096 and 6144x5120 not tried.
+- [ ] JPEG: 24 Mpixel decodes (6000x4000, 4000x6000, 4096x5120), 6144x6144 hangs the SoC; the sizes
+      between are refused, not tried.
 - [ ] Sizes not probed: VP9 at 8192x8192 (HEVC there hangs), MPEG-2 and MPEG-4 to the registers'
       4096x4080, VP8 4096 wide past 2304 lines, both encoders past 4096.
 - [ ] Decoder scaling for VP9, VP8, MPEG-2 and JPEG: the register map below.
@@ -32,11 +33,6 @@ FFmpeg's, and what no chip has measured yet.
 - [ ] `linux-sunxi/0096`'s limit: AFBC shrunk by the display at growing ratios (1.7× plays clean, 2×
       for 4K to 1080p, beyond) until the picture or `RCQ sync timed out` fails; the patch's estimate
       set to that edge. Today it refuses 1.7×, which plays.
-- [ ] Merge the Cedrus patches that share a responsibility: `0808` resets the largest picture `0803`
-      gives JPEG and `0806` gives MPEG-4; each size belongs in its codec's patch.
-
-## Rockchip RK3518
-
 - [ ] HEVC encode: every width tried between 5120 and 8192 (6144, 7168, 7680, 7936) comes out at
       5–14 dB in most runs, at any height and with the memory clock pinned at its top; 5120 and 8192
       always encode clean. Until the cause is known, `hevc_rkmpp` should refuse them.

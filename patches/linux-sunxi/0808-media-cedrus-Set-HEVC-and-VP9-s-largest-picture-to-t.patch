@@ -1,0 +1,92 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 31 Oct 2026 13:48:45 -0400
+Subject: [PATCH] media: cedrus: Set HEVC and VP9's largest picture to the
+ engine's
+
+HEVC and VP9 decode to 8192x4320; 8192x8192 hangs the SoC. 10-bit
+pictures past 6144x3456 fail or hang, so their SPS is refused there.
+---
+ drivers/staging/media/sunxi/cedrus/cedrus_dec.h      | 4 ++++
+ drivers/staging/media/sunxi/cedrus/cedrus_dec_h265.c | 9 +++++++--
+ drivers/staging/media/sunxi/cedrus/cedrus_dec_vp9.c  | 9 +++++++--
+ 3 files changed, 18 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec.h b/drivers/staging/media/sunxi/cedrus/cedrus_dec.h
+index 186357a21..a217b4a0f 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_dec.h
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec.h
+@@ -35,6 +35,10 @@ cedrus_dec_picture_10bit_extra_size(struct cedrus_context *ctx,
+ 
+ /* Bit depth */
+ 
++/* 10-bit pictures past this fail to decode, or hang the engine. */
++#define CEDRUS_DEC_10BIT_MAX_WIDTH	6144
++#define CEDRUS_DEC_10BIT_MAX_HEIGHT	3456
++
+ int cedrus_dec_bit_depth_update(struct cedrus_context *ctx,
+ 				unsigned int bit_depth);
+ 
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec_h265.c b/drivers/staging/media/sunxi/cedrus/cedrus_dec_h265.c
+index 22d1c84d3..99b562b51 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_dec_h265.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec_h265.c
+@@ -181,6 +181,11 @@ static int cedrus_dec_h265_ctrl_validate(struct cedrus_context *ctx,
+ 	if (bit_depth > max_depth)
+ 		return -EINVAL;
+ 
++	if (bit_depth > 8 &&
++	    (sps->pic_width_in_luma_samples > CEDRUS_DEC_10BIT_MAX_WIDTH ||
++	     sps->pic_height_in_luma_samples > CEDRUS_DEC_10BIT_MAX_HEIGHT))
++		return -EINVAL;
++
+ 	return cedrus_dec_bit_depth_update(ctx, bit_depth);
+ }
+ 
+@@ -1127,11 +1132,11 @@ static const struct v4l2_ctrl_config cedrus_dec_h265_ctrl_configs[] = {
+ 
+ static const struct v4l2_frmsize_stepwise cedrus_dec_h265_frmsize = {
+ 	.min_width	= 16,
+-	.max_width	= 4096,
++	.max_width	= 8192,
+ 	.step_width	= 16,
+ 
+ 	.min_height	= 16,
+-	.max_height	= 2304,
++	.max_height	= 4320,
+ 	.step_height	= 16,
+ };
+ 
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec_vp9.c b/drivers/staging/media/sunxi/cedrus/cedrus_dec_vp9.c
+index a82ddec14..d5155577c 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_dec_vp9.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec_vp9.c
+@@ -1336,6 +1336,11 @@ static int cedrus_vp9_ctrl_validate(struct cedrus_context *ctx,
+ 	if (dec->bit_depth > max_depth)
+ 		return -EINVAL;
+ 
++	if (dec->bit_depth > 8 &&
++	    (dec->frame_width_minus_1 + 1 > CEDRUS_DEC_10BIT_MAX_WIDTH ||
++	     dec->frame_height_minus_1 + 1 > CEDRUS_DEC_10BIT_MAX_HEIGHT))
++		return -EINVAL;
++
+ 	return cedrus_dec_bit_depth_update(ctx, dec->bit_depth);
+ }
+ 
+@@ -1404,11 +1409,11 @@ static const struct v4l2_ctrl_config cedrus_dec_vp9_ctrl_configs[] = {
+ 
+ static const struct v4l2_frmsize_stepwise cedrus_dec_vp9_frmsize = {
+ 	.min_width	= 16,
+-	.max_width	= 4096,
++	.max_width	= 8192,
+ 	.step_width	= 16,
+ 
+ 	.min_height	= 16,
+-	.max_height	= 2304,
++	.max_height	= 4320,
+ 	.step_height	= 16,
+ };
+ 
+-- 
+2.47.3
+

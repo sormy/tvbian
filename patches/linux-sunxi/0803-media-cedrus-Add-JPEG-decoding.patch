@@ -3,8 +3,10 @@ From: Emmanuel Gil Peyrot <linkmauve@linkmauve.fr>
 Date: Sun, 14 Jan 2024 10:54:01 +0100
 Subject: [PATCH] media: cedrus: Add JPEG decoding
 
-Baseline 8-bit YCbCr JPEG up to 6144x6144, written by the rotate and
-scale output as NV12; 4:2:2 and 4:4:4 come out as 4:2:0. Motion JPEG
+Baseline 8-bit YCbCr JPEG up to 24 million pixels and 6000 on a side,
+6144x6144 hanging the SoC,
+written by the rotate and scale output as NV12; 4:2:2 and 4:4:4 come
+out as 4:2:0. Motion JPEG
 too, whose frames may leave the Huffman tables out: the Annex K tables
 stand in for them.
 
@@ -19,7 +21,7 @@ Ported from Emmanuel Gil Peyrot's series to the reworked driver.
  drivers/staging/media/sunxi/cedrus/cedrus.h   |   2 +
  .../media/sunxi/cedrus/cedrus_context.c       |   7 +-
  .../staging/media/sunxi/cedrus/cedrus_dec.c   |   6 +
- .../media/sunxi/cedrus/cedrus_dec_jpeg.c      | 390 ++++++++++++++++++
+ .../media/sunxi/cedrus/cedrus_dec_jpeg.c      | 394 ++++++++++++++++++
  .../media/sunxi/cedrus/cedrus_dec_jpeg.h      |  20 +
  .../media/sunxi/cedrus/cedrus_engine.h        |   4 +
  .../staging/media/sunxi/cedrus/cedrus_proc.c  |  40 +-
@@ -143,10 +145,10 @@ index c061e815c..987054826 100644
  /* Decoder */
 diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec_jpeg.c b/drivers/staging/media/sunxi/cedrus/cedrus_dec_jpeg.c
 new file mode 100644
-index 000000000..ed943462c
+index 000000000..f3d1ae91f
 --- /dev/null
 +++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec_jpeg.c
-@@ -0,0 +1,390 @@
+@@ -0,0 +1,394 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * Cedrus Video Engine Driver
@@ -329,6 +331,9 @@ index 000000000..ed943462c
 +	}
 +}
 +
++/* The largest picture measured to decode; 6144x6144 hangs the SoC. */
++#define CEDRUS_DEC_JPEG_MAX_PIXELS	(6000 * 4000)
++
 +/* Job */
 +
 +static int cedrus_dec_jpeg_job_configure(struct cedrus_context *ctx)
@@ -364,7 +369,8 @@ index 000000000..ed943462c
 +	/* Baseline 8-bit YCbCr, within the buffers the coded format sized. */
 +	if (header.frame.precision != 8 || header.frame.num_components != 3 ||
 +	    header.frame.width > pix_format->width ||
-+	    header.frame.height > pix_format->height)
++	    header.frame.height > pix_format->height ||
++	    header.frame.width * header.frame.height > CEDRUS_DEC_JPEG_MAX_PIXELS)
 +		return -EINVAL;
 +
 +	ret = cedrus_dec_jpeg_subsampling(&header.frame, &job->subsampling);
@@ -497,11 +503,11 @@ index 000000000..ed943462c
 +
 +static const struct v4l2_frmsize_stepwise cedrus_dec_jpeg_frmsize = {
 +	.min_width	= 16,
-+	.max_width	= 6144,
++	.max_width	= 6000,
 +	.step_width	= 16,
 +
 +	.min_height	= 16,
-+	.max_height	= 6144,
++	.max_height	= 6000,
 +	.step_height	= 16,
 +};
 +

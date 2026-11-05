@@ -18,7 +18,7 @@ one buffer: a B-VOP whose backward reference is any other picture is
 refused. So are interlaced B-VOPs, whose direct mode the engine
 predicts without the field distances, static sprites, sprite
 brightness change, data partitioning, reversible VLC and pictures over
-2048 wide or high.
+4080 wide, the engine's 8-bit macroblock count, or 2304 high.
 ---
  drivers/staging/media/sunxi/cedrus/Makefile   |   1 +
  drivers/staging/media/sunxi/cedrus/cedrus.c   |   1 +
@@ -26,10 +26,10 @@ brightness change, data partitioning, reversible VLC and pictures over
  .../staging/media/sunxi/cedrus/cedrus_dec.c   |   5 +-
  .../media/sunxi/cedrus/cedrus_dec_mpeg2.c     |   8 +-
  .../media/sunxi/cedrus/cedrus_dec_mpeg2.h     |   6 +
- .../media/sunxi/cedrus/cedrus_dec_mpeg4.c     | 745 ++++++++++++++++++
+ .../media/sunxi/cedrus/cedrus_dec_mpeg4.c     | 747 ++++++++++++++++++
  .../media/sunxi/cedrus/cedrus_dec_mpeg4.h     |  20 +
  .../staging/media/sunxi/cedrus/cedrus_regs.h  |  72 ++
- 9 files changed, 855 insertions(+), 5 deletions(-)
+ 9 files changed, 857 insertions(+), 5 deletions(-)
  create mode 100644 drivers/staging/media/sunxi/cedrus/cedrus_dec_mpeg4.c
  create mode 100644 drivers/staging/media/sunxi/cedrus/cedrus_dec_mpeg4.h
 
@@ -160,10 +160,10 @@ index 9e937a87b..b92cbc098 100644
  #endif
 diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec_mpeg4.c b/drivers/staging/media/sunxi/cedrus/cedrus_dec_mpeg4.c
 new file mode 100644
-index 000000000..a2fb1d93c
+index 000000000..367ec18cd
 --- /dev/null
 +++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec_mpeg4.c
-@@ -0,0 +1,745 @@
+@@ -0,0 +1,747 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * Cedrus Video Engine Driver
@@ -187,13 +187,15 @@ index 000000000..a2fb1d93c
 +#include "cedrus_proc.h"
 +#include "cedrus_regs.h"
 +
-+#define CEDRUS_MPEG4_MAX_SIZE		2048
-+#define CEDRUS_MPEG4_MAX_MBS		(CEDRUS_MPEG4_MAX_SIZE / 16)
++/* The engine counts macroblocks in 8 bits: 4080 wide */
++#define CEDRUS_MPEG4_MAX_WIDTH		4080
++#define CEDRUS_MPEG4_MAX_HEIGHT		2304
++#define CEDRUS_MPEG4_MAX_MBS		(CEDRUS_MPEG4_MAX_WIDTH / 16)
 +
 +/* Scratch sizes for the largest picture: the vendor's or libvdpau's, larger */
 +#define CEDRUS_MPEG4_MBH_SIZE		(CEDRUS_MPEG4_MAX_MBS * SZ_2K)
 +#define CEDRUS_MPEG4_DCAC_SIZE		(CEDRUS_MPEG4_MAX_MBS * CEDRUS_MPEG4_MAX_MBS * 2)
-+#define CEDRUS_MPEG4_NCF_SIZE		(CEDRUS_MPEG4_MAX_MBS * SZ_2K)
++#define CEDRUS_MPEG4_NCF_SIZE		(CEDRUS_MPEG4_MAX_MBS * SZ_4K)
 +#define CEDRUS_MPEG4_MBH_OFFSET		0
 +#define CEDRUS_MPEG4_DCAC_OFFSET	CEDRUS_MPEG4_MBH_SIZE
 +#define CEDRUS_MPEG4_NCF_OFFSET		(CEDRUS_MPEG4_DCAC_OFFSET + \
@@ -244,8 +246,8 @@ index 000000000..a2fb1d93c
 +	    vol->sprite_warping_accuracy > CEDRUS_MPEG4_WARPING_ACCURACY_MAX)
 +		return -EINVAL;
 +
-+	if (!vol->width || vol->width > CEDRUS_MPEG4_MAX_SIZE ||
-+	    !vol->height || vol->height > CEDRUS_MPEG4_MAX_SIZE)
++	if (!vol->width || vol->width > CEDRUS_MPEG4_MAX_WIDTH ||
++	    !vol->height || vol->height > CEDRUS_MPEG4_MAX_HEIGHT)
 +		return -EINVAL;
 +
 +	return 0;
@@ -884,11 +886,11 @@ index 000000000..a2fb1d93c
 +
 +static const struct v4l2_frmsize_stepwise cedrus_dec_mpeg4_frmsize = {
 +	.min_width	= 16,
-+	.max_width	= CEDRUS_MPEG4_MAX_SIZE,
++	.max_width	= CEDRUS_MPEG4_MAX_WIDTH,
 +	.step_width	= 16,
 +
 +	.min_height	= 16,
-+	.max_height	= CEDRUS_MPEG4_MAX_SIZE,
++	.max_height	= CEDRUS_MPEG4_MAX_HEIGHT,
 +	.step_height	= 16,
 +};
 +
