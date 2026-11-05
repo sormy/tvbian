@@ -236,6 +236,12 @@ class Buffer:
                 self.map[row * self.pitch:row * self.pitch + len(chroma)] = chroma
 
     def pixel(self, x, y):
+        """R'G'B' 8-bit; an NV12 capture, from a YCbCr output, read as BT.709 limited range."""
+        if self.format == NV12:
+            luma = self.map[y * self.pitch + x]
+            chroma = (self.height + y // 2) * self.pitch + x // 2 * 2
+            codes = (luma, self.map[chroma], self.map[chroma + 1])
+            return to8(yuv_to_rgb([c * 4 / 1023 for c in codes], 709))
         (value,) = struct.unpack_from("<I", self.map, y * self.pitch + x * 4)
         return value >> 16 & 255, value >> 8 & 255, value & 255
 
@@ -668,10 +674,11 @@ class Box:
         return {} if info["zpos_fixed"] or "zpos" not in info["props"] else {"zpos": info["zpos"][0] + level}
 
     def capture_buffer(self):
-        """A writeback target the engine takes: full size, or half where it scales its writeback."""
+        """A writeback target the engine takes: full size, or half where it scales its writeback; NV12
+        where the output is YCbCr and the engine converts no YCbCr back to RGB."""
         width, height = self.mode.hdisplay, self.mode.vdisplay
         for scale in (1, 2):
-            for fourcc in (XRGB8888, ARGB8888):
+            for fourcc in (XRGB8888, ARGB8888, NV12):
                 capture = Buffer(self.drm, width // scale, height // scale, fourcc)
                 if not self.show(self.planes[0], Buffer(self.drm, width, height, XRGB8888), None, capture=capture):
                     return capture
@@ -705,7 +712,7 @@ class Box:
             return
         capture = self.capture_buffer()
         if not capture:
-            print("SKIP compose: the writeback takes no XRGB8888 or ARGB8888 capture")
+            print("SKIP compose: the writeback takes no capture at this mode")
             return
         error, ui, video, want = self.video_and_interface(capture=capture)
         diff = lambda a, b: max(abs(x - y) for x, y in zip(a, b))
@@ -823,7 +830,7 @@ class Box:
             return
         capture = self.capture_buffer()
         if not capture:
-            print("SKIP scope: the writeback takes no XRGB8888 or ARGB8888 capture")
+            print("SKIP scope: the writeback takes no capture at this mode")
             return
         diff = lambda a, b: max(abs(x - y) for x, y in zip(a, b))
         _, ui0, video0, _ = self.video_and_interface(capture=capture)
