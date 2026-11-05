@@ -56,6 +56,7 @@ for its API, and rewrites of top-level ones it takes in their place (`0103`, `02
 | `0808`        | Cedrus: HEVC and VP9's largest picture, measured |
 | `0809`        | Cedrus: a missing HEVC reference skipped quietly |
 | `0810`        | Cedrus: scaled H.264 referenced from tiles       |
+| `0811`        | Cedrus: VP9's low 2 bits plane by frame height   |
 
 The display stack is 7.2's on both kernels. `0034` takes 7.2.12's `drivers/gpu/drm/sun4i`,
 `bridge/synopsys`, `ccu-sun8i-de2.c`, `sun50i-iommu.c` and `dw_hdmi.h` as they are; LibreELEC's
@@ -163,7 +164,7 @@ Motion JPEG to 24 million pixels and 6000 on a side, as NV12, the Annex K tables
 missing ones; the engine parses the headers itself, so it takes no request and drains as a stateful
 decoder. `0804` is ours, the H616 encoder's JPEG mode after the vendor library: the Annex K Huffman
 tables fixed in the engine, the quantisation tables loaded at `0xe0`/`0xe4`, the headers put through
-the engine and the end marker by the CPU. `0800`–`0808` apply last on both kernels, in order. Not
+the engine and the end marker by the CPU. `0800`–`0811` apply last on both kernels, in order. Not
 yet submitted.
 
 `0805`–`0806` are ours. `0805` adds private stateless MPEG-4 Part 2 controls, as `0064` does VC-1's:
@@ -187,6 +188,10 @@ with a rate-limited debug line, not a `WARN_ON`. Not yet submitted.
 32x32 tiles, not linear NV12. Motion compensation reads tiles faster: a 4K High profile picture
 takes the H616's engine 33 ms, not 38.5, scaled, and 4K at 24 fps scaled to 2256x1504 keeps up. Not
 yet submitted.
+
+`0811` is ours: the engine finds a 10-bit VP9 reference's low 2 bits plane after its chroma at the
+frame's height, not the buffer's padded one; at 1080 lines every inter frame came out at 64 dB, at
+1072 and 1088 exact. Not yet submitted.
 
 `0276` is ours: DE33's VI channel 0 carries a 17-point 3D LUT, CDC, ahead of the channel's CSC, on
 the channel's own signal: Y, Cb, Cr for YUV input in the red, green and blue fields; R, G, B for

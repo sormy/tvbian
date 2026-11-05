@@ -18,7 +18,6 @@ FFmpeg's, and what no chip has measured yet.
       plane, and a half-transparent ARGB shadow over it comes out solid black. `sun8i_mixer.c` picks
       RGB or YUV black from the output format at mode set: either the format changes after it, or on
       DE33 the blender works in RGB before the formatter and YUV black is the wrong one.
-- [ ] VP9 profile 2 at 1920x1080 decodes to 64 dB, not exact; 2560x1440 and up are exact.
 - [ ] VP9 at 3840x2160 decodes at 43 fps; the datasheet gives 60.
 - [ ] H.263 at 352x288 differs between two runs.
 - [ ] JPEG: 24 Mpixel decodes (6000x4000, 4000x6000, 4096x5120), 6144x6144 hangs the SoC; the sizes

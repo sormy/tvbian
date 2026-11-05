@@ -1,0 +1,34 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Wed, 4 Nov 2026 09:40:00 -0500
+Subject: [PATCH] media: cedrus: Place VP9's low 2 bits plane by the frame
+ height
+
+The engine finds a 10-bit reference's low 2 bits plane after its chroma
+plane at the frame's height, not the picture buffer's padded one. The
+driver placed it after the padded chroma plane, so a frame whose height
+is not a multiple of 16 wrote the plane where its next frame did not
+read it: every inter frame of 1920x1080 VP9 profile 2 came out wrong,
+key frames and 1088 or 1072 lines exact.
+---
+ drivers/staging/media/sunxi/cedrus/cedrus_dec_vp9.c | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec_vp9.c b/drivers/staging/media/sunxi/cedrus/cedrus_dec_vp9.c
+index d5155577c..5d8b9d038 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_dec_vp9.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec_vp9.c
+@@ -1042,9 +1042,8 @@ static int cedrus_vp9_job_configure(struct cedrus_context *ctx)
+ 	if (dec->bit_depth > 8 && !afbc) {
+ 		struct v4l2_pix_format fmt = cedrus_picture_recon_format(ctx);
+ 		u32 stride = fmt.bytesperline;
+-		u32 h = fmt.height;
+ 		u32 stride2 = ALIGN(stride >> 2, 32);
+-		u32 off = (u32)(chroma - luma) + stride * (h >> 1);
++		u32 off = (u32)(chroma - luma) + stride * (cur_h >> 1);
+ 		u32 cfg = VE_DEC_VP9_10BIT_CFG_STRIDE(stride2);
+ 
+ 		if (p010)
+-- 
+2.47.3
+
