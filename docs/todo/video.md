@@ -19,7 +19,6 @@ FFmpeg's, and what no chip has measured yet.
       RGB or YUV black from the output format at mode set: either the format changes after it, or on
       DE33 the blender works in RGB before the formatter and YUV black is the wrong one.
 - [ ] VP9 at 3840x2160 decodes at 43 fps; the datasheet gives 60.
-- [ ] H.263 at 352x288 differs between two runs.
 - [ ] JPEG: 24 Mpixel decodes (6000x4000, 4000x6000, 4096x5120), 6144x6144 hangs the SoC; the sizes
       between are refused, not tried.
 - [ ] Sizes not probed: VP9 at 8192x8192 (HEVC there hangs), MPEG-2 and MPEG-4 to the registers'
@@ -82,8 +81,8 @@ FFmpeg's, and what no chip has measured yet.
 - [ ] A package: `patches/ffmpeg/` on 9.0.2 is built by hand today (`research/ffmpeg-v4l2m2m/`); an
       `extras/` package built by `./build.sh` and deployed as a deb, MPP linked static for Rockchip,
       the research build retired. Then the patches sent upstream.
-- [ ] `*_v4l2m2m` decoders take a coded size the driver clamped: H313 JPEG past 6000x4000 decodes
-      broken, not refused. `0032` refuses it for the encoders.
+- [ ] `*_v4l2m2m` decoders take a coded size the driver clamped: the H313's JPEG past its limit
+      fails every frame instead of refusing at open. `0032` refuses it for the encoders.
 - [ ] `*_v4l2m2m` decoders decode nothing after an end of stream: a seek back from the end or a
       looped input gets no frames. The restart command goes out; the capture queue stays done.
 - [ ] fuseamp asks for compressed frames: `afbc` on `v4l2request` and `*_rkmpp`, `-afbc` on
