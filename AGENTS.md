@@ -168,7 +168,8 @@ cannot be backed, say so rather than rounding up.
   project-wide item too big for a line. A page grows topics as `<scope>-<topic>.md`. Every page has
   its row in the index.
 - **Worklogs are written as work happens** — dated entries, wrong turns included. They are the raw
-  material everything else derives from, and what the next port follows.
+  material everything else derives from, and what the next port follows. Beside each, `steering.md`
+  logs where the docs or rules steered wrong.
 - **Narrative lives in `docs/`**, never in scripts, payload files or DTB tables. Those stay terse.
 - **Measured numbers live in `docs/<board>/board.md`** — they're per-unit and they decay.
 - **The claim, not its proof.** Dates, evidence and the session's narration go in the worklog; a

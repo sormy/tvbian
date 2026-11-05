@@ -42,11 +42,23 @@ records it before the next phase starts. A phase is done when each of its lines 
 
 **State lives in files, never in memory**, so a run resumes from them:
 
-| File                      | Holds                                               |
-| ------------------------- | --------------------------------------------------- |
-| `docs/<board>/board.md`   | the Test report: every line's ID, mark and evidence |
-| `docs/<board>/worklog.md` | dated: what was tried, the command, what it showed  |
-| `build/logs/<board>/`     | every serial and test log, one file per attempt     |
+| File                       | Holds                                                     |
+| -------------------------- | --------------------------------------------------------- |
+| `docs/<board>/board.md`    | the Test report: every line's ID, mark and evidence       |
+| `docs/<board>/worklog.md`  | dated: what was tried, the command, what it showed        |
+| `docs/<board>/steering.md` | dated: where the docs or rules steered wrong, and the fix |
+| `build/logs/<board>/`      | every serial and test log, one file per attempt           |
+
+**A steering entry** is written when the docs or rules were missing or wrong, a human was asked for
+what should have run unattended, or a deficiency got past every check. Each carries:
+
+- **Kind**: `missing`, `wrong`, `human`, `escape`, `agent` or `tooling`.
+- **Found by**: a test, the agent or the human; the human's find means a test is missing.
+- **Cost**: the human's steps and the time lost.
+- **Damage**, when a box or the owner's data was put at risk.
+- **Reversed**, when it overturns an earlier decision: the evidence that decision lacked.
+- **Repeat**, when the same mistake was logged before: it becomes a rule in `AGENTS.md`.
+- **Fix**: the doc, rule or test it asks for, and its commit once made.
 
 What remains is read off the Test report: every line not ✅, ➖ or a recorded ❌. A line's ID lives
 in this folder and the Test report alone; the worklog, commits and messages name what it checks.
