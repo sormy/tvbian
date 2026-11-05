@@ -40,7 +40,7 @@ index 46441d5..54b153d 100644
 +	ref->subpix_size = subpix_size_width * subpix_size_height;
 +
 +	ref->subpix = dma_alloc_attrs(dev, ref->subpix_size,
-+					      &ref->subpix_dma,
++				      &ref->subpix_dma,
 +					      GFP_KERNEL,
 +					      DMA_ATTR_NO_KERNEL_MAPPING);
 +	if (!ref->subpix)
@@ -58,7 +58,7 @@ index 46441d5..54b153d 100644
 +				      ref->rec_chroma_size, SZ_4K);
 +
 +	ref->rec = dma_alloc_attrs(dev, ref->rec_size,
-+					   &ref->rec_dma, GFP_KERNEL,
++				   &ref->rec_dma, GFP_KERNEL,
 +					   DMA_ATTR_NO_KERNEL_MAPPING);
 +	if (!ref->rec) {
 +		ret = -ENOMEM;
@@ -281,7 +281,7 @@ index 46441d5..54b153d 100644
  	/* Configure subpixel buffers. */
  
  	cedrus_enc_write_addr(dev, VE_ENC_AVC_SUBPIX_ADDR_NEW_REG,
--		     h264_buffer->subpix_dma);
+-			      h264_buffer->subpix_dma);
 -
 -	if (!h264_ctx->subpix_last_dma)
 -		h264_ctx->subpix_last_dma = h264_buffer->subpix_dma;
@@ -289,7 +289,7 @@ index 46441d5..54b153d 100644
 -	/* XXX: is this for the last reference or the last encoded frame? */
 +			      rec->subpix_dma);
  	cedrus_enc_write_addr(dev, VE_ENC_AVC_SUBPIX_ADDR_LAST_REG,
--		     h264_ctx->subpix_last_dma);
+-			      h264_ctx->subpix_last_dma);
 -
 -	h264_ctx->subpix_last_dma = h264_buffer->subpix_dma;
 +			      ref->subpix_dma);

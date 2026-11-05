@@ -11,7 +11,6 @@ ccu-sun8i-de2.c, sun50i-iommu.c and include/drm/bridge/dw_hdmi.h as they
 are, so that series applies to both kernels unchanged.
 
 Signed-off-by: Artem Butusov <art.sormy@gmail.com>
-
 ---
  drivers/gpu/drm/bridge/synopsys/Kconfig            |   8 +
  drivers/gpu/drm/bridge/synopsys/dw-dp.c            |  89 ++--

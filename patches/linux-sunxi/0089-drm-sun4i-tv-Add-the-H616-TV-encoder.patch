@@ -11,7 +11,6 @@ the encoder's three clocks and two resets. The DAC's load detection
 stays off: armed, it clicks on the AV jack and sensed no cable here.
 
 Signed-off-by: Artem Butusov <art.sormy@gmail.com>
-
 ---
 --- a/drivers/gpu/drm/sun4i/sun4i_tv.c
 +++ b/drivers/gpu/drm/sun4i/sun4i_tv.c

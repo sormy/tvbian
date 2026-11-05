@@ -9,7 +9,6 @@ could not wake a box. Honour the property: keep the receiver running
 and its interrupt armed as a wake source.
 
 Signed-off-by: Artem Butusov <art.sormy@gmail.com>
-
 ---
 --- a/drivers/media/rc/sunxi-cir.c
 +++ b/drivers/media/rc/sunxi-cir.c

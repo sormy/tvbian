@@ -7,7 +7,6 @@ LibreELEC's sun4i-i2s IEC958 transport, which HDMI audio rides on, uses
 the IEC958 subframe masks 7.2 defines in <sound/asoundef.h>.
 
 Signed-off-by: Artem Butusov <art.sormy@gmail.com>
-
 ---
  include/sound/asoundef.h | 9 +++++++++
  1 file changed, 9 insertions(+)

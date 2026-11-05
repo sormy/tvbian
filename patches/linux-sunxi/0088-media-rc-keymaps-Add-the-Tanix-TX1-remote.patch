@@ -11,7 +11,6 @@ pointer in the vendor's software, as KEY_TOUCHPAD_TOGGLE for a pointer
 mode to follow.
 
 Signed-off-by: Artem Butusov <art.sormy@gmail.com>
-
 ---
 --- a/drivers/media/rc/keymaps/Makefile	2026-10-25 18:42:38.893338041 +0000
 +++ b/drivers/media/rc/keymaps/Makefile	2026-10-25 18:42:38.904134666 +0000
@@ -33,16 +32,6 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
  #define RC_MAP_TANIX_TX3MINI             "rc-tanix-tx3mini"
  #define RC_MAP_TANIX_TX5MAX              "rc-tanix-tx5max"
  #define RC_MAP_TBS_NEC                   "rc-tbs-nec"
---- a/Documentation/devicetree/bindings/media/rc.yaml	2026-10-25 18:42:38.902423041 +0000
-+++ b/Documentation/devicetree/bindings/media/rc.yaml	2026-10-25 18:42:38.905469791 +0000
-@@ -129,6 +129,7 @@
-       - rc-snapstream-firefly
-       - rc-streamzap
-       - rc-su3000
-+      - rc-tanix-tx1
-       - rc-tanix-tx3mini
-       - rc-tanix-tx5max
-       - rc-tbs-nec
 --- /dev/null
 +++ b/drivers/media/rc/keymaps/rc-tanix-tx1.c	2026-10-25 18:42:38.906829875 +0000
 @@ -0,0 +1,75 @@

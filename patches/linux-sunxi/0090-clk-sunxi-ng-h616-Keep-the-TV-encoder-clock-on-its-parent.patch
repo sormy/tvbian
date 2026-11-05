@@ -10,7 +10,6 @@ PLL-VIDEO1, as Allwinner's driver sets it: keep the parent the device
 tree assigns.
 
 Signed-off-by: Artem Butusov <art.sormy@gmail.com>
-
 ---
 diff --git a/drivers/clk/sunxi-ng/ccu-sun50i-h616.c b/drivers/clk/sunxi-ng/ccu-sun50i-h616.c
 --- a/drivers/clk/sunxi-ng/ccu-sun50i-h616.c

@@ -689,13 +689,13 @@ index 000000000..367ec18cd
 +	for (i = 0; i < 64; i++)
 +		cedrus_write(dev, VE_DEC_MPEG_IQMINPUT,
 +			     VE_DEC_MPEG_IQMINPUT_WEIGHT(i,
-+					quant->intra_quantiser_matrix[i]) |
++							 quant->intra_quantiser_matrix[i]) |
 +			     VE_DEC_MPEG_IQMINPUT_FLAG_INTRA);
 +
 +	for (i = 0; i < 64; i++)
 +		cedrus_write(dev, VE_DEC_MPEG_IQMINPUT,
 +			     VE_DEC_MPEG_IQMINPUT_WEIGHT(i,
-+					quant->non_intra_quantiser_matrix[i]) |
++							 quant->non_intra_quantiser_matrix[i]) |
 +			     VE_DEC_MPEG_IQMINPUT_FLAG_NON_INTRA);
 +}
 +

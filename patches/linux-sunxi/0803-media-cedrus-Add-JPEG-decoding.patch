@@ -23,12 +23,12 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
  drivers/staging/media/sunxi/cedrus/cedrus.h   |   2 +
  .../media/sunxi/cedrus/cedrus_context.c       |   7 +-
  .../staging/media/sunxi/cedrus/cedrus_dec.c   |   6 +
- .../media/sunxi/cedrus/cedrus_dec_jpeg.c      | 394 ++++++++++++++++++
+ .../media/sunxi/cedrus/cedrus_dec_jpeg.c      | 395 ++++++++++++++++++
  .../media/sunxi/cedrus/cedrus_dec_jpeg.h      |  20 +
  .../media/sunxi/cedrus/cedrus_engine.h        |   4 +
  .../staging/media/sunxi/cedrus/cedrus_proc.c  |  40 +-
  .../staging/media/sunxi/cedrus/cedrus_regs.h  |  12 +
- 11 files changed, 481 insertions(+), 3 deletions(-)
+ 11 files changed, 482 insertions(+), 3 deletions(-)
  create mode 100644 drivers/staging/media/sunxi/cedrus/cedrus_dec_jpeg.c
  create mode 100644 drivers/staging/media/sunxi/cedrus/cedrus_dec_jpeg.h
 
@@ -150,7 +150,7 @@ new file mode 100644
 index 000000000..f3d1ae91f
 --- /dev/null
 +++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec_jpeg.c
-@@ -0,0 +1,394 @@
+@@ -0,0 +1,395 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * Cedrus Video Engine Driver
@@ -203,7 +203,7 @@ index 000000000..f3d1ae91f
 +}
 +
 +static void cedrus_dec_jpeg_huffman_codes_write(struct cedrus_device *dev,
-+					      const u8 *counts)
++						const u8 *counts)
 +{
 +	u16 start_codes[CEDRUS_JPEG_HUFFMAN_CODES];
 +	u8 offsets[CEDRUS_JPEG_HUFFMAN_CODES];
@@ -233,8 +233,8 @@ index 000000000..f3d1ae91f
 +}
 +
 +static void cedrus_dec_jpeg_huffman_symbols_write(struct cedrus_device *dev,
-+						const u8 *symbols,
-+						size_t length)
++						  const u8 *symbols,
++						  size_t length)
 +{
 +	unsigned int i, words = DIV_ROUND_UP(length, 4);
 +	u32 value = 0;
@@ -262,11 +262,11 @@ index 000000000..f3d1ae91f
 +	for (i = 0; i < 2; i++) {
 +		struct v4l2_jpeg_scan_component_spec *component =
 +			&header->scan->component[i];
++		u8 dc = component->dc_entropy_coding_table_selector;
++		u8 ac = component->ac_entropy_coding_table_selector;
 +
-+		tables[i * 2] = &header->huffman_tables[
-+			component->dc_entropy_coding_table_selector];
-+		tables[i * 2 + 1] = &header->huffman_tables[
-+			component->ac_entropy_coding_table_selector + 2];
++		tables[i * 2] = &header->huffman_tables[dc];
++		tables[i * 2 + 1] = &header->huffman_tables[ac + 2];
 +	}
 +
 +	cedrus_write(dev, VE_DEC_MPEG_SRAM_RW_OFFSET, 0);
@@ -277,10 +277,12 @@ index 000000000..f3d1ae91f
 +	for (i = 0; i < CEDRUS_JPEG_HUFFMAN_GAP_WORDS; i++)
 +		cedrus_write(dev, VE_DEC_MPEG_SRAM_RW_DATA, 0);
 +
-+	for (i = 0; i < ARRAY_SIZE(tables); i++)
-+		cedrus_dec_jpeg_huffman_symbols_write(dev,
-+			tables[i]->start + CEDRUS_JPEG_HUFFMAN_CODES,
-+			tables[i]->length - CEDRUS_JPEG_HUFFMAN_CODES);
++	for (i = 0; i < ARRAY_SIZE(tables); i++) {
++		const struct v4l2_jpeg_reference *table = tables[i];
++
++		cedrus_dec_jpeg_huffman_symbols_write(dev, table->start + CEDRUS_JPEG_HUFFMAN_CODES,
++						      table->length - CEDRUS_JPEG_HUFFMAN_CODES);
++	}
 +}
 +
 +static int cedrus_dec_jpeg_quantisation_write(struct cedrus_device *dev,
@@ -354,6 +356,7 @@ index 000000000..f3d1ae91f
 +		.huffman_tables		= huffman_tables,
 +	};
 +	const struct v4l2_jpeg_frame_component_spec *components;
++	const struct v4l2_jpeg_reference *table;
 +	unsigned int size = vb2_get_plane_payload(coded, 0);
 +	dma_addr_t coded_addr, luma_addr, chroma_addr;
 +	unsigned int hmax = 0, vmax = 0, i;
@@ -402,15 +405,13 @@ index 000000000..f3d1ae91f
 +	cedrus_write(dev, VE_DEC_MPEG_JPEG_SIZE, value);
 +
 +	/* Luma's table as the intra matrix, chroma's as the non-intra one. */
-+	ret = cedrus_dec_jpeg_quantisation_write(dev,
-+			&quantisation_tables[components[0].quantization_table_selector],
-+			VE_DEC_MPEG_IQMINPUT_FLAG_INTRA);
++	table = &quantisation_tables[components[0].quantization_table_selector];
++	ret = cedrus_dec_jpeg_quantisation_write(dev, table, VE_DEC_MPEG_IQMINPUT_FLAG_INTRA);
 +	if (ret)
 +		return ret;
 +
-+	ret = cedrus_dec_jpeg_quantisation_write(dev,
-+			&quantisation_tables[components[1].quantization_table_selector],
-+			VE_DEC_MPEG_IQMINPUT_FLAG_NON_INTRA);
++	table = &quantisation_tables[components[1].quantization_table_selector];
++	ret = cedrus_dec_jpeg_quantisation_write(dev, table, VE_DEC_MPEG_IQMINPUT_FLAG_NON_INTRA);
 +	if (ret)
 +		return ret;
 +

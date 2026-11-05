@@ -14,10 +14,11 @@ code** — one `boards/<board>/` directory. If a change needs new code per board
 TVBian is based on Debian; it is never called Debian.
 
 **Boards stay downstream**: no board tree or config goes upstream. Mainline patches are sendable as
-they stand: one change each, a `Signed-off-by`, `checkpatch.pl --strict` clean. A fix to a carried
-patch not yet upstream is folded into it. Vendor-kernel patches (`linux-rockchip`, the out-of-tree
-drivers) have no upstream path, and are written for the least code that is correct on our boxes. A
-board's key names its model (`h96max-m20`), never its SoC.
+they stand: one change each, a `Signed-off-by`, `checkpatch.pl --strict` clean except where the
+surrounding code's style wins. Imported and backported code stays as its source wrote it. A fix to a
+carried patch not yet upstream is folded into it. Vendor-kernel patches (`linux-rockchip`, the
+out-of-tree drivers) have no upstream path, and are written for the least code that is correct on
+our boxes. A board's key names its model (`h96max-m20`), never its SoC.
 
 | Tree                | Holds                                                                                          |
 | ------------------- | ---------------------------------------------------------------------------------------------- |

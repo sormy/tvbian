@@ -125,7 +125,7 @@ index e307e26..a27d9ca 100644
 +
 +	h264_ctx->deblk_size = h264_ctx->width_mbs * 64;
 +	h264_ctx->deblk = dma_alloc_attrs(dev, h264_ctx->deblk_size,
-+					&h264_ctx->deblk_dma, GFP_KERNEL,
++					  &h264_ctx->deblk_dma, GFP_KERNEL,
 +					DMA_ATTR_NO_KERNEL_MAPPING);
 +	if (!h264_ctx->deblk) {
 +		ret = -ENOMEM;
@@ -136,7 +136,7 @@ index e307e26..a27d9ca 100644
 +
 +	h264_ctx->row_info_size = h264_ctx->height_mbs * 2;
 +	h264_ctx->row_info = dma_alloc_attrs(dev, h264_ctx->row_info_size,
-+					&h264_ctx->row_info_dma, GFP_KERNEL,
++					     &h264_ctx->row_info_dma, GFP_KERNEL,
 +					DMA_ATTR_NO_KERNEL_MAPPING);
 +	if (!h264_ctx->row_info) {
 +		ret = -ENOMEM;
@@ -217,16 +217,18 @@ index e307e26..a27d9ca 100644
  	/* Configure subpixel buffers. */
  
 -	cedrus_write(dev, VE_ENC_AVC_SUBPIX_ADDR_NEW_REG,
+-		     h264_buffer->subpix_dma);
 +	cedrus_enc_write_addr(dev, VE_ENC_AVC_SUBPIX_ADDR_NEW_REG,
- 		     h264_buffer->subpix_dma);
++			      h264_buffer->subpix_dma);
  
  	if (!h264_ctx->subpix_last_dma)
  		h264_ctx->subpix_last_dma = h264_buffer->subpix_dma;
  
  	/* XXX: is this for the last reference or the last encoded frame? */
 -	cedrus_write(dev, VE_ENC_AVC_SUBPIX_ADDR_LAST_REG,
+-		     h264_ctx->subpix_last_dma);
 +	cedrus_enc_write_addr(dev, VE_ENC_AVC_SUBPIX_ADDR_LAST_REG,
- 		     h264_ctx->subpix_last_dma);
++			      h264_ctx->subpix_last_dma);
  
  	h264_ctx->subpix_last_dma = h264_buffer->subpix_dma;
  

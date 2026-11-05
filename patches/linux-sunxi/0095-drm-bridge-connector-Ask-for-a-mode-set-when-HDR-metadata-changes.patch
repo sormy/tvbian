@@ -11,11 +11,10 @@ mode set's values: HDR over a menu, or SDR over a film.
 
 Forcing it from a bridge's atomic_check comes too late: that runs in
 mode_fixup(), after the helpers added a mode-setting CRTC's planes and
-connectors to the commit. Force it here, as dw_hdmi_connector_atomic_check()
-does.
+connectors to the commit. Force it here, as
+dw_hdmi_connector_atomic_check() does.
 
 Signed-off-by: Artem Butusov <art.sormy@gmail.com>
-
 ---
 diff --git a/drivers/gpu/drm/display/drm_bridge_connector.c b/drivers/gpu/drm/display/drm_bridge_connector.c
 --- a/drivers/gpu/drm/display/drm_bridge_connector.c

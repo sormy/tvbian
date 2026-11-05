@@ -1,0 +1,21 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 25 Oct 2026 15:00:00 -0400
+Subject: [PATCH] dt-bindings: media: rc: Add the Tanix TX1 remote's keymap
+
+The Tanix TX1 ships its own remote; list its keymap, rc-tanix-tx1.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+--- a/Documentation/devicetree/bindings/media/rc.yaml	2026-10-25 18:42:38.902423041 +0000
++++ b/Documentation/devicetree/bindings/media/rc.yaml	2026-10-25 18:42:38.905469791 +0000
+@@ -129,6 +129,7 @@
+       - rc-snapstream-firefly
+       - rc-streamzap
+       - rc-su3000
++      - rc-tanix-tx1
+       - rc-tanix-tx3mini
+       - rc-tanix-tx5max
+       - rc-tbs-nec
+-- 
+2.47.3

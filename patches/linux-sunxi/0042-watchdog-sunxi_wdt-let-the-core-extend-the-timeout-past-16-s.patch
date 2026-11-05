@@ -4,11 +4,12 @@ Date: Sat, 24 Oct 2026 14:44:29 +0000
 Subject: [PATCH] watchdog: sunxi_wdt: let the core extend the timeout past 16
  s
 
-The hardware counts at most 16 s, and the driver gives that as max_timeout,
-so a longer timeout is refused with -EINVAL: systemd's RuntimeWatchdogSec=80
-leaves the watchdog unarmed. Give it as max_hw_heartbeat_ms instead, as
-meson_gxbb_wdt does, and the core pings the hardware between the user's
-pings; the hardware is programmed with at most 16 s.
+The hardware counts at most 16 s, and the driver gives that as
+max_timeout, so a longer timeout is refused with -EINVAL: systemd's
+RuntimeWatchdogSec=80 leaves the watchdog unarmed. Give it as
+max_hw_heartbeat_ms instead, as meson_gxbb_wdt does, and the core pings
+the hardware between the user's pings; the hardware is programmed with
+at most 16 s.
 
 Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
