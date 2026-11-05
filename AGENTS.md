@@ -126,6 +126,9 @@ another, so nothing rots when one is rewritten.
 
 # Standing rules
 
+**A mistake made twice becomes a rule** here, or in `AGENTS.local.md` when it is about the owner's
+setup.
+
 ## Claims and evidence
 
 Six states, meaning exactly what they say:
@@ -282,6 +285,10 @@ higher one and record why.
 - **Bring-up and fixes run unattended.** Exhaust the box's readback, the repo and `backup/` before
   asking a person to look, listen or plug in. Make the ask one step, and add the test it shows is
   missing.
+- **Registers through `/dev/mem`: only the offsets the driver itself uses**, read one block at a
+  time. An offset outside a block's registers faults the bus and resets the box.
+- **Over SSH, stop a process by its exact name (`pkill -x`) or PID.** `pkill -f` matches the SSH
+  session's own command line and kills it.
 - `mmcblk` numbering is **not stable** across images or boots. Identify the eMMC by its
   `boot0`/`boot1` companions, never by a remembered number.
 - **After any refactor, rebuild the image and diff every payload file against a pre-change build.**
