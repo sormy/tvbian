@@ -8,6 +8,8 @@ them from write-combined memory: dma-contig allocates the capture
 queue coherent. Let userspace ask for non-coherent buffers with
 V4L2_MEMORY_FLAG_NON_COHERENT; videobuf2 then syncs them for the CPU
 when they are dequeued and for the device when they are queued.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
 diff -urN a/drivers/staging/media/sunxi/cedrus/cedrus_context.c b/drivers/staging/media/sunxi/cedrus/cedrus_context.c
 --- a/drivers/staging/media/sunxi/cedrus/cedrus_context.c

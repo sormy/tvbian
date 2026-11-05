@@ -14,6 +14,8 @@ The engine parses the headers itself, so it takes no request, keeps a
 CPU mapping of the coded buffer and drains as a stateful decoder.
 
 Ported from Emmanuel Gil Peyrot's series to the reworked driver.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
  drivers/staging/media/sunxi/cedrus/Kconfig    |   1 +
  drivers/staging/media/sunxi/cedrus/Makefile   |   1 +

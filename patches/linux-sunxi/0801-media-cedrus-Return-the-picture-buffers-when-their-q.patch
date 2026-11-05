@@ -6,6 +6,8 @@ Subject: [PATCH] media: cedrus: Return the picture buffers when their queue
 
 Stopping the picture queue left its queued buffers with the driver, and
 videobuf2 warned of a driver bug for each.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
  drivers/staging/media/sunxi/cedrus/cedrus_context.c | 4 +++-
  1 file changed, 3 insertions(+), 1 deletion(-)

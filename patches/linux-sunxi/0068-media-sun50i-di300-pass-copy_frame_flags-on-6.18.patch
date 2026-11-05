@@ -5,6 +5,8 @@ Subject: [PATCH] media: sun50i-di300: pass copy_frame_flags on 6.18
 
 6.18's v4l2_m2m_buf_copy_metadata() takes copy_frame_flags; the driver
 is written for a kernel whose call has none and copies the flags.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
  drivers/media/platform/sunxi/sun50i-di300/sun50i-di300.c | 4 ++--
  1 file changed, 2 insertions(+), 2 deletions(-)

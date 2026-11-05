@@ -19,6 +19,8 @@ refused. So are interlaced B-VOPs, whose direct mode the engine
 predicts without the field distances, static sprites, sprite
 brightness change, data partitioning, reversible VLC and pictures over
 4080 wide, the engine's 8-bit macroblock count, or 2304 high.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
  drivers/staging/media/sunxi/cedrus/Makefile   |   1 +
  drivers/staging/media/sunxi/cedrus/cedrus.c   |   1 +

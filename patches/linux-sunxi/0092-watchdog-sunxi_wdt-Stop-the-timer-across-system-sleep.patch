@@ -8,6 +8,8 @@ watchdog core's worker pings it, so a sleep longer than its 16 s
 hardware maximum resets the system. Stop it on suspend and start it on
 resume when it was running, as meson_gxbb_wdt does.
 
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+
 ---
  drivers/watchdog/sunxi_wdt.c | 28 ++++++++++++++++++++++++++++
  1 file changed, 28 insertions(+)

@@ -10,6 +10,8 @@ driver placed it after the padded chroma plane, so a frame whose height
 is not a multiple of 16 wrote the plane where its next frame did not
 read it: every inter frame of 1920x1080 VP9 profile 2 came out wrong,
 key frames and 1088 or 1072 lines exact.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
  drivers/staging/media/sunxi/cedrus/cedrus_dec_vp9.c | 3 +--
  1 file changed, 1 insertion(+), 2 deletions(-)

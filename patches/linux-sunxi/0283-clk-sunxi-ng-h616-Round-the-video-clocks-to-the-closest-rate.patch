@@ -14,6 +14,8 @@ computed, the same at 4K 23.976 and 29.97 Hz, 4 x 816 MHz over 11, and
 
 Set CCU_FEATURE_CLOSEST_RATE on the three video PLLs, the TV TCONs and
 the HDMI clock.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
 diff -urN a/drivers/clk/sunxi-ng/ccu-sun50i-h616.c b/drivers/clk/sunxi-ng/ccu-sun50i-h616.c
 --- a/drivers/clk/sunxi-ng/ccu-sun50i-h616.c

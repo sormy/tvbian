@@ -19,6 +19,8 @@ H.264 and H.265 only: SDROT_CTRL at 0x240 with addresses at 0x244 and
 
 The decoder node kept G_SELECTION and S_SELECTION disabled, its
 selection being the encoder's crop; the decoder now answers COMPOSE.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
  drivers/staging/media/sunxi/cedrus/cedrus.h   | 53 +++++++++++--
  .../media/sunxi/cedrus/cedrus_context.h       |  2 +

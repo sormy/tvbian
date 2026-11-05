@@ -8,6 +8,8 @@ A stream with a gap, a network stall or a cut, names references whose
 pictures were dropped. The DPB setup skipped such an entry under a
 WARN_ON: a backtrace any player can raise, five in a burst after one
 stall. Skip it with a rate-limited debug line, as H.264 does.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
  drivers/staging/media/sunxi/cedrus/cedrus_dec_h265.c | 7 ++++++-
  1 file changed, 6 insertions(+), 1 deletion(-)

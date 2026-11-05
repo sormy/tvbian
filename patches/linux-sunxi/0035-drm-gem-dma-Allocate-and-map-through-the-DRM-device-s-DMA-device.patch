@@ -11,6 +11,8 @@ the IOMMU of its planes device, a framebuffer got a physical address
 the mixer cannot read: one IOMMU fault per frame. Use drm_dev_dma_dev()
 for allocation, freeing, the sg table and mmap, as 7.2 does.
 
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+
 ---
  drivers/gpu/drm/drm_gem_dma_helper.c | 14 +++++++-------
  1 file changed, 7 insertions(+), 7 deletions(-)

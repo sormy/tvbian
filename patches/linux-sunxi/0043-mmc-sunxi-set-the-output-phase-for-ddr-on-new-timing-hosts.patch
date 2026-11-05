@@ -8,6 +8,8 @@ after a while: a data error, or none, then the status command in recovery
 never returns. Allwinner's own driver drives the command line at 180
 degrees and, in DDR, the data lines at 180 too; this driver never touched
 the drive delay register. Set it as the vendor driver does.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
  drivers/mmc/host/sunxi-mmc.c | 18 ++++++++++++++++++
  1 file changed, 18 insertions(+)

@@ -12,6 +12,8 @@ Limit TV TCON0, the one feeding HDMI, to the video0 outputs HDMI
 shares and to P = 0: clear its P field at probe and model the rest
 as an M divider like HDMI, with the same rounding. TV TCON1 feeds
 the TV encoder, which needs video1, and keeps its MP divider.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
 --- a/drivers/clk/sunxi-ng/ccu-sun50i-h616.c
 +++ b/drivers/clk/sunxi-ng/ccu-sun50i-h616.c

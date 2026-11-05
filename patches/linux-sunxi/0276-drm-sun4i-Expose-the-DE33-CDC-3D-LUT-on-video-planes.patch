@@ -21,6 +21,8 @@ queue split across the hardware's eight parity banks, and only when the
 blob changes or the plane becomes visible: the LUT RAM keeps it while
 the CDC runs, every captured frame of 300 flips on the same blob showing
 it.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
 diff -urN a/drivers/gpu/drm/sun4i/Makefile b/drivers/gpu/drm/sun4i/Makefile
 --- a/drivers/gpu/drm/sun4i/Makefile

@@ -9,6 +9,8 @@ shrink. The edge-detection support selected it the other way round, for
 a downscale, where it costs the scaler the most: a 3840x2160 YUV layer
 shrunk 1.70x onto a 2256x1504@60 screen fell behind and scanned out
 garbage below the top. Select it as the vendor does.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
 diff --git a/drivers/gpu/drm/sun4i/sun8i_vi_scaler.c b/drivers/gpu/drm/sun4i/sun8i_vi_scaler.c
 --- a/drivers/gpu/drm/sun4i/sun8i_vi_scaler.c

@@ -6,6 +6,8 @@ Subject: [PATCH 78/82] media: cedrus: Drain the encoder on a stop command
 ffmpeg and GStreamer drain a stateful encoder with V4L2_ENC_CMD_STOP and
 wait for the buffer flagged LAST. Implement the stop command, the EOS
 event and the last buffer with the mem2mem helpers.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
  .../media/sunxi/cedrus/cedrus_context.c       | 32 ++++++++++++++++++-
  .../staging/media/sunxi/cedrus/cedrus_proc.c  | 16 +++++++++-

@@ -8,6 +8,8 @@ Each picture buffer carried its own reconstruction, and a P-frame
 referenced the previous buffer's. A client requeueing the buffer it just
 dequeued, as ffmpeg does, had the engine overwrite the reference it was
 reading. Keep two reference slots in the context and alternate them.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
  .../media/sunxi/cedrus/cedrus_enc_h264.c      | 206 +++++++++---------
  .../media/sunxi/cedrus/cedrus_enc_h264.h      |  30 ++-

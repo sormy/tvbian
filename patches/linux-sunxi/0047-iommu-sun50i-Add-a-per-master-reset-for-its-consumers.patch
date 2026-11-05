@@ -8,6 +8,8 @@ still be transferring. On the H616 the video engine's port stays stuck
 after that, and every later decode reads wrong data until a reboot. A
 consumer that has just reset its device can now reset its port again,
 with nothing in flight, as the vendor BSP's sunxi_reset_device_iommu().
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
 diff --git a/include/linux/soc/sunxi/sun50i_iommu.h b/include/linux/soc/sunxi/sun50i_iommu.h
 --- a/include/linux/soc/sunxi/sun50i_iommu.h

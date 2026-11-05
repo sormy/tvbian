@@ -11,6 +11,8 @@ converts the reconstruction to P010; let it scale while it does.
 A scaled 10-bit picture keeps the full-size hidden reconstruction and
 its low 2 bits plane after the scaled P010 picture: size the plane from
 the coded picture, not the scaled one, and count the hidden NV12 once.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
 diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec.c b/drivers/staging/media/sunxi/cedrus/cedrus_dec.c
 --- a/drivers/staging/media/sunxi/cedrus/cedrus_dec.c

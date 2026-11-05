@@ -7,6 +7,8 @@ Subject: [PATCH 76/82] media: cedrus: Enable the encoder without the decoder's
 Enabling the encoder or-ed its bits into the mode register, so a mode a
 decode left there, such as VP9's RAMPD and bit 30, stayed set. Write the
 mode outright.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
  drivers/staging/media/sunxi/cedrus/cedrus_enc.c | 7 ++-----
  1 file changed, 2 insertions(+), 5 deletions(-)

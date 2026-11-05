@@ -11,6 +11,8 @@ Attach the HDMI Colorspace property next to HDR_OUTPUT_METADATA, which
 dw-hdmi turns into the AVI InfoFrame's colorimetry, and take a change
 of it as a mode change, as a change of HDR metadata already is, so the
 InfoFrame follows.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
  drivers/gpu/drm/meson/meson_encoder_hdmi.c | 9 +++++++--
  1 file changed, 7 insertions(+), 2 deletions(-)

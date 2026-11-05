@@ -5,6 +5,8 @@ Subject: [PATCH 80/82] media: cedrus: Put the H.264 SPS timing fields in order
 
 num_units_in_tick is the frame period's numerator and time_scale twice
 its denominator. They were swapped, so a 30 fps stream announced 1/30 fps.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
  drivers/staging/media/sunxi/cedrus/cedrus_enc_h264.c | 4 ++--
  1 file changed, 2 insertions(+), 2 deletions(-)

@@ -6,6 +6,8 @@ Subject: [PATCH] media: cedrus: Size a coded format by its own engine
 S_FMT on the coded queue prepared the format with the engine it was
 about to replace: a JPEG stream took the MPEG-2 engine's size limits,
 the engine the context opens with, and any codec those of the last.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
  drivers/staging/media/sunxi/cedrus/cedrus_dec.c    | 4 +++-
  drivers/staging/media/sunxi/cedrus/cedrus_engine.c | 5 ++++-

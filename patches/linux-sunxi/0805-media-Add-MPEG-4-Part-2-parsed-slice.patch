@@ -7,6 +7,8 @@ Private stateless controls for MPEG-4 Part 2 Simple and Advanced Simple
 profile and H.263 baseline: the VOL, the VOP, the quantisation matrices
 and a slice, one video packet, H.263 GOB run or whole VOP a request.
 They stay out of the public headers until they settle, as VC-1's do.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
  drivers/media/v4l2-core/v4l2-ctrls-core.c |  28 ++++++
  drivers/media/v4l2-core/v4l2-ctrls-defs.c |  16 ++++

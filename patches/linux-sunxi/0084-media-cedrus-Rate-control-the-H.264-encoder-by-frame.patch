@@ -10,6 +10,8 @@ frame's QP while it is more than two frames off. The QP ceiling defaults
 to H.264's 51, so a low bitrate is reachable.
 
 The engine does not clip the chroma QP to 51, and past it the output grows tenfold: the QP stops where QP plus the chroma offset reaches 51.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
  .../media/sunxi/cedrus/cedrus_enc_h264.c      | 94 +++++++++++++++++--
  .../media/sunxi/cedrus/cedrus_enc_h264.h      |  4 +

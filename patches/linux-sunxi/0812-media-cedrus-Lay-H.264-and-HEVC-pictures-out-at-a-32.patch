@@ -14,6 +14,8 @@ Align the lines of an H.264 or HEVC picture, and of the hidden
 reconstruction a scaled or P010 picture references, to 32 bytes, and
 program the line stride and chroma length from the picture's
 bytesperline instead of recomputing them from its width.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
 diff -urN a/drivers/staging/media/sunxi/cedrus/cedrus.h b/drivers/staging/media/sunxi/cedrus/cedrus.h
 --- a/drivers/staging/media/sunxi/cedrus/cedrus.h

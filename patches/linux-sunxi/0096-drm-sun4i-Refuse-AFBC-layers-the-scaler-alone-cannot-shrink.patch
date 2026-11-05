@@ -21,6 +21,8 @@ passes.
 The margin is the module parameter afbc_shrink_margin, a percentage,
 clamped to 50-150 and read at each check, so it can be swept at run
 time.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
 diff -urN a/drivers/gpu/drm/sun4i/sun8i_vi_layer.c b/drivers/gpu/drm/sun4i/sun8i_vi_layer.c
 --- a/drivers/gpu/drm/sun4i/sun8i_vi_layer.c

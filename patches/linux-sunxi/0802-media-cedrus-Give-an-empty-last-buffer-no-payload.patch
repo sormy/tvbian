@@ -6,6 +6,8 @@ Subject: [PATCH] media: cedrus: Give an empty last buffer no payload
 A stop with nothing left to process hands back the next picture buffer
 as the last one, still carrying the payload buffer_prepare set: a
 reader took it for a picture of whatever the buffer last held.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
  .../media/sunxi/cedrus/cedrus_context.c       |  1 +
  .../staging/media/sunxi/cedrus/cedrus_proc.c  | 28 ++++++++++++++++++-

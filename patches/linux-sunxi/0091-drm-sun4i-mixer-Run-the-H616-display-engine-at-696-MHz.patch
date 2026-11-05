@@ -8,6 +8,8 @@ and de, assigned-clock-rates 696000000), and stock firmware reads it
 back at that rate. Mainline set 600 MHz, which cuts the VI scaler's
 throughput by the same proportion. Use the vendor's rate; the DE PLL
 makes it as 24 MHz x 29.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
 diff --git a/drivers/gpu/drm/sun4i/sun8i_mixer.c b/drivers/gpu/drm/sun4i/sun8i_mixer.c
 --- a/drivers/gpu/drm/sun4i/sun8i_mixer.c

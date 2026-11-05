@@ -6,6 +6,8 @@ Subject: [PATCH] media: cedrus: Set HEVC and VP9's largest picture to the
 
 HEVC and VP9 decode to 8192x4320; 8192x8192 hangs the SoC. 10-bit
 pictures past 6144x3456 fail or hang, so their SPS is refused there.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
  drivers/staging/media/sunxi/cedrus/cedrus_dec.h      | 4 ++++
  drivers/staging/media/sunxi/cedrus/cedrus_dec_h265.c | 9 +++++++--

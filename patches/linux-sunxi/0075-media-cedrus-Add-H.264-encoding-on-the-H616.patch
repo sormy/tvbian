@@ -5,6 +5,8 @@ Subject: [PATCH 75/82] media: cedrus: Add H.264 encoding on the H616
 
 The H616's video engine carries an H.264 encoder; expose it. Its register
 differences from the V3s follow.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
  drivers/staging/media/sunxi/cedrus/cedrus.c | 3 ++-
  1 file changed, 2 insertions(+), 1 deletion(-)

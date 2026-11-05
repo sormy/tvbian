@@ -12,6 +12,8 @@ The HDMI encoder hands it to dw-hdmi in atomic_mode_set. Where only the
 payload changed, the commit tail calls that hook again for the CRTC's
 TMDS encoders, after the planes: the metadata follows a scene without a
 mode set. The clock it also sets is unchanged, so setting it is a no-op.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
 diff -urN a/drivers/gpu/drm/sun4i/sun4i_crtc.c b/drivers/gpu/drm/sun4i/sun4i_crtc.c
 --- a/drivers/gpu/drm/sun4i/sun4i_crtc.c

@@ -7,6 +7,8 @@ The driver samples at a fixed delay of 0 on every new-timing host. The
 H616 eMMC on a Tanix TX1 V2.0 gets data errors in DDR52 at that delay,
 then hangs in recovery; its stock firmware tunes the delay per unit and
 runs at 20 cells. Let a board give it as allwinner,sample-delay.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
  drivers/mmc/host/sunxi-mmc.c | 10 +++++++++-
  1 file changed, 9 insertions(+), 1 deletion(-)

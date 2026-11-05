@@ -7,6 +7,8 @@ A stream the engine cannot decode makes it read outside its buffers; the
 IOMMU faults, the frame times out, and the watchdog resets the engine.
 Its IOMMU port stays stuck, and later streams decode to garbage until a
 reboot. Reset the port too, once the engine is idle.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
 diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_hw.c b/drivers/staging/media/sunxi/cedrus/cedrus_hw.c
 --- a/drivers/staging/media/sunxi/cedrus/cedrus_hw.c

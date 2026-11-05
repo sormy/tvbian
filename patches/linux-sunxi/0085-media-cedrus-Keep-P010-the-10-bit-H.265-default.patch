@@ -6,6 +6,8 @@ Subject: [PATCH] media: cedrus: Keep P010 the 10-bit H.265 default
 AFBC as the default left a consumer taking the driver's format, as
 ffmpeg does, with frames it cannot read in software. P010 is readable by
 every consumer; a display that scans AFBC out asks for it.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
  drivers/staging/media/sunxi/cedrus/cedrus_dec.c | 14 +++++++-------
  1 file changed, 7 insertions(+), 7 deletions(-)

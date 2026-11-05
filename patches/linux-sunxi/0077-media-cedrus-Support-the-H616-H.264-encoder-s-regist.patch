@@ -9,6 +9,8 @@ ISP scaler size in 8-pixel units and reads a macroblock row buffer at
 0xb9c; past 2048 pixels it also writes deblocking data to memory and needs
 the mode register's width bits, as decoding does. Without them its first
 read faults.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
  drivers/staging/media/sunxi/cedrus/cedrus.c   |  3 +-
  drivers/staging/media/sunxi/cedrus/cedrus.h   |  1 +

@@ -14,6 +14,8 @@ sink takes 4:2:2: its 12-bit container runs at the pixel clock, so every
 mode the sink takes in 8 bits. The mixer accepts UYVY12_1X24 and its
 formatter outputs 4:2:2 at 10 bits, clamped to the limited range. SDR
 stays RGB.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
 diff -urN a/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c b/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
 --- a/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c

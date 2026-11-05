@@ -13,6 +13,8 @@ vendor's library does on this engine.
 
 The same engine answers MJPG, the format FFmpeg and others ask for. The
 H.264 encoder's interrupt handlers move to cedrus_enc.c, shared.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
  drivers/staging/media/sunxi/cedrus/Makefile   |   1 +
  drivers/staging/media/sunxi/cedrus/cedrus.c   |   1 +

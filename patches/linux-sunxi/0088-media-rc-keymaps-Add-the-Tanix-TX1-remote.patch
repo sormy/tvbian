@@ -10,6 +10,8 @@ track keys as their labels read, and the mouse button, which toggles a
 pointer in the vendor's software, as KEY_TOUCHPAD_TOGGLE for a pointer
 mode to follow.
 
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+
 ---
 --- a/drivers/media/rc/keymaps/Makefile	2026-10-25 18:42:38.893338041 +0000
 +++ b/drivers/media/rc/keymaps/Makefile	2026-10-25 18:42:38.904134666 +0000

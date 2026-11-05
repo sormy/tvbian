@@ -12,6 +12,8 @@ no picture where it dropped a quarter. The engine's clock barely matters,
 600 to 696 MHz giving 3%.
 
 Reconstruct a scaled H.264 picture in 32x32 tiles, sized for them.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
 diff -urN a/drivers/staging/media/sunxi/cedrus/cedrus.h b/drivers/staging/media/sunxi/cedrus/cedrus.h
 --- a/drivers/staging/media/sunxi/cedrus/cedrus.h

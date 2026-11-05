@@ -9,6 +9,8 @@ crop taken from it, so a 360-line picture was coded as 368 lines. Keep the
 requested size, pad the stride and buffer only, and crop the SPS from the
 macroblock-aligned size. The engine reads a little past the chroma plane,
 so the buffer also gets a row of slack.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
  drivers/staging/media/sunxi/cedrus/cedrus_enc.c    |  7 +++++--
  .../staging/media/sunxi/cedrus/cedrus_enc_h264.c   | 14 ++++++--------

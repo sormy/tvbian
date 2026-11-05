@@ -13,10 +13,11 @@ userspace come from upstream; we carry only what upstream can't know. **Adding a
 code** — one `boards/<board>/` directory. If a change needs new code per board, the design is wrong.
 TVBian is based on Debian; it is never called Debian.
 
-**Boards stay downstream**: no board tree or config goes upstream. Mainline patches are written
-upstream-shaped, to be sent. Vendor-kernel patches (`linux-rockchip`, the out-of-tree drivers) have
-no upstream path, and are written for the least code that is correct on our boxes. A board's key
-names its model (`h96max-m20`), never its SoC.
+**Boards stay downstream**: no board tree or config goes upstream. Mainline patches are sendable as
+they stand: one change each, a `Signed-off-by`, `checkpatch.pl --strict` clean. A fix to a carried
+patch not yet upstream is folded into it. Vendor-kernel patches (`linux-rockchip`, the out-of-tree
+drivers) have no upstream path, and are written for the least code that is correct on our boxes. A
+board's key names its model (`h96max-m20`), never its SoC.
 
 | Tree                | Holds                                                                                          |
 | ------------------- | ---------------------------------------------------------------------------------------------- |

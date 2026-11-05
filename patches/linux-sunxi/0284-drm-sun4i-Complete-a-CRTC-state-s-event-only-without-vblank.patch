@@ -15,6 +15,8 @@ without a CRTC, tracked by its fake commit, refuses it with -EBUSY: 3 to
 Send the state's event only for a CRTC without vblank. A TCON CRTC's
 event is armed in atomic_begin and sent by the vblank after it, as
 before the writeback support.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
 diff -urN a/drivers/gpu/drm/sun4i/sun4i_crtc.c b/drivers/gpu/drm/sun4i/sun4i_crtc.c
 --- a/drivers/gpu/drm/sun4i/sun4i_crtc.c

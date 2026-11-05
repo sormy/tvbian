@@ -7,6 +7,8 @@ The engine inserts emulation-prevention bytes only into the slice data it
 writes. The headers are put with the insertion disabled, so any
 0x000000-0x000003 sequence in them went out raw: a VUI timing field
 holding 1 ended the SPS early. Escape the header bytes as they are put.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
  drivers/staging/media/sunxi/cedrus/cedrus.h   |  7 ++
  .../media/sunxi/cedrus/cedrus_enc_h264.c      | 77 +++++++++++++++----

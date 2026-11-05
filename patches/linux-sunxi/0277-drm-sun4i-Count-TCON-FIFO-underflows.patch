@@ -8,6 +8,8 @@ register until it is cleared: the display engine missed its scanout
 deadline. Count it at each vblank, clearing it, and show the count since
 boot read-only in debugfs, dri/<n>/crtc-<i>/underruns, so a player can
 step its load down where the screen breaks up.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
 diff -urN a/drivers/gpu/drm/sun4i/sun4i_crtc.c b/drivers/gpu/drm/sun4i/sun4i_crtc.c
 --- a/drivers/gpu/drm/sun4i/sun4i_crtc.c

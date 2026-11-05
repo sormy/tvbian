@@ -10,6 +10,8 @@ connector argument of hpd_notify(); field_prep() and field_get() for
 non-constant masks; and <linux/mod_devicetable.h> in sun6i_drc.c, which
 6.18's headers leave out.
 
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+
 ---
  drivers/gpu/drm/bridge/synopsys/dw-hdmi.c | 27 +++++++++++++++------------
  drivers/gpu/drm/sun4i/sun4i_backend.c     |  4 ++--

@@ -8,6 +8,8 @@ in DRAM, as for H.264, and reads further into the probability buffer,
 which the vendor's library allocates at 0x5400 bytes. Without the rows
 it decoded wrong pictures at 2304 wide; without the larger buffer it
 faulted reading past it at 3840.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
  .../media/sunxi/cedrus/cedrus_dec_vp8.c       | 65 +++++++++++++++++++
  .../media/sunxi/cedrus/cedrus_dec_vp8.h       | 10 ++-

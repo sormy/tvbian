@@ -9,6 +9,7 @@ G12A-class H.264, HEVC and multi-instance MPEG-1/2 on top of it. Its
 H.264 reference lists use v4l2-h264, so the driver selects V4L2_H264.
 
 Link: https://github.com/ray38080289/meson-sm1-codecs
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
  drivers/staging/media/meson/vdec/Kconfig      |   11 +
  drivers/staging/media/meson/vdec/Makefile     |    5 +-

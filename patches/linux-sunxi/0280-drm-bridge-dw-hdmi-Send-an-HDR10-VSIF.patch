@@ -13,6 +13,8 @@ NULL gives the slot back to HDMI's VSIF. A 3D mode keeps HDMI's VSIF,
 which carries its structure. On a mode named by an HDMI_VIC, the 4K
 24, 25 and 30 Hz ones, the VSIF no longer carries it, so the AVI
 InfoFrame names the mode's CTA VIC instead, as HDMI 2.0 allows.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
 diff -urN a/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c b/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
 --- a/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c

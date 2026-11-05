@@ -9,6 +9,8 @@ MP clock's divider search still keeps the best rate below, with or
 without parent adjustment. Use ccu_is_better_rate() there too: nothing
 changes for clocks without the feature. Add
 SUNXI_CCU_MP_WITH_MUX_GATE_CLOSEST to declare one.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
 diff -urN a/drivers/clk/sunxi-ng/ccu_mp.c b/drivers/clk/sunxi-ng/ccu_mp.c
 --- a/drivers/clk/sunxi-ng/ccu_mp.c

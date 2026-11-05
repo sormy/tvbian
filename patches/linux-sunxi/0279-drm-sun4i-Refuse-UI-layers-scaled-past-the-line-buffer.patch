@@ -8,6 +8,8 @@ the vendor driver decimates a wider source in the fetcher before it
 scales. This driver does not, so a wider source scaled is programmed as
 it is. Refuse it in atomic_check; a 1:1 layer of any width still
 passes.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
 diff -urN a/drivers/gpu/drm/sun4i/sun8i_ui_layer.c b/drivers/gpu/drm/sun4i/sun8i_ui_layer.c
 --- a/drivers/gpu/drm/sun4i/sun8i_ui_layer.c

@@ -12,6 +12,8 @@ dw_hdmi_g12a_dwc_read() with the regmap lock held and interrupts off,
 and the next reader hard-locks the CPU.
 
 End the map at 0x7fff.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
 diff -urN a/drivers/gpu/drm/meson/meson_dw_hdmi.c b/drivers/gpu/drm/meson/meson_dw_hdmi.c
 --- a/drivers/gpu/drm/meson/meson_dw_hdmi.c

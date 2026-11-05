@@ -9,6 +9,8 @@ so a longer timeout is refused with -EINVAL: systemd's RuntimeWatchdogSec=80
 leaves the watchdog unarmed. Give it as max_hw_heartbeat_ms instead, as
 meson_gxbb_wdt does, and the core pings the hardware between the user's
 pings; the hardware is programmed with at most 16 s.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
  drivers/watchdog/sunxi_wdt.c | 11 ++++++-----
  1 file changed, 6 insertions(+), 5 deletions(-)
