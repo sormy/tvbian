@@ -1,0 +1,64 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Wed, 4 Nov 2026 17:45:00 -0500
+Subject: [PATCH] hwcontext_v4l2request: add a cacheable option for CAPTURE
+ buffers
+
+The CAPTURE buffers come coherent: a CPU that reads the pictures, to
+convert or tone map them, reads write-combined memory, 127 ms for a
+1080p P010 picture on the H616. cacheable asks for them with
+V4L2_MEMORY_FLAG_NON_COHERENT where the queue reports cache hints; the
+driver then syncs each buffer at QBUF and DQBUF, so a picture read
+between dequeue and requeue is coherent. Off by default: a reader
+that never maps the pictures would pay for the syncs.
+---
+ libavutil/hwcontext_v4l2request.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/libavutil/hwcontext_v4l2request.c b/libavutil/hwcontext_v4l2request.c
+index c2cb3d9..1f35000 100644
+--- a/libavutil/hwcontext_v4l2request.c
++++ b/libavutil/hwcontext_v4l2request.c
+@@ -62,6 +62,9 @@ typedef struct V4L2RequestDeviceContext {
+ 
+     // Bit depths whose frames are asked for AFBC compressed, a bit each (1 << 8, 1 << 10).
+     uint32_t afbc_depths;
++
++    // CAPTURE buffers CPU-cacheable, for a CPU that reads the pictures
++    int cacheable;
+ } V4L2RequestDeviceContext;
+ 
+ typedef struct V4L2RequestFramesContext {
+@@ -249,6 +252,9 @@ static int v4l2request_device_create(AVHWDeviceContext *hwdev, const char *devic
+         p = *end == ',' ? end + 1 : end;
+     }
+ 
++    if ((entry = av_dict_get(opts, "cacheable", NULL, 0)))
++        hwctx->cacheable = strtol(entry->value, NULL, 10);
++
+     // TODO: enumerate V4L2 Request API capable video decoders
+     //       and fill hwctx->decoders and hwctx->nb_decoders,
+     //       limit to decoders for the media 'device' when specified
+@@ -812,6 +818,7 @@ static int v4l2request_open_decoder(AVHWFramesContext *hwfc)
+ static AVBufferRef *v4l2request_v4l2_buffer_alloc(AVHWFramesContext *hwfc,
+                                                   struct v4l2_format *format)
+ {
++    V4L2RequestDeviceContext *hwctx = hwfc->device_ctx->hwctx;
+     AVV4L2RequestFramesContext *fctx = hwfc->hwctx;
+     AVV4L2RequestFramesContextInternal *fctxi = fctx->internal;
+     struct v4l2_create_buffers buffers = {
+@@ -839,6 +846,11 @@ static AVBufferRef *v4l2request_v4l2_buffer_alloc(AVHWFramesContext *hwfc,
+         buffer->m.planes = (struct v4l2_plane *)(buffer + 1);
+     }
+ 
++    // the driver syncs a non-coherent buffer at QBUF and DQBUF, so it is only asked for a CPU reader
++    if (hwctx->cacheable && format->type == fctxi->capture.format.type &&
++        (fctxi->capture.capabilities & V4L2_BUF_CAP_SUPPORTS_MMAP_CACHE_HINTS))
++        buffers.flags = V4L2_MEMORY_FLAG_NON_COHERENT;
++
+     // Create the buffer
+     if (ioctl(fctxi->video_fd, VIDIOC_CREATE_BUFS, &buffers) < 0) {
+         av_log(hwfc, AV_LOG_ERROR, "Failed to create buffer of type %d: %s (%d)\n",
+-- 
+2.55.0
+
