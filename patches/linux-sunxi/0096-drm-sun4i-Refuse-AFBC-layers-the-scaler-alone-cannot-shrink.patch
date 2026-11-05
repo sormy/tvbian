@@ -12,10 +12,11 @@ falls behind, the picture is clean at the top and garbage below.
 Check it in atomic_check instead, so a commit the hardware cannot scan
 out fails and userspace can fall back to a linear buffer. The scaler
 takes a source pixel a clock: an output line's source pixels, the wider
-width times the shrink, must fit in 90% of the mixer clocks of its line
+width times the shrink, must fit in 98% of the mixer clocks of its line
 time. On DE33 at 696 MHz, 3840x2160 onto 1269 lines of 2256x1504@60
-needs 87% and scans out with no TCON underflow; at 600 MHz it needs
-101% and breaks up. A 1:1 AFBC layer still passes.
+needs 87% and scans out with no TCON underflow, 1050 lines of 1400x1050
+97.9%; the least that broke up needed 99.3%. A 1:1 AFBC layer still
+passes.
 
 The margin is the module parameter afbc_shrink_margin, a percentage,
 clamped to 50-150 and read at each check, so it can be swept at run
@@ -40,10 +41,10 @@ diff -urN a/drivers/gpu/drm/sun4i/sun8i_vi_layer.c b/drivers/gpu/drm/sun4i/sun8i
 +#define SUN8I_VI_AFBC_SHRINK_MARGIN_MIN	50
 +#define SUN8I_VI_AFBC_SHRINK_MARGIN_MAX	150
 +
-+static unsigned int afbc_shrink_margin = 90;
++static unsigned int afbc_shrink_margin = 98;
 +module_param(afbc_shrink_margin, uint, 0644);
 +MODULE_PARM_DESC(afbc_shrink_margin,
-+		 "Share of a line time an AFBC layer's VI scaler may use to shrink, in percent, clamped to 50-150 (default 90)");
++		 "Share of a line time an AFBC layer's VI scaler may use to shrink, in percent, clamped to 50-150 (default 98)");
 +
 +/*
 + * The scaler takes a source pixel a clock, so an output line's source pixels

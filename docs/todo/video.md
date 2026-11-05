@@ -29,9 +29,6 @@ FFmpeg's, and what no chip has measured yet.
 - [ ] AFBC and the scaled picture together: AFBC is the primary output's mode.
 - [ ] Root-cause the flicker of a full-screen 3840x2160 `AR24` plane over a 3840x2160 `YU10` AFBC
       video, even at 30 Hz, where either plane alone is clean.
-- [ ] `linux-sunxi/0096`'s limit: AFBC shrunk by the display at growing ratios (1.7× plays clean, 2×
-      for 4K to 1080p, beyond) until the picture or `RCQ sync timed out` fails; the patch's estimate
-      set to that edge. Today it refuses 1.7×, which plays.
 - [ ] HEVC encode: every width tried between 5120 and 8192 (6144, 7168, 7680, 7936) comes out at
       5–14 dB in most runs, at any height and with the memory clock pinned at its top; 5120 and 8192
       always encode clean. Until the cause is known, `hevc_rkmpp` should refuse them.

@@ -216,9 +216,9 @@ write there. Not yet submitted.
 
 `0096` is ours: an AFBC layer skips the fetcher's coarse downscale, so a shrink the VI scaler cannot
 keep up with breaks the picture up below its top. The scaler takes a source pixel a clock: an output
-line's source pixels, the wider width times the shrink, must fit in 90% of the mixer clocks of its
+line's source pixels, the wider width times the shrink, must fit in 98% of the mixer clocks of its
 line time, or the commit is refused for userspace to take a linear buffer. The share is
-`sun8i_mixer.afbc_shrink_margin`, percent, default 90, clamped to 50–150, writable at run time
+`sun8i_mixer.afbc_shrink_margin`, percent, default 98, clamped to 50–150, writable at run time
 (`/sys/module/sun8i_mixer/parameters/`). Not yet submitted.
 
 `0277`–`0279` are ours. `0277` counts the TCON's latched FIFO underflow at each vblank, clearing it,
