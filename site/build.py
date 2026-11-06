@@ -450,6 +450,12 @@ def terminal_html(root: Path, cards: list[Card], release: Release | None = None)
         f"running Linux {green(kernel)}",
         "",
         " " + motd_field("Base:", f"Debian stable ({esc(suite)})", ""),
+        " "
+        + motd_field(
+            "Updates:",
+            f"Kernel upgrade enabled and {green('20')} packages available for upgrade",
+            "",
+        ),
         "",
         " "
         + motd_field(
@@ -467,12 +473,17 @@ def terminal_html(root: Path, cards: list[Card], release: Release | None = None)
         ),
         "",
         " "
-        + motd_field("Load:", green("0%"), "0%", MOTD_CELL)
-        + motd_field("Uptime:", green("3h 8m"), ""),
+        + motd_field("Load:", green("8%"), "8%", MOTD_CELL)
+        + motd_field("Uptime:", green("4h 1m"), ""),
         " "
-        + motd_field("Memory:", green("9%") + " of 1.93G", "9% of 1.93G", MOTD_CELL)
-        + motd_field("CPU temp:", green("48 °C"), ""),
-        " " + motd_field("Disk /:", green("46%") + " of 58G", ""),
+        + motd_field(
+            "Memory:",
+            green("12%") + " of 1.44G",
+            "12% of 1.44G",
+            MOTD_CELL,
+        )
+        + motd_field("CPU temp:", green("44 °C"), ""),
+        " " + motd_field("Disk /:", green("32%") + " of 15G", ""),
     ]
     motd_text = "\n".join(lines)
     return (
