@@ -44,14 +44,16 @@ echo "Found $(info "$remote" | sed -n 's/^\tName: //p') ($remote)."
 
 # a re-pair starts from no bond at all: the remote has wiped its keys, so the box drops its own,
 # then finds the remote afresh; the scan runs on through the pairing, which needs it
-info "$remote" | grep -q "Paired: yes" && echo "It was paired here before: forgetting the old pairing."
-# the session pairs only a device it lists: wait until it finds the remote again after the remove
-seen=$(wc -l <"$work/log")
-say "remove $remote"
-end=$(($(date +%s) + 15))
-until tail -n +"$seen" "$work/log" | grep -q "NEW.*Device $remote" || [ "$(date +%s)" -ge "$end" ]; do
-  sleep 1
-done
+if info "$remote" | grep -q "Paired: yes"; then
+  echo "It was paired here before: forgetting the old pairing."
+  # the session pairs only a device it lists: wait until it finds the remote again after the remove
+  seen=$(wc -l <"$work/log")
+  say "remove $remote"
+  end=$(($(date +%s) + 15))
+  until tail -n +"$seen" "$work/log" | grep -q "NEW.*Device $remote" || [ "$(date +%s)" -ge "$end" ]; do
+    sleep 1
+  done
+fi
 echo "Pairing..."
 say "pair $remote"
 end=$(($(date +%s) + 30))
@@ -69,7 +71,8 @@ say "connect $remote"
 echo "Press any key on the remote."
 end=$(($(date +%s) + 30))
 while [ "$(date +%s)" -lt "$end" ]; do
-  if info "$remote" | grep -q "ServicesResolved: yes" && ls /dev/input/event* >/dev/null 2>&1; then
+  # its input devices carry its address
+  if grep -qix "$remote" /sys/class/input/input*/uniq 2>/dev/null; then
     say "quit"
     echo "Done: the remote is connected and its keys work."
     exit 0
