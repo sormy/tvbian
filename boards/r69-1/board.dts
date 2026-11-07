@@ -1497,7 +1497,7 @@
 		clock-names = "baudclk", "apb_pclk";
 		reg-shift = <2>;
 		reg-io-width = <4>;
-		dmas = <&dmac 13>, <&dmac 12>;
+		/* no dma-names, as Rockchip ships it: interrupt mode, without the DMA request failing */
 		status = "okay";
 		pinctrl-names = "default";
 		pinctrl-0 = <&uart2m0_xfer>, <&uart2m0_ctsn>;

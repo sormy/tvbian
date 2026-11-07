@@ -60,7 +60,13 @@
  		phys = <&hdmiphy>;
  		phy-names = "hdmi";
  		#sound-dai-cells = <0>;
-@@ -1494,6 +1502,12 @@
+@@ -1489,11 +1497,17 @@
+ 		clock-names = "baudclk", "apb_pclk";
+ 		reg-shift = <2>;
+ 		reg-io-width = <4>;
+-		dmas = <&dmac 13>, <&dmac 12>;
++		/* no dma-names, as Rockchip ships it: interrupt mode, without the DMA request failing */
+ 		status = "okay";
  		pinctrl-names = "default";
  		pinctrl-0 = <&uart2m0_xfer>, <&uart2m0_ctsn>;
  		phandle = <0xf6>;
