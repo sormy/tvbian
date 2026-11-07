@@ -8,7 +8,7 @@ carry only the rest.
 | ---------------------------------------- | --------------------------------------------------------------------------- |
 | `input-remotectl-share-pwm-irq`          | the IR power key as a wake source; Rockchip fixed the IRQ choice            |
 | `net-stmmac-skip-absent-mdio-reset-gpio` | a WARN + ~416 lines of trace at every boot; Rockchip fixed one call site    |
-| `bluetooth-hci-h4-serdev`                | serdev binding for `hci_h4`, so BT needs no `hciattach` unit                |
+| `bluetooth-hci-h4-serdev`                | serdev `hci_h4`: BT with no `hciattach`, once it answers steadily           |
 | `bluetooth-hci-h4-aic8800-bdaddr`        | the AIC8800's BT on a made-up address: Wi-Fi's + 1 instead                  |
 | `drm-rockchip-vop2-hdr-ext-data-size`    | a short `HDR_EXT_DATA` blob read past its end; Rockchip's 3108-byte refused |
 | `6.12/devfreq-event-rockchip-dfi-rk3528` | 6.12 only: no RK3528 DFI, so the DDR never scales                           |

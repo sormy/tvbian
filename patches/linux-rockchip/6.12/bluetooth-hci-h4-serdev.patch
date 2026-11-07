@@ -12,20 +12,20 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 
 ---
 diff --git a/drivers/bluetooth/hci_h4.c b/drivers/bluetooth/hci_h4.c
-index 1d0cdf023..d435fbb33 100644
 --- a/drivers/bluetooth/hci_h4.c
 +++ b/drivers/bluetooth/hci_h4.c
-@@ -25,6 +25,9 @@
+@@ -25,6 +25,10 @@
  #include <linux/signal.h>
  #include <linux/ioctl.h>
  #include <linux/skbuff.h>
 +#include <linux/mod_devicetable.h>
 +#include <linux/property.h>
 +#include <linux/serdev.h>
++#include <linux/delay.h>
  #include <linux/unaligned.h>
  
  #include <net/bluetooth/bluetooth.h>
-@@ -51,6 +54,11 @@ static int h4_open(struct hci_uart *hu)
+@@ -51,6 +55,11 @@ static int h4_open(struct hci_uart *hu)
  	skb_queue_head_init(&h4->txq);
  
  	hu->priv = h4;
@@ -37,7 +37,7 @@ index 1d0cdf023..d435fbb33 100644
  	return 0;
  }
  
-@@ -141,13 +149,123 @@ static const struct hci_uart_proto h4p = {
+@@ -141,13 +150,134 @@ static const struct hci_uart_proto h4p =
  	.flush		= h4_flush,
  };
  
@@ -45,6 +45,10 @@ index 1d0cdf023..d435fbb33 100644
 +
 +/* the controller ignores commands until it has answered one */
 +#define H4_QUIRK_SYNC_RESET	BIT(0)
++/* the AIC8800 can answer, then fall silent while its Wi-Fi driver powers it up */
++#define H4_SYNC_STEADY		6
++#define H4_SYNC_BEAT_MS		500
++#define H4_SYNC_TRIES		40
 +
 +struct h4_serdev {
 +	struct hci_uart hu;
@@ -55,24 +59,31 @@ index 1d0cdf023..d435fbb33 100644
 +{
 +	struct h4_serdev *h4 = serdev_device_get_drvdata(hu->serdev);
 +	struct sk_buff *skb;
-+	int i;
++	int i, steady = 0;
 +
 +	if (!(h4->quirks & H4_QUIRK_SYNC_RESET))
 +		return 0;
 +
 +	bt_dev_info(hu->hdev, "syncing controller, a command timeout here is expected");
 +
-+	for (i = 0; i < 3; i++) {
-+		skb = __hci_cmd_sync(hu->hdev, HCI_OP_RESET, 0, NULL, HCI_CMD_TIMEOUT);
-+		if (!IS_ERR(skb)) {
-+			kfree_skb(skb);
-+			return 0;
++	for (i = 0; i < H4_SYNC_TRIES && steady < H4_SYNC_STEADY; i++) {
++		skb = __hci_cmd_sync(hu->hdev, steady ? HCI_OP_READ_LOCAL_VERSION : HCI_OP_RESET,
++				     0, NULL, HCI_CMD_TIMEOUT);
++		if (IS_ERR(skb)) {
++			steady = 0;
++			continue;
 +		}
++		kfree_skb(skb);
++		if (++steady < H4_SYNC_STEADY)
++			msleep(H4_SYNC_BEAT_MS);
 +	}
 +
-+	bt_dev_err(hu->hdev, "no answer to HCI Reset");
++	if (steady < H4_SYNC_STEADY) {
++		bt_dev_err(hu->hdev, "no steady answer from the controller");
++		return -ETIMEDOUT;
++	}
 +
-+	return PTR_ERR(skb);
++	return 0;
 +}
 +
 +/* not h4p: a ->setup there would suppress the tty path's vendor detect */

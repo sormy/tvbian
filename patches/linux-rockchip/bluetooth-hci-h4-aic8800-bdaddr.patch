@@ -11,10 +11,9 @@ driver's SoC-derived address plus one, written with AIC's vendor command
 Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
 diff --git a/drivers/bluetooth/hci_h4.c b/drivers/bluetooth/hci_h4.c
-index d435fbb..8eae897 100644
 --- a/drivers/bluetooth/hci_h4.c
 +++ b/drivers/bluetooth/hci_h4.c
-@@ -32,6 +32,7 @@
+@@ -33,6 +33,7 @@
  
  #include <net/bluetooth/bluetooth.h>
  #include <net/bluetooth/hci_core.h>
@@ -22,10 +21,10 @@ index d435fbb..8eae897 100644
  
  #include "hci_uart.h"
  
-@@ -153,21 +154,22 @@ static const struct hci_uart_proto h4p = {
- 
- /* the controller ignores commands until it has answered one */
- #define H4_QUIRK_SYNC_RESET	BIT(0)
+@@ -158,21 +159,22 @@ static const struct hci_uart_proto h4p =
+ #define H4_SYNC_STEADY		6
+ #define H4_SYNC_BEAT_MS		500
+ #define H4_SYNC_TRIES		40
 +/* an AIC8800 with nothing in efuse makes up its address */
 +#define H4_QUIRK_AIC_BDADDR	BIT(1)
 +
@@ -42,16 +41,16 @@ index d435fbb..8eae897 100644
  {
 -	struct h4_serdev *h4 = serdev_device_get_drvdata(hu->serdev);
  	struct sk_buff *skb;
- 	int i;
+ 	int i, steady = 0;
  
 -	if (!(h4->quirks & H4_QUIRK_SYNC_RESET))
 -		return 0;
 -
  	bt_dev_info(hu->hdev, "syncing controller, a command timeout here is expected");
  
- 	for (i = 0; i < 3; i++) {
-@@ -183,6 +185,75 @@ static int h4_serdev_setup(struct hci_uart *hu)
- 	return PTR_ERR(skb);
+ 	for (i = 0; i < H4_SYNC_TRIES && steady < H4_SYNC_STEADY; i++) {
+@@ -195,6 +197,75 @@ static int h4_serdev_setup(struct hci_ua
+ 	return 0;
  }
  
 +static int h4_aic_set_bdaddr(struct hci_dev *hdev, const bdaddr_t *bdaddr)
@@ -126,7 +125,7 @@ index d435fbb..8eae897 100644
  /* not h4p: a ->setup there would suppress the tty path's vendor detect */
  static const struct hci_uart_proto h4_serdev_proto = {
  	.id		= HCI_UART_H4,
-@@ -224,7 +295,7 @@ static void h4_serdev_remove(struct serdev_device *serdev)
+@@ -236,7 +307,7 @@ static void h4_serdev_remove(struct serd
  
  static const struct of_device_id h4_serdev_of_match[] = {
  	{ .compatible = "aicsemi,aic8800-bt",
