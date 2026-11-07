@@ -84,13 +84,14 @@ Record the scancode as well as the keycode — the scancode is what a remap matc
 
 ```sh
 sudo evtest /dev/input/ir-remote          # IR
-sudo evtest /dev/input/bt-remote          # BLE; pair and trust first, or the node does not exist
-sudo evtest /dev/input/bt-remote-consumer # BLE; media and volume usually arrive here instead
+sudo evtest /dev/input/bt-remote          # BLE, consumer control; pair and trust first
+sudo evtest /dev/input/bt-remote-keyboard # BLE, the keyboard interface
 ```
 
 A BLE handset pairs as three HID interfaces — keyboard, consumer control, mouse — each its own node.
 Which one carries a given button differs per remote, so capture from both key-bearing nodes before
-calling a button dead.
+calling a button dead. The bundled `2B54:1600` handset sends every key on consumer control,
+`bt-remote`.
 
 Press every button and read the pairs:
 
@@ -233,21 +234,10 @@ Two traps worth knowing: there is **no `60-keyboard.rules`** on current systemd 
 
 ## Known gaps
 
-No board's IR table has had this pass; each was transcribed from what the hardware emitted. Where
-the same button disagrees, known here:
-
-| Button      | R69, IR      | H96 Max 3518, IR | BLE, after `hwdb` |
-| ----------- | ------------ | ---------------- | ----------------- |
-| Cog         | `KEY_SETUP`  | `KEY_F13`        | `KEY_CONFIG`      |
-| OK (centre) | `KEY_ENTER`  | `KEY_REPLY`      | `KEY_OK`          |
-| Home        | `KEY_HOME`   | `KEY_HOME`       | `KEY_HOMEPAGE`    |
-| Voice       | `KEY_HELP`   | `KEY_F14`        | `KEY_SEARCH`      |
-| P +/-       | `KEY_PAGEUP` | `KEY_CHANNELUP`  | `KEY_CHANNELUP`   |
-| Prime Video | `KEY_F3`     | `KEY_F8`         | `KEY_BLUE`        |
-| Google Play | `KEY_F8`     | `KEY_F9`         | `KEY_GREEN`       |
-
-- **IR:** pick one keycode per printed button, BLE's, and make every `ir_keyN` table agree with it.
-  The app keys are YouTube `KEY_RED`, Netflix `KEY_YELLOW`, Prime Video `KEY_BLUE`, Google Play
-  `KEY_GREEN`.
-- **BLE:** every board's remote reports `2B54:1600`, but the map is ✅ only where its scancodes were
-  captured: 🟡 on the 3518, whose remote also drives the 3518D; ❓ on the R69, whose is not.
+- **IR:** a board's table is checked button by button, recorded in its `board.md`; a table copied
+  from another board for the same remote is 🟡 until pressed there.
+- **Mouse:** over BLE the handset switches to pointer mode itself and sends no key; the d-pad then
+  moves the pointer, `REL_X`/`REL_Y` on `bt-remote-mouse`, and OK clicks `BTN_LEFT`. Over IR it
+  sends `KEY_TOUCHPAD_TOGGLE`.
+- **BLE:** the map is the HID layer's, the same for one handset on every board; a new handset's
+  scancodes are captured once.
