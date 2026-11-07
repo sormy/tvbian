@@ -1688,3 +1688,11 @@ gain, the unit's own DRAM init on the eMMC, is not worth it; the install keeps w
 - Prettier ran with `--print-width 100 --prose-wrap always` on the four changed Markdown files;
   `git diff --check` passed for the touched files. The full-tree check reports existing whitespace
   in `boards/h96max-m20/board.patch`. Nothing staged, committed, pushed or branched.
+
+## 2026-11-07 — HDR on a PC monitor; the green background
+
+- The owner's monitor (2256x1504, HDR10 in its EDID, YCbCr 4:4:4 and 4:2:2, deep colour to 16 bits,
+  300 MHz TMDS), 6.18.62 with a test `0286`: HDR10 at 8 bpc goes as RGB, a picture; at 10 bpc as
+  YCbCr 4:2:2 (`0278`), no signal at 2256x1504, a picture at 1920x1080@60.
+- At 1080p60 4:2:2 HDR10, an area no layer covers shows green with `BKCOLOR` at the 10-bit YUV
+  black, 8-bit YUV black or RGB black alike: `0286`'s premise is wrong, the patch dropped.

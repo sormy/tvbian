@@ -14,10 +14,12 @@ FFmpeg's, and what no chip has measured yet.
       encoding tried at `0x120`. Quarter-sample luma sits 45–57 dB from FFmpeg's, Xvid's 3-point GMC
       38–42 dB on a large pan: a reference decoder would tell which side strays. A damaged stream
       leaves the picture past the error unwritten, where software conceals.
-- [ ] The mixer's background shows green on a YUV output (4K60 HDR10, 10-bit 4:2:0) with no video
-      plane, and a half-transparent ARGB shadow over it comes out solid black. `sun8i_mixer.c` picks
-      RGB or YUV black from the output format at mode set: either the format changes after it, or on
-      DE33 the blender works in RGB before the formatter and YUV black is the wrong one.
+- [ ] An area no layer covers shows green on a YCbCr output (HDR10, 10-bit 4:2:2 or 4:2:0), and a
+      half-transparent ARGB shadow comes out solid black. Not the background value: RGB black, 8-bit
+      and 10-bit YUV black in `BKCOLOR` all show the same green.
+- [ ] HDR as 10-bit YCbCr 4:2:2 only at a CEA mode: a PC monitor listing 4:2:2 showed no signal at
+      its native 2256x1504, a picture at 1080p60. Elsewhere HDR goes as 8-bit RGB; 10-bit RGB needs
+      a TMDS clock the H616's video PLL cannot make.
 - [ ] VP9 at 3840x2160 decodes at 43 fps; the datasheet gives 60.
 - [ ] Sizes not probed: MPEG-2 and MPEG-4 to the registers' 4096x4080, VP8 4096 wide past 2304
       lines, both encoders past 4096.
