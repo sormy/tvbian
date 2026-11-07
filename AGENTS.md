@@ -182,6 +182,8 @@ cannot be backed, say so rather than rounding up.
 
 - **Pure facts. No poems, no prose, no narrative.** A table or a checklist beats a paragraph. Drop
   anything obvious or inferrable — if a competent reader can work it out, it does not go in.
+- **Simple to read**: the point first; short sentences, one idea each; plain words, a term the
+  reader needs defined once; a list or a table for anything with parts.
 - **Every word earns its place.** Cut relentlessly: a sentence restating the one above it, a caveat
   the command already enforces, an explanation of what the reader can see. Length is the symptom;
   restatement is the disease.
