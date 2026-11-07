@@ -7,12 +7,10 @@ BOARDS_DIR=/repo/boards
 # shellcheck source=/dev/null
 . "$BOARDS_DIR/$BOARD/board.conf"
 : "${BOARD_FAMILY:?boards/$BOARD/board.conf names no BOARD_FAMILY}" "${BOARD_NAME:?boards/$BOARD/board.conf names no BOARD_NAME}"
-: "${BOARD_CMA:?boards/$BOARD/board.conf names no BOARD_CMA}"
+: "${BOARD_CMDLINE:?boards/$BOARD/board.conf names no BOARD_CMDLINE}"
 [ "${BOARD_ID:-}" = "$BOARD" ] || { echo "boards/$BOARD/board.conf: BOARD_ID=${BOARD_ID:-} is not its directory" >&2; exit 1; }
-# Rockchip's default: the vendor's ttyFIQ0 console
-if [ "$BOARD_FAMILY" = rk35xx ]; then
-  : "${BOARD_SERIALCON:=earlycon=uart8250,mmio32,0xff9f0000 console=ttyFIQ0}"
-fi
+# shellcheck source=/dev/null
+. "$BOARDS_DIR/common/cmdline.conf"
 VERSION=${TVB_BUILD_REVISION:-0~local}
 ROOT=/work/package/$BOARD
 LIB=$ROOT/usr/lib/tvb
@@ -30,16 +28,10 @@ echo "$BOARD_NAME" >"$LIB/board-name"
 bash /repo/package/install-list.sh "$BOARDS_DIR/$BOARD/package.list" "$BOARDS_DIR" "$ROOT"
 
 mkdir -p "$ROOT/usr/share/u-boot-menu/conf.d"
-# ro: systemd-fsck-root checks the rootfs; net.ifnames=0: eth0 and wlan0, as on Armbian
-cmdline="rootwait ro ${BOARD_SERIALCON:-} console=tty1 consoleblank=0 net.ifnames=0"
-# the board's firmware ahead of every package's
-cmdline="$cmdline firmware_class.path=/usr/lib/tvb/firmware"
-# cma= overrides a tree's own linux,cma-default pool
-cmdline="$cmdline cma=$BOARD_CMA"
 cat >"$ROOT/usr/share/u-boot-menu/conf.d/tvb.conf" <<CONF
 U_BOOT_FDT=/usr/lib/tvb/board.dtb
 U_BOOT_TIMEOUT=10
-U_BOOT_PARAMETERS="$(echo "$cmdline" | tr -s ' ' | sed 's/ $//')"
+U_BOOT_PARAMETERS="$BOARD_CMDLINE $TVB_CMDLINE"
 CONF
 
 cat >"$ROOT/DEBIAN/postinst" <<'SCRIPT'

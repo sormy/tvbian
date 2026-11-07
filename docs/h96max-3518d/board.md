@@ -271,8 +271,8 @@ Things that surprise you once and then cost you an hour if you forgot them.
   evidence about this hardware.
 - **The serial console is `ttyFIQ0`, not `ttyS0`.** `serial@ff9f0000` is `disabled` in the tree and
   the vendor fiq-debugger owns that UART instead.
-- **`card0-TV-1` always reads `connected`.** TVE has no detect line, so that status is meaningless;
-  there is no AV jack on this board at all.
+- **No AV jack, so `tve` is disabled.** The TV encoder has no detect line and cannot tell whether a
+  cable is in.
 - **Either USB socket can power the box.** The included USB-C↔USB-A cable works in both directions,
   so 5 V can go into USB-A and leave USB-C — the only OTG port, the one maskrom uses — free.
 - **The `-2` Seekwave firmware errors in `dmesg` are normal.** The driver probes a board-specific
@@ -299,11 +299,10 @@ unit has nothing wired to it.
 `board.patch` — `dtb.md` carries the per-node rationale: `gmac0` (no PHY —
 `RK630 PHY stmmac-0:02: phy_poll_reset failed: -110`), `sfc` (no flash — SPL reads
 `unrecognized JEDEC id bytes: 00, 00, 00`), `sdmmc` (no slot; the controller binds and claims
-`vcc-sd`/`vccio_sd` regardless), `tve` (no AV jack — and `card0-TV-1` always reads `connected`
-because TVE has no detect line), `spdif` and `acodec` with their sound cards, `pwm@ffa90030` (no IR
-receiver), and the USB 3 phy. Two more are noise rather than nodes: `es7243e` ×3 on i2c6 never
-probes — zero mentions in a 660 KB dmesg — and `wifi_chip_type` still names `ap6275s`, a Broadcom
-part this box does not have.
+`vcc-sd`/`vccio_sd` regardless), `tve` (no AV jack, and no detect line), `spdif` and `acodec` with
+their sound cards, `pwm@ffa90030` (no IR receiver), and the USB 3 phy. Two more are noise rather
+than nodes: `es7243e` ×3 on i2c6 never probes — zero mentions in a 660 KB dmesg — and
+`wifi_chip_type` still names `ap6275s`, a Broadcom part this box does not have.
 
 ## Factory boot chain
 

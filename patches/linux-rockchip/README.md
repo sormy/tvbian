@@ -11,6 +11,7 @@ carry only the rest.
 | `bluetooth-hci-h4-serdev`                | serdev `hci_h4`: BT with no `hciattach`, once it answers steadily           |
 | `bluetooth-hci-h4-aic8800-bdaddr`        | the AIC8800's BT on a made-up address: Wi-Fi's + 1 instead                  |
 | `drm-rockchip-tve-unknown-connector`     | the AV jack seen as connected, the console sized to 720x576 on HDMI         |
+| `drm-rockchip-tve-composite-connector`   | the AV jack as `TV-1`, not `Composite-1` as on every other SoC              |
 | `drm-rockchip-vop2-hdr-ext-data-size`    | a short `HDR_EXT_DATA` blob read past its end; Rockchip's 3108-byte refused |
 | `6.12/devfreq-event-rockchip-dfi-rk3528` | 6.12 only: no RK3528 DFI, so the DDR never scales                           |
 | `mmc-dw-mmc-rockchip-per-host-inherit`   | `static bool inherit` in `dw_mci_v2_execute_tuning()` — **not needed here** |

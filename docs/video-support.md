@@ -146,7 +146,7 @@ with the clip already in memory:
 
 | Case                                         | H313    | RK3518      | RK3528         | S905L3      |
 | -------------------------------------------- | ------- | ----------- | -------------- | ----------- |
-| Pool, `BOARD_CMA`                            | 16 MiB  | 16 MiB      | 16 MiB         | 512 MiB     |
+| Pool, `cma=` in `BOARD_CMDLINE`              | 16 MiB  | 16 MiB      | 16 MiB         | 512 MiB     |
 | Video and display IOMMU                      | yes     | yes         | yes            | no          |
 | Idle use                                     | 1.5 MiB | 1.2-2.3 MiB | 3.0 MiB        | ≤ 42 MiB    |
 | 4K H.264, HEVC, VP9                          | ❓      | ❓          | 0 MiB, 8K HEVC | 291-294 MiB |

@@ -1,0 +1,39 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 7 Nov 2026 15:00:00 -0500
+Subject: [PATCH] drm/rockchip: tve: register the connector as Composite
+
+The TV encoder outputs CVBS alone, yet registered its connector as TV,
+the type for an output that switches among composite, S-Video and
+component. Composite is the type for CVBS, as sunxi's, meson's and
+vc4's encoders register it, so userspace and the command line name it
+Composite-1 on every SoC.
+
+The boot logo's hand-over keeps a reference for outputs that support
+hot-plug, TV among them: Composite joins it.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff -urN a/drivers/gpu/drm/rockchip/rockchip_drm_tve.c b/drivers/gpu/drm/rockchip/rockchip_drm_tve.c
+--- a/drivers/gpu/drm/rockchip/rockchip_drm_tve.c
++++ b/drivers/gpu/drm/rockchip/rockchip_drm_tve.c
+@@ -1110,7 +1110,7 @@
+ 	connector->interlace_allowed = 1;
+ 	ret = drm_connector_init(drm_dev, connector,
+ 				 &rockchip_tve_connector_funcs,
+-				 DRM_MODE_CONNECTOR_TV);
++				 DRM_MODE_CONNECTOR_Composite);
+ 	if (ret < 0) {
+ 		dev_dbg(tve->dev, "failed to initialize connector with drm\n");
+ 		goto err_free_encoder;
+diff -urN a/drivers/gpu/drm/rockchip/rockchip_drm_logo.c b/drivers/gpu/drm/rockchip/rockchip_drm_logo.c
+--- a/drivers/gpu/drm/rockchip/rockchip_drm_logo.c
++++ b/drivers/gpu/drm/rockchip/rockchip_drm_logo.c
+@@ -30,6 +30,7 @@
+ 	case DRM_MODE_CONNECTOR_HDMIA:
+ 	case DRM_MODE_CONNECTOR_HDMIB:
+ 	case DRM_MODE_CONNECTOR_TV:
++	case DRM_MODE_CONNECTOR_Composite:
+ 		return true;
+ 	default:
+ 		return false;

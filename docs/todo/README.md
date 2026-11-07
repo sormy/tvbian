@@ -42,6 +42,10 @@ below.
       and Google Chrome links none, so both decode in software here. Firefox loads the system's
       FFmpeg, ours, at run time; else a Chromium built with its V4L2 decoders.
 
+- [ ] **Consider: the console fits each screen plugged after the first.** The kernel's console is
+      one framebuffer, sized by the first screen and cloned to every output, so a larger screen
+      plugged later shows it small. A userspace console (kmscon) redraws per screen on hot-plug.
+
 - [ ] **Every board: which recovery button it has.** Most boxes expose a U-Boot recovery button, a
       key the bootloader reads and Linux sees, not the SoC's maskrom or FEL strap, which is rarely
       wired out. Each board's README row and `board.md` name it: "Recovery button (U-Boot)", or "→

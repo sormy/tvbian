@@ -294,9 +294,9 @@ higher one and record why.
 - **`/dev/mem`: only the offsets the driver uses, while its power domain is on**; anything else
   hangs or resets the box.
 - **A box's `/tmp` is RAM**: big files go to `/var/tmp`; remove what you wrote.
-- **`BOARD_CMA` covers the worst case**, the largest uncompressed picture, a seek, a resolution
-  change and the interface up, plus a margin, measured with `/sys/kernel/debug/cma/*/used`. A
-  decoder behind an IOMMU uses none.
+- **A `cma=` in `BOARD_CMDLINE`, where the tree's pool is wrong, covers the worst case**, the
+  largest uncompressed picture, a seek, a resolution change and the interface up, plus a margin,
+  measured with `/sys/kernel/debug/cma/*/used`. A decoder behind an IOMMU uses none.
 - **Tests use our FFmpeg**, built on the host; nothing builds on a box.
 - **Over SSH, stop a process by its exact name (`pkill -x`) or PID.** `pkill -f` matches the SSH
   session's own command line and kills it.

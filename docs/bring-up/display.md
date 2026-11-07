@@ -11,6 +11,10 @@
 4. **The AV jack and S/PDIF** through the kit's adapters: the composite picture on an HDMI screen,
    the jack's audio in headphones. First find the jack's ground: the RCA that beeps to a USB shell,
    box off. A cable grounded elsewhere gives no picture; the CTIA-to-OMTP adapter fixes it.
+   **Composite is `Composite-1`, off by default**: the connector of type Composite, a driver that
+   names it otherwise patched; `video=Composite-1:d` in `BOARD_CMDLINE`, else it sizes the console
+   when HDMI is plugged in after boot. Turn it on for the test with
+   `echo on > /sys/class/drm/card0-Composite-1/status`, and `off` after.
 5. **The GPU** headless first, EGL on GBM rendering to an FBO, `glReadPixels` on a known triangle;
    then on screen with the full default `glmark2-es2-drm` suite, beside a sibling family's full run.
 6. **Planes**: every plane the CRTC offers, with its formats, compression, scaling, alpha and zpos.
