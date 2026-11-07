@@ -1,0 +1,103 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Fri, 6 Nov 2026 00:00:00 +0000
+Subject: [PATCH] avcodec/rkmppdec: take every packet before returning EAGAIN
+
+libavcodec takes EAGAIN from receive_frame as every packet it holds
+consumed. A packet MPP refused stays in in_pkt; once it was written, the
+decoder returned EAGAIN with the caller's next packet still held, and the
+following avcodec_send_packet() failed with EAGAIN, which ffmpeg reports
+as an internal bug. A resolution change hits it: MPP stops its output
+while it reconfigures and refuses input.
+
+Take packets until libavcodec has none or MPP is full; with MPP full,
+wait for a frame, as after the end of stream.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/libavcodec/rkmppdec.c b/libavcodec/rkmppdec.c
+--- a/libavcodec/rkmppdec.c
++++ b/libavcodec/rkmppdec.c
+@@ -640,50 +640,51 @@ static int rkmpp_receive_frame(AVCodecCo
+ {
+     RKMPPDecodeContext *rk_context = avctx->priv_data;
+     RKMPPDecoder *decoder = rk_context->decoder;
+-    int ret = MPP_NOK;
+-    RK_S32 usedslots, freeslots;
++    AVPacket *const pkt = avctx->internal->in_pkt;
++    RK_S32 usedslots = 0;
++    int input_full = 0;
++    int ret;
+ 
+-    if (!decoder->eos_sent) {
+-        // we get the available slots in decoder
++    // libavcodec takes EAGAIN as every packet it holds consumed: take them until MPP is full
++    while (!decoder->eos_sent && !input_full) {
+         ret = decoder->mpi->control(decoder->ctx, MPP_DEC_GET_STREAM_COUNT, &usedslots);
+         if (ret != MPP_OK) {
+             av_log(avctx, AV_LOG_ERROR, "Failed to get decoder used slots (code = %d).\n", ret);
+             return ret;
+         }
+-
+-        freeslots = INPUT_MAX_PACKETS - usedslots;
+-        if (freeslots > 0) {
+-            AVPacket *const pkt = avctx->internal->in_pkt;
+-
+-            if (!pkt->size) {
+-                ret = ff_decode_get_packet(avctx, pkt);
+-                if (ret < 0 && ret != AVERROR_EOF) {
+-                    return ret;
+-                }
+-            }
+-
+-            ret = rkmpp_send_packet(avctx, pkt);
+-            if (ret < 0 && ret != AVERROR(EAGAIN)) {
+-                av_packet_unref(pkt);
+-                av_log(avctx, AV_LOG_ERROR, "Failed to send packet to decoder (code = %d)\n", ret);
++        input_full = usedslots >= INPUT_MAX_PACKETS;
++        if (input_full)
++            break;
++
++        if (!pkt->size) {
++            ret = ff_decode_get_packet(avctx, pkt);
++            if (ret == AVERROR(EAGAIN))
++                break;
++            if (ret < 0 && ret != AVERROR_EOF)
+                 return ret;
+-            } else if (ret == AVERROR(EAGAIN)) {
+-                // Input queue is full, don't queue more packet.
+-                freeslots = 0;
+-            } else {
+-                av_packet_unref(pkt);
+-            }
+         }
+ 
+-        // make sure we keep decoder full
+-        if (freeslots > 1 && !decoder->eos_sent)
+-            return AVERROR(EAGAIN);
++        ret = rkmpp_send_packet(avctx, pkt);
++        if (ret == AVERROR(EAGAIN)) {
++            input_full = 1;
++        } else if (ret < 0) {
++            av_packet_unref(pkt);
++            av_log(avctx, AV_LOG_ERROR, "Failed to send packet to decoder (code = %d)\n", ret);
++            return ret;
++        } else {
++            av_packet_unref(pkt);
++        }
+     }
+ 
+-    // past the end of stream sent, MPP may still be setting up: wait for its end of stream
++    // every packet taken and room left: more input before a blocking wait on MPP
++    if (!decoder->eos_sent && !input_full && usedslots < INPUT_MAX_PACKETS - 1)
++        return AVERROR(EAGAIN);
++
++    // past the end of stream sent, MPP may still be setting up: wait for its end of stream; with
++    // its input full, wait for a frame
+     do {
+         ret = rkmpp_retrieve_frame(avctx, frame);
+-    } while (decoder->eos_sent && ret == AVERROR(EAGAIN));
++    } while ((decoder->eos_sent || input_full) && ret == AVERROR(EAGAIN));
+ 
+     return ret;
+ }
