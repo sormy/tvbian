@@ -1,0 +1,24 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Fri, 6 Nov 2026 00:00:00 +0000
+Subject: [PATCH] drm/rockchip: tve: report an unsensed connector as unknown
+
+The TV encoder cannot sense a load, yet reported its connector connected
+with nothing plugged. The fbdev console then sized itself to 720x576 on
+every screen, HDMI's too. Unknown is the status for a connector that cannot
+tell: clients use it when nothing else is connected.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/drivers/gpu/drm/rockchip/rockchip_drm_tve.c b/drivers/gpu/drm/rockchip/rockchip_drm_tve.c
+--- a/drivers/gpu/drm/rockchip/rockchip_drm_tve.c
++++ b/drivers/gpu/drm/rockchip/rockchip_drm_tve.c
+@@ -177,7 +177,7 @@ static void rockchip_encoder_destroy(str
+ static enum drm_connector_status
+ rockchip_tve_connector_detect(struct drm_connector *connector, bool force)
+ {
+-	return connector_status_connected;
++	return connector_status_unknown;
+ }
+ 
+ static void rockchip_tve_connector_destroy(struct drm_connector *connector)
