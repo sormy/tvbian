@@ -1,0 +1,10 @@
+# Stock's default NV matches the packaged standalone variant.
+link /usr/lib/firmware/updates/swt6621s/SWT6621S_NV_SDIO_STANDALONE_FDD.bin /usr/lib/tvb/firmware/SWT6621S_NV_SDIO.h96max-m2-plus,rk3528-tvbox.bin
+
+0755 common/led-shutdown /usr/lib/systemd/system-shutdown/tvb-led
+0755 common/led-sleep /usr/lib/systemd/system-sleep/tvb-led
+0644 common/powerkey.conf /usr/lib/systemd/logind.conf.d/zz-tvb-powerkey.conf
+0644 common/vpu.rules /usr/lib/udev/rules.d/99-tvb-vpu.rules
+0644 common/rfkill-bt.rules /usr/lib/udev/rules.d/60-tvb-rfkill-bt.rules
+0755 common/tvb-install /usr/sbin/tvb-install
+0644 common/preserve-sectors.rk35xx /usr/lib/tvb/preserve-sectors
