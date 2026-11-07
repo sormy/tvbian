@@ -287,7 +287,8 @@ higher one and record why.
   as `ssh root@<BOARD_HOSTNAME>.local`.
 - **Bring-up and fixes run unattended.** Exhaust the box's readback, the repo and `backup/` before
   asking a person to look, listen or plug in. Make the ask one step, and add the test it shows is
-  missing.
+  missing. When the ask is timed, a person watching or acting soon after the agent starts something
+  (a button held through a reboot), start only on their word that they are ready.
 - **`/dev/mem`: only the offsets the driver uses, while its power domain is on**; anything else
   hangs or resets the box.
 - **A box's `/tmp` is RAM**: big files go to `/var/tmp`; remove what you wrote.
