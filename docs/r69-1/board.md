@@ -150,27 +150,26 @@ The receiver is input device **`ffa90030.pwm`**, reachable at the stable path
 `boards/r69-1/board.dts`. The kernel builds the driver in, with the shared-IRQ fix from
 `kernel/rk35xx.conf`.
 
-> **Baseline, not a spec** — this is the mapping of _our_ unit, and these boxes vary between
-> production runs. The H96 Max's remote answers to a different usercode (`0xfb04`) with different
-> codes for OK and the app row. Check yours with `evtest /dev/input/ir-remote`.
+🟡 The table gives the canonical keymap in `docs/remote-keymap.md`, as the H96 Max M2 Plus's does
+for the same remote; not pressed here since.
 
 | Button                    | Key event                                        |
 | ------------------------- | ------------------------------------------------ |
 | Power                     | `KEY_POWER`                                      |
-| OK (center)               | `KEY_ENTER`                                      |
+| OK (center)               | `KEY_OK`                                         |
 | Up / Down / Left / Right  | `KEY_UP` / `KEY_DOWN` / `KEY_LEFT` / `KEY_RIGHT` |
 | Back                      | `KEY_BACK`                                       |
-| Home                      | `KEY_HOME`                                       |
+| Home                      | `KEY_HOMEPAGE`                                   |
 | Delete                    | `KEY_BACKSPACE`                                  |
 | Hamburger (menu)          | `KEY_MENU`                                       |
-| Cog (settings)            | `KEY_SETUP`                                      |
-| Voice                     | `KEY_HELP`                                       |
-| Mouse                     | `KEY_TEXT`                                       |
+| Cog (settings)            | `KEY_CONFIG`                                     |
+| Voice                     | `KEY_SEARCH`                                     |
+| Mouse                     | `KEY_TOUCHPAD_TOGGLE`                            |
 | Volume up / down          | `KEY_VOLUMEUP` / `KEY_VOLUMEDOWN`                |
 | Mute                      | `KEY_MUTE`                                       |
-| Page up / down            | `KEY_PAGEUP` / `KEY_PAGEDOWN`                    |
-| YouTube / Netflix         | `KEY_F6` / `KEY_F7`                              |
-| Prime Video / Google Play | `KEY_F3` / `KEY_F8`                              |
+| P up / down               | `KEY_CHANNELUP` / `KEY_CHANNELDOWN`              |
+| YouTube / Netflix         | `KEY_RED` / `KEY_YELLOW`                         |
+| Prime Video / Google Play | `KEY_BLUE` / `KEY_GREEN`                         |
 
 **Voice** and **mouse** emit plain key events; their special functions (voice capture, on-screen
 cursor) are not wired up over IR.

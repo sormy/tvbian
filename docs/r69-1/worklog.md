@@ -1879,3 +1879,56 @@ nothing failed. The previous tree is kept at `/root/board.dtb.known-good`.
 
 - `BOARD_CMA=16M` from the H96 Max 3518 and 3518D, the same RK3518: their peak 2.3 MiB under 8K HEVC
   with AFBC frames and a 4K60 display. Not booted on this box.
+
+## 2026-11-06 — DDC/CI over `i2c-gpio`
+
+- The M2 Plus's graft: the HDMI DDC pins as an `i2c-gpio` bus, `ddc-i2c-bus` on the HDMI node, with
+  the canonical `ir_key1` table. DTB `88aa00b6`, the old kept as `board.dtb.preddc`.
+- BOE monitor attached: EDID 256 bytes, `ddcutil detect` Display 1, MCCS 2.2 on `i2c-hdmi-ddc`;
+  brightness 100, set 80 and read 80, set back 100. No `ddc read failed` at boot.
+
+## 2026-11-06 — uart2's DMA, and Bluetooth at boot
+
+- `of_dma_request_slave_channel: dma-names property of node '/serial@ffa00000' missing or empty`:
+  `uart2` carries the factory's `dmas` without `dma-names`, as Rockchip's `rk3528.dtsi` does, so the
+  UART runs in interrupt mode. `dmas` dropped, DTB `582d79e0`: the error gone,
+  `failed to request DMA, use interrupt mode` left, the mode unchanged.
+- That boot `hci0` stayed down: HCI Reset answered on a retry, `Opcode 0x1003 failed: -110`. The
+  boot before today's trees failed alike. `hci_uart`'s setup at 15.76 s, `aic8800_bsp` loaded at
+  15.98 s, `aicbt_patch_table_load` at 16.24 s.
+- `softdep hci_uart pre: aic8800_bsp` in `/etc/modprobe.d`, six warm reboots: `hci0` up 2, down 4;
+  the setup 0.2–0.3 s ahead of the patch every time. Removed.
+- `hciconfig hci0 up` brings it up but leaves it out of `btmgmt`;
+  `modprobe -r hci_uart && modprobe hci_uart` brings it back whole, `Powered: yes`.
+
+## 2026-11-06 — Bluetooth's setup, retried
+
+- `bluetooth-hci-h4-serdev.patch` folded: each HCI Reset followed by Read Local Version, the pair
+  retried up to 8 times. Kernel rebuilt, its `hci_uart.ko` alone swapped in, the original kept as
+  `/root/hci_uart.ko.orig`. Eight warm reboots: `hci0` up 1, down 7. The setup now passes, a reset
+  and the read answered after one timeout, and the core's Read Local Features (`0x1003`) after it
+  times out: the controller answers, then falls silent near 0.1 s later.
+- To see the traffic, a runtime repeat over `btmon`: `hci_uart` loaded, then `aic8800_fdrv`. Its
+  `rmmod aic8800_fdrv` took down `wlan0`, the only link here (no Ethernet cable), and the box did
+  not come back on Wi-Fi: power cycled by hand.
+
+## 2026-11-06 — Bluetooth's setup waits for steady answers
+
+- `btmon` from early boot, a failing boot: Reset unanswered, then Reset, Reset, Read Local Version,
+  Read BD ADDR and AIC's `0xfc70` all answered within 25 ms, then nothing: `0x1003` timed out. A
+  rebind right after `wlan0` appeared failed alike; a setup a few seconds later passed.
+- A udev rule and then a unit rebinding `hci_uart_h4` after `wlan0`: dropped, userspace binding a
+  driver.
+- `bluetooth-hci-h4-serdev.patch` folded: setup counts the controller up after 6 answers in a row,
+  500 ms apart, Reset then Read Local Version, a miss starting the count again, 40 commands at most.
+  The earlier single-read retry reverted. Kernel rebuilt, `hci_uart.ko` swapped in.
+- Ten warm reboots: `hci0` `UP RUNNING`, `Powered: yes`, on its first setup each time; 2 of 6
+  before. Setup to registration 4.7 s.
+
+## 2026-11-06 — The console in the small font on HDMI
+
+- The console 90x36 on the 2256x1504 monitor: the TV encoder's `TV-1`, sensing nothing, reported
+  `connected`, and fbcon sized itself and its font to its 720x576.
+- `drm-rockchip-tve-unknown-connector.patch`: `TV-1` reports `unknown`. Kernel rebuilt and
+  installed: `TV-1` `unknown`, the console 141x47 in the large font. Confirmed on the screen by the
+  owner.
