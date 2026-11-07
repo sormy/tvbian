@@ -52,7 +52,15 @@
  		phandle = <0xeb>;
  
  		vop_out: ports {
-@@ -1494,6 +1501,12 @@
+@@ -1389,6 +1396,7 @@
+ 		rockchip,cts-manual;
+ 		pinctrl-names = "default";
+ 		pinctrl-0 = <&hdmi_pins>;
++		ddc-i2c-bus = <&hdmi_ddc>;
+ 		phys = <&hdmiphy>;
+ 		phy-names = "hdmi";
+ 		#sound-dai-cells = <0>;
+@@ -1494,6 +1502,12 @@
  		pinctrl-names = "default";
  		pinctrl-0 = <&uart2m0_xfer>, <&uart2m0_ctsn>;
  		phandle = <0xf6>;
@@ -65,7 +73,7 @@
  	};
  
  	uart3: serial@ffa08000 {
-@@ -1748,12 +1761,14 @@
+@@ -1748,12 +1762,14 @@
  		status = "okay";
  		remote_pwm_id = <0x03>;
  		handle_cpu_id = <0x01>;
@@ -82,7 +90,7 @@
  		};
  
  		ir_key2 {
-@@ -1864,7 +1879,8 @@
+@@ -1864,7 +1880,8 @@
  		clocks = <&cru TCLK_WDT_NS>, <&cru PCLK_WDT_NS>;
  		clock-names = "tclk", "pclk";
  		interrupts = <GIC_SPI 28 IRQ_TYPE_LEVEL_HIGH>;
@@ -92,7 +100,45 @@
  		phandle = <0x10e>;
  	};
  
-@@ -4373,27 +4389,29 @@
+@@ -3106,12 +3123,15 @@
+ 		hdmi {
+ 
+ 			hdmi_pins: hdmi-pins {
+-				rockchip,pins = <0 RK_PA3 1 &pcfg_pull_none>,
+-				                <0 RK_PA4 1 &pcfg_pull_none>,
+-				                <0 RK_PA5 1 &pcfg_pull_none>;
++				rockchip,pins = <0 RK_PA3 1 &pcfg_pull_none>;
+ 				phandle = <0x3c>;
+ 			};
+ 
++			hdmi_ddc_gpio: hdmi-ddc-gpio {
++				rockchip,pins = <0 RK_PA4 RK_FUNC_GPIO &pcfg_pull_none>,
++				                <0 RK_PA5 RK_FUNC_GPIO &pcfg_pull_none>;
++			};
++
+ 			hdmi_pins_idle: hdmi-pins-idle {
+ 				rockchip,pins = <0 RK_PA3 1 &pcfg_pull_none>,
+ 				                <0 RK_PA4 RK_FUNC_GPIO &pcfg_output_low_pull_down>,
+@@ -4089,6 +4109,18 @@
+ 		};
+ 	};
+ 
++	/* the HDMI DDC lines as a full I2C bus: dw-hdmi's own master reads the EDID but refuses DDC/CI */
++	hdmi_ddc: i2c-hdmi-ddc {
++		compatible = "i2c-gpio";
++		sda-gpios = <&gpio0 RK_PA5 GPIO_OPEN_DRAIN>;
++		scl-gpios = <&gpio0 RK_PA4 GPIO_OPEN_DRAIN>;
++		i2c-gpio,delay-us = <5>;
++		pinctrl-names = "default";
++		pinctrl-0 = <&hdmi_ddc_gpio>;
++		#address-cells = <1>;
++		#size-cells = <0>;
++	};
++
+ 	adc_keys: adc-keys {
+ 		status = "okay";
+ 		compatible = "adc-keys";
+@@ -4373,27 +4405,29 @@
  	leds {
  		compatible = "gpio-leds";
  

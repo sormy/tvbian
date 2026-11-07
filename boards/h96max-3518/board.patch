@@ -52,7 +52,15 @@
  		phandle = <0xea>;
  
  		vop_out: ports {
-@@ -1746,7 +1753,8 @@
+@@ -1387,6 +1394,7 @@
+ 		rockchip,cts-manual;
+ 		pinctrl-names = "default";
+ 		pinctrl-0 = <&hdmi_pins>;
++		ddc-i2c-bus = <&hdmi_ddc>;
+ 		phys = <&hdmiphy>;
+ 		phy-names = "hdmi";
+ 		#sound-dai-cells = <0>;
+@@ -1746,7 +1754,8 @@
  		status = "okay";
  		remote_pwm_id = <0x03>;
  		handle_cpu_id = <0x01>;
@@ -62,7 +70,7 @@
  		phandle = <0x107>;
  
  		ir_key1 {
-@@ -1776,7 +1784,8 @@
+@@ -1776,7 +1785,8 @@
  
  		ir_key6 {
  			rockchip,usercode = <0xfb04>;
@@ -72,7 +80,7 @@
  		};
  
  		ir_key7 {
-@@ -1862,7 +1871,8 @@
+@@ -1862,7 +1872,8 @@
  		clocks = <&cru TCLK_WDT_NS>, <&cru PCLK_WDT_NS>;
  		clock-names = "tclk", "pclk";
  		interrupts = <GIC_SPI 28 IRQ_TYPE_LEVEL_HIGH>;
@@ -82,7 +90,45 @@
  		phandle = <0x10d>;
  	};
  
-@@ -4277,6 +4287,8 @@
+@@ -3056,12 +3067,15 @@
+ 		hdmi {
+ 
+ 			hdmi_pins: hdmi-pins {
+-				rockchip,pins = <0 RK_PA3 1 &pcfg_pull_none>,
+-				                <0 RK_PA4 1 &pcfg_pull_none>,
+-				                <0 RK_PA5 1 &pcfg_pull_none>;
++				rockchip,pins = <0 RK_PA3 1 &pcfg_pull_none>;
+ 				phandle = <0x3c>;
+ 			};
+ 
++			hdmi_ddc_gpio: hdmi-ddc-gpio {
++				rockchip,pins = <0 RK_PA4 RK_FUNC_GPIO &pcfg_pull_none>,
++				                <0 RK_PA5 RK_FUNC_GPIO &pcfg_pull_none>;
++			};
++
+ 			hdmi_pins_idle: hdmi-pins-idle {
+ 				rockchip,pins = <0 RK_PA3 1 &pcfg_pull_none>,
+ 				                <0 RK_PA4 RK_FUNC_GPIO &pcfg_output_low_pull_down>,
+@@ -4031,6 +4045,18 @@
+ 		};
+ 	};
+ 
++	/* the HDMI DDC lines as a full I2C bus: dw-hdmi's own master reads the EDID but refuses DDC/CI */
++	hdmi_ddc: i2c-hdmi-ddc {
++		compatible = "i2c-gpio";
++		sda-gpios = <&gpio0 RK_PA5 GPIO_OPEN_DRAIN>;
++		scl-gpios = <&gpio0 RK_PA4 GPIO_OPEN_DRAIN>;
++		i2c-gpio,delay-us = <5>;
++		pinctrl-names = "default";
++		pinctrl-0 = <&hdmi_ddc_gpio>;
++		#address-cells = <1>;
++		#size-cells = <0>;
++	};
++
+ 	adc_keys: adc-keys {
+ 		status = "okay";
+ 		compatible = "adc-keys";
+@@ -4277,6 +4303,8 @@
  		pinctrl-names = "default";
  		pinctrl-0 = <&wifi_enable_h>, <&clkm1_32k_out>;
  		post-power-on-delay-ms = <200>;
@@ -91,7 +137,7 @@
  		reset-gpios = <&gpio3 10 GPIO_ACTIVE_LOW>;
  		status = "okay";
  		phandle = <0x79>;
-@@ -4321,7 +4333,9 @@
+@@ -4321,7 +4349,9 @@
  		compatible = "gpio-leds";
  		phandle = <0x1c7>;
  
@@ -102,7 +148,7 @@
  			gpios = <&gpio4 17 GPIO_ACTIVE_LOW>;
  			linux,default-trigger = "none";
  			default-state = "on";
-@@ -4329,7 +4343,8 @@
+@@ -4329,7 +4359,8 @@
  			retain-state-shutdown;
  		};
  
@@ -112,7 +158,7 @@
  			gpios = <&gpio4 11 GPIO_ACTIVE_LOW>;
  			linux,default-trigger = "none";
  			default-state = "off";
-@@ -4338,10 +4353,8 @@
+@@ -4338,10 +4369,8 @@
  		};
  	};
  

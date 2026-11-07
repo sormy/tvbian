@@ -70,7 +70,15 @@
  		phandle = <0xef>;
  
  		ports {
-@@ -1743,7 +1752,9 @@
+@@ -1387,6 +1396,7 @@
+ 		rockchip,cts-manual;
+ 		pinctrl-names = "default";
+ 		pinctrl-0 = <&hdmi_pins>;
++		ddc-i2c-bus = <&hdmi_ddc>;
+ 		phys = <&hdmiphy>;
+ 		phy-names = "hdmi";
+ 		#sound-dai-cells = <0>;
+@@ -1743,7 +1753,9 @@
  		pinctrl-0 = <&pwm3m0_pins>;
  		clocks = <&cru CLK_PWM0>, <&cru PCLK_PWM0>;
  		clock-names = "pwm", "pclk";
@@ -81,7 +89,7 @@
  		remote_pwm_id = <0x03>;
  		handle_cpu_id = <0x01>;
  		remote_support_psci = <0x00>;
-@@ -1862,7 +1873,8 @@
+@@ -1862,7 +1874,8 @@
  		clocks = <&cru TCLK_WDT_NS>, <&cru PCLK_WDT_NS>;
  		clock-names = "tclk", "pclk";
  		interrupts = <GIC_SPI 28 IRQ_TYPE_LEVEL_HIGH>;
@@ -91,7 +99,7 @@
  		phandle = <0x10d>;
  	};
  
-@@ -2007,7 +2019,8 @@
+@@ -2007,7 +2020,8 @@
  		#sound-dai-cells = <0>;
  		pinctrl-names = "default";
  		pinctrl-0 = <&spdifm0_pins>;
@@ -101,7 +109,7 @@
  		phandle = <0x9b>;
  	};
  
-@@ -2036,7 +2049,9 @@
+@@ -2036,7 +2050,9 @@
  		phy-handle = <&rmii0_phy>;
  		nvmem-cells = <&macphy_bgs>;
  		nvmem-cell-names = "bgs";
@@ -112,7 +120,7 @@
  		phandle = <0x10e>;
  
  		mdio0: mdio {
-@@ -2121,7 +2136,8 @@
+@@ -2121,7 +2137,8 @@
  		assigned-clock-rates = <100000000>;
  		#address-cells = <1>;
  		#size-cells = <0>;
@@ -122,7 +130,7 @@
  		phandle = <0x111>;
  	};
  
-@@ -2178,7 +2194,8 @@
+@@ -2178,7 +2195,8 @@
  		resets = <&cru SRST_HRESETN_SDMMC0>;
  		reset-names = "reset";
  		rockchip,use-v2-tuning;
@@ -132,7 +140,7 @@
  		bus-width = <4>;
  		cap-mmc-highspeed;
  		cap-sd-highspeed;
-@@ -2377,6 +2394,7 @@
+@@ -2377,6 +2395,7 @@
  		reset-names = "combphy-apb", "combphy";
  		rockchip,pipe-grf = <&grf>;
  		rockchip,pipe-phy-grf = <&grf>;
@@ -140,7 +148,7 @@
  		status = "okay";
  		phandle = <0x23>;
  	};
-@@ -2438,7 +2456,8 @@
+@@ -2438,7 +2457,8 @@
  		clock-names = "pclk", "mclk";
  		resets = <&cru SRST_PRESETN_ACODEC>;
  		reset-names = "acodec";
@@ -150,7 +158,26 @@
  		pa-ctl-gpios = <&gpio0 0 GPIO_ACTIVE_HIGH>;
  		phandle = <0x91>;
  	};
-@@ -4014,7 +4033,8 @@
+@@ -3055,12 +3075,15 @@
+ 		hdmi {
+ 
+ 			hdmi_pins: hdmi-pins {
+-				rockchip,pins = <0 RK_PA3 1 &pcfg_pull_none>,
+-				                <0 RK_PA4 1 &pcfg_pull_none>,
+-				                <0 RK_PA5 1 &pcfg_pull_none>;
++				rockchip,pins = <0 RK_PA3 1 &pcfg_pull_none>;
+ 				phandle = <0x3c>;
+ 			};
+ 
++			hdmi_ddc_gpio: hdmi-ddc-gpio {
++				rockchip,pins = <0 RK_PA4 RK_FUNC_GPIO &pcfg_pull_none>,
++				                <0 RK_PA5 RK_FUNC_GPIO &pcfg_pull_none>;
++			};
++
+ 			hdmi_pins_idle: hdmi-pins-idle {
+ 				rockchip,pins = <0 RK_PA3 1 &pcfg_pull_none>,
+ 				                <0 RK_PA4 RK_FUNC_GPIO &pcfg_output_low_pull_down>,
+@@ -4014,7 +4037,8 @@
  	};
  
  	acodec_sound: acodec-sound {
@@ -160,7 +187,26 @@
  		compatible = "simple-audio-card";
  		simple-audio-card,name = "rk3528-acodec";
  		simple-audio-card,format = "i2s";
-@@ -4131,7 +4151,8 @@
+@@ -4030,6 +4054,18 @@
+ 		};
+ 	};
+ 
++	/* the HDMI DDC lines as a full I2C bus: dw-hdmi's own master reads the EDID but refuses DDC/CI */
++	hdmi_ddc: i2c-hdmi-ddc {
++		compatible = "i2c-gpio";
++		sda-gpios = <&gpio0 RK_PA5 GPIO_OPEN_DRAIN>;
++		scl-gpios = <&gpio0 RK_PA4 GPIO_OPEN_DRAIN>;
++		i2c-gpio,delay-us = <5>;
++		pinctrl-names = "default";
++		pinctrl-0 = <&hdmi_ddc_gpio>;
++		#address-cells = <1>;
++		#size-cells = <0>;
++	};
++
+ 	adc_keys: adc-keys {
+ 		status = "okay";
+ 		compatible = "adc-keys";
+@@ -4131,7 +4167,8 @@
  	};
  
  	spdif-sound {
@@ -170,7 +216,7 @@
  		compatible = "simple-audio-card";
  		simple-audio-card,name = "ROCKCHIP,SPDIF";
  		simple-audio-card,mclk-fs = <128>;
-@@ -4276,6 +4297,8 @@
+@@ -4276,6 +4313,8 @@
  		pinctrl-names = "default";
  		pinctrl-0 = <&wifi_enable_h>, <&clkm1_32k_out>;
  		post-power-on-delay-ms = <200>;
@@ -179,7 +225,7 @@
  		reset-gpios = <&gpio3 10 GPIO_ACTIVE_LOW>;
  		status = "okay";
  		phandle = <0x79>;
-@@ -4320,7 +4343,9 @@
+@@ -4320,7 +4359,9 @@
  		compatible = "gpio-leds";
  		phandle = <0x1c7>;
  
@@ -190,7 +236,7 @@
  			gpios = <&gpio4 17 GPIO_ACTIVE_LOW>;
  			linux,default-trigger = "none";
  			default-state = "on";
-@@ -4328,7 +4353,8 @@
+@@ -4328,7 +4369,8 @@
  			retain-state-shutdown;
  		};
  
@@ -200,7 +246,7 @@
  			gpios = <&gpio4 11 GPIO_ACTIVE_LOW>;
  			linux,default-trigger = "none";
  			default-state = "off";
-@@ -4337,10 +4363,8 @@
+@@ -4337,10 +4379,8 @@
  		};
  	};
  
