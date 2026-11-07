@@ -150,8 +150,8 @@ The receiver is input device **`ffa90030.pwm`**, reachable at the stable path
 `boards/r69-1/board.dts`. The kernel builds the driver in, with the shared-IRQ fix from
 `kernel/rk35xx.conf`.
 
-🟡 The table gives the canonical keymap in `docs/remote-keymap.md`, as the H96 Max M2 Plus's does
-for the same remote; not pressed here since.
+✅ The table gives the canonical keymap in `docs/remote-keymap.md`: for every button this remote
+sends it is the H96 Max M2 Plus's, pressed button by button there.
 
 | Button                    | Key event                                        |
 | ------------------------- | ------------------------------------------------ |

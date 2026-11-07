@@ -175,8 +175,8 @@ device `ffa90030.pwm` at the stable path `/dev/input/ir-remote`; scancodes come 
 | YouTube / Netflix         | `KEY_RED` / `KEY_YELLOW`                         |
 | Prime Video / Google Play | `KEY_BLUE` / `KEY_GREEN`                         |
 
-🟡 The table gives the canonical keymap in `docs/remote-keymap.md`, as the H96 Max M2 Plus's does
-for the same remote; not pressed here since.
+✅ The table gives the canonical keymap in `docs/remote-keymap.md`: for every button this remote
+sends it is the H96 Max M2 Plus's, pressed button by button there.
 
 **Over Bluetooth** (optional) adds the **air-mouse** and a battery reading. Pairing mode is **left +
 right until the LED blinks** — steady glow first, then the blink; the glow ends once a host
@@ -225,64 +225,15 @@ trigger.
 comes up native: the vendor PHY computes its PLL for any rate up to 600 MHz. ✅ on the R69,
 2026-10-22.
 
-## Warm reboot is unreliable: dwmmc does not always re-initialise
+## Warm reboot
 
-❌ **The bug (2026-08-15).** `systemctl reboot` on the SD-booted Armbian intermittently never came
-back: initramfs retried ~22 times, gave up with `ALERT! UUID=… does not exist`, and only a **power
-cycle** recovered it.
+✅ **Wi-Fi comes back.** A failed first SDIO init powers the card off for `power-off-delay-us`,
+unset in the factory tree: about 1 ms, too short to restart the chip. 200 ms in `sdio-pwrseq`: 10
+warm reboots of 10 with `wlan0`.
 
-✅ **UHS is back (2026-11-06).** On TVBian's U-Boot and 6.1 kernel, with `sd-uhs-sdr12/25/50/104`
-restored, 40 warm reboots brought the SD root up at SDR104, each on the first attempt. The loss was
-recorded under Armbian's stack and does not reproduce on ours. The strip, which cost SDR104 for
-high-speed 50 MHz, is reverted.
-
-**The same root cause has a second symptom: no `wlan0`.** On 2026-08-15 a warm reboot came up with
-the rootfs fine but no Wi-Fi, because the Seekwave driver gave up waiting for its SDIO card:
-
-```
-[SKWSDIO ERROR] skw_sdio_scan_card: wait scan card time out
-[SKWSDIO INFO]  skw_sdio_remove_card: sdio_unregister_driver
-[SKWSDIO ERROR] skw_sdio_io_init: scan card fail
-```
-
-Which symptom appears depends on which `dwmmc` slot loses the race after a warm reset: SD loses and
-there is no root, SDIO loses and there is no Wi-Fi. The `sdhci` eMMC is never affected.
-
-🟡 **The Wi-Fi half has not recurred since the UHS strip, and nobody traced why.** The two symptoms
-share a root cause, so slowing the SD slot plausibly changed the race for the SDIO slot too — but
-that is inference, not a trace, and the driver's 1 s wait is untouched. Treat it as unexplained
-rather than fixed.
-
-❌ **The driver-side fix is not shipped.** Raising the driver's 1 s wait for its SDIO card to 10 s —
-enough to cover the mmc core's 400k/300k/200k/minimum retry ladder — did fix it: **15 consecutive
-warm reboots** (2026-08-15, 5 + 10 runs), every one a fresh `boot_id`, `wlan0` up, zero
-`wait scan card time out`. But that patch was against the Armbian build tree in the now-closed
-`armbian/build#10440`. `modules/swt6621s.conf` builds pinned commit `b1b15016` without it, which
-still waits `msecs_to_jiffies(1000)` in `skw_sdio_scan_card()`. Carrying it here is the open item in
-`todo/rk35xx-sd-uhs-warm-reset.md`.
-
-**What the failure actually looked like**, from `verbosity=7` captured via ramoops — note the eMMC
-is never affected, and both `dwmmc` controllers stumble while only the SD fails to recover:
-
-```
-14.51  mmc0 (SDIO, ffc20000): -110  -> recovers, SDR104 SDIO card
-14.58  mmc1 (SD,   ffc30000): -110  -> retries 15.19, 15.81, 16.41 ... never recovers
-14.19  mmc2 (eMMC, ffbf0000): fine, HS200
-```
-
-**Five candidates were tested on hardware and disproven** — recorded in `dtb.md` so nobody repeats
-them: `full-pwr-cycle`, `regulator-boot-on` on `vccio_sd`, `driver_async_probe=dwmmc_rockchip` (the
-factory's own cmdline), an `mmc-pwrseq-simple` swap for `vcc_sd`, and simply waiting longer.
-
-**The R69 strips the same properties for a different reason.** It has _no 1.8 V switch at all_
-(`vcc_sd` is a fixed 3.3 V rail), so the UHS properties it inherited from the ROCK 2F made the
-kernel negotiate 1.8 V signalling the pads cannot do, hanging some cards even at cold boot — there
-the strip is a **correctness fix**. This board has a real `vccio_sd` 1.8/3.3 V switch and UHS works
-at cold boot, so here it is a **reliability-for-speed trade**.
-
-Still open: why a warm reset leaves `dwmmc` unable to re-initialise while `sdhci` never stumbles. A
-driver question, not a device-tree one, and what stands between this board and SDR104 —
-`todo/rk35xx-sd-uhs-warm-reset.md`.
+✅ **The SD root comes back at SDR104**, 40 warm reboots of 40 with `sd-uhs-*` in the tree. The root
+loss that once had UHS stripped was seen under Armbian's stack; the disproven tree changes are in
+`dtb.md`, the history in `worklog.md`.
 
 ## Recovery
 

@@ -19,10 +19,24 @@ below.
       `FEATURE_ABORT`: nothing on the box speaks CEC's follower side. The TV's remote reaches the
       box.
 
+- [ ] **The BLE remote wakes every box from sleep.** Today only IR does; it matters most where there
+      is no IR receiver.
+
+- [ ] **A `tools/validate/` test shows decoded AFBC and scaled frames on a plane**, unattended.
+
+- [ ] **Blu-ray 3D plays in 3D on a 3D TV.** Today only its 2D view.
+
+- [ ] **FFmpeg, Kodi and Fuseamp install as `tvb-*` packages**, Fuseamp once it is ready for
+      release.
+
+- [ ] **A new kernel or driver is shown not to regress, unattended, on every board it ships to**,
+      before it ships.
+
 - [ ] **Every board: the recovery button sends `KEY_VENDOR`.** Mainline's code for a "recovery",
-      "update" or "maskrom" button; the Tanix TX1 V2.0 has it. The others keep their factory trees'
-      codes: the R69 and H96 Max 3518 `KEY_VOLUMEUP`, the H96 Max 3518D `KEY_F11`. Each change says
-      why in its `board.patch`, and a press under `evtest /dev/input/recovery-button` checks it.
+      "update" or "maskrom" button; the Tanix TX1 V2.0 and the H96 Max M2 Plus have it. The others
+      keep their factory trees' codes: the R69 and H96 Max 3518 `KEY_VOLUMEUP`, the H96 Max 3518D
+      `KEY_F11`. Each change says why in its `board.patch`, and a press under
+      `evtest /dev/input/recovery-button` checks it.
 
 - [ ] **Every board: which recovery button it has.** Most boxes expose a U-Boot recovery button, a
       key the bootloader reads and Linux sees, not the SoC's maskrom or FEL strap, which is rarely
@@ -128,21 +142,20 @@ below.
 
 ## Bigger todos
 
-| File                                    | Open question                               |
-| --------------------------------------- | ------------------------------------------- |
-| `docs/todo/video.md`                    | hardware video: what is left, every SoC     |
-| `docs/todo/media-stick.md`              | the universal media stick                   |
-| `docs/todo/kodi.md`                     | Kodi 22 on our FFmpeg, built on trixie      |
-| `docs/todo/extras-upstream.md`          | extras built from an upstream release       |
-| `docs/todo/rk35xx.md`                   | Rockchip boards, every one                  |
-| `docs/todo/rk35xx-boot-log.md`          | boot log cleanup                            |
-| `docs/todo/rk35xx-sd-uhs-warm-reset.md` | `dwmmc` first init after a warm reset       |
-| `docs/todo/rk35xx-uboot-usb.md`         | USB in our U-Boot                           |
-| `docs/todo/allwinner.md`                | Allwinner boards, every one                 |
-| `docs/todo/amlogic.md`                  | Amlogic boards, every one                   |
-| `docs/todo/tanix-tx1-v2.md`             | the Tanix TX1 V2.0: what is left            |
-| `docs/todo/h96max-m20.md`               | the H96 Max M20: what is left               |
-| `docs/todo/h96max-m2-plus.md`           | the H96 Max M2 Plus: what is left           |
-| `docs/todo/swt6621s.md`                 | the SWT6621S Wi-Fi/BT: what is left         |
-| `docs/todo/website.md`                  | tvbian.com: one page on GitHub Pages        |
-| `docs/todo/repo-layout.md`              | folders, patches, tools and docs, regrouped |
+| File                            | Open question                               |
+| ------------------------------- | ------------------------------------------- |
+| `docs/todo/video.md`            | hardware video: what is left, every SoC     |
+| `docs/todo/media-stick.md`      | the universal media stick                   |
+| `docs/todo/kodi.md`             | Kodi 22 on our FFmpeg, built on trixie      |
+| `docs/todo/extras-upstream.md`  | extras built from an upstream release       |
+| `docs/todo/rk35xx.md`           | Rockchip boards, every one                  |
+| `docs/todo/rk35xx-boot-log.md`  | boot log cleanup                            |
+| `docs/todo/rk35xx-uboot-usb.md` | USB in our U-Boot                           |
+| `docs/todo/allwinner.md`        | Allwinner boards, every one                 |
+| `docs/todo/amlogic.md`          | Amlogic boards, every one                   |
+| `docs/todo/tanix-tx1-v2.md`     | the Tanix TX1 V2.0: what is left            |
+| `docs/todo/h96max-m20.md`       | the H96 Max M20: what is left               |
+| `docs/todo/h96max-m2-plus.md`   | the H96 Max M2 Plus: what is left           |
+| `docs/todo/swt6621s.md`         | the SWT6621S Wi-Fi/BT: what is left         |
+| `docs/todo/website.md`          | tvbian.com: one page on GitHub Pages        |
+| `docs/todo/repo-layout.md`      | folders, patches, tools and docs, regrouped |

@@ -20,7 +20,7 @@ consumer needs otherwise; `compatible` and `model` are the two that do.
 | `gpio-leds`          | node names `work-green`/`work-red` → `power`/`standby`               | family-uniform `/sys/class/leds` names (shared LED hooks)                 |
 | `watchdog@ffac0000`  | `status` → `okay`                                                    | `/dev/watchdog` for systemd's `RuntimeWatchdogSec` (verified)             |
 | `sdio-pwrseq`        | `power-off-delay-us` → `200000`                                      | ✅ a warm reboot left the Wi-Fi chip unreset; 10 of 10 with it            |
-| `ir_key6` (`0xfb04`) | key table → canonical keymap                                         | 🟡 as the M2 Plus, pressed there; unpressed here                          |
+| `ir_key6` (`0xfb04`) | key table → canonical keymap                                         | ✅ the M2 Plus's for this remote, pressed there                           |
 | `hdmi@ff8d0000`      | `ddc-i2c-bus` → `i2c-gpio` on the DDC pins                           | ✅ DDC/CI; dw-hdmi's own I2C refuses it                                   |
 | `chosen`             | **removed**                                                          | U-Boot overwrites `bootargs` from `extlinux.conf`                         |
 

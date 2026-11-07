@@ -5,6 +5,11 @@
       with Rockchip's own blob too. The register image is at fault, not the screen. The VOP then
       underruns until a reboot.
 - [ ] **RK3528: HDR on a real HDR screen**, the picture by eye.
+- [ ] **DDC/CI on `rk35xx-next`**, on one RK3528 box for them all.
+- [ ] **MJPEG decodes in hardware through our FFmpeg.**
+- [ ] **Optional: every codec the hardware decodes or encodes reaches our FFmpeg**, AVS, AVS+, AVS2
+      and VC-1 included where the chip has them. For completeness more than use.
+- [ ] **`display.py` passes with a real screen attached**, HDR or not.
 - [ ] **VOP2: AFBC for the video and interface planes.** Which planes take which AFBC formats at 4K,
       and whether a plane refuses it mid-play.
 
@@ -21,6 +26,4 @@
       right third of a 4K frame; ✅ on the 3518D only. Check `3840x2160p60` full-screen with no
       fringe on the right, then that a 1080p display still comes up clean.
 
-- [ ] **R69 and the 3518: their IR tables onto the canonical keymap** in `docs/remote-keymap.md`.
-      Each `ir_keyN` table in `board.patch` gives its own keys today (OK is `KEY_ENTER` on the R69,
-      `KEY_REPLY` on the 3518); then its pass over both transports, once a box has the remote.
+- [ ] **The R69's Wi-Fi comes back after every warm reboot.**
