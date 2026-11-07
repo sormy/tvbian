@@ -2392,3 +2392,27 @@ card once the same DDR blob was on its eMMC. The eMMC's FIT is 2026.10 again.
   every engine has an IOMMU.
 - `cma=16M`: pool 16 MiB, idle 2.3 MiB, both loads 2.3 MiB, 1779 commits, none refused; `display.py`
   18 passed. `node cma compatible matching fail` is logged at 256M too.
+
+## 2026-11-06 — UHS back on the SD; the SDIO reset
+
+- DTBs built from the box's own `board.dtb`, `board.dtb.good` kept. `sd-uhs-sdr12/25/50/104`
+  restored, nothing else: 30 of 30 warm reboots with the SD root at SDR104, first attempt, no
+  `-110`. The repo tree, with them and `power-off-delay-us = <200000>` in `sdio-pwrseq` (from the M2
+  Plus): 10 of 10, the SD at SDR104 and the SDIO card at the second clock. 60.0 MB/s raw read at
+  148.5 MHz, 1.8 V. Kernel unchanged: the TVE test build of 6.1.172.
+
+## 2026-11-06 — DDC/CI over `i2c-gpio`
+
+- The M2 Plus's graft: the HDMI DDC pins as an `i2c-gpio` bus, `ddc-i2c-bus` on the HDMI node, with
+  the canonical `ir_key6` table. DTB `54681668`, the old kept as `board.dtb.preddc`. Hostname set to
+  `h96max-3518`, its `BOARD_HOSTNAME`, from `h96max-h313`.
+- BOE monitor attached: EDID 256 bytes, `ddcutil detect` Display 1, MCCS 2.2 on `i2c-hdmi-ddc`;
+  brightness 100, set 80 and read 80, set back 100. No `ddc read failed` at boot.
+
+## 2026-11-06 — The console in the small font on HDMI
+
+- The console 90x36 on the 2256x1504 monitor: the TV encoder's `TV-1`, sensing nothing, reported
+  `connected`, and fbcon sized itself and its font to its 720x576.
+- `drm-rockchip-tve-unknown-connector.patch`: `TV-1` reports `unknown`. Kernel rebuilt and installed
+  with HDMI unplugged: `TV-1` `unknown`, the console on it at 90x36, as it should be; 141x47 on HDMI
+  unchecked here.

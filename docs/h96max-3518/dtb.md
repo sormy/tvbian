@@ -8,27 +8,28 @@ Base: the box's factory Android DTB, carved from the eMMC `boot` partition
 Rule: every edit must have a functional consumer. Factory values stay untouched unless a named
 consumer needs otherwise; `compatible` and `model` are the two that do.
 
-| Node                | Change                                                               | Why                                                                       |
-| ------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| `/` (root)          | `compatible` prepends `"h96max-3518,rk3518-tvbox"`                   | the Seekwave driver keys board-specific firmware names off it             |
-| `/` (root)          | `compatible` appends `"rockchip,rk3528a"`                            | userspace can't identify this SoC otherwise — see below                   |
-| `/` (root)          | `model` → `H96 Max 3518 3518_ZX_V01`                                 | the factory string names the reference EVB, not this box                  |
-| `pwm@ffa90030` (IR) | `remote_support_psci` `0` → `1`                                      | IR as ATF wake source (remote wake)                                       |
-| `gpu@ff700000`      | `interrupt-names`/`clocks`/`clock-names` → lima style (`bus`/`core`) | the kernel uses mainline `lima`, not the vendor Mali blob                 |
-| `vop@ff840000`      | `esmart_lb_mode` `[03]` → `[02]`                                     | 🟡 4K line buffer for Esmart0; `03` caps at 2K — no 4K display tried here |
-| `vop@ff840000`      | `support-multi-area` dropped                                         | an Esmart sub-window (`win1`-`win3`) reaches writeback but never HDMI     |
-| `gpio-leds`         | node names `work-green`/`work-red` → `power`/`standby`               | family-uniform `/sys/class/leds` names (shared LED hooks)                 |
-| `watchdog@ffac0000` | `status` → `okay`                                                    | `/dev/watchdog` for systemd's `RuntimeWatchdogSec` (verified)             |
-| `mmc@ffc30000` (SD) | `sd-uhs-sdr12/25/50/104` **removed**                                 | warm reboot intermittently lost the SD root                               |
-| `chosen`            | **removed**                                                          | U-Boot overwrites `bootargs` from `extlinux.conf`                         |
+| Node                 | Change                                                               | Why                                                                       |
+| -------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `/` (root)           | `compatible` prepends `"h96max-3518,rk3518-tvbox"`                   | the Seekwave driver keys board-specific firmware names off it             |
+| `/` (root)           | `compatible` appends `"rockchip,rk3528a"`                            | userspace can't identify this SoC otherwise — see below                   |
+| `/` (root)           | `model` → `H96 Max 3518 3518_ZX_V01`                                 | the factory string names the reference EVB, not this box                  |
+| `pwm@ffa90030` (IR)  | `remote_support_psci` `0` → `1`                                      | IR as ATF wake source (remote wake)                                       |
+| `gpu@ff700000`       | `interrupt-names`/`clocks`/`clock-names` → lima style (`bus`/`core`) | the kernel uses mainline `lima`, not the vendor Mali blob                 |
+| `vop@ff840000`       | `esmart_lb_mode` `[03]` → `[02]`                                     | 🟡 4K line buffer for Esmart0; `03` caps at 2K — no 4K display tried here |
+| `vop@ff840000`       | `support-multi-area` dropped                                         | an Esmart sub-window (`win1`-`win3`) reaches writeback but never HDMI     |
+| `gpio-leds`          | node names `work-green`/`work-red` → `power`/`standby`               | family-uniform `/sys/class/leds` names (shared LED hooks)                 |
+| `watchdog@ffac0000`  | `status` → `okay`                                                    | `/dev/watchdog` for systemd's `RuntimeWatchdogSec` (verified)             |
+| `sdio-pwrseq`        | `power-off-delay-us` → `200000`                                      | ✅ a warm reboot left the Wi-Fi chip unreset; 10 of 10 with it            |
+| `ir_key6` (`0xfb04`) | key table → canonical keymap                                         | 🟡 as the M2 Plus, pressed there; unpressed here                          |
+| `hdmi@ff8d0000`      | `ddc-i2c-bus` → `i2c-gpio` on the DDC pins                           | ✅ DDC/CI; dw-hdmi's own I2C refuses it                                   |
+| `chosen`             | **removed**                                                          | U-Boot overwrites `bootargs` from `extlinux.conf`                         |
 
 > **uart0 and `fiq-debugger` stay stock**, console `ttyFIQ0`: the debugger half never initialises
 > (the vendor sets `rockchip,irq-mode-enable = <1>`, so `IRQ fiq not found` is by design), and what
 > runs is a plain tty over uart0. Reverted 2026-10-20: a `ttyS0` graft, uart0 `okay` and
 > `fiq-debugger` `disabled`, bought nothing and gave the family two console names.
 
-Everything else is factory, unchanged. `mmc@ffc20000` (SDIO Wi-Fi) keeps its `sd-uhs-sdr104` — only
-the SD slot gave up UHS.
+Everything else is factory, unchanged.
 
 ## Why the SoC has to name itself `rk3528a`
 
@@ -61,12 +62,13 @@ and `board.dtb` from the factory blob and `board.patch`; `tvb-h96max-3518` ships
 
 ## Tried and reverted
 
-| Node                | Change tried                                  | Outcome                                                            |
-| ------------------- | --------------------------------------------- | ------------------------------------------------------------------ |
-| `cpu-sleep0`        | `status` → `okay`                             | **hangs the boot** ~19 s in, at first real idle — reverted         |
-| `mmc@ffc30000` (SD) | `full-pwr-cycle;`                             | **does not fix the warm-reboot root loss** (2026-08-15) — reverted |
-| `vccio_sd`          | `regulator-boot-on;`                          | **does not fix it** (2026-08-15) — reverted                        |
-| `mmc@ffc30000` (SD) | `vcc_sd` gpio moved to an `mmc-pwrseq-simple` | **does not fix it** (2026-08-15) — reverted                        |
+| Node                | Change tried                                  | Outcome                                                                  |
+| ------------------- | --------------------------------------------- | ------------------------------------------------------------------------ |
+| `cpu-sleep0`        | `status` → `okay`                             | **hangs the boot** ~19 s in, at first real idle — reverted               |
+| `mmc@ffc30000` (SD) | `sd-uhs-*` removed                            | Armbian's warm-reboot SD loss; reverted 2026-11-06, 40 reboots at SDR104 |
+| `mmc@ffc30000` (SD) | `full-pwr-cycle;`                             | **does not fix the warm-reboot root loss** (2026-08-15) — reverted       |
+| `vccio_sd`          | `regulator-boot-on;`                          | **does not fix it** (2026-08-15) — reverted                              |
+| `mmc@ffc30000` (SD) | `vcc_sd` gpio moved to an `mmc-pwrseq-simple` | **does not fix it** (2026-08-15) — reverted                              |
 
 `cpu-sleep0` is worth a retry someday, but not by flipping `status` — try a shallower
 `arm,psci-suspend-param` or a newer BL31. Serial settled the cause: the box hangs silently during
@@ -87,5 +89,5 @@ ALERT!  UUID=… does not exist.  Dropping to a shell!
 
 `regulator-boot-on` and the `mmc-pwrseq` swap targeted the same 1.8 V theory and failed too, as did
 `driver_async_probe=dwmmc_rockchip,rockchip-drm` — the factory's own setting, confirmed present in
-the failing boot's cmdline. Removing the UHS modes outright is what worked; the trade it costs and
-the open root cause are in `board.md` and `docs/todo/rk35xx-sd-uhs-warm-reset.md`.
+the failing boot's cmdline. Removing the UHS modes outright stopped it under Armbian; on TVBian's
+stack the loss does not reproduce, and the modes are back.

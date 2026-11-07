@@ -46,7 +46,8 @@ Not a spec — one box, one kernel. If yours lands in the same ballpark, nothing
 | Wi-Fi (5 GHz, ax) | **414 Mbit/s down / 380 Mbit/s up** to a wired peer, −34 dBm           |
 | eMMC sequential   | **91.6 MB/s read · 44.0 MB/s write** (read is the HS200 ceiling)       |
 | eMMC random 4K    | **3,016 read / 3,783 write IOPS**                                      |
-| SD, UHS stripped  | **22.8 MB/s read · 19.7 write**, 1913/393 IOPS: the 50 MHz bus         |
+| SD, SDR104        | **60.0 MB/s** raw sequential read, 148.5 MHz, 1.8 V                    |
+| SD, high speed    | **22.8 MB/s read · 19.7 write**, 1913/393 IOPS: the 50 MHz bus         |
 | USB 3 sequential  | **389 MB/s read · 360 MB/s write** — SuperSpeed, UAS, ~18% of one core |
 | USB 3 random 4K   | **9,120 read / 8,380 write IOPS** (35.6 / 32.7 MB/s)                   |
 | GPU               | **glmark2 41** at 1080p (lima, Mali-450)                               |
@@ -156,26 +157,26 @@ Early boot briefly shows both LEDs dimly lit, until the kernel driver takes the 
 device `ffa90030.pwm` at the stable path `/dev/input/ir-remote`; scancodes come from
 `rockchip,usercode = <0xfb04>` in `boards/h96max-3518/board.dts`:
 
-| Button            | Key event                                        |
-| ----------------- | ------------------------------------------------ |
-| Power             | `KEY_POWER`                                      |
-| Hamburger (menu)  | `KEY_MENU`                                       |
-| Voice (mic)       | `KEY_F14`                                        |
-| Cog (settings)    | `KEY_F13`                                        |
-| D-pad             | `KEY_UP` / `KEY_DOWN` / `KEY_LEFT` / `KEY_RIGHT` |
-| OK (center)       | `KEY_REPLY`                                      |
-| Back              | `KEY_BACK`                                       |
-| Home              | `KEY_HOME`                                       |
-| Backspace         | `KEY_BACKSPACE`                                  |
-| Volume +/−        | `KEY_VOLUMEUP` / `KEY_VOLUMEDOWN`                |
-| Mute              | `KEY_MUTE`                                       |
-| P +/− (channel)   | `KEY_CHANNELUP` / `KEY_CHANNELDOWN`              |
-| YT / NF / PV / GP | `KEY_F6` / `KEY_F7` / `KEY_F8` / `KEY_F9`        |
-| Mouse             | `KEY_TEXT`                                       |
+| Button                    | Key event                                        |
+| ------------------------- | ------------------------------------------------ |
+| Power                     | `KEY_POWER`                                      |
+| OK (center)               | `KEY_OK`                                         |
+| Up / Down / Left / Right  | `KEY_UP` / `KEY_DOWN` / `KEY_LEFT` / `KEY_RIGHT` |
+| Back                      | `KEY_BACK`                                       |
+| Home                      | `KEY_HOMEPAGE`                                   |
+| Delete                    | `KEY_BACKSPACE`                                  |
+| Hamburger (menu)          | `KEY_MENU`                                       |
+| Cog (settings)            | `KEY_CONFIG`                                     |
+| Voice                     | `KEY_SEARCH`                                     |
+| Mouse                     | `KEY_TOUCHPAD_TOGGLE`                            |
+| Volume up / down          | `KEY_VOLUMEUP` / `KEY_VOLUMEDOWN`                |
+| Mute                      | `KEY_MUTE`                                       |
+| P up / down               | `KEY_CHANNELUP` / `KEY_CHANNELDOWN`              |
+| YouTube / Netflix         | `KEY_RED` / `KEY_YELLOW`                         |
+| Prime Video / Google Play | `KEY_BLUE` / `KEY_GREEN`                         |
 
-> **Baseline, not a spec** — _our_ unit's mapping, and these boxes vary between production runs. The
-> R69's remote answers to a different usercode (`0xfb05`) with different codes for OK and the app
-> row. Check yours with `evtest /dev/input/ir-remote`.
+🟡 The table gives the canonical keymap in `docs/remote-keymap.md`, as the H96 Max M2 Plus's does
+for the same remote; not pressed here since.
 
 **Over Bluetooth** (optional) adds the **air-mouse** and a battery reading. Pairing mode is **left +
 right until the LED blinks** — steady glow first, then the blink; the glow ends once a host
@@ -230,10 +231,10 @@ comes up native: the vendor PHY computes its PLL for any rate up to 600 MHz. ✅
 back: initramfs retried ~22 times, gave up with `ALERT! UUID=… does not exist`, and only a **power
 cycle** recovered it.
 
-🟡 **Partial mitigation: strip `sd-uhs-sdr12/25/50/104` from `mmc@ffc30000`.** The card then runs
-plain `high speed SDXC` at 3.3 V, and the SD root failure stopped recurring. The cost is real and
-accepted: SDR104 (148.5 MHz, ~70 MB/s rootfs reads) drops to high-speed 50 MHz. **This treats a
-symptom, not the cause.**
+✅ **UHS is back (2026-11-06).** On TVBian's U-Boot and 6.1 kernel, with `sd-uhs-sdr12/25/50/104`
+restored, 40 warm reboots brought the SD root up at SDR104, each on the first attempt. The loss was
+recorded under Armbian's stack and does not reproduce on ours. The strip, which cost SDR104 for
+high-speed 50 MHz, is reverted.
 
 **The same root cause has a second symptom: no `wlan0`.** On 2026-08-15 a warm reboot came up with
 the rootfs fine but no Wi-Fi, because the Seekwave driver gave up waiting for its SDIO card:
