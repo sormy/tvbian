@@ -170,7 +170,16 @@
  		compatible = "simple-audio-card";
  		simple-audio-card,name = "ROCKCHIP,SPDIF";
  		simple-audio-card,mclk-fs = <128>;
-@@ -4320,7 +4341,9 @@
+@@ -4276,6 +4297,8 @@
+ 		pinctrl-names = "default";
+ 		pinctrl-0 = <&wifi_enable_h>, <&clkm1_32k_out>;
+ 		post-power-on-delay-ms = <200>;
++		/* Each failed init retries after a power-off; a reset this long restarts a chip left running by a warm reboot. */
++		power-off-delay-us = <200000>;
+ 		reset-gpios = <&gpio3 10 GPIO_ACTIVE_LOW>;
+ 		status = "okay";
+ 		phandle = <0x79>;
+@@ -4320,7 +4343,9 @@
  		compatible = "gpio-leds";
  		phandle = <0x1c7>;
  
@@ -181,7 +190,7 @@
  			gpios = <&gpio4 17 GPIO_ACTIVE_LOW>;
  			linux,default-trigger = "none";
  			default-state = "on";
-@@ -4328,7 +4351,8 @@
+@@ -4328,7 +4353,8 @@
  			retain-state-shutdown;
  		};
  
@@ -191,7 +200,7 @@
  			gpios = <&gpio4 11 GPIO_ACTIVE_LOW>;
  			linux,default-trigger = "none";
  			default-state = "off";
-@@ -4337,10 +4361,8 @@
+@@ -4337,10 +4363,8 @@
  		};
  	};
  

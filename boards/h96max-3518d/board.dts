@@ -4297,6 +4297,8 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&wifi_enable_h>, <&clkm1_32k_out>;
 		post-power-on-delay-ms = <200>;
+		/* Each failed init retries after a power-off; a reset this long restarts a chip left running by a warm reboot. */
+		power-off-delay-us = <200000>;
 		reset-gpios = <&gpio3 10 GPIO_ACTIVE_LOW>;
 		status = "okay";
 		phandle = <0x79>;

@@ -86,7 +86,16 @@
  		vqmmc-supply = <&vccio_sd>;
  		vmmc-supply = <&vcc_sd>;
  		phandle = <0x114>;
-@@ -4321,7 +4328,9 @@
+@@ -4277,6 +4284,8 @@
+ 		pinctrl-names = "default";
+ 		pinctrl-0 = <&wifi_enable_h>, <&clkm1_32k_out>;
+ 		post-power-on-delay-ms = <200>;
++		/* Each failed init retries after a power-off; a reset this long restarts a chip left running by a warm reboot. */
++		power-off-delay-us = <200000>;
+ 		reset-gpios = <&gpio3 10 GPIO_ACTIVE_LOW>;
+ 		status = "okay";
+ 		phandle = <0x79>;
+@@ -4321,7 +4330,9 @@
  		compatible = "gpio-leds";
  		phandle = <0x1c7>;
  
@@ -97,7 +106,7 @@
  			gpios = <&gpio4 17 GPIO_ACTIVE_LOW>;
  			linux,default-trigger = "none";
  			default-state = "on";
-@@ -4329,7 +4338,8 @@
+@@ -4329,7 +4340,8 @@
  			retain-state-shutdown;
  		};
  
@@ -107,7 +116,7 @@
  			gpios = <&gpio4 11 GPIO_ACTIVE_LOW>;
  			linux,default-trigger = "none";
  			default-state = "off";
-@@ -4338,10 +4348,8 @@
+@@ -4338,10 +4350,8 @@
  		};
  	};
  
