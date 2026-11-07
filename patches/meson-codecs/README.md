@@ -38,6 +38,7 @@ in-tree: `patches/linux-meson/` `0002` puts meson-sm1-codecs's decoder under
 | `0029` | HEVC: an IDR or BLA picture releases every earlier reference        |
 | `0030` | H.264 and VP9 past their largest picture refused, H.264 past 8 bits |
 | `0031` | VP9: an interrupt without a parsed header is no error               |
+| `0032` | HEVC: an interrupt before anything is parsed is no error            |
 
 | Overlay package     | Module        | Device                |
 | ------------------- | ------------- | --------------------- |
@@ -167,6 +168,13 @@ The microcode also interrupts with no header parsed, `dec_status` 0, as for its 
 through `DEBUG_REG1`. The driver aborted on each: with CMA full of movable pages, the first 4K VP9
 decode after a boot failed every packet. Amlogic's driver ignores them; so does this one, clearing
 the debug tag.
+
+## 0032
+
+The same interrupt in HEVC, `dec_status` 0 with nothing parsed, aborted a 4K Main10 session at its
+start while its CAPTURE buffers migrated into CMA. It is ignored too, the debug tag cleared; any
+other unknown status still aborts. 🟡 The status-0 interrupt did not recur in 30 runs since; no
+regression.
 
 ## Upstream
 

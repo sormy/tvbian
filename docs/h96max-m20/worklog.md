@@ -1772,3 +1772,18 @@ before), CMA 768 MiB as before, `wlan0` connected, nothing failed. The previous 
 - The tree's `linux,cma` node removed from `board.patch`; `cma=512M`: pool 512 MiB, idle 5.5 MiB,
   the same load 396.7 MiB, 4493 commits, none refused, no allocation failure; `display.py` 10
   passed.
+
+## 2026-11-05 — HEVC: an interrupt with nothing parsed, `0032`
+
+- Fuseamp, a 4K24 HEVC Main10 film with E-AC3: one open of five logged
+  `Unrecognized dec_status: 00000000` and `Aborting decoding session!`; the player fell to software
+  for about 15 s. `0031` ignores the same status-0 interrupt in VP9; HEVC still aborted on it.
+- `0032`: HEVC ignores `dec_status` 0 and clears `DEBUG_REG1`; any other unknown status still
+  aborts.
+- Our FFmpeg 9.0.2 (`patches/ffmpeg/`, host-built into `/opt/ffmpeg-9`), `hevc_v4l2m2m`, 4K Main10:
+  10 starts after filling the page cache, `CmaFree` about 300 MiB; 10 more beside 1.45 GiB of held
+  anonymous memory, `CmaFree` 0-51 MiB. Every frame decoded, no abort, no OOM.
+- Fuseamp, the film opened 10 times on the `0032` kernel: hardware throughout, 24 fps from the
+  start.
+- The status-0 interrupt fired in none of the 30 runs (dynamic debug on `codec_hevc.c`): no
+  regression, the fix itself not exercised. 🟡

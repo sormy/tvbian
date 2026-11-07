@@ -1,0 +1,39 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Thu, 5 Nov 2026 20:30:00 -0500
+Subject: [PATCH] media: meson: vdec: hevc: an interrupt before anything is
+ parsed is no error
+
+The microcode also interrupts with dec_status 0, before it has parsed
+anything: for its debug messages through DEBUG_REG1, which Amlogic's
+driver clears. The driver took such an interrupt for a fault and aborted
+the session. With CMA full of movable pages, a 4K HEVC Main10 session's
+CAPTURE buffers took a moment to migrate in, and the session aborted on
+one of these at its start.
+
+Ignore an interrupt with nothing parsed, as VP9 already does, and clear
+the debug tag. Any other unknown status still aborts.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ vdec/codec_hevc.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/vdec/codec_hevc.c b/vdec/codec_hevc.c
+--- a/vdec/codec_hevc.c
++++ b/vdec/codec_hevc.c
+@@ -2298,6 +2298,12 @@
+ 		finish_yield = true;
+ 		goto unlock;
+ 	}
++	if (!dec_status) {
++		dev_dbg(core->dev_dec, "dec_status 0, debug tag %08X: nothing parsed, ignored\n",
++			amvdec_read_dos(core, DEBUG_REG1));
++		amvdec_write_dos(core, DEBUG_REG1, 0);
++		goto unlock;
++	}
+ 	if (dec_status != HEVC_SLICE_SEGMENT_DONE) {
+ 		dev_err(core->dev_dec, "Unrecognized dec_status: %08X\n",
+ 			dec_status);
+-- 
+2.55.0
