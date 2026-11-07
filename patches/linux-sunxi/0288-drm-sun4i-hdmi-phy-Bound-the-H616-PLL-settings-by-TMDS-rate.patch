@@ -1,0 +1,60 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 7 Nov 2026 13:00:00 -0500
+Subject: [PATCH] drm/sun4i: hdmi-phy: Bound the H616 PLL settings by TMDS rate
+
+dw-hdmi looks the PLL table up by TMDS rate, 5/4 of the pixel clock at
+10 bits and 3/2 at 12, but the H616's rows hold the settings Allwinner's
+BSP gives by pixel clock: 10-bit 0x3b4c at a 297 MHz pixel clock is its
+setting for a 371 MHz TMDS rate. So 10-bit RGB at a 148.5 or 235.5 MHz
+pixel clock got the HDMI 2.0 setting and showed no signal.
+
+The BSP's phy301 table, read by TMDS rate, falls into five bands, the
+same for every depth: up to 45.25, 92.5, 185, 340 and 594 MHz. Bound the
+rows by these. The 8-bit settings at 27, 74.25, 148.5, 297 and 594 MHz
+stay as they were; 10-bit RGB at 148.5 and 235.5 MHz now shows a picture.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff -urN a/drivers/gpu/drm/sun4i/sun8i_hdmi_phy.c b/drivers/gpu/drm/sun4i/sun8i_hdmi_phy.c
+--- a/drivers/gpu/drm/sun4i/sun8i_hdmi_phy.c
++++ b/drivers/gpu/drm/sun4i/sun8i_hdmi_phy.c
+@@ -126,28 +126,28 @@ static const struct dw_hdmi_phy_config sun50i_h6_phy_config[] = {
+ 
+ static const struct dw_hdmi_mpll_config sun50i_h616_mpll_cfg[] = {
+ 	{
+-		27000000, {
++		45250000, {
+ 			{ 0x00b3, 0x0003 },
+ 			{ 0x2153, 0x0003 },
+ 			{ 0x40f3, 0x0003 },
+ 		},
+ 	},  {
+-		74250000, {
++		92500000, {
+ 			{ 0x0072, 0x0003 },
+-			{ 0x2145, 0x0003 },
+-			{ 0x4061, 0x0003 },
++			{ 0x2142, 0x0003 },
++			{ 0x40a2, 0x0003 },
+ 		},
+ 	},  {
+-		148500000, {
++		185000000, {
+ 			{ 0x0051, 0x0003 },
+-			{ 0x214c, 0x0003 },
+-			{ 0x4064, 0x0003 },
++			{ 0x2145, 0x0003 },
++			{ 0x4061, 0x0003 },
+ 		},
+ 	},  {
+-		297000000, {
++		340000000, {
+ 			{ 0x0040, 0x0003 },
+-			{ 0x3b4c, 0x0003 },
+-			{ 0x5a64, 0x0003 },
++			{ 0x214c, 0x0003 },
++			{ 0x4064, 0x0003 },
+ 		},
+ 	},  {
+ 		594000000, {

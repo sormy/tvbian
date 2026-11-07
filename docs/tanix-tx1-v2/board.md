@@ -276,7 +276,7 @@ CPU's own beside each encoder:
 | AV jack, composite   | CVBS out             | —                 | ❌ no picture                |
 | Dolby Vision, HDR10+ | not listed           | —                 | ➖                           |
 | HDR10 to HDMI        | CTA-861.3            | InfoFrame follows | ✅ `0095`                    |
-| HLG, 10-bit to HDMI  | 10-bit HDMI          | —                 | ✅ HDR as 4:2:2, `0278`; HLG |
+| HLG, 10-bit to HDMI  | 10-bit HDMI          | —                 | ✅ RGB or 4:2:2, `0289`; HLG |
 
 LE is LibreELEC's `projects/Allwinner/patches/linux`; the VP9 decoder shares the HEVC engine's slot,
 so the factory tree's `vp9@01c00000` has no hardware behind it on the H616.

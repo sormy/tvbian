@@ -1696,3 +1696,39 @@ gain, the unit's own DRAM init on the eMMC, is not worth it; the install keeps w
   YCbCr 4:2:2 (`0278`), no signal at 2256x1504, a picture at 1920x1080@60.
 - At 1080p60 4:2:2 HDR10, an area no layer covers shows green with `BKCOLOR` at the 10-bit YUV
   black, 8-bit YUV black or RGB black alike: `0286`'s premise is wrong, the patch dropped.
+
+## 2026-11-07 — HDR in 10 bits: the H616 PHY table read by TMDS rate
+
+- `0278` with 4:2:2 offered only at a CEA mode (`drm_match_cea_mode`), 6.18.62, the owner's monitor,
+  HDR10 at 10 bpc: 2256x1504 goes as RGB 8-bit, a picture. Its first 1080p60 (mode #3, negative
+  syncs, its own timing, not VIC 16) also goes as RGB, a picture. The earlier 4:2:2 picture at
+  1080p60 was that same non-CEA mode #3, so CEA is not what this monitor needs; untested at VIC 16
+  (#4).
+- 10-bit RGB: Allwinner's BSP (`orangepi-xunlong/linux-orangepi`, `orange-pi-5.4-sun50iw9`,
+  `disp2/hdmi2`) sets the CCU `hdmi` clock to the TCON's rate, the pixel clock, and passes the PHY
+  the pixel clock and colour depth (`phy_aw_configure`); its PHY table has 10- and 12-bit entries.
+  The PHY's PLL makes the 5/4 TMDS clock. The earlier try asked the CCU for the TMDS rate, 294.4
+  MHz, and got 269.1: a wrong request, not a hardware limit. Our dw-hdmi picks the PHY's 10-bit
+  settings (`res[depth]`), and the glue sets `tmds` to the pixel clock for RGB.
+- A test patch: HDR at 10 bpc offered as 10-bit RGB first, the mixer and CSC taking it as RGB. The
+  controller sends it (`TX_INVID0` 0x03, `VP_PR_CD` 0x50, AVI RGB, `PHY_STAT0` 0xf3, PHY locked),
+  but the owner's monitor shows no signal at 2256x1504 or VIC 16 1080p60, with the CCU `hdmi` clock
+  at the pixel rate (235.5, 148.5 MHz) or asked for 5/4 (got 297.0, 198.0).
+- The same monitor on the H96 Max 3518 (6.1.172), forced through `color_format` and `color_depth`:
+  HDR10 as 10-bit RGB at 2256x1504 and at VIC 16, and as YCbCr 4:2:2 at 2256x1504, all three a
+  picture. The monitor takes both; the Tanix's HDMI path fails 10-bit RGB everywhere and 4:2:2 at
+  235.5 MHz.
+- Cause, from Allwinner's BSP (`phy.c`, its default PHY path): its PHY table is keyed by pixel
+  clock, its 10-bit rows at 148.5 and 237.6 MHz `0x214C` (HDMI 1.4), at 297 MHz `0x3B4C` (HDMI 2.0);
+  for 4:2:2 it programs the 8-bit row. 7.2's dw-hdmi keys `sun50i_h616_mpll_cfg` by TMDS clock and
+  by `res[depth]`: 10-bit RGB at 235.5 or 148.5 MHz lands on `0x3b4c`, 4:2:2's 12-bit container on
+  the 12-bit row (`0x5a64` at 235.5 MHz). The BSP has no 235.5 MHz row at all.
+- A test patch: 4:2:2 on the 8-bit PHY row; the TMDS ≤ 297 MHz row's 10-bit entry `0x214c`; the CCU
+  `hdmi` clock at the pixel rate. HDR10, the owner's monitor: 10-bit RGB at 2256x1504 and at VIC 16,
+  4:2:2 at 2256x1504 and at VIC 16, all four a picture (`VP_PR_CD` 0x50 for RGB, AVI 4:2:2 for
+  4:2:2).
+- `0278` now the mixer's 10-bit RGB and 4:2:2 output; `0287` 4:2:2 on the 8-bit PHY setting; `0288`
+  the H616 table bounded by the BSP's five TMDS bands (45.25, 92.5, 185, 340, 594 MHz), the 8-bit
+  settings at 27, 74.25, 148.5, 297 and 594 MHz unchanged; `0289` HDR as 10-bit RGB where the sink's
+  TMDS limit allows, else 4:2:2. On that kernel HDR at 10 bpc picks 10-bit RGB at 2256x1504 and at
+  VIC 16 (`VP_PR_CD` 0x50). `sunxi64-next` takes the same set, `0289` on 7.3's colour-format bits.

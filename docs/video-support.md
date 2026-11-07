@@ -175,7 +175,7 @@ the 1.5 GiB box. The S905L3's kernel has no CMA debugfs or sysfs: in use is `Cma
 | The display shrinks them           | 🟠 ¹ | ❓     | ❓     | ❓     |
 | Shrunk while decoding, compressed  | ➖   | ❌ ²   | ❌ ²   | ➖     |
 | HDR signalled to the TV            | ✅   | ❓     | ❓     | ❓     |
-| 10-bit HDMI                        | ❓   | ❓     | ❓     | ❓     |
+| 10-bit HDMI                        | ✅   | ✅     | ❓     | ❓     |
 | Decoder to display with no copy    | ✅   | 🟡 ³   | 🟡 ³   | 🟡 ³   |
 
 1. Refused today, the decoder shrinking the video instead; the hardware shrinks them cleanly to

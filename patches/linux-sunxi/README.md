@@ -4,7 +4,7 @@ Applied through `kernel/sunxi64.conf` (6.18) and `kernel/sunxi64-next.conf` (new
 each listing its patches one by one; each leaves on the bump that brings it from upstream. The top
 level is the current kernel's series, 6.18's; `next/` holds what only `-next` does: patches written
 for its API, and rewrites of top-level ones it takes in their place (`0103`, `0246`, `0257`, `0263`,
-`0265`, `0276`, `0278`, `0281`, `0282`, for 7.3).
+`0265`, `0276`, `0281`, `0282`, `0289`, for 7.3).
 
 | Patch         | Holds                                            |
 | ------------- | ------------------------------------------------ |
@@ -42,7 +42,7 @@ for its API, and rewrites of top-level ones it takes in their place (`0103`, `02
 | `0099`        | VI scaler: edge-directed only to enlarge         |
 | `0276`        | DE33: the CDC 3D LUT on the VI planes            |
 | `0277`        | TCON: FIFO underflows counted in debugfs         |
-| `0278`        | HDMI: HDR as 10-bit YCbCr 4:2:2                  |
+| `0278`        | DE33: 10-bit RGB and YCbCr 4:2:2 out             |
 | `0279`        | UI layers: no scaling past the line buffer       |
 | `0280`        | dw-hdmi: an HDR10+ VSIF, sent in place           |
 | `0281`        | CRTC: `HDR10PLUS_VSIF`, no mode set to change it |
@@ -50,6 +50,9 @@ for its API, and rewrites of top-level ones it takes in their place (`0103`, `02
 | `0283`        | H616: video clocks round to the closest rate     |
 | `0284`        | no early flip event on a TCON CRTC               |
 | `0285`        | H616: TV TCON rates reachable by HDMI            |
+| `0287`        | dw-hdmi: 4:2:2 on the PHY's 8-bit setting        |
+| `0288`        | H616 PHY: PLL settings bounded by TMDS rate      |
+| `0289`        | dw-hdmi: HDR in 10 bits, RGB or 4:2:2            |
 | `0800`–`0804` | Cedrus: VP8 to 4096 wide, JPEG both ways         |
 | `0805`–`0806` | Cedrus: MPEG-4 Part 2 and H.263 decode           |
 | `0807`        | Cedrus: a coded format sized by its own engine   |
@@ -129,7 +132,7 @@ keys. Not yet submitted.
 | `0087`                 | Cedrus metadata copy, 7.2's two-argument call     |
 | `0103`, `0257`, `0265` | the dw-hdmi bridge on 7.3's encoder and state API |
 | `0246`, `0263`         | AFBC framebuffers, the writeback check on 7.3     |
-| `0276`, `0278`, `0281` | the CDC LUT, HDR 4:2:2, HDR10+ on 7.3's DRM API   |
+| `0276`, `0281`, `0289` | the CDC LUT, HDR10+, HDR's formats on 7.3's API   |
 | `0282`                 | the MP closest rate on 7.3's `determine_rate`     |
 
 ## LibreELEC's series and ours
@@ -222,11 +225,9 @@ line time, or the commit is refused for userspace to take a linear buffer. The s
 (`/sys/module/sun8i_mixer/parameters/`). Not yet submitted.
 
 `0277`–`0279` are ours. `0277` counts the TCON's latched FIFO underflow at each vblank, clearing it,
-as `dri/<n>/crtc-<i>/underruns` in debugfs. `0278` sends HDR as YCbCr 4:2:2, 12-bit container, where
-`max bpc` is 10 or more, the connector's `HDR_OUTPUT_METADATA` names an EOTF other than SDR and the
-sink lists 4:2:2; SDR stays RGB. 4:4:4 at 10 bits needs a TMDS clock 5/4 of the pixel clock, which
-the H616's integer video PLL cannot divide from the TCON's. `0279` refuses a UI layer scaled from a
-source wider than its channel's line buffer, 2048 on DE33. Not yet submitted.
+as `dri/<n>/crtc-<i>/underruns` in debugfs. `0278` lets the DE33 mixer output 10-bit RGB and 10-bit
+YCbCr 4:2:2 (`UYVY12_1X24`, a 12-bit container at the 8-bit TMDS rate). `0279` refuses a UI layer
+scaled from a source wider than its channel's line buffer, 2048 on DE33. Not yet submitted.
 
 `0280` and `0281` are ours. `0280` lets dw-hdmi send CTA-861-G's HDR10+ VSIF in its one
 vendor-specific slot, written at once without a mode set and again after every setup; none gives the
@@ -254,6 +255,16 @@ takes it now. Not yet submitted.
 `tcon-tv0`, the HDMI one, an M divider on video0, its P cleared at probe, so the two always agree;
 640×480 59.94 Hz lands 840 ppm slow. `tcon-tv1` feeds the TV encoder from video1 and keeps its MP
 divider. Not yet submitted.
+
+`0287`–`0289` are ours. dw-hdmi picks the PHY's setting by TMDS rate and colour depth: `0287` gives
+4:2:2 the 8-bit setting, its container running at the 8-bit rate. The H616's table held Allwinner's
+settings by pixel clock; `0288` bounds them by TMDS rate, the five bands of the BSP's `phy301`
+table, so 10-bit at 148.5 and 235.5 MHz gets the HDMI 1.4 setting, not 2.0's, and shows a picture.
+The `hdmi` clock stays at the pixel clock, as the BSP sets it: the PHY's PLL makes the 5/4. `0289`
+sends HDR in 10 bits where `max bpc` is 10 or more and `HDR_OUTPUT_METADATA` names an EOTF other
+than SDR: RGB where the sink takes 10 bits at 5/4 of the pixel clock within its TMDS limit, else
+4:2:2 where it lists it; SDR stays 8-bit RGB. Shown on a 2256x1504 monitor, both formats, native and
+1080p60. Not yet submitted.
 
 `0089` adds the H616 TV encoder to `sun4i_tv`, on both kernels, its DAC load detection left off:
 armed, it clicks on the AV jack, and it sensed no cable here; `0090` keeps the encoder's clock on

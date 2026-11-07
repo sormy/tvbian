@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 7 Nov 2026 13:00:00 -0500
+Subject: [PATCH] drm/bridge: dw-hdmi: Use the 8-bit PHY setting for YCbCr 4:2:2
+
+The PHY tables give each TMDS rate a setting per colour depth, and
+hdmi_phy_configure_dwc_hdmi_3d_tx() picks the depth from the output
+bus format. YCbCr 4:2:2 is 12 bits a sample, but its container runs at
+the 8-bit TMDS rate: the 12-bit setting multiplies a clock that needs
+no multiplying. On the H616, 4:2:2 at 235.5 MHz showed no signal on a
+monitor that takes it from an RK3528, and a picture with this change.
+
+Use the 8-bit setting for 4:2:2.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff -urN a/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c b/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
+--- a/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
++++ b/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
+@@ -1613,6 +1613,10 @@ static int hdmi_phy_configure_dwc_hdmi_3d_tx(struct dw_hdmi *hdmi,
+ 		break;
+ 	}
+ 
++	/* 4:2:2's 12-bit container runs at the 8-bit TMDS rate */
++	if (hdmi_bus_fmt_is_yuv422(hdmi->hdmi_data.enc_out_bus_format))
++		depth = DW_HDMI_RES_8;
++
+ 	/* PLL/MPLL Cfg - always match on final entry */
+ 	for (; mpll_config->mpixelclock != ~0UL; mpll_config++)
+ 		if (mtmdsclock <= mpll_config->mpixelclock)

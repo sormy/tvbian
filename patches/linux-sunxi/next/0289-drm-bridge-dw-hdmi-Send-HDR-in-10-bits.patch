@@ -1,0 +1,66 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 7 Nov 2026 13:00:00 -0500
+Subject: [PATCH] drm/bridge: dw-hdmi: Send HDR in 10 bits
+
+dw-hdmi lists RGB888 ahead of every deeper format, so HDR10 leaves in
+8 bits whatever max bpc asks.
+
+Where the connector asks for HDR, an HDR_OUTPUT_METADATA EOTF other than
+SDR with max bpc 10 or more, offer 10-bit RGB first if the sink takes
+10 bits at 5/4 of the pixel clock within its TMDS limit, then YCbCr
+4:2:2 if it lists 4:2:2: its 12-bit container runs at the 8-bit rate,
+so it fits wherever 8 bits do. A monitor at 2256x1504 shows HDR10 both
+ways from the H616. SDR stays 8-bit RGB.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff -urN a/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c b/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
+--- a/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
++++ b/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
+@@ -2710,8 +2710,21 @@ static int dw_hdmi_connector_create(struct dw_hdmi *hdmi)
+  * - MEDIA_BUS_FMT_YUV8_1X24,
+  */
+ 
+-/* Can return a maximum of 11 possible output formats for a mode/connector */
+-#define MAX_OUTPUT_SEL_FORMATS	11
++/* Can return a maximum of 13 possible output formats for a mode/connector */
++#define MAX_OUTPUT_SEL_FORMATS	13
++
++static bool dw_hdmi_hdr_output(const struct drm_connector_state *conn_state)
++{
++	const struct hdr_output_metadata *metadata;
++
++	if (!conn_state->hdr_output_metadata)
++		return false;
++
++	metadata = conn_state->hdr_output_metadata->data;
++
++	return metadata->hdmi_metadata_type1.eotf !=
++	       HDMI_EOTF_TRADITIONAL_GAMMA_SDR;
++}
+ 
+ static u32 *dw_hdmi_bridge_atomic_get_output_bus_fmts(struct drm_bridge *bridge,
+ 					struct drm_bridge_state *bridge_state,
+@@ -2744,6 +2757,21 @@ static u32 *dw_hdmi_bridge_atomic_get_output_bus_fmts(struct drm_bridge *bridge,
+ 		return output_fmts;
+ 	}
+ 
++	/*
++	 * HDR goes out in 10 bits where max bpc allows: as RGB where the sink
++	 * takes 10 bits at 5/4 of the pixel clock, else as YCbCr 4:2:2, whose
++	 * 12-bit container runs at the 8-bit TMDS rate. SDR stays 8-bit RGB.
++	 */
++	if (max_bpc >= 10 && dw_hdmi_hdr_output(conn_state) &&
++	    !drm_mode_is_420_only(info, mode)) {
++		if (info->bpc >= 10 &&
++		    mode->clock * 5 / 4 <= info->max_tmds_clock)
++			output_fmts[i++] = MEDIA_BUS_FMT_RGB101010_1X30;
++
++		if (info->color_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR422))
++			output_fmts[i++] = MEDIA_BUS_FMT_UYVY12_1X24;
++	}
++
+ 	/*
+ 	 * If the current mode enforces 4:2:0, force the output bus format
+ 	 * to 4:2:0 and do not add the YUV422/444/RGB formats

@@ -1,0 +1,107 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 7 Nov 2026 13:00:00 -0500
+Subject: [PATCH] drm/sun4i: Output 10-bit RGB and YCbCr 4:2:2
+
+The DE33 mixer offers RGB888 and YCbCr 4:2:0 alone, so a 10-bit sink
+gets 8 bits outside 4:2:0. Its formatter also outputs 10-bit RGB and
+10-bit YCbCr 4:2:2, the latter as UYVY12_1X24, a 12-bit container at
+the 8-bit TMDS rate.
+
+Accept RGB101010_1X30 and UYVY12_1X24. The formatter takes either in
+10 bits, 4:2:2 clamped to the limited range, RGB to the full range. The
+blender background and the layer CSCs treat 10-bit RGB as RGB.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff -urN a/drivers/gpu/drm/sun4i/sun50i_fmt.c b/drivers/gpu/drm/sun4i/sun50i_fmt.c
+--- a/drivers/gpu/drm/sun4i/sun50i_fmt.c
++++ b/drivers/gpu/drm/sun4i/sun50i_fmt.c
+@@ -20,6 +20,8 @@ static u32 sun50i_fmt_get_colorspace(u32 format)
+ 	case MEDIA_BUS_FMT_UYYVYY8_0_5X24:
+ 	case MEDIA_BUS_FMT_UYYVYY10_0_5X30:
+ 		return SUN50I_FMT_CS_YUV420;
++	case MEDIA_BUS_FMT_UYVY12_1X24:
++		return SUN50I_FMT_CS_YUV422;
+ 	default:
+ 		return SUN50I_FMT_CS_YUV444RGB;
+ 	}
+@@ -27,14 +29,16 @@ static u32 sun50i_fmt_get_colorspace(u32 format)
+ 
+ static bool sun50i_fmt_is_10bit(u32 format)
+ {
+-	return format == MEDIA_BUS_FMT_UYYVYY10_0_5X30;
++	return format == MEDIA_BUS_FMT_UYYVYY10_0_5X30 ||
++	       format == MEDIA_BUS_FMT_UYVY12_1X24 ||
++	       format == MEDIA_BUS_FMT_RGB101010_1X30;
+ }
+ 
+ void sun50i_fmt_setup(struct sun8i_mixer *mixer, u16 width,
+ 		      u16 height, u32 format)
+ {
+ 	u32 colorspace = sun50i_fmt_get_colorspace(format);
+-	bool bypass = colorspace == SUN50I_FMT_CS_YUV444RGB;
++	bool bypass = format == MEDIA_BUS_FMT_RGB888_1X24;
+ 	bool de3 = mixer->cfg->de_type == SUN8I_MIXER_DE3;
+ 
+ 	sun8i_rdma_write(mixer->fmt_rdma, SUN50I_FMT_SIZE,
+@@ -45,7 +49,7 @@ void sun50i_fmt_setup(struct sun8i_mixer *mixer, u16 width,
+ 	sun8i_rdma_write(mixer->fmt_rdma, SUN50I_FMT_FORMAT, colorspace);
+ 	sun8i_rdma_write(mixer->fmt_rdma, SUN50I_FMT_COEF, 0);
+ 
+-	if (bypass) {
++	if (sunxi_bus_fmt_is_rgb(format)) {
+ 		sun8i_rdma_write(mixer->fmt_rdma, SUN50I_FMT_LMT_Y,
+ 				 SUN50I_FMT_LIMIT_BYPASS);
+ 		sun8i_rdma_write(mixer->fmt_rdma, SUN50I_FMT_LMT_C0,
+diff -urN a/drivers/gpu/drm/sun4i/sun8i_csc.c b/drivers/gpu/drm/sun4i/sun8i_csc.c
+--- a/drivers/gpu/drm/sun4i/sun8i_csc.c
++++ b/drivers/gpu/drm/sun4i/sun8i_csc.c
+@@ -328,7 +328,7 @@ static const u32 *sun8i_csc_get_de3_table(enum sun8i_csc_mode mode,
+ 					  u32 out_format,
+ 					  enum drm_color_encoding out_encoding)
+ {
+-	if (out_format != MEDIA_BUS_FMT_RGB888_1X24) {
++	if (!sunxi_bus_fmt_is_rgb(out_format)) {
+ 		if (mode == SUN8I_CSC_MODE_RGB)
+ 			return rgb2yuv_de3[out_encoding];
+ 
+diff -urN a/drivers/gpu/drm/sun4i/sun8i_mixer.c b/drivers/gpu/drm/sun4i/sun8i_mixer.c
+--- a/drivers/gpu/drm/sun4i/sun8i_mixer.c
++++ b/drivers/gpu/drm/sun4i/sun8i_mixer.c
+@@ -483,7 +483,7 @@ static void sun8i_mixer_mode_set(struct sunxi_engine *engine,
+ 			 interlaced ? "on" : "off");
+ 
+ 	/* Background and bottom plane fill color must match output format. */
+-	if (engine->format == MEDIA_BUS_FMT_RGB888_1X24)
++	if (sunxi_bus_fmt_is_rgb(engine->format))
+ 		val = SUN8I_MIXER_BLEND_COLOR_BLACK;
+ 	else
+ 		val = SUN8I_MIXER_BLEND_COLOR_BLACK_YUV;
+@@ -504,7 +504,9 @@ static bool sun8i_mixer_format_valid(struct sunxi_engine *engine, u32 format)
+ 
+ 	if (mixer->cfg->has_formatter &&
+ 	    (format == MEDIA_BUS_FMT_UYYVYY8_0_5X24 ||
+-	     format == MEDIA_BUS_FMT_UYYVYY10_0_5X30))
++	     format == MEDIA_BUS_FMT_UYYVYY10_0_5X30 ||
++	     format == MEDIA_BUS_FMT_UYVY12_1X24 ||
++	     format == MEDIA_BUS_FMT_RGB101010_1X30))
+ 		return true;
+ 
+ 	return format == MEDIA_BUS_FMT_RGB888_1X24;
+diff -urN a/drivers/gpu/drm/sun4i/sunxi_engine.h b/drivers/gpu/drm/sun4i/sunxi_engine.h
+--- a/drivers/gpu/drm/sun4i/sunxi_engine.h
++++ b/drivers/gpu/drm/sun4i/sunxi_engine.h
+@@ -282,6 +282,12 @@ sunxi_engine_mode_set(struct sunxi_engine *engine,
+ 		engine->ops->mode_set(engine, mode);
+ }
+ 
++static inline bool sunxi_bus_fmt_is_rgb(u32 format)
++{
++	return format == MEDIA_BUS_FMT_RGB888_1X24 ||
++	       format == MEDIA_BUS_FMT_RGB101010_1X30;
++}
++
+ /**
+  * sunxi_engine_format_valid - Check if engine supports output format
+  * @engine:	pointer to the engine

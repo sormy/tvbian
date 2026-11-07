@@ -17,9 +17,9 @@ FFmpeg's, and what no chip has measured yet.
 - [ ] An area no layer covers shows green on a YCbCr output (HDR10, 10-bit 4:2:2 or 4:2:0), and a
       half-transparent ARGB shadow comes out solid black. Not the background value: RGB black, 8-bit
       and 10-bit YUV black in `BKCOLOR` all show the same green.
-- [ ] HDR as 10-bit YCbCr 4:2:2 only at a CEA mode: a PC monitor listing 4:2:2 showed no signal at
-      its native 2256x1504, a picture at 1080p60. Elsewhere HDR goes as 8-bit RGB; 10-bit RGB needs
-      a TMDS clock the H616's video PLL cannot make.
+- [ ] Consider: the HDMI colour format (Auto, RGB, 4:2:2) a kernel option changeable at runtime, as
+      Apple TV's Chroma setting; the color-format property once upstream. Apps offering it is
+      theirs.
 - [ ] VP9 at 3840x2160 decodes at 43 fps; the datasheet gives 60.
 - [ ] Sizes not probed: MPEG-2 and MPEG-4 to the registers' 4096x4080, VP8 4096 wide past 2304
       lines, both encoders past 4096.
