@@ -72,21 +72,7 @@
  		phandle = <0x10d>;
  	};
  
-@@ -2187,11 +2196,9 @@
- 		pinctrl-names = "default";
- 		pinctrl-0 = <&sdmmc_clk>, <&sdmmc_cmd>, <&sdmmc_det>, <&sdmmc_bus4>;
- 		rockchip,default-sample-phase = <90>;
-+		/* sd-uhs-* removed: with UHS the SD intermittently fails to re-initialise after a
-+		 * warm reset and the box comes up with no root. Costs SDR104, keeps reboots. */
- 		supports-sd;
--		sd-uhs-sdr12;
--		sd-uhs-sdr25;
--		sd-uhs-sdr50;
--		sd-uhs-sdr104;
- 		vqmmc-supply = <&vccio_sd>;
- 		vmmc-supply = <&vcc_sd>;
- 		phandle = <0x114>;
-@@ -4277,6 +4284,8 @@
+@@ -4277,6 +4286,8 @@
  		pinctrl-names = "default";
  		pinctrl-0 = <&wifi_enable_h>, <&clkm1_32k_out>;
  		post-power-on-delay-ms = <200>;
@@ -95,7 +81,7 @@
  		reset-gpios = <&gpio3 10 GPIO_ACTIVE_LOW>;
  		status = "okay";
  		phandle = <0x79>;
-@@ -4321,7 +4330,9 @@
+@@ -4321,7 +4332,9 @@
  		compatible = "gpio-leds";
  		phandle = <0x1c7>;
  
@@ -106,7 +92,7 @@
  			gpios = <&gpio4 17 GPIO_ACTIVE_LOW>;
  			linux,default-trigger = "none";
  			default-state = "on";
-@@ -4329,7 +4340,8 @@
+@@ -4329,7 +4342,8 @@
  			retain-state-shutdown;
  		};
  
@@ -116,7 +102,7 @@
  			gpios = <&gpio4 11 GPIO_ACTIVE_LOW>;
  			linux,default-trigger = "none";
  			default-state = "off";
-@@ -4338,10 +4350,8 @@
+@@ -4338,10 +4352,8 @@
  		};
  	};
  

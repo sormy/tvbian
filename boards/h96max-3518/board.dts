@@ -2196,9 +2196,11 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&sdmmc_clk>, <&sdmmc_cmd>, <&sdmmc_det>, <&sdmmc_bus4>;
 		rockchip,default-sample-phase = <90>;
-		/* sd-uhs-* removed: with UHS the SD intermittently fails to re-initialise after a
-		 * warm reset and the box comes up with no root. Costs SDR104, keeps reboots. */
 		supports-sd;
+		sd-uhs-sdr12;
+		sd-uhs-sdr25;
+		sd-uhs-sdr50;
+		sd-uhs-sdr104;
 		vqmmc-supply = <&vccio_sd>;
 		vmmc-supply = <&vcc_sd>;
 		phandle = <0x114>;
