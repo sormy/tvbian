@@ -2,13 +2,14 @@
 """The display path on a running box: its planes, their composition and pace, its colour stages
 and the HDMI output.
 
-Runs on the box, as root, with nothing else on the screen (no compositor, no player), unattended:
+Runs on the box, as root, unattended, with HDMI unplugged, since a real screen's EDID gets in the
+synthetic ones' way, and nothing else on the display (no compositor, no player):
 
     python3 display.py
 
-Where the HDMI screen lacks HDR, or there is none, a synthetic HDR10/HLG EDID stands in through
-debugfs for the run; then the connector meets SDR, HDR10, HLG and HDR10-and-HLG screens the same way.
-The connector's own EDID and force state come back after.
+A synthetic HDR10/HLG EDID stands in through debugfs for the run; then the connector meets SDR,
+HDR10, HLG and HDR10-and-HLG screens the same way. The connector's own EDID and force state come
+back after.
 
 Checks, each skipped where the box lacks what it needs:
   - planes: every plane the CRTC offers, listed (type, zpos, alpha, modifiers, formats), a YUV
@@ -117,6 +118,8 @@ PACING_SECONDS = 60
 RUNG_SECONDS = 10
 # Kernel log lines that only a screen absent from the bus raises, not a box falling behind.
 NO_SCREEN_NOISE = re.compile(r"scdc|ddc|i2c|edid|hpd|hot.?plug|phy", re.I)
+# Kernel log lines from buses and radios off the display path: a rung falls on its own lines only.
+OFF_PATH_NOISE = re.compile(r"usb\d*-port|\bSKW|wlan\d|\bmmc\d|Bluetooth", re.I)
 PLANE_STATE_LINE = re.compile(r"^plane\[(\d+)\]: (\S+)", re.M)
 ESMART_SUB_WINDOW = re.compile(r"Esmart\d-win[1-3]")
 EBUSY = 16
@@ -498,7 +501,8 @@ def hdr_sink(edid=None):
     try:
         with open(f"{debugfs}/edid_override", "wb") as f:
             f.write(edid)
-        for state in ("detect", "on"):
+        # a status change, not a write, is what makes 6.12 re-read the EDID
+        for state in ("off", "on"):
             with open(f"{sysfs}/status", "w") as f:
                 f.write(state)
         settled_mode()
@@ -506,8 +510,9 @@ def hdr_sink(edid=None):
     finally:
         with open(f"{debugfs}/edid_override", "w") as f:
             f.write("reset")
-        with open(f"{sysfs}/status", "w") as f:
-            f.write("on" if force == "on" else "detect")
+        for state in ("off", "on" if force == "on" else "detect"):
+            with open(f"{sysfs}/status", "w") as f:
+                f.write(state)
 
 
 def settled_mode(timeout=10.0, steady=1.0):
@@ -577,12 +582,16 @@ class Box:
                 self.writeback = c.connector_id
             if c.connector_type == CONNECTOR_HDMIA and c.connection == 1:
                 self.hdmi_connector = c.connector_id
-        if self.crtc is None and self.hdmi_connector and res.count_crtcs:
-            # nothing set a mode on the screen, as fbcon does on hotplug: the preferred one on the first CRTC
+        if self.hdmi_connector and res.count_crtcs:
             modes = self.connector_modes()
-            self.crtc, self.index = crtcs[0], 0
-            if not modes or self.set_mode(modes[0]):
-                self.crtc = self.index = None
+            shown = self.crtc is not None and any(bytes(m) == bytes(self.mode) for m in modes)
+            if not shown:
+                # nothing set a mode, or the screen changed under it (fbcon follows a hotplug on 6.1, not 6.12):
+                # the preferred one, on the first CRTC unless one is active
+                if self.crtc is None:
+                    self.crtc, self.index = crtcs[0], 0
+                if not modes or self.set_mode(modes[0]):
+                    self.crtc = self.index = None
         pr = self.drm.call("planes", PlaneRes())
         ids = self.drm.ids(pr.count_planes)
         self.drm.call("planes", PlaneRes(planes=ctypes.addressof(ids), count_planes=pr.count_planes))
@@ -815,7 +824,7 @@ class Box:
             time.sleep(0.5)
             r = self.pace(RUNG_SECONDS, (min(ha, 3840), min(va, 2160))) if not error else {"error": error}
             new = [line for line in kernel_log()[len(log):]]
-            glitches = [line for line in new if not NO_SCREEN_NOISE.search(line)]
+            glitches = [line for line in new if not NO_SCREEN_NOISE.search(line) and not OFF_PATH_NOISE.search(line)]
             underruns = None if counter is None else underrun_count() - counter
             ok = not error and not r["error"] and not r["refused"] and not r["failed"] and not r["late"] \
                 and r["rate"] >= 0.95 * mode.vrefresh and not glitches and not underruns
@@ -827,8 +836,8 @@ class Box:
             print(f"RECORD rating: {name} {verdict} ({detail})")
             for line in sorted(set(re.sub(r"^\[[ 0-9.]+\] ", "", g) for g in glitches))[:3]:
                 print(f"  kernel: {line}")
-            if any(NO_SCREEN_NOISE.search(line) for line in new):
-                print(f"  ({len(new) - len(glitches)} lines from the absent screen, not counted)")
+            if len(new) > len(glitches):
+                print(f"  ({len(new) - len(glitches)} lines from the absent screen or off the display path, not counted)")
             if ok:
                 sustained.add(name)
         size = next((n for n in RESOLUTION_LADDER if n in sustained), None)
