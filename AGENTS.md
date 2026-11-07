@@ -167,6 +167,8 @@ cannot be backed, say so rather than rounding up.
   chip whatever board carries it (`aic8800`), `<board>.md` for one box, and `<topic>.md` for a
   project-wide item too big for a line. A page grows topics as `<scope>-<topic>.md`. Every page has
   its row in the index.
+- **An ask made in the middle of other work is a todo first**, to do or to consider, on its page.
+  Then back to the work.
 - **Worklogs are written as work happens** — dated entries, wrong turns included. They are the raw
   material everything else derives from, and what the next port follows. Beside each, `steering.md`
   logs where the docs or rules steered wrong.
