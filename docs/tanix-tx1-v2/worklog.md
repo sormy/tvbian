@@ -1732,3 +1732,10 @@ gain, the unit's own DRAM init on the eMMC, is not worth it; the install keeps w
   settings at 27, 74.25, 148.5, 297 and 594 MHz unchanged; `0289` HDR as 10-bit RGB where the sink's
   TMDS limit allows, else 4:2:2. On that kernel HDR at 10 bpc picks 10-bit RGB at 2256x1504 and at
   VIC 16 (`VP_PR_CD` 0x50). `sunxi64-next` takes the same set, `0289` on 7.3's colour-format bits.
+
+## 2026-11-07 — 4K streams ramping after a resume
+
+- 4K streams ramped up for about 30 s after a resume. One was the network: four waits for data in 33
+  s at 46–61 Mbit/s. The other was the player falling behind, every 2nd or 3rd picture shown:
+  `fuseamp.service` was in a restart loop, 186 starts, beside a copy started by hand that held the
+  display. With the unit alone, the same clip reached 24 fps within a second.

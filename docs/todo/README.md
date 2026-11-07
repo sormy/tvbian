@@ -38,6 +38,10 @@ below.
       `KEY_F11`. Each change says why in its `board.patch`, and a press under
       `evtest /dev/input/recovery-button` checks it.
 
+- [ ] **Consider: a browser decodes video in hardware.** Debian's Chromium bundles its own FFmpeg
+      and Google Chrome links none, so both decode in software here. Firefox loads the system's
+      FFmpeg, ours, at run time; else a Chromium built with its V4L2 decoders.
+
 - [ ] **Every board: which recovery button it has.** Most boxes expose a U-Boot recovery button, a
       key the bootloader reads and Linux sees, not the SoC's maskrom or FEL strap, which is rarely
       wired out. Each board's README row and `board.md` name it: "Recovery button (U-Boot)", or "→

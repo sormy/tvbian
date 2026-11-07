@@ -9,6 +9,8 @@
 - [ ] Wi-Fi went silent after a group rekey: no traffic for 37 min, the link still up, nothing
       logged, the box running. Seen once; 27 forced rekeys at 20 s passed clean, so the cause is not
       the group-key install alone.
+- [ ] A 4K stream resumed mid-file plays at once over Wi-Fi: once it waited for data four times in
+      its first 33 s (1.5 to 6.3 s each, at 46–61 Mbit/s), then played smoothly.
 
 ## Parked
 
