@@ -10,3 +10,8 @@
 # USB webcams need none of them
 # CONFIG_VIDEO_CAMERA_SENSOR is not set
 # CONFIG_VIDEO_NVP6158 is not set
+# 6.12 builds the hard-lockup detector on perf's NMI, which a GICv2 cannot raise: each CPU watches
+# its neighbour instead, as 6.1's OTHER_CPU did
+CONFIG_HARDLOCKUP_DETECTOR_PREFER_BUDDY=y
+# systemd's automounts, binfmt_misc's among them; 6.1's defconfig has it, 6.12's does not
+CONFIG_AUTOFS_FS=y
