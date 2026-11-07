@@ -41,8 +41,10 @@ is **byte-identical** in this board's tree, so it should apply essentially verba
 | IR `remote_support_psci` → `1`                               | **reverted** — no IR receiver here, `pwm@ffa90030` disabled   |
 | LEDs → `work-green`/`work-red` renamed `power`/`standby`     | verbatim                                                      |
 | `chosen` dropped                                             | verbatim                                                      |
+| `sdio-pwrseq` → `power-off-delay-us = <200000>`              | verbatim; the card came up first try here, 30 of 30           |
 | `compatible` + `model`                                       | **board's own strings** — see below                           |
 | `sdmmc` → drop `sd-uhs-*`                                    | **skip** — no SD slot is fitted, so the graft has no consumer |
+| HDMI DDC → `i2c-gpio`, `ddc-i2c-bus`                         | verbatim; DDC/CI ✅, no `ddc read failed` at boot             |
 
 ### IR is disabled, not grafted around
 

@@ -197,10 +197,10 @@ usercode matches none of the nine `ir_keyN` tables. The worklog has the full rea
 **The remote still works here, over BLE.** Paired, it is two HID devices (`2B54:1600`), both
 symlinked by `60-tvb-input-names.rules`:
 
-| Device                      | Symlink                      | Half          | State |
-| --------------------------- | ---------------------------- | ------------- | :---: |
-| `Bluetooth remote Keyboard` | `/dev/input/bt-remote`       | the keys      |  ✅   |
-| `Bluetooth remote Mouse`    | `/dev/input/bt-remote-mouse` | the air-mouse |  ✅   |
+| Device                              | Symlink                      | Half          | State |
+| ----------------------------------- | ---------------------------- | ------------- | :---: |
+| `Bluetooth remote Consumer Control` | `/dev/input/bt-remote`       | the keys      |  ✅   |
+| `Bluetooth remote Mouse`            | `/dev/input/bt-remote-mouse` | the air-mouse |  ✅   |
 
 What is lost is narrower than "no remote": nothing works **until** it is paired. ✅ Remote wake from
 suspend does work, over BLE — see the suspend section. `/dev/input/ir-remote` never appears: the
@@ -392,8 +392,6 @@ and the restore commands are all in `docs/rockchip-maskrom.md`; what is board-sp
 - **AV1 has no hardware decode** ➖. Software `dav1d` gives 40.6 fps at 1080p with all four cores
   pegged, so 1080p60 or 4K AV1 is out of reach. Pin players to VP9, which YouTube serves to anything
   not advertising AV1.
-- **`ddc read failed` ×15 at every boot.** EDID still parses — 256 B, 40 modes — and everything
-  works, so it is cosmetic. Inherited from the factory tree, not from our graft.
 - **AVS1/AVS+ decode never confirmed** ❓. FFmpeg's FATE `cavs.mpg`, demuxed to an elementary
   stream, makes MPP spin — endless `loop again`, no frame — under both `vdpu2` codings. Either the
   stream is unclean or the legacy path does not really do AVS1 here. AVS2, the one that appears in

@@ -3183,3 +3183,11 @@ driver loads, brings in `skw_sdio_lite`, and the devices it creates bring in the
 - `cma=16M`: pool 16 MiB, idle 1.2 MiB; a 4K60 synthetic screen with a 4K NV12 video plane and the
   interface over it, flipped at a player's pace, while the engine decoded 8K HEVC with AFBC frames,
   iperf3 from plex: 1.2 MiB, 1643 commits, none refused; `display.py` 18 passed.
+
+## 2026-11-06 — DDC/CI over `i2c-gpio`
+
+- The M2 Plus's graft: the HDMI DDC pins as an `i2c-gpio` bus, `ddc-i2c-bus` on the HDMI node. DTB
+  `7ac1ea3d`, the old kept as `board.dtb.preddc`; Fuseamp started again after the reboot.
+- BOE monitor attached: EDID 256 bytes, `ddcutil detect` Display 1, MCCS 2.2 on `i2c-hdmi-ddc`;
+  brightness 100, set 80 and read 80, set back 100.
+- `ddc read failed`: 0 lines this boot, with the screen attached; 15 at every boot before.
