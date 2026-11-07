@@ -23,7 +23,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 CORPUS = ROOT / "build" / "validate" / "video" / "clips"
 RESULTS = ROOT / "build" / "validate" / "video"
-BOX_DIR = "/root/validate-video"
+BOX_DIR = "/var/tmp/tvb-validate-video"
 FRAMES = 3
 # a hardware hang costs a minute at most; past two failing sizes a codec's ladder stops
 CASE_TIMEOUT = 60
@@ -81,7 +81,7 @@ ENGINES = {
         "download": "hwdownload,format=nv12,",
         # NV15 frames cannot be downloaded: 10-bit is checked by frames decoded
         "count_only": {"h264p10", "hevc10", "vp9p2"},
-        "fallback": r"larger than the hardware|unsupported by MPP|Unknown codec",
+        "fallback": r"larger than the hardware|unsupported by MPP|for soc \S+ unsupported|Unknown codec",
         "irq": r"vdpu|rkvdec|jpegd|avsd|rkvenc",
         "encoders": {"h264": "h264_rkmpp", "hevc": "hevc_rkmpp"},
     },
@@ -275,6 +275,8 @@ def scale_case(ff, engine, codec, clip):
         return {"verdict": "unoffered"}
     rc, log, _ = sh([ff, "-hide_banner", "-nostdin", "-v", "verbose"] + eng["scale"](codec) +
                     ["-i", clip, "-frames:v", "1", "-f", "null", "-"])
+    if re.search(eng["fallback"], log):
+        return {"verdict": "refused"}
     m = re.findall(r"Stream #0:0.*?Video: .*?(\d{3,5}x\d{3,5})", log)
     out = m[-1] if m else None
     if not out:
@@ -355,6 +357,8 @@ def ladder(sizes, run, emit, start):
 
 
 def cmd_box(args):
+    global BOX_DIR
+    BOX_DIR = args.dir
     ff, root = args.ffmpeg, Path(args.dir)
     manifest = json.loads((root / "manifest.json").read_text())["clips"]
     only = re.compile(args.only) if args.only else None
@@ -407,59 +411,66 @@ def cmd_box(args):
 # host: run, report, compare
 
 def cmd_run(args):
+    global BOX_DIR
     ssh = ["ssh", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR",
            "-o", "BatchMode=yes", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=3", args.box]
     scp = ["scp", "-q", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR"]
-    subprocess.run(ssh + [f"mkdir -p {BOX_DIR}"], check=True)
-    have = set(subprocess.run(ssh + [f"ls {BOX_DIR}"], stdout=subprocess.PIPE, text=True).stdout.split())
-    send = [str(p) for p in CORPUS.glob("*-*.*") if p.name not in have] + [str(CORPUS / "manifest.json")]
-    if send:
-        subprocess.run(scp + send + [f"{args.box}:{BOX_DIR}/"], check=True)
-    subprocess.run(scp + [__file__, f"{args.box}:{BOX_DIR}/video.py"], check=True)
-    records, after = [], []
-    RESULTS.mkdir(parents=True, exist_ok=True)
-    out = Path(args.out) if args.out else None
+    BOX_DIR = subprocess.run(ssh + ["mktemp -d /var/tmp/tvb-validate-video.XXXXXX"],
+                             check=True, stdout=subprocess.PIPE, text=True).stdout.strip()
+    try:
+        send = [str(p) for p in CORPUS.glob("*-*.*")] + [str(CORPUS / "manifest.json")]
+        if send:
+            subprocess.run(scp + send + [f"{args.box}:{BOX_DIR}/"], check=True)
+        subprocess.run(scp + [__file__, f"{args.box}:{BOX_DIR}/video.py"], check=True)
+        records, after = [], []
+        RESULTS.mkdir(parents=True, exist_ok=True)
+        out = Path(args.out) if args.out else None
 
-    def save(rec):
-        nonlocal out
-        records.append(rec)
-        out = out or RESULTS / f"{args.box.split('@')[-1]}-{records[0]['kernel']}.json"
-        out.write_text(json.dumps(records, indent=1))
+        def save(rec):
+            nonlocal out
+            records.append(rec)
+            out = out or RESULTS / f"{args.box.split('@')[-1]}-{records[0]['kernel']}.json"
+            out.write_text(json.dumps(records, indent=1))
 
-    while True:
-        remote = (f"python3 {BOX_DIR}/video.py box --engine {args.engine} --ffmpeg {args.ffmpeg} --dir {BOX_DIR} "
-                  f"--suite {args.suite}" + (f" --only '{args.only}'" if args.only else "") +
-                  (f" --skip '{args.skip}'" if args.skip else "") +
-                  (f" --after {','.join(after)}" if after else ""))
-        p = subprocess.Popen(ssh + [remote], stdout=subprocess.PIPE, text=True)
-        started, finished = None, False
-        for line in p.stdout:
-            rec = json.loads(line)
-            if "start" in rec:
-                started = rec["start"]
-                continue
-            finished = finished or rec.get("done", False)
-            if "kernel" in rec and "engine" in rec and records:
-                continue
-            save(rec)
-            if "suite" in rec:
-                print(f"{rec['suite']:6} {rec['codec']:8} {rec['size']:10} {rec['verdict']:9} "
-                      f"{rec.get('fps') or '':>6} {rec.get('cpu_fps') or '':>6} {rec.get('psnr_y') or ''}", flush=True)
-        p.wait()
-        if finished or not started:
-            break
-        # the box went away mid-case: a hang its watchdog reset, or worse; wait for it, go on
-        suite, codec, size = started
-        save({"suite": suite, "codec": codec, "size": size, "verdict": "hang"})
-        print(f"{suite:6} {codec:8} {size:10} hang, waiting for the box", flush=True)
-        after.append(f"{suite}:{codec}")
-        for _ in range(60):
-            time.sleep(10)
-            if subprocess.run(ssh[:-1] + ["-o", "ConnectTimeout=5", args.box, "true"]).returncode == 0:
+        while True:
+            remote = (f"python3 {BOX_DIR}/video.py box --engine {args.engine} --ffmpeg {args.ffmpeg} --dir {BOX_DIR} "
+                      f"--suite {args.suite}" + (f" --only '{args.only}'" if args.only else "") +
+                      (f" --skip '{args.skip}'" if args.skip else "") +
+                      (f" --after {','.join(after)}" if after else ""))
+            p = subprocess.Popen(ssh + [remote], stdout=subprocess.PIPE, text=True)
+            started, finished = None, False
+            for line in p.stdout:
+                rec = json.loads(line)
+                if "start" in rec:
+                    started = rec["start"]
+                    continue
+                finished = finished or rec.get("done", False)
+                if "kernel" in rec and "engine" in rec and records:
+                    continue
+                save(rec)
+                if "suite" in rec:
+                    print(f"{rec['suite']:6} {rec['codec']:8} {rec['size']:10} {rec['verdict']:9} "
+                          f"{rec.get('fps') or '':>6} {rec.get('cpu_fps') or '':>6} {rec.get('psnr_y') or ''}", flush=True)
+            p.wait()
+            if finished or not started:
                 break
-        else:
-            sys.exit("the box did not come back")
-    print(f"saved {out}")
+            # the box went away mid-case: a hang its watchdog reset, or worse; wait for it, go on
+            suite, codec, size = started
+            save({"suite": suite, "codec": codec, "size": size, "verdict": "hang"})
+            print(f"{suite:6} {codec:8} {size:10} hang, waiting for the box", flush=True)
+            after.append(f"{suite}:{codec}")
+            for _ in range(60):
+                time.sleep(10)
+                if subprocess.run(ssh[:-1] + ["-o", "ConnectTimeout=5", args.box, "true"]).returncode == 0:
+                    break
+            else:
+                sys.exit("the box did not come back")
+        print(f"saved {out}")
+    finally:
+        try:
+            subprocess.run(ssh + [f"rm -rf -- {BOX_DIR}"], timeout=10, check=True)
+        except (subprocess.SubprocessError, OSError) as error:
+            print(f"cleanup needed on box: {BOX_DIR}: {error}", file=sys.stderr)
 
 
 def load(path):
