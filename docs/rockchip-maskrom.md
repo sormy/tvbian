@@ -281,3 +281,10 @@ for ((s = 0; s < SECTORS; s += STEP)); do
 done
 rm -f part.img
 ```
+
+## How the loaders are made
+
+Each board's `maskrom_loader.bin` is Rockchip's `usbplug` (from `rkbin`) packed with that board's
+own DDR init, carved from its factory idbloader, `boards/<board>/factory_idbloader.bin`. That blob
+is read from the box's eMMC once, when the board is brought up. `./build.sh loader <board>` repacks
+one, byte-identical on a rebuild; `./build.sh loaders` every board's.

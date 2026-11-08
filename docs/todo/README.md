@@ -100,8 +100,7 @@ below.
       in that order, a patch spanning two in the later. Origin goes in each folder's README. A
       move-only commit: the patched tree byte-identical before and after.
 
-- [ ] **Every board: the Test report keyed by checklist ID.** `docs/bring-up/` asks for it; no
-      board's report is, so a line never run stays invisible. The Tanix TX1 V2.0 first.
+- [ ] **Every board's Test report has a row for every check, by name**, so a line never run shows.
 
 - [ ] **An AI review on every pull request, against `AGENTS.md`.** A fork PR runs without our
       secrets, so a GitHub App fits: CodeRabbit's open-source plan, free for a public repo and

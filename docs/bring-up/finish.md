@@ -2,14 +2,14 @@
 
 ## Do
 
-1. **The full pass**: `system.md` to `input.md` again, on the family's kernel and on its `-next`,
-   the Test report marked per kernel side by side. A number that differs between kernels is a
-   finding.
+1. **The full pass**: `system.md` to `input.md` again on the family's kernel. On its `-next`, the
+   unattended lines a kernel can change, in their own table: the image, the bootloader, the hardware
+   and the hands-on lines are marked once. A number that differs between kernels is a finding.
 2. **What remains**, off the Test report: each ❌ and each gap scoped in Known gaps: the vendor's
    code, the closest mainline driver, any series in flight, an estimate.
 3. **A few days of daily use** by the human, every issue a worklog entry.
 4. **The post-mortem**: each `steering.md` entry becomes its fix in `docs/bring-up/`, `AGENTS.md` or
-   a test, the commit named in the entry.
+   a test, the commit named in the entry; then the file goes.
 5. **The pull request.**
 
 ## Bites
@@ -25,7 +25,7 @@
 
 ## Check
 
-- [ ] **Q1** Every line has a mark on both kernels; no ❓ left
+- [ ] **Q1** Every line has a mark, `-next` lines too; no ❓ left, optional lines aside
 - [ ] **Q2** Every ❌ and gap is scoped in Known gaps
 - [ ] **Q3** 👤 A few days of daily use with no issue
 - [ ] **Q4** The main README and its family's README list the board

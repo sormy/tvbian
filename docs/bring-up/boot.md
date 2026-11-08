@@ -31,14 +31,18 @@ From loaders to an installed system, and how a running box is changed without lo
    The service-mode loader never depends on the board tree: a tree bug must not take the way in
    away.
 
-3. **RAM before anything else**: `mtest` over every range from a U-Boot loaded over the service
-   mode, then `stress-ng --vm` over most of RAM on the first boot. A box that fails only under
-   memory load has a RAM fault until shown otherwise.
-4. **The first boot from RAM**: the service mode loads U-Boot, the tree and a boot script; the
-   kernel boots with nothing written. Then from an SD card or USB stick, the eMMC untouched.
+3. **RAM before anything else**: `stress-ng --vm` over most of RAM on the first boot; `mtest` over
+   every range first, optionally, where the service-mode U-Boot sizes every bank. A box that fails
+   only under memory load has a RAM fault until shown otherwise.
+4. **Confirm the boot medium before writing it**: the selected connector must be present on the
+   delivered box, and its bootloader must support that medium. A family sibling's connector is no
+   evidence for this board. **The first boot may come from RAM**, the safer route: the service mode
+   loads U-Boot, the tree and a boot script, and the kernel boots with nothing written. Or from an
+   SD card where there is a slot, or a USB stick, the eMMC untouched.
 5. **Network first**: a boot that comes up on Ethernet or Wi-Fi and takes `ssh`; the USB Ethernet
    adapter stands in until the board's own works (`r8152` is in every family's kernel).
-6. **Install** with `tvb-install` from external media, which keeps the eMMC's bootloader.
+6. **Install** with `tvb-install` from external media, which keeps the eMMC's bootloader; a box that
+   boots none is written over the service mode.
 7. **Changing a running box**, every tree or kernel change:
    1. a second way in plugged: USB Ethernet or serial;
    2. a driver patch is built and loaded on the box, no reboot; only a kernel change needs one;
@@ -59,15 +63,17 @@ From loaders to an installed system, and how a running box is changed without lo
   and the kernel's last words show.
 - **A test harness checks its own premise** in the log before it reports: the test kernel's or
   tree's marker line, or the run tested nothing. Bootstd ignores a FEL script and boots the disk.
+- **A build is not a boot test.** A first boot's risk is judged on the control tree, the factory
+  tuning and the way back, against the closest sister's.
 - **A new tree's U-Boot is tested over the service mode** before it is written: there the SPL has
   set nothing up for it.
 
 ## Check
 
 - [ ] **O1** The service-mode loader boots without the board tree
-- [ ] **O2** `mtest` passes over every RAM range
-- [ ] **O3** 👤 A kernel boots from RAM over the service mode, nothing written
-- [ ] **O4** 👤 The image boots from an SD card or USB stick, the eMMC untouched
+- [ ] **O2** Optional: `mtest` passes over every RAM range
+- [ ] **O3** 👤 The image boots from an SD card, the eMMC untouched, where there is a slot
+- [ ] **O4** 👤 Optional: the image boots from a USB stick, the eMMC untouched
 - [ ] **O5** It comes up on the network and takes `ssh`
 - [ ] **O6** On Rockchip, the image's loaders at sectors 64 and 16384 are the board's
 - [ ] **O7** `/usr/lib/tvb/board.dtb` is identical to `boards/<board>/board.dtb`

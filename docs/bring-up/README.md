@@ -10,10 +10,11 @@ folder is the whole procedure: this file, read whole first, then one phase at a 
 | family | the SoC family is new                   | `contact.md`, `family.md`, then as a board            |
 
 **A board of a known family with known chips is mostly authoring**: its trees (`trees.md`) and its
-board data (`boot.md`). Validation leans on its sisters: a line whose block is a sister's ✅ needs
-only a weak check here. The effort goes where this board differs from them: its wiring, RAM, eMMC,
-ports, remote and LEDs, and its heat: sisters by block are not sisters by heat, and a stick runs
-hotter than its box sibling.
+board data (`boot.md`), with no stock runtime capture, the image and its factory trees carrying it.
+Validation leans on its sisters: a line whose block is a sister's ✅ needs only a weak check here.
+The effort goes where this board differs from them: its wiring, RAM, eMMC, ports, remote and LEDs,
+and its heat: sisters by block are not sisters by heat, and a stick runs hotter than its box
+sibling.
 
 | File          | Covers                                                    |
 | ------------- | --------------------------------------------------------- |
@@ -32,7 +33,7 @@ hotter than its box sibling.
 | `input.md`    | USB, the remote, buttons, LEDs                            |
 | `chip.md`     | a driver for a chip that has none                         |
 | `family.md`   | what every board of a new family inherits                 |
-| `finish.md`   | the full pass on both kernels, the pull request           |
+| `finish.md`   | the full pass, `-next`'s kernel lines, the pull request   |
 
 ## The run
 
@@ -44,7 +45,7 @@ records it before the next phase starts. A phase is done when each of its lines 
 
 | File                       | Holds                                                     |
 | -------------------------- | --------------------------------------------------------- |
-| `docs/<board>/board.md`    | the Test report: every line's ID, mark and evidence       |
+| `docs/<board>/board.md`    | the Test report: every line's name, mark and evidence     |
 | `docs/<board>/worklog.md`  | dated: what was tried, the command, what it showed        |
 | `docs/<board>/steering.md` | dated: where the docs or rules steered wrong, and the fix |
 | `build/logs/<board>/`      | every serial and test log, one file per attempt           |
@@ -52,7 +53,8 @@ records it before the next phase starts. A phase is done when each of its lines 
 **A steering entry** is written when the docs or rules were missing or wrong, a human was asked for
 what should have run unattended, or a deficiency got past every check. Each carries:
 
-- **Kind**: `missing`, `wrong`, `human`, `escape`, `agent` or `tooling`.
+- **Kind**: `missing`, `wrong`, `human`, `escape`, `agent`, `tooling`, or `doc`: a line asking more
+  than it needs.
 - **Found by**: a test, the agent or the human; the human's find means a test is missing.
 - **Cost**: the human's steps and the time lost.
 - **Damage**, when a box or the owner's data was put at risk.
@@ -61,7 +63,7 @@ what should have run unattended, or a deficiency got past every check. Each carr
 - **Fix**: the doc, rule or test it asks for, and its commit once made.
 
 What remains is read off the Test report: every line not ✅, ➖ or a recorded ❌. A line's ID lives
-in this folder and the Test report alone; the worklog, commits and messages name what it checks.
+in this folder alone; the Test report, the worklog, commits and messages name what it checks.
 
 **A box that resets itself comes first.** The watchdog and the kernel's lockup detectors
 (`system.md`) are what let the agent run unattended: a hang it causes resets the box, and the next
@@ -78,6 +80,13 @@ hang is a human's step.
 Everything else it does. 👤 lines wait for one batch at the end, except those a phase needs to go
 on: the first way in, the backup's read, a first boot from external media. **Fewest human actions
 first**: a cable beats a click-through, and a guess costs the human a power cycle.
+
+**Most of it runs unattended.** The human's part is a few short sessions, each a smoke check: the
+listing and photos, the recovery button, the remote and the LEDs, a TV. No test campaigns.
+
+**A 👤 line earns its place**: one that needs the human, and above all one that needs special kit,
+is required only when nothing unattended can answer it and its answer changes what ships; otherwise
+it is marked optional, or it goes. Each measurement states what it decides.
 
 **It stops and reports** when one step has failed three times with three different fixes, when the
 box answers on no way in, or when the next step would cost the only way back.
@@ -115,6 +124,8 @@ These hold in every phase.
 
 - A tree or kernel change boots from RAM over the service mode first, or with a one-boot argument
   typed at U-Boot's prompt, never written to the boot config.
+- A tree change only a driver off the boot path reads goes straight in, the known-good `board.dtb`
+  kept where one copy over a network the change cannot touch restores it.
 - A second way in, USB Ethernet or serial, is plugged in before a kernel swap.
 - Nothing replaces the eMMC's bootloader on a box whose way back is not proven.
 
@@ -164,19 +175,24 @@ months of daily use proves a board, and a ✅ that fails later turns ❌, the ca
 
 ## Kit
 
-| Item                                   | For                                      |
-| -------------------------------------- | ---------------------------------------- |
-| multimeter, any cheap one              | serial pins; the AV jack's ground        |
-| TTL adapter: 1.8/3.3/5 V jumper, FT232 | serial; a CP2102 cannot do 1.5 Mbaud     |
-| test hooks, or a soldering iron        | holding the serial pads                  |
-| USB-A male-to-male cable               | the USB service mode                     |
-| USB Ethernet adapter, RTL8152/8153     | a network before the board's own         |
-| a power switch the host toggles        | power cycles without hands               |
-| USB camera                             | the agent watching the screen            |
-| TV with CEC; PC monitor with DDC/CI    | the HDMI checks                          |
-| 3.5 mm AV to 3×RCA, RCA to HDMI        | the AV jack's picture on any HDMI screen |
-| 3.5 mm CTIA-to-OMTP adapter            | AV cables grounded on ring 2             |
-| stereo headphones; S/PDIF to RCA       | the AV jack's and S/PDIF's audio, by ear |
-| AV receiver, where there is one        | passthrough                              |
-| SD card, USB stick, SSD in a USB case  | booting images; the USB stress test      |
-| power meter                            | draw at idle, suspended and off          |
+Most have a USB SSD or stick and a screen; some an OTG cable; few the serial kit. A line needs only
+the kit it names: without it the line is ➖, never a blocker.
+
+| Item                                     | For                                      | Who has it |
+| ---------------------------------------- | ---------------------------------------- | ---------- |
+| SD card, USB 3 stick or SSD, USB 2 stick | booting images; the USB stress test      | most       |
+| a TV or PC monitor on HDMI               | the HDMI checks                          | most       |
+| USB keyboard, mouse or receiver          | USB 1.1 at 12M                           | most       |
+| USB-A male-to-male cable, or OTG         | the USB service mode                     | some       |
+| USB Ethernet adapter, RTL8152/8153       | a network before the board's own         | some       |
+| TV with CEC; PC monitor with DDC/CI      | CEC and DDC/CI                           | some       |
+| multimeter, any cheap one                | serial pins; the AV jack's ground        | few        |
+| TTL adapter: 1.8/3.3/5 V jumper, FT232   | serial; a CP2102 cannot do 1.5 Mbaud     | few        |
+| test hooks, or a soldering iron          | holding the serial pads                  | few        |
+| a power switch the host toggles          | power cycles without hands               | few        |
+| USB camera                               | the agent watching the screen            | few        |
+| 3.5 mm AV to 3×RCA, RCA to HDMI          | the AV jack's picture on any HDMI screen | few        |
+| 3.5 mm CTIA-to-OMTP adapter              | AV cables grounded on ring 2             | few        |
+| stereo headphones; S/PDIF to RCA         | the AV jack's and S/PDIF's audio, by ear | few        |
+| AV receiver                              | passthrough                              | few        |
+| power meter                              | whether sleep saves enough to keep       | few        |

@@ -11,8 +11,10 @@
        --direct=1 --ioengine=libaio --iodepth=32 --numjobs=1 --runtime=30 --time_based
    ```
 
-2. The install cycle, in order: external media, `tvb-install`, the eMMC, the service mode on our
-   U-Boot, a full read, a full restore of the stock backup, then the install again.
+2. The install cycle, in order: external media and `tvb-install`, or the service mode where the box
+   boots none; the eMMC; the service mode on our U-Boot. A new family's also: a write over it, read
+   back identical; a full write that boots shows the same, at more risk. Within a family the
+   family's proof stands.
 
 ## Bites
 
@@ -31,11 +33,9 @@
 - [ ] **M2** The SD card under `fio`
 - [ ] **M3** 👤 SD hotplug, in and out
 - [ ] **M4** Every speed mode kept survives warm reboots
-- [ ] **M5** `tvb-install` puts the image on the eMMC
+- [ ] **M5** `tvb-install` puts the image on the eMMC, where the box boots external media
 - [ ] **M6** It boots from the eMMC on its own loaders
 - [ ] **M7** The per-unit window is byte-identical to the backup
 - [ ] **M8** 👤 The service mode enters on our U-Boot
-- [ ] **M9** It loads the board's loader and reports the eMMC's true size
-- [ ] **M10** Over it, a full-disk read matches the eMMC
-- [ ] **M11** Over it, the stock backup restored in full boots stock
-- [ ] **M12** The install passes again after the restore
+- [ ] **M9** A new family's: it loads the family's loader and reports the eMMC's true size
+- [ ] **M10** A new family's: over it, a write reads back identical, or a full write boots

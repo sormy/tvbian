@@ -24,16 +24,16 @@
 
 3. **`board.md`**, in this order:
 
-   | Section       | Holds                                              |
-   | ------------- | -------------------------------------------------- |
-   | Identity      | name, PCB, components, the product and PCB photos  |
-   | Serial        | the pads outlined in red, pin order, baud, voltage |
-   | Addresses     | each one and its source                            |
-   | Test report   | every ID, its mark per kernel, its evidence        |
-   | Measured      | the numbers, dated, with what was fitted           |
-   | per component | how each works on this board                       |
-   | Known gaps    | ❌, ❓, the trade-offs, each scoped                |
-   | Recovery      | this box's way into the service mode, and back     |
+   | Section        | Holds                                                        |
+   | -------------- | ------------------------------------------------------------ |
+   | Identity       | name, PCB, components, the product and PCB photos            |
+   | Serial console | location, pinout and its square pad, level, console and baud |
+   | Addresses      | each one and its source                                      |
+   | Test report    | every check by name, its mark per kernel, its evidence       |
+   | Measured       | the numbers, dated, with what was fitted                     |
+   | per component  | how each works on this board                                 |
+   | Known gaps     | ❌, ❓, the trade-offs, each scoped                          |
+   | Recovery       | this box's way into the service mode, and back               |
 
 4. **The serial pins**, on the open board. TX carries the console out, RX takes keystrokes in;
    reading needs only GND and TX.
@@ -46,6 +46,8 @@
       `tio -b <baud> -t -L --log-file build/logs/<board>/<YYYYMMDD-HHMMSS>.log <port>`.
    5. The box's RX last, for a shell: it drives the SoC, so the jumper is set to the SoC's level
       first. Never the supply pad.
+   6. Contact held firm: a hook in a plated hole touches only its rim. Noise between clean lines, or
+      the adapter dropping off USB, is a loose pin or GND, not the baud.
 
 ## Bites
 
@@ -54,11 +56,12 @@
 
 ## Check
 
-- [ ] **L1** 👤 The stock boot log scrolls on serial
+- [ ] **L1** 👤 Where stock boots with serial attached: its log scrolls there
 - [ ] **I1** The ID is searched: every result is this box
 - [ ] **I2** The human confirmed the ID
 - [ ] **I3** 👤 Photos of both sides of the PCB, the markings readable
-- [ ] **I4** 👤 The serial pads outlined on the photo
+- [ ] **I4** 👤 The serial pads outlined on the PCB photo, each pin named (TX, RX, GND) with its
+      voltage, where the board has them
 - [ ] **I5** Every component is in `board.md`, by part
 - [ ] **I6** `board.md` has every section above
 - [ ] **I7** `BOARD_PCB` and `BOARD_DATE` are the silkscreen's name and date

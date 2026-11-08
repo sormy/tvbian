@@ -5,7 +5,12 @@ Nothing on the box is written before its whole eMMC is off it and a way back is 
 ## Do
 
 1. **The DRAM-init blob first**, it feeds every service-mode loader:
-   - Rockchip: the idbloader, sector 64 for 4096 sectors → `boards/<board>/factory_idbloader.bin`;
+   - Rockchip: the idbloader, sector 64 for 4096 sectors → `boards/<board>/factory_idbloader.bin`.
+     Our loader is built from it, so the first read is through the factory Loader, the one use it is
+     fit for: 2 MiB, under its silent 32 MB read cap, twice and identical, a valid IDB header and
+     DDR entry. Then our loader, uploaded over Maskrom, reads the same block: identical means it
+     reads true, and the full backup rests on it. Its writes are proven later, a write read back
+     (`storage.md`);
    - Allwinner: boot0, sector 16 for 128 → `boards/<board>/factory_boot0.bin`, before the first FEL
      read: the FEL loader's DRAM settings come from it;
    - Amlogic: none, the factory U-Boot serves the burning mode itself.

@@ -19,19 +19,20 @@ supported board means the patch targets mainline's tree.
    following the factory, never a third value.
 5. **Grafts known here**, starting from the closest board's patch:
 
-   | Graft                                       | Needed by                                   |
-   | ------------------------------------------- | ------------------------------------------- |
-   | IR `remote_support_psci` → `1`              | the remote waking the box from off          |
-   | GPU: lima `clocks`, `interrupt-names`       | mainline's lima                             |
-   | LEDs: labels `power`, `standby`             | the shared LED hooks                        |
-   | LEDs: `retain-state-shutdown`, `-suspended` | the hooks, not the LED core, own the LEDs   |
-   | `watchdog` → `okay`                         | systemd's `RuntimeWatchdogSec`              |
-   | VOP `esmart_lb_mode` → `02`                 | 4K on Rockchip                              |
-   | `model` → the box's name                    | identity; the factory names the EVB         |
-   | CEC: mainline's node, `hdmi-phandle`        | `/dev/cec0`                                 |
-   | DDC: `i2c-gpio`, pins muxed to GPIO         | DDC/CI; unmuxed, the EDID reads empty       |
-   | IOMMU: `iommus` on every master the factory | no page faults at idle                      |
-   | SoC or board `compatible`                   | only where a driver or userspace keys on it |
+   | Graft                                       | Needed by                                      |
+   | ------------------------------------------- | ---------------------------------------------- |
+   | IR `remote_support_psci` → `1`              | the remote waking the box from off             |
+   | GPU: lima `clocks`, `interrupt-names`       | mainline's lima                                |
+   | LEDs: labels `power`, `standby`             | the shared LED hooks                           |
+   | Recovery button → `KEY_VENDOR`              | a button the kernel sees; not a boot-ROM strap |
+   | LEDs: `retain-state-shutdown`, `-suspended` | the hooks, not the LED core, own the LEDs      |
+   | `watchdog` → `okay`                         | systemd's `RuntimeWatchdogSec`                 |
+   | VOP `esmart_lb_mode` → `02`                 | 4K on Rockchip                                 |
+   | `model` → the box's name                    | identity; the factory names the EVB            |
+   | CEC: mainline's node, `hdmi-phandle`        | `/dev/cec0`                                    |
+   | DDC: `i2c-gpio`, pins muxed to GPIO         | DDC/CI; unmuxed, the EDID reads empty          |
+   | IOMMU: `iommus` on every master the factory | no page faults at idle                         |
+   | SoC or board `compatible`                   | only where a driver or userspace keys on it    |
 
 ## Bites
 
@@ -40,6 +41,8 @@ supported board means the patch targets mainline's tree.
 - **Trust the PCB over the tree.** A factory tree is often an evaluation board's: it claims hardware
   the box lacks. Disabling a node needs a positive signal, a driver error or a probe reading
   nothing; silence is not absence. No graft without a consumer.
+- **Nor the listing**: listings for one box disagree. A USB port's generation is its receptacle's
+  lead count, nine for USB 3, and a SuperSpeed device's link speed.
 - **Sizes come from the hardware, not the tree.** U-Boot writes the RAM it found into the memory
   node's `reg`, and nothing else: a factory `linux,usable-memory`, which the kernel prefers, caps
   every unit at the size it names. Drop it; the M20 carried one.

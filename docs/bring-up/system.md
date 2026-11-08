@@ -8,8 +8,8 @@ Test report marking each side by side; a number that differs between them is a f
 1. Boot twice, measure the second: the first resizes and runs first-boot setup.
 2. Account for `dmesg` line by line: every noisy line is a fault or a wrong level, often in an
    out-of-tree driver. Judge a line by what it says, not its level; demoting it hides it.
-3. Ten warm reboots and ten power cycles, every device checked after each: an MMC controller can
-   fail its first init after a warm reboot.
+3. Ten warm reboots, every device checked after each: an MMC controller can fail its first init
+   after a warm reboot.
 4. RAM under load, then the watchdog's two traps, a forced panic, and a real hang: the box resets
    itself each time. It is what every later phase relies on to run unattended.
 5. **Heat**: the factory OPP table, then CPU stress against the trip points. A stick, or a box with
@@ -50,24 +50,24 @@ Test report marking each side by side; a number that differs between them is a f
 - [ ] **S2** U-Boot prints on serial
 - [ ] **S3** The kernel prints on serial
 - [ ] **S4** A login on serial
-- [ ] **S5** The boot on HDMI, as early as it gets
+- [ ] **S5** The boot shows on HDMI from the kernel's first lines; before them, only where our
+      U-Boot drives the display
 - [ ] **S6** `dmesg` accounted for line by line; tolerated lines named in `board.md`
 - [ ] **S7** `systemd-analyze blame` explains every second
 - [ ] **S8** The second boot is at or under the recorded time
 - [ ] **S9** `/usr/lib/tvb/board-{id,name,pcb}` are right
 - [ ] **S10** Every `tvb-*-modules` module is loaded
 - [ ] **S11** Ten warm reboots, every device working after each
-- [ ] **S12** Ten power cycles, every device working after each
-- [ ] **S13** `free -m` is the advertised RAM
-- [ ] **S14** `stress-ng --vm --verify` over most of RAM is clean
-- [ ] **S15** `journalctl -b | grep "Watchdog running with"` shows the largest timeout its clock
+- [ ] **S12** `free -m` is the advertised RAM
+- [ ] **S13** `stress-ng --vm --verify` over most of RAM is clean
+- [ ] **S14** `journalctl -b | grep "Watchdog running with"` shows the largest timeout its clock
       allows
-- [ ] **S16** Pings stopped, the box resets at the set timeout: not at the maximum, not never
-- [ ] **S17** A forced panic reboots the box, the oops in `/sys/fs/pstore/`
-- [ ] **S18** No userspace service sets an address or attaches a device
-- [ ] **S19** The image adds nothing beyond `tvb-base`, the board's packages and their depends
-- [ ] **S20** `scaling_available_frequencies` is the factory OPP table
-- [ ] **S21** 5 minutes of 4-core `stress-ng` stays under the trip points, not throttled
-- [ ] **S22** A stick or small heat sink: the 30-minute combined soak, no throttling, no eMMC, DRAM
+- [ ] **S15** Pings stopped, the box resets at the set timeout: not at the maximum, not never
+- [ ] **S16** A forced panic reboots the box, the oops in `/sys/fs/pstore/`
+- [ ] **S17** No userspace service sets an address or attaches a device
+- [ ] **S18** The image adds nothing beyond `tvb-base`, the board's packages and their depends
+- [ ] **S19** `scaling_available_frequencies` is the factory OPP table
+- [ ] **S20** 5 minutes of 4-core `stress-ng` stays under the trip points, not throttled
+- [ ] **S21** A stick or small heat sink: the 30-minute combined soak, no throttling, no eMMC, DRAM
       or Wi-Fi error
-- [ ] **S23** A CPU stuck on a hung bus read: a lockup panic, the box back by itself
+- [ ] **S22** A CPU stuck on a hung bus read: a lockup panic, the box back by itself

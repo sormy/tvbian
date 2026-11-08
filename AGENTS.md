@@ -159,14 +159,14 @@ cannot be backed, say so rather than rounding up.
   READMEs routing a reader to a family or a guide, a board's own `board.md` for its per-board facts,
   a worklog naming the files it changed, and the bring-up's phases naming each other and the docs
   they update.
-- **Checklist IDs live in `docs/bring-up/` and the boards' Test reports, nowhere else**: worklogs,
-  commits and messages name what a line checks. An ID is never renumbered; a new line takes the next
-  free one.
+- **Checklist IDs live in `docs/bring-up/` alone**: a board's Test report, its worklog, commits and
+  messages name what a line checks, since IDs drift.
 - **A todo goes where its scope is.** `docs/todo/README.md` holds what spans families, and indexes
   the folder: `<family>.md` for what spans a family's boards (`rk35xx`), `<chip>.md` for a Wi-Fi/BT
   chip whatever board carries it (`aic8800`), `<board>.md` for one box, and `<topic>.md` for a
   project-wide item too big for a line. A page grows topics as `<scope>-<topic>.md`. Every page has
-  its row in the index.
+  its row in the index. An item says what we want in the end, in a line or two, not how. A finished
+  item is removed: the worklog and the commit record it.
 - **An ask made in the middle of other work is a todo first**, to do or to consider, on its page.
   Then back to the work.
 - **Worklogs are written as work happens** — dated entries, wrong turns included. They are the raw
@@ -301,7 +301,8 @@ higher one and record why.
 - **Over SSH, stop a process by its exact name (`pkill -x`) or PID.** `pkill -f` matches the SSH
   session's own command line and kills it.
 - `mmcblk` numbering is **not stable** across images or boots. Identify the eMMC by its
-  `boot0`/`boot1` companions, never by a remembered number.
+  `boot0`/`boot1` companions, an SD or SDIO host by its controller,
+  `/sys/devices/platform/<controller>/mmc_host/mmc*`, never by a remembered number.
 - **After any refactor, rebuild the image and diff every payload file against a pre-change build.**
   Comment-level differences only, unless the change is deliberately a rename — and a path moving
   between packages needs `Replaces` and `Breaks`, which the release guard checks.

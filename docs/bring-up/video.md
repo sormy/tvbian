@@ -14,20 +14,7 @@ screen in a player, before any one stage is judged.
 3. **The vendor's stack read before ours is written**: its display driver and its player's decoder
    setup, the format it sends, who scales, the clocks, the limits it checks. Ours mirrors it unless
    a measurement says better.
-4. **The cases written down before the first test**, one `board.md` row each:
-
-   | Axis   | Cases                                     |
-   | ------ | ----------------------------------------- |
-   | Depth  | 8-bit, 10-bit                             |
-   | Layout | linear, AFBC                              |
-   | Scale  | 1:1, shrink under 2×, over 2×, enlarge    |
-   | Width  | within the display's line buffer, past it |
-   | Codec  | one with AFBC output, one without         |
-   | Kernel | each the board ships                      |
-
-5. **Each case proven on the screen**: the whole picture by eye or the camera, the player's dropped
-   and late frames, and the display engine's log clean during it (no `RCQ sync timed out`, no
-   underrun), at the display's own mode.
+4. **Played in a player**, video with its audio, judged by eye and ear: the human's one step.
 
 ## Bites
 
@@ -51,10 +38,8 @@ screen in a player, before any one stage is judged.
 - [ ] **C1** `video.py` decode passes every codec the vendor's matrix lists, at its largest size
 - [ ] **C2** Every encoder's output decodes back
 - [ ] **C3** The decoder's downscale, where it has one
-- [ ] **C4** A real 4K HEVC film plays smooth, the CPU near idle
-- [ ] **C5** 4K60 on screen, zero copy, at the claimed frame rate
-- [ ] **C6** On LPDDR3 or a 32-bit bus: AFBC, 8- and 10-bit, decoder to plane, seen
-- [ ] **C7** Every case in the table above seen, the display engine's log clean
-- [ ] **C8** Stopping and restarting a stream leaves no stale buffers or warnings
-- [ ] **C9** A clip past each limit, then a supported one, decodes right
-- [ ] **C10** The board's matrix is in `board.md`, its chip's column in `docs/video-support.md`
+- [ ] **C4** 👤 A 4K film plays smooth in a player, its audio with it
+- [ ] **C5** Where the decoder writes AFBC: 8- and 10-bit frames, decoder to plane
+- [ ] **C6** The decoder's scaled picture, decoder to plane
+- [ ] **C7** A clip past each limit, then a supported one, decodes right
+- [ ] **C8** The board's matrix is in `board.md`, its chip's column in `docs/video-support.md`

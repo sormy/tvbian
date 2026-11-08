@@ -5,9 +5,9 @@ can show, the agent reads off it. Say what each action is for.
 
 ## Do
 
-1. 👤 Product photos: the unit, its retail box, the label under it (model, RAM, storage), and every
-   accessory, the remote, the power supply, the cables. They match a box against its clones; they go
-   in `docs/<board>/`.
+1. 👤 Ask for the product listing URL first. Read its model, selected variant where visible, ports
+   and accessories. Ask only for photos that resolve what the listing cannot show: the delivered
+   unit, its label or accessories. Keep the URL and photos in `docs/<board>/` once the ID is agreed.
 2. **Ask: a serial adapter, and the pins found?** `identity.md`'s serial steps, then stock Android
    booted with the console attached: often a root shell. Take `dump.md`'s small files there and
    then.
@@ -25,6 +25,8 @@ can show, the agent reads off it. Say what each action is for.
 
 - **The name lies.** A box labelled "H96 Max H313", branded LEFFOT, is an RK3518; vendors keep a
   model name, a case and a web page across chip changes, and clones copy all three.
+- **A listing describes the offer, not the delivered hardware.** An inaccessible listing needs its
+  title and selected variant from the human; it does not require a full photo set.
 - **Android lies too.** Spoofed firmware reports more RAM, storage and a faster SoC. The SoC is read
   where Android cannot reach: the service mode's vendor ID, or the `compatible` of the factory tree
   carved from the eMMC.
@@ -33,6 +35,6 @@ can show, the agent reads off it. Say what each action is for.
 
 ## Check
 
-- [ ] **K1** 👤 Photos of the unit, its retail box, its label and every accessory
+- [ ] **K1** 👤 Listing URL or product photos recorded; delivered-unit ambiguities resolved
 - [ ] **K2** The SoC, read from the service mode or the factory tree
 - [ ] **K3** The kind decided and told to the human

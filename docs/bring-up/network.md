@@ -42,10 +42,12 @@
 - [ ] **N11** BT: `hci0` `UP RUNNING`, `errors:0`
 - [ ] **N12** `btmgmt find` lists devices
 - [ ] **N13** 👤 The bundled remote pairs, and stays paired across a reboot
-- [ ] **N14** 👤 The remote wakes the box over BLE, where claimed
+- [ ] **N14** 👤 The remote wakes the box over BLE: ❌ on every board so far, scoped in
+      `docs/todo/README.md`
 - [ ] **N15** Every address is stable across reboots and an eMMC migration
 - [ ] **N16** Every address is the unit's own, shown by a read
 - [ ] **N17** Per-unit firmware (EEPROM, calibration, NVRAM) is named for the board
-- [ ] **N18** Access point mode serves a client, where stock offers it, or a scoped to-do
-- [ ] **N19** Wi-Fi Direct connects to a peer, where stock offers it, or a scoped to-do
-- [ ] **N20** `iw list`'s interface modes match stock's
+- [ ] **N18** Access point mode serves a client, where stock offers it, or a scoped to-do; once a
+      chip
+- [ ] **N19** Wi-Fi Direct connects to a peer, where stock offers it, or a scoped to-do; once a chip
+- [ ] **N20** `iw list`'s interface modes match stock's; once a chip

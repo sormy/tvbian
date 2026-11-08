@@ -2,9 +2,11 @@
 
 ## Do
 
-1. **USB**: `lsusb -t` first, then every port with a disk faster than its link under `fio` and
+1. **USB**: one device a generation, each on its own path: a USB 3 stick or SSD (`5000M`, `uas`), a
+   USB 2 stick (`480M`, `usb-storage`), a keyboard, mouse or receiver (`12M`, HID). Ask for all
+   three at once, each said disposable or not. `lsusb -t` first, then each stick under `fio` and
    `stress-ng` together; `fio` sized to the link, 256 MB read and 128 MB write on `480M`, 1 GB on
-   `5000M`; raw reads `--readonly`, writes to a file on its filesystem.
+   `5000M`; raw reads `--readonly`, writes only to a disposable one.
 2. **IR, before any key is pressed**: `ir-keytable -s rcN -p all -t` decodes with no keymap; stock's
    tree (Allwinner `ir_addr_codeN`, Rockchip `ir_key`) and the vendor's `usr/keylayout/` name the
    codes; grep mainline's `drivers/media/rc/keymaps/` for one captured scancode. After a cold boot,
@@ -27,15 +29,14 @@
 - [ ] **U1** `lsusb -t`: no USB 2 hub in the way
 - [ ] **U2** USB 3 judged by its BOS capability, at `5000M` on `uas`
 - [ ] **U3** USB 2 at `480M`, a stick in at power-on enumerating as one plugged in after does
-- [ ] **U4** 👤 Every port under `fio` and `stress-ng` together, stable
+- [ ] **U4** Every port under `fio` and `stress-ng` together, stable
 - [ ] **U5** 👤 Hotplug on every port
+- [ ] **U6** USB 1.1 at `12M`: a keyboard, mouse or receiver enumerates, its inputs appear
 - [ ] **R1** `ir-keytable -r` lists every button, against the canonical keymap
-- [ ] **R2** 👤 IR produces the canonical keymap under `evtest`
-- [ ] **R3** 👤 BLE produces the canonical keymap
-- [ ] **R4** 👤 The remote cold-boots the box from off
-- [ ] **R5** 👤 Each button registers as input, or does its job at power-on
-- [ ] **R6** 👤 The recovery button reaches the service mode
-- [ ] **R7** Every `/dev/input/event*` has a name in `/dev/input`, from `base/input-names.rules`
-- [ ] **E1** 👤 The LEDs' on state matches the factory's
-- [ ] **E2** 👤 The off state matches the factory's
-- [ ] **E3** 👤 The suspended state matches the factory's
+- [ ] **R2** 👤 A remote the keymap doc lacks: every button under `evtest`, over IR and over BLE
+- [ ] **R3** 👤 The remote cold-boots the box; each button registers or does its job; the recovery
+      button reaches the service mode
+- [ ] **R4** Every `/dev/input/event*` has a name in `/dev/input`, from `base/input-names.rules`
+- [ ] **R5** A recovery button the kernel sees sends `KEY_VENDOR` on `/dev/input/recovery-button`; a
+      FEL or maskrom button only the boot ROM reads is ➖
+- [ ] **E1** 👤 The LEDs on, off and asleep match the factory's

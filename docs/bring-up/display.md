@@ -25,8 +25,9 @@
    plane and per CRTC, exposed as a property. Its output by writeback matches the same table
    computed on the host, or, with no writeback, its registers read back. Record which planes each
    stage maps and what the engine cannot do, so the player knows when to use the GPU.
-8. **Unattended**: `tools/validate/display.py` runs steps 6 and 7 and the HDR side of step 2. With
-   no HDR screen, a synthetic EDID stands in. Only the picture on a real HDR screen needs a person.
+8. **Unattended**: `tools/validate/display.py` runs steps 6 and 7 and the HDR side of step 2, with
+   HDMI unplugged: synthetic EDIDs stand in, and a real screen's gets in their way. Only the picture
+   on a real HDR screen needs a person.
 
 ## Bites
 
@@ -53,35 +54,32 @@
 
 ## Check
 
-- [ ] **H1** 👤 1080p at every refresh rate, on a TV
-- [ ] **H2** 👤 1440p at every refresh rate, on a TV
-- [ ] **H3** 👤 4K at every refresh rate, on a TV
-- [ ] **H4** 👤 The same modes on a PC monitor
-- [ ] **H5** 👤 Hotplug re-detects, with no blank screen after
-- [ ] **H6** Every HDR transition at one mode, the InfoFrame read back, on an HDR screen or the
+- [ ] **H1** 👤 A TV at the largest mode the box claims, 8K60 where the kit's TV shows it, 4K60 on
+      most: picture and sound, replugged, its remote over CEC; a claim past the TV stays ❓
+- [ ] **H2** 👤 Optional: every refresh rate and 1440p on a TV, and a PC monitor's modes
+- [ ] **H3** Every HDR transition at one mode, the InfoFrame read back, on an HDR screen or the
       synthetic one (`hdmi`)
-- [ ] **H7** 👤 The refresh follows the content's frame rate; VRR, QMS and ALLM where offered
-- [ ] **H8** Every sound card plays a timed 3 s in 3 s, at 44.1 and 48 kHz
-- [ ] **H9** 👤 HDMI audio plays, as the default sink
-- [ ] **H10** 👤 Multichannel LPCM plays
-- [ ] **H11** 👤 AC3 and DTS pass through to a receiver
-- [ ] **H12** `cec-ctl` shows a physical address
-- [ ] **H13** 👤 Mute and volume on the TV remote reach the box
-- [ ] **H14** `ddcutil getvcp 10` reads a monitor's brightness
-- [ ] **H15** `ddcutil setvcp 10` moves it
-- [ ] **H16** 👤 S/PDIF out, heard
-- [ ] **H17** 👤 AV out: a picture, and the jack's audio heard
-- [ ] **H18** The GPU's full `glmark2-es2-drm` suite on screen, beside a sibling family's
-- [ ] **H19** The console font reads right at the native mode
-- [ ] **H20** Every plane's formats, compression, scaling, alpha and zpos listed (`planes`)
-- [ ] **H21** A video plane under the interface, composed by the engine, native mode and 4K, no
+- [ ] **H4** 👤 Optional: the refresh follows the content's frame rate; VRR, QMS and ALLM where
+      offered
+- [ ] **H5** Every sound card plays a timed 3 s in 3 s, at 44.1 and 48 kHz
+- [ ] **H6** 👤 Optional: multichannel LPCM plays
+- [ ] **H7** 👤 Optional: AC3 and DTS pass through to a receiver
+- [ ] **H8** `cec-ctl` shows a physical address
+- [ ] **H9** `ddcutil getvcp 10` reads a monitor's brightness
+- [ ] **H10** `ddcutil setvcp 10` moves it
+- [ ] **H11** 👤 Optional: S/PDIF out, heard
+- [ ] **H12** 👤 Optional: AV out, a picture, and the jack's audio heard
+- [ ] **H13** The GPU's full `glmark2-es2-drm` suite on screen, beside a sibling family's
+- [ ] **H14** The console font reads right at the native mode
+- [ ] **H15** Every plane's formats, compression, scaling, alpha and zpos listed (`planes`)
+- [ ] **H16** A video plane under the interface, composed by the engine, native mode and 4K, no
       underrun (`compose`, `underruns`)
-- [ ] **H22** Each colour stage a property, its writeback within two codes of the host's table, or
+- [ ] **H17** Each colour stage a property, its writeback within two codes of the host's table, or
       its registers read back (`lut`, `sdr2hdr`)
-- [ ] **H23** A minute of player-paced nonblocking commits, none refused (`pacing`)
-- [ ] **H24** An SDR interface over HDR video: the interface mapped, the video untouched, or the
+- [ ] **H18** A minute of player-paced nonblocking commits, none refused (`pacing`)
+- [ ] **H19** An SDR interface over HDR video: the interface mapped, the video untouched, or the
       whole-output scope recorded (`scope`)
-- [ ] **H25** What the engine cannot map, recorded for the player's GPU path (`RECORD maps`)
-- [ ] **H26** SDR, HDR10, HLG and HDR10-and-HLG screens: HDR sent for what each lists (`sinks`)
-- [ ] **H27** The display's rating, its largest and fastest sustained modes, in `board.md`
+- [ ] **H20** What the engine cannot map, recorded for the player's GPU path (`RECORD maps`)
+- [ ] **H21** SDR, HDR10, HLG and HDR10-and-HLG screens: HDR sent for what each lists (`sinks`)
+- [ ] **H22** The display's rating, its largest and fastest sustained modes, in `board.md`
       (`rating`)
