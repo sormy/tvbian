@@ -22,6 +22,8 @@ Amlogic boxes are in [README_AMLOGIC.md](README_AMLOGIC.md), Allwinner ones in
 | <img src="docs/h96max-m2-plus/image1.jpg" width="260"> | **[H96 Max M2 Plus][m2p]**<br>`M2_P_ZX_20250328`               | SoC RK3528<br>4 GB RAM · 32 GB eMMC, **no SD slot**<br>USB-A 3.0 (OTG)<br>10/100 Ethernet · SWT6621S Wi-Fi + BT               | [2](#2-otg-cable): OTG cable                             |
 | <img src="docs/h96max-rk3528/image1.jpg" width="260">  | **[H96 Max RK3528][rk3528]** ❓<br>`RK3528_DDR3_8X4_V12`       | SoC RK3528<br>4 GB RAM · 64 GB eMMC<br>USB-A 3.0 (OTG) + USB-A 2.0<br>10/100 Ethernet · AIC8800D80 Wi-Fi + BT<br>Front LCD    | [1](#1-sd-card): SD card<br>[2](#2-otg-cable): OTG cable |
 
+❓ Not tested here: built from the box's stock firmware, waiting for an owner's report.
+
 [r69]: docs/r69-1/board.md
 [h96]: docs/h96max-3518/board.md
 [h96d]: docs/h96max-3518d/board.md
