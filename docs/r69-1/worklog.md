@@ -1932,3 +1932,10 @@ nothing failed. The previous tree is kept at `/root/board.dtb.known-good`.
 - `drm-rockchip-tve-unknown-connector.patch`: `TV-1` reports `unknown`. Kernel rebuilt and
   installed: `TV-1` `unknown`, the console 141x47 in the large font. Confirmed on the screen by the
   owner.
+
+## 2026-11-07 — A T8S on this image
+
+- Reported to the owner: a T8S box boots the r69-1 image. Its board looks the same, but its
+  silkscreen reads `R69MAX V1.1`, not this board's `XR821_V1.1`. Untested here: a different PCB name
+  may differ in RAM, Wi-Fi or wiring, so it is listed as reported, not tested, until a T8S's own
+  boot log or dump shows it.

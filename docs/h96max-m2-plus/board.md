@@ -28,9 +28,12 @@ Product: <https://h5.h96max.com/products-details/h96-max-m2-android-tv-box>
 
 Store: <https://www.aliexpress.com/store/1105506642>
 
-## Serial
+## Serial console
 
-Three unpopulated pads on the underside; pinout and voltage unverified.
+- **Location**: three plated holes near the SoC heatsink's corner, beside the LED.
+- **Pinout**: **TX · GND · RX**, RX the square pad.
+- **Level**: 3.3 V.
+- **Console**: `ttyFIQ0`, 1500000 8N1.
 
 ## Addresses
 
@@ -68,16 +71,16 @@ in their own table.
 
 ### Identity
 
-| Check               | Mark | Evidence                                  |
-| ------------------- | ---- | ----------------------------------------- |
-| Stock log on serial | ❓   | —                                         |
-| ID searched         | ✅   | Manufacturer model search: RK3528 M2 Plus |
-| ID confirmed        | ✅   | Owner confirmed ID                        |
-| PCB photos          | 🟡   | Both sides; SoC hidden under heatsink     |
-| Serial pads marked  | ❓   | —                                         |
-| Components          | ✅   | Marked parts in Identity, both sides      |
-| board.md sections   | ✅   | Required sections present                 |
-| PCB name and date   | ✅   | Full silkscreen in board.conf             |
+| Check               | Mark | Evidence                                      |
+| ------------------- | ---- | --------------------------------------------- |
+| Stock log on serial | ➖   | stock not booted on serial                    |
+| ID searched         | ✅   | Manufacturer model search: RK3528 M2 Plus     |
+| ID confirmed        | ✅   | Owner confirmed ID                            |
+| PCB photos          | 🟡   | Both sides; SoC hidden under heatsink         |
+| Serial pads marked  | ✅   | TX, GND, RX (square), 3.3 V; a clean boot log |
+| Components          | ✅   | Marked parts in Identity, both sides          |
+| board.md sections   | ✅   | Required sections present                     |
+| PCB name and date   | ✅   | Full silkscreen in board.conf                 |
 
 ### Dump
 
@@ -447,8 +450,7 @@ With a real screen that takes YCbCr, the writeback refuses YCbCr output
 
 ## Known gaps
 
-- Untested, waiting on a person: serial, and a TV at 4K60; the scaled picture to a plane waits on
-  our test.
+- Untested, waiting on a person: a TV at 4K60; the scaled picture to a plane waits on our test.
 - DDR pinned at 786 MHz by the factory's `auto-freq-en = <0>`; load-based scaling hung the box.
 - AVS, AVS2: MPP decodes them; our FFmpeg has no `rkmpp` path. VC-1: no decoder in MPP. MVC: the 2D
   base view only, a todo.
@@ -459,7 +461,7 @@ With a real screen that takes YCbCr, the writeback refuses YCbCr output
 - Wi-Fi: after 2 h of traffic, about half the TCP connects over it stalled; reassociation and a
   driver reload kept it, a reboot cleared it. Seen once.
 - Heat: a 30-minute combined soak holds 100–105 °C at full clock; the zone, Rockchip's own design,
-  throttles at 110 °C. One Lima MMU fault came at 103 °C, in one of two soaks.
+  throttles at 110 °C. One Lima MMU fault came at 103 °C, in one of three soaks.
 - USB 3 port: with nothing plugged, its root port logs `config error`.
 - `gpu-bus` fails to probe (no `pvtm` regulator): `vdd_logic` does not follow the GPU clock. The DMC
   floor is 850 mV; the GPU bus wants up to 875 mV at 800 MHz. Read 900 mV at idle.

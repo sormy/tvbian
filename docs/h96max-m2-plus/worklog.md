@@ -554,3 +554,11 @@ MPP 1.1.0's `osal/mpp_soc.c`, the `rk3528` entry, against `patches/ffmpeg/`; not
   8K 0.826x, as before. Under `display.py` 19 passed with 8K 8- and 10-bit, a seek and that stream
   in 10 rounds: no decode failed, against about 1 in 10 before: the same EAGAIN, MPP slower under
   the display's load.
+
+## 2026-11-07 — Serial
+
+- The owner found the console: three plated holes near the SoC heatsink's corner, beside the LED, TX
+  · GND · RX, RX the square pad, 3.3 V. At 1500000 8N1, hooks resting in the holes gave noise
+  between clean lines, and the adapter dropped off USB every few seconds; held firm, a clean log
+  from U-Boot's menu to the `ttyFIQ0` login, the command line the board's then the distro's
+  (`build/logs/h96max-m2-plus/2026-11-07-serial-boot.log`).

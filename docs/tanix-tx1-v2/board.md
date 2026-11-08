@@ -368,7 +368,10 @@ storage, `sdmmc_arg`, the stock boot package and the unused stretches between th
 
 ## Serial console
 
-Pads `VCC RX TX GND`, 115200 8N1, outlined on `board2.jpg`.
+- **Location**: four pads, outlined in red on `board2.jpg`.
+- **Pinout**: `VCC RX TX GND`, silkscreened.
+- **Level**: 3.3 V.
+- **Console**: `ttyS0`, 115200 8N1.
 
 ## Recovery — read this before writing anything
 

@@ -29,6 +29,14 @@ kernel.
 | Remote        | bundled 22-button remote — **dual-mode**: IR unpaired, BLE when paired                                                                          |
 | Serial header | 4 pads by the SD slot, **1500000** baud                                                                                                         |
 | PCB marking   | `XR821_V1.1` over `BY-XH 2540` — match the **first** line; the second looks like a fab + YYWW date code and will differ between production runs |
+| Also sold as  | **T8S**, its board the same to the eye but marked `R69MAX V1.1`: reported to boot this image; ❓ untested here                                  |
+
+## Serial console
+
+- **Location**: four pads by the SD slot.
+- **Pinout**: **GND · TX · RX · 3V3**, GND the square pad.
+- **Level**: 3.3 V.
+- **Console**: `ttyFIQ0`, 1500000 8N1.
 
 ## Measured on our unit — not a spec, one box and one kernel
 

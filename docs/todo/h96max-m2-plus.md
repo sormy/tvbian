@@ -4,16 +4,13 @@ The board's open items.
 
 - [ ] **A TV at 4K60.** Picture and sound, replugged, the TV remote's mute and volume over CEC.
 
-- [ ] **Serial: find and mark the pads.** Three unpopulated pads on the underside. With a
-      multimeter: GND by continuity to the shield, TX by its idle level with the box on, RX the one
-      left; the voltage from TX's idle level. Mark them on `board-bottom.jpg`, pin names and voltage,
-      then solder a header: the stock boot log, U-Boot, the kernel and the login on serial.
+- [ ] **The serial pins outlined on a PCB photo**, TX · GND · RX named.
 
 - [ ] **`rk35xx-next`: the combined soak and hours of traffic.** 30 minutes of CPU, RAM, eMMC and
       Wi-Fi load, then hours of Wi-Fi traffic, on 6.12.
 
-- [ ] **A Lima MMU fault at 103 °C**, in one of two 30-minute soaks on 6.1. Repeat the soak and read
-      whether it comes back.
+- [ ] **No Lima MMU fault under the combined soak.** Seen once in three 30-minute soaks on 6.1, at
+      103 °C; the other two, to 105 °C and capped at 95 °C, were clean.
 
 - [ ] **The USB 3 root port logs `config error`** with nothing plugged.
 

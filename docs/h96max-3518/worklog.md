@@ -2416,3 +2416,9 @@ card once the same DDR blob was on its eMMC. The eMMC's FIT is 2026.10 again.
 - `drm-rockchip-tve-unknown-connector.patch`: `TV-1` reports `unknown`. Kernel rebuilt and installed
   with HDMI unplugged: `TV-1` `unknown`, the console on it at 90x36, as it should be; 141x47 on HDMI
   unchecked here.
+
+## 2026-11-07 — The case label is wrong
+
+- The Leffot unit's case label, "H96 Max H313", names the wrong box. Photos of its board, from the
+  owner, show this board's silkscreen, `3518_ZX_V01`: inside is the H96 Max 3518, an RK3518, not the
+  Allwinner H313 model. `BOARD_ALT_NAMES` lists "Leffot H313", though nothing reads it yet.

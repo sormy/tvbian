@@ -27,6 +27,13 @@ gone. Known gaps are at the bottom.
 
 <img src="board2.jpeg" width="640">
 
+## Serial console
+
+- **Location**: three plated holes on the back of the PCB, dead centre, no header.
+- **Pinout**: **RX · GND · TX**, RX the square pad, TX toward the HDMI side.
+- **Level**: 3.3 V.
+- **Console**: `ttyAML0`, 115200 8N1.
+
 ## Addresses
 
 | Interface | Address             | Where it comes from                             |

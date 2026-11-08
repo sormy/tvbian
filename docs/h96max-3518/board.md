@@ -22,6 +22,7 @@ kernel.
 | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Name          | **H96 Max H313** — the model name on the back of the case (LEFFOT). Case plate: `RAM 2GB · ROM 16GB · Input 5V⎓2A`                                                                          |
 | Board         | silkscreen **`3518_ZX_V01 20250818`** — combined RAM+eMMC module, on-PCB Wi-Fi/BT antennas                                                                                                  |
+| Also sold as  | **Leffot H313**, its case labelled "H96 Max H313", an Allwinner model's name: this unit, ✅ by the board's silkscreen                                                                       |
 | SoC           | **RK3518** — `SoC: 35181001` (same ID as the R69)                                                                                                                                           |
 | Label MAC     | **`00:EF:00:4A:43:A6`** ✅ — matches the case label, and held in eMMC vendor storage as `LAN_MAC` (live copy v74); serial `YT26050805378`                                                   |
 | RAM / storage | 2 GB LPDDR3 (**a real 2 GB**) · 16 GB Micron eMMC `R1J96N` (14.7 GiB) · SD card slot                                                                                                        |
@@ -234,6 +235,13 @@ warm reboots of 10 with `wlan0`.
 ✅ **The SD root comes back at SDR104**, 40 warm reboots of 40 with `sd-uhs-*` in the tree. The root
 loss that once had UHS stripped was seen under Armbian's stack; the disproven tree changes are in
 `dtb.md`, the history in `worklog.md`.
+
+## Serial console
+
+- **Location**: three plated holes between the SD slot and the LEDs.
+- **Pinout**: **RX · GND · TX**, RX the square pad.
+- **Level**: 3.3 V.
+- **Console**: `ttyFIQ0`, 1500000 8N1.
 
 ## Recovery
 

@@ -332,7 +332,7 @@ The only view of U-Boot and early boot; under stock Android it is a **root shell
   or hook into; contact is surface-only, against a pad barely wider than a probe tip.
 - **Pinout**: **TX · GND · RX**, with **TX nearest the HDMI-jack side**. That reference needs no
   assumption about which way up the board is held.
-- **1500000 baud**, 3.3 V. A CP2102 cannot do 1.5 Mbaud — use an FT232 or CH340.
+- **1500000 baud**, 8N1, 3.3 V, `ttyFIQ0`. A CP2102 cannot do 1.5 Mbaud — use an FT232 or CH340.
 - Wire **GND, TX and RX only, crossed** (board TX → adapter RX). Never connect 3V3: the box is
   self-powered and tying rails can backfeed.
 - **GND need not come from the pads at all** — the HDMI shell, the mounting holes beside it, or the
