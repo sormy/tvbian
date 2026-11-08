@@ -12,8 +12,9 @@ below.
       (`20250818`) and the 3518D's (`20250401`) are in their docs, the M20's and R69's to be read
       off the PCB photos.
 
-- [ ] **Every board: `dtb.md` beside the patch it explains**, from `docs/<board>/` to
-      `boards/<board>/`, and its links followed.
+- [ ] **Every board in one folder**: `docs/<board>/`, its `board.md`, worklog, `dtb.md` and photos,
+      merged into `boards/<board>/` beside its `board.conf` and trees, an alias's too; every link,
+      the site's and the release's readers followed.
 
 - [ ] **Every board: answer the TV's CEC queries.** The TV asks for the box's power status and gets
       `FEATURE_ABORT`: nothing on the box speaks CEC's follower side. The TV's remote reaches the
