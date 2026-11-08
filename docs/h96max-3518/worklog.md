@@ -2421,4 +2421,12 @@ card once the same DDR blob was on its eMMC. The eMMC's FIT is 2026.10 again.
 
 - The Leffot unit's case label, "H96 Max H313", names the wrong box. Photos of its board, from the
   owner, show this board's silkscreen, `3518_ZX_V01`: inside is the H96 Max 3518, an RK3518, not the
-  Allwinner H313 model. `BOARD_ALT_NAMES` lists "Leffot H313", though nothing reads it yet.
+  Allwinner H313 model. `boards/leffot-h313/alias.conf` lists it, on this board's image.
+
+## 2026-11-07 — Composite off by default, `Composite-1`
+
+- `drm-rockchip-tve-composite-connector.patch`: the TV encoder registers its connector as Composite,
+  `Composite-1`, as on every other SoC; `BOARD_CMDLINE` carries `video=Composite-1:d`. With HDMI
+  unplugged at boot: `Composite-1` `disconnected`, no console until a screen is plugged.
+- `echo on` to its `status`: connected, 720x576i, the console on it at 90x36; `echo off`:
+  disconnected again.

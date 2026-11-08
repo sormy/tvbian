@@ -1939,3 +1939,9 @@ nothing failed. The previous tree is kept at `/root/board.dtb.known-good`.
   silkscreen reads `R69MAX V1.1`, not this board's `XR821_V1.1`. Untested here: a different PCB name
   may differ in RAM, Wi-Fi or wiring, so it is listed as reported, not tested, until a T8S's own
   boot log or dump shows it.
+
+## 2026-11-07 — Composite off by default, `Composite-1`
+
+- `drm-rockchip-tve-composite-connector.patch`: the TV encoder registers its connector as Composite,
+  `Composite-1`, as on every other SoC; `BOARD_CMDLINE` carries `video=Composite-1:d`. With HDMI
+  unplugged at boot: `Composite-1` `disconnected`, no console until a screen is plugged.

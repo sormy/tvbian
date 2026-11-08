@@ -1739,3 +1739,8 @@ gain, the unit's own DRAM init on the eMMC, is not worth it; the install keeps w
   s at 46–61 Mbit/s. The other was the player falling behind, every 2nd or 3rd picture shown:
   `fuseamp.service` was in a restart loop, 186 starts, beside a copy started by hand that held the
   display. With the unit alone, the same clip reached 24 fps within a second.
+
+## 2026-11-07 — Composite off by default
+
+- `BOARD_CMDLINE` carries `video=Composite-1:d`: `Composite-1` `disconnected` at boot, the console
+  at 141x47 on the monitor.

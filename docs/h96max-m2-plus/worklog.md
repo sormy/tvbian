@@ -562,3 +562,9 @@ MPP 1.1.0's `osal/mpp_soc.c`, the `rk3528` entry, against `patches/ffmpeg/`; not
   between clean lines, and the adapter dropped off USB every few seconds; held firm, a clean log
   from U-Boot's menu to the `ttyFIQ0` login, the command line the board's then the distro's
   (`build/logs/h96max-m2-plus/2026-11-07-serial-boot.log`).
+
+## 2026-11-07 — Composite off by default, `Composite-1`
+
+- `drm-rockchip-tve-composite-connector.patch`: the TV encoder registers its connector as Composite,
+  `Composite-1`, as on every other SoC; `BOARD_CMDLINE` carries `video=Composite-1:d`. With HDMI
+  unplugged at boot: `Composite-1` `disconnected`, no console until a screen is plugged.
