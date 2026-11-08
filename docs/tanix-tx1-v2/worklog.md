@@ -1744,3 +1744,21 @@ gain, the unit's own DRAM init on the eMMC, is not worth it; the install keeps w
 
 - `BOARD_CMDLINE` carries `video=Composite-1:d`: `Composite-1` `disconnected` at boot, the console
   at 141x47 on the monitor.
+
+## 2026-11-07 — published trees and defconfigs for this PCB
+
+- [NoNamedCat/armbian-tanix-tx1-6031](https://github.com/NoNamedCat/armbian-tanix-tx1-6031) is our
+  PCB, `QHZIW_H313_TX1_EMCP_V2.0`, on Armbian 6.18: a tree
+  (`patches/kernel/sun50i-h313-tanix-tx1.dts`), an ATBM6031 driver patch
+  (`patches/atbm6031_driver_linux6.18.patch`) and a U-Boot defconfig
+  (`patches/u-boot/0001-add-tanix-tx1-6031-defconfig.patch`). Found through
+  [Armbian forum 56895](https://forum.armbian.com/topic/56895-have-armbian-for-tanix-tx1-qhziw_h313_tx1_emcp_v20/).
+- minimyth2's TX1 defconfigs,
+  [`0164-add-tx1-v1.2-defconfig.patch`](https://github.com/warpme/minimyth2/blob/master/script/bootloaders/u-boot-aw/files/0164-add-tx1-v1.2-defconfig.patch)
+  and
+  [`0165-add-tx1-v2.0-defconfig.patch`](https://github.com/warpme/minimyth2/blob/master/script/bootloaders/u-boot-aw/files/0165-add-tx1-v2.0-defconfig.patch),
+  hold the same DRAM values as mainline's
+  [`tanix_tx1_defconfig`](https://github.com/u-boot/u-boot/blob/v2026.10/configs/tanix_tx1_defconfig),
+  which is the `CS_H313_TX1_EMCP_V1.1` PCB's; `v2.0` adds `SUNXI_RVBAR_ALTERNATIVE` only. Neither
+  came from a V2.0 boot0: against ours, `CA_DRI`, `TPR6`, `TPR11` and `TPR12` differ and the clock
+  is 720 MHz to the factory's 600.
