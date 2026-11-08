@@ -12,6 +12,9 @@ From loaders to an installed system, and how a running box is changed without lo
      `earlycon`; `cma=`, the pool, a player's peak plus a margin as `docs/video-support.md` measures
      it; `video=Composite-1:d` where there is composite. The distro's follow it, from
      `boards/common/cmdline.conf`.
+   - A box that runs a listed board's image unchanged is an alias, not a board:
+     `boards/<id>/alias.conf` with `BOARD_ALIAS_OF`, its name, PCB and links; its photos in
+     `docs/<id>/`.
    - `package.list`: mode, repo file, install path, at Debian's paths; `link <target> <dest>` makes
      a symlink.
    - **Firmware is per chip, the SoC's blocks counted**: `tvb-firmware-<chip>` from

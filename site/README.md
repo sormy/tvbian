@@ -19,8 +19,14 @@ Writes `build/out/site/index.html`, `media/` and `CNAME`. The domain is `tvbian.
 | Product photo               | `docs/<board>/image1.*`       |
 | Image download              | Release assets                |
 | Previous board ID           | `BOARD_RENAMED_FROM`          |
+| Aliases, on their own cards | `boards/<id>/alias.conf`      |
 | Family filters              | Listed boards' families       |
 | GitHub stars                | Repository API, at build time |
+
+An alias is another box that runs a listed board's image unchanged: `boards/<id>/alias.conf` holds
+`BOARD_ALIAS_OF`, the board, and its own `BOARD_NAME`, `BOARD_PCB`, `BOARD_HOME`, `BOARD_STORE`; its
+photo is `docs/<id>/image1.*`, as a board's. Its card follows its board's, with "ALIAS" and the
+board's name under its PCB, and the board's download.
 
 The table's board link joins its row to `boards/<board>/board.conf`. Unlisted board directories are
 not advertised. A listed board must have a matching ID, a board report and an install guide. Photos

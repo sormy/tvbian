@@ -38,11 +38,6 @@ below.
       `KEY_F11`. Each change says why in its `board.patch`, and a press under
       `evtest /dev/input/recovery-button` checks it.
 
-- [ ] **Consider: siblings, a box that runs a board's image unchanged.** One list per board, each
-      sibling's name, PCB marking and whether tested here or reported with a source, shown on the
-      website, in the README and in the release notes; it replaces `BOARD_ALT_NAMES`, which nothing
-      reads. The Leffot H313 (tested) and the T8S (reported) first.
-
 - [ ] **Consider: a browser decodes video in hardware.** Debian's Chromium bundles its own FFmpeg
       and Google Chrome links none, so both decode in software here. Firefox loads the system's
       FFmpeg, ours, at run time; else a Chromium built with its V4L2 decoders.

@@ -14,7 +14,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "site"))
 import build  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
-BOARDS = tuple(card.id for card in build.load_cards(ROOT))
+CARDS = build.load_cards(ROOT)
+BOARDS = tuple(card.id for card in CARDS if not card.alias_of)
 
 
 def asset(name: str) -> dict[str, str]:
@@ -50,6 +51,12 @@ class Parse(unittest.TestCase):
         assert rockchip is not None
         self.assertEqual(rockchip.install, "SD or OTG")
         self.assertEqual(rockchip.guide, "README_ROCKCHIP.md")
+
+    def test_readme_names_every_alias(self) -> None:
+        readme = (ROOT / "README.md").read_text()
+        for card in CARDS:
+            if card.alias_of:
+                self.assertIn(card.name, readme)
 
     def test_image_name_is_the_plain_image(self) -> None:
         names = [
@@ -149,11 +156,13 @@ class Write(unittest.TestCase):
             self.assertIn("https://tvbian.com/", page)
             self.assertIn('alt="R69-1, Android TV box"', page)
             self.assertIn("Android TV boxes TVBian supports", page)
-            for board in BOARDS:
-                photo = build.find_photo(ROOT, board)
+            for card in CARDS:
+                if card.alias_of:
+                    continue
+                photo = card.photo
                 self.assertIsNotNone(photo)
                 assert photo is not None
-                self.assertTrue((out / "media" / f"{board}{photo.suffix}").is_file())
+                self.assertTrue((out / "media" / f"{card.id}{photo.suffix}").is_file())
             r69 = article(page, "R69-1")
             self.assertIn(image_name("r69-1"), r69)
             self.assertIn("README_ROCKCHIP.md#install", r69)
@@ -226,6 +235,53 @@ class Discovery(unittest.TestCase):
         self.assertTrue((out / "media/new-box.jpg").is_file())
         self.assertIn("Debian stable (trixie)", page)
         self.assertNotIn("@@", page)
+
+    def alias(self, conf: str, alias_id: str = "new-alias") -> Path:
+        folder = self.root / "boards" / alias_id
+        folder.mkdir()
+        (folder / "alias.conf").write_text(conf)
+        return folder
+
+    def test_alias_follows_its_board_with_its_own_photo_and_the_boards_image(self) -> None:
+        self.alias(
+            'BOARD_ALIAS_OF=new-box\nBOARD_NAME="Other Name"\nBOARD_PCB=PCB_OTHER\n'
+            "BOARD_STORE=https://example.test/other-store\n"
+        )
+        photos = self.root / "docs/new-alias"
+        photos.mkdir()
+        shutil.copyfile(ROOT / "docs/r69-1/image1.jpg", photos / "image1.jpg")
+        self.assertEqual(
+            [card.id for card in build.load_cards(self.root)], ["new-box", "new-alias"]
+        )
+        out = self.root / "aliased"
+        build.write_site(self.root, self.release, out)
+        page = (out / "index.html").read_text()
+        alias = page[page.index('id="new-alias"') :]
+        for expected in (
+            "Other Name",
+            "PCB_OTHER",
+            "<span>ALIAS</span> Brand New",
+            "https://example.test/other-store",
+            image_name("new-box"),
+            "docs/new-box/board.md",
+            'data-family="new-family"',
+        ):
+            self.assertIn(expected, alias)
+        self.assertTrue((out / "media/new-alias.jpg").is_file())
+
+    def test_alias_errors(self) -> None:
+        for conf, error in (
+            ('BOARD_ALIAS_OF=missing\nBOARD_NAME="X"\n', "names no listed board"),
+            ("BOARD_ALIAS_OF=new-box\n", "names no BOARD_NAME"),
+        ):
+            folder = self.alias(conf, "bad-alias")
+            with self.assertRaisesRegex(SystemExit, error):
+                build.load_cards(self.root)
+            shutil.rmtree(folder)
+        both = self.alias('BOARD_ALIAS_OF=new-box\nBOARD_NAME="X"\n', "new-box2")
+        (both / "board.conf").write_text("BOARD_ID=new-box2\n")
+        with self.assertRaisesRegex(SystemExit, "both board.conf and alias.conf"):
+            build.load_cards(self.root)
 
     def test_release_suffix_keeps_the_original_image_date(self) -> None:
         data = release_json([image_name("new-box")])

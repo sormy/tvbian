@@ -14,14 +14,14 @@ because we have trust issues too.
 
 ## Boxes
 
-| Box                    | Board                      | Form     | SoC    | RAM\*     | eMMC\* | Wi-Fi/BT   | Ports                                     | Install         |
-| ---------------------- | -------------------------- | -------- | ------ | --------- | ------ | ---------- | ----------------------------------------- | --------------- |
-| [R69-1][r69]           | `XR821_V1.1`               | box      | RK3518 | 2G (1.5G) | 16G    | AIC8800D80 | HDMI, USB 3.0 + 2.0, LAN 100M, SD, AV, IR | [SD or OTG][rk] |
-| [H96 Max 3518][a]      | `3518_ZX_V01`              | box      | RK3518 | 2G        | 16G    | SWT6621S   | HDMI, USB 3.0 + 2.0, LAN 100M, SD, AV, IR | [SD or OTG][rk] |
-| [H96 Max 3518D][b]     | `3518_DG_ZX_V01`           | stick    | RK3518 | 2G        | 16G    | SWT6621S   | HDMI, USB-C + USB-A                       | [OTG][rk]       |
-| [H96 Max M2 Plus][m2p] | `M2_P_ZX_20250328`         | box      | RK3528 | 4G        | 32G    | SWT6621S   | HDMI, USB 3.0, LAN 100M, AV, IR           | [OTG][rk]       |
-| [H96 Max M20][m20]     | `905_DG_ZX01_V01`          | stick    | S905L3 | 2G        | 16G    | MT7668S    | HDMI, USB-C + USB-A                       | [OTG][aml]      |
-| [Tanix TX1 V2.0][tx1]  | `QHZIW_H313_TX1_EMCP_V2.0` | mini box | H313   | 2G (1.5G) | 16G    | ATBM6031-X | HDMI, USB-A, AV, IR                       | [OTG][aw]       |
+| Box                                | Board                          | Form     | SoC    | RAM\*     | eMMC\* | Wi-Fi/BT   | Ports                                     | Install         |
+| ---------------------------------- | ------------------------------ | -------- | ------ | --------- | ------ | ---------- | ----------------------------------------- | --------------- |
+| [R69-1][r69]<br>↳ T8S              | `XR821_V1.1`<br>`R69MAX V1.1`  | box      | RK3518 | 2G (1.5G) | 16G    | AIC8800D80 | HDMI, USB 3.0 + 2.0, LAN 100M, SD, AV, IR | [SD or OTG][rk] |
+| [H96 Max 3518][a]<br>↳ Leffot H313 | `3518_ZX_V01`<br>`3518_ZX_V01` | box      | RK3518 | 2G        | 16G    | SWT6621S   | HDMI, USB 3.0 + 2.0, LAN 100M, SD, AV, IR | [SD or OTG][rk] |
+| [H96 Max 3518D][b]                 | `3518_DG_ZX_V01`               | stick    | RK3518 | 2G        | 16G    | SWT6621S   | HDMI, USB-C + USB-A                       | [OTG][rk]       |
+| [H96 Max M2 Plus][m2p]             | `M2_P_ZX_20250328`             | box      | RK3528 | 4G        | 32G    | SWT6621S   | HDMI, USB 3.0, LAN 100M, AV, IR           | [OTG][rk]       |
+| [H96 Max M20][m20]                 | `905_DG_ZX01_V01`              | stick    | S905L3 | 2G        | 16G    | MT7668S    | HDMI, USB-C + USB-A                       | [OTG][aml]      |
+| [Tanix TX1 V2.0][tx1]              | `QHZIW_H313_TX1_EMCP_V2.0`     | mini box | H313   | 2G (1.5G) | 16G    | ATBM6031-X | HDMI, USB-A, AV, IR                       | [OTG][aw]       |
 
 \*What our units carry. The same model ships with more or less of either, and the image takes what
 it finds: no device tree fixes either size.

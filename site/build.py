@@ -5,6 +5,7 @@
 
 The box table in README.md is the list. A row joins boards/<id>/board.conf through its
 docs/<id>/board.md link. Image links are that release's tvbian-<board>-<suite>-<date>.img.xz.
+An alias, boards/<id>/alias.conf, is another box that runs a listed board's image unchanged.
 """
 
 from __future__ import annotations
@@ -82,6 +83,8 @@ class Card:
     photo: Path | None
     home: str = ""
     store: str = ""
+    alias_of: str = ""
+    alias_of_name: str = ""
 
 
 def die(message: str) -> NoReturn:
@@ -228,13 +231,44 @@ def row_from(fields: dict[str, str], refs: dict[str, str]) -> Row:
     )
 
 
-def find_photo(root: Path, board_id: str) -> Path | None:
-    docs = root / "docs" / board_id
+def find_photo(folder: Path) -> Path | None:
     for name in PHOTOS:
-        photo = docs / name
+        photo = folder / name
         if photo.is_file():
             return photo
     return None
+
+
+def load_aliases(root: Path, boards: dict[str, Card]) -> dict[str, list[Card]]:
+    aliases: dict[str, list[Card]] = {}
+    for conf in sorted((root / "boards").glob("*/alias.conf")):
+        alias_id = conf.parent.name
+        if (conf.parent / "board.conf").is_file():
+            die(f"boards/{alias_id} has both board.conf and alias.conf")
+        text = conf.read_text()
+        parent = boards.get(conf_value(text, "BOARD_ALIAS_OF"))
+        if parent is None:
+            die(f"boards/{alias_id}/alias.conf: BOARD_ALIAS_OF names no listed board")
+        name = conf_value(text, "BOARD_NAME")
+        if not name:
+            die(f"boards/{alias_id}/alias.conf names no BOARD_NAME")
+        aliases.setdefault(parent.id, []).append(
+            Card(
+                alias_id,
+                name,
+                conf_value(text, "BOARD_PCB"),
+                parent.family_id,
+                parent.family,
+                parent.previous,
+                parent.row,
+                find_photo(root / "docs" / alias_id),
+                conf_value(text, "BOARD_HOME"),
+                conf_value(text, "BOARD_STORE"),
+                alias_of=parent.id,
+                alias_of_name=parent.name,
+            )
+        )
+    return aliases
 
 
 def load_cards(root: Path) -> list[Card]:
@@ -271,12 +305,13 @@ def load_cards(root: Path) -> list[Card]:
                 FAMILY_NAME.get(family, family),
                 conf_value(text, "BOARD_RENAMED_FROM"),
                 row,
-                find_photo(root, board_id),
+                find_photo(root / "docs" / board_id),
                 conf_value(text, "BOARD_HOME"),
                 conf_value(text, "BOARD_STORE"),
             )
         )
-    return cards
+    aliases = load_aliases(root, {card.id: card for card in cards})
+    return [each for card in cards for each in (card, *aliases.get(card.id, []))]
 
 
 def image_for(board_id: str, release: Release, previous: str = "") -> Asset | None:
@@ -387,15 +422,13 @@ def card_html(
     ports = [port.strip() for port in row.ports.split(",")] if row and row.ports else []
     hardware = " · ".join(radio + ports)
     parts = [
-        f'<p class="spec">{esc(spec_line(card))}</p>' if spec_line(card) else "",
-        f'<p class="spec">{esc(hardware)}</p>' if hardware else "",
         f'<p class="pcb"><span>PCB</span> {esc(card.pcb)}</p>' if card.pcb else "",
+        f'<p class="pcb"><span>ALIAS</span> {esc(card.alias_of_name)}</p>' if card.alias_of else "",
+        f'<p class="spec chip">{esc(spec_line(card))}</p>' if spec_line(card) else "",
+        f'<p class="spec">{esc(hardware)}</p>' if hardware else "",
     ]
-    image = image_for(card.id, release, card.previous)
-    if image:
-        actions = f'<a class="btn primary" href="{esc(image.url)}">Download</a>'
-    else:
-        actions = f'<a class="btn" href="{esc(release.page)}">No download this week</a>'
+    image = image_for(card.alias_of or card.id, release, card.previous)
+    actions = f'<a class="btn primary" href="{esc(image.url)}">Download</a>' if image else ""
     guide = row.guide if row else ""
     if guide and row and row.install:
         actions += f'<a class="btn" href="{esc(f"{REPO}/blob/main/{guide}#install")}">Install</a>'
@@ -410,7 +443,7 @@ def card_html(
         if url
     )
     sources = f'<div class="board-links">{sources}</div>' if sources else ""
-    doc = f"{REPO}/blob/main/docs/{card.id}/board.md"
+    doc = f"{REPO}/blob/main/docs/{card.alias_of or card.id}/board.md"
     return (
         f'<article class="board" id="{esc(card.id)}" data-family="{esc(card.family)}">'
         f'<figure class="stage">{shot}</figure><div class="body">'
