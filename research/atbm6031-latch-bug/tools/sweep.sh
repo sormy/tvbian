@@ -1,7 +1,7 @@
 #!/bin/bash
 # One stressor mix at a time, 120 s each with sparse traffic, then the link and throughput at the peer:
 # a latch is a link still slow or at 20 MHz after the stress stops. Mixes from Seekwave's starve-sweep.sh.
-# Run detached; an ssh session's traffic suppresses a latch. Usage: sweep.sh <iperf3 server> <log>
+# Run detached; an ssh session's traffic suppresses a latch. Usage: CLIP=<4K HDR10 clip> sweep.sh <iperf3 server> <log>
 set -u
 PEER=$1 OUT=$2 T=120
 GW=$(ip -4 route show default | awk '{print $3; exit}')
@@ -28,7 +28,7 @@ latched() {
 # what was playing when it latched in the wild: a 4K HDR10 stream from Jellyfin, decoded on the engine
 player() {
 	while :; do /root/ffmpeg-scale -loglevel quiet -hwaccel v4l2request -hwaccel_output_format drm_prime \
-		-i /root/clips/aquaman-60s-video.mkv -f null -; done &
+		-i "${CLIP:?a 4K HEVC Main10 HDR10 clip on the box}" -f null -; done &
 	iperf3 -c "$PEER" -R -b 50M -t $T >/dev/null 2>&1
 	kill %1; pkill -x ffmpeg-scale
 }

@@ -992,9 +992,9 @@
   `stress-ng --cpu 4 --io 2` 64.5 up, 61.0 down; `tx bitrate 135.0 MBit/s MCS 7 40MHz`.
 - Wi-Fi latch sought: `iperf3 --bidir` to `plex` for 600 s, each direction 12–25 Mbit/s in every 10
   s interval, none at 0; a 2 s run after, 66.7 Mbit/s.
-- C5: `aquaman-60s-video.mkv`, 4K HEVC Main10 HDR10 at 23.98 fps, 1491 frames: decoded to
-  `drm_prime` through P010 in 75.7 s, 19.7 fps, CPU 67–77% idle. `kmssink` refused
-  (`drmModeSetPlane`: EACCES): another session's player held DRM master.
+- C5: a 60 s 4K HEVC Main10 HDR10 clip at 23.98 fps, 1491 frames: decoded to `drm_prime` through
+  P010 in 75.7 s, 19.7 fps, CPU 67–77% idle. `kmssink` refused (`drmModeSetPlane`: EACCES): another
+  session's player held DRM master.
 - U3 on the stick: `fio` 64 KiB random, 70% reads, iodepth 8, 60 s, under
   `stress-ng --cpu 4 --vm 1`: 10.8 MB/s read, 4.6 write, 0 errors, no USB reset, the stick still
   attached.
@@ -1051,9 +1051,9 @@
   Mbit/s down at 13% CPU after.
 - 0016: `atbm_printk` at `KERN_ERR` for every class; 93 kernel lines in 10 min before, all of them
   warning or above.
-- VE clock, 2026-10-27: PLL-VE `0x03001058` N 0x18 → 0x19 by hand, 600 → 624 MHz as stock runs it;
-  `aquaman-60s-video.mkv` (4K HEVC Main10, 1491 frames) to `drm_prime`: 19.51 fps at 600, 19.68
-  at 624. +0.9% for +4%: 4K Main10 is not bound by the engine's clock; the tree stays at 600.
+- VE clock, 2026-10-27: PLL-VE `0x03001058` N 0x18 → 0x19 by hand, 600 → 624 MHz as stock runs it; a
+  60 s 4K HEVC Main10 clip (1491 frames) to `drm_prime`: 19.51 fps at 600, 19.68 at 624. +0.9% for
+  +4%: 4K Main10 is not bound by the engine's clock; the tree stays at 600.
 - Boot, 2026-10-27, `CONFIG_CRYPTO_DEV_SUN8I_CE=y`: the CE probes at 0.69 s and
   `systemd-random-seed` no longer waits (was 1.66 s), but the total held at 12.1-12.4 s: it was off
   the critical path. Kernel 5.6 s: 1.24 s between the display engine binding mixer0 and mixer1, its
@@ -1113,17 +1113,17 @@
   table. The same boot logged `RCQ sync timed out` at 183 and 192 s, with the player on screen; its
   log says nothing then: cause open.
 - 0097, 2026-10-28, 6.18: 0094's scaling allowed for 10-bit H.265 as P010, the 2-bit plane sized
-  from the coded picture. `aquaman-60s-video.mkv` (4K Main10 HDR10) with `capture_max_width=1920`,
-  `_height=1080`: 1920x1080 P010, its HDR metadata kept; the whole clip 25.23 fps (19.4 full); 10
-  frames against a software area scale, 67.6 dB PSNR (Y 65.9); no warning. The 10-bit cost was the
-  full-size P010 copy, not the decode: AFBC is not needed for a smaller screen.
+  from the coded picture. a 60 s 4K Main10 HDR10 clip with `capture_max_width=1920`, `_height=1080`:
+  1920x1080 P010, its HDR metadata kept; the whole clip 25.23 fps (19.4 full); 10 frames against a
+  software area scale, 67.6 dB PSNR (Y 65.9); no warning. The 10-bit cost was the full-size P010
+  copy, not the decode: AFBC is not needed for a smaller screen.
 - 0096 + 0097 in the player (its session's box suite, 2256x1504@60): `hevc10-4k.mkv` at the screen's
   size, 1920x1080 P010, 75.7 dB against an area-scaled software decode; AFBC asked, AFBC at full
   size; all 24 picture cases pass; "plays on after a seek" passes, where it failed before. The
-  Aquaman stream, P010 and the size from the start, 20 s from 600 s: 387 shown, 4 dropped, 27 late.
-  With AFBC asked, refused by 0096 and reopened linear: from 0 s 452 shown, 8 dropped; later starts
-  vary, its own seek reopen and audio stall at the HDR switch, by its account. No `RCQ` or Cedrus
-  warning in any run.
+  WEB-DL film's stream, P010 and the size from the start, 20 s from 600 s: 387 shown, 4 dropped, 27
+  late. With AFBC asked, refused by 0096 and reopened linear: from 0 s 452 shown, 8 dropped; later
+  starts vary, its own seek reopen and audio stall at the HDR switch, by its account. No `RCQ` or
+  Cedrus warning in any run.
 
 ## 2026-10-28 — Wi-Fi gone after a reboot
 
@@ -1140,11 +1140,11 @@
   box by hand-adding the trigger: reinstalling the kernel deb runs it, `atbm6031` stays indexed.
 - `0091` on the box: `de`, `mixer0` and `mixer1` at 696000000 Hz.
 - Allwinner's path on 6.18.59 without `0096`, with `0091` (`de` 696 MHz) and `0099`: full-size AFBC
-  shrunk by the display, 3840x2160 YU10 to 2256x1268, BT.2020, by Fuseamp, 30 s from 600 s. Aquaman
-  (WEB-DL): 686 shown, 1 dropped, 0 late. Inception (UHD remux): 690 shown, 0 dropped, 0 late. No
+  shrunk by the display, 3840x2160 YU10 to 2256x1268, BT.2020, by Fuseamp, 30 s from 600 s. The
+  WEB-DL film: 686 shown, 1 dropped, 0 late. A UHD Blu-ray remux: 690 shown, 0 dropped, 0 late. No
   `RCQ sync timed out` in either. Picture by eye not yet checked.
-- Cadence at 60 Hz: Aquaman a clean 3:2; Inception ~36 irregular holds in 30 s, nothing dropped or
-  late: decode time on heavy pictures or the player's pacing, unmeasured.
+- Cadence at 60 Hz: the WEB-DL film a clean 3:2; the remux ~36 irregular holds in 30 s, nothing
+  dropped or late: decode time on heavy pictures or the player's pacing, unmeasured.
 - Fuseamp's suite: 24/24 picture cases, every playback case passes, 4K Main10 with AFBC 182 shown,
   cold start 1292 ms. One `RCQ sync timed out` at 497 s uptime, during its mode-set case.
 

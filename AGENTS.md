@@ -176,7 +176,8 @@ cannot be backed, say so rather than rounding up.
 - **Measured numbers live in `docs/<board>/board.md`** — they're per-unit and they decay.
 - **The claim, not its proof.** Dates, evidence and the session's narration go in the worklog; a
   table is never restated in prose; a line that fails "do we even need this?" goes.
-- **No media file names** in docs, patches or commits: tests use synthetic streams.
+- **No titles or file names from the owner's media** in docs, patches, commits or messages: a film
+  is named by its format, "a 4K24 HEVC Main10 film"; tests use synthetic streams.
 - **Short and plain**: docs, instructions and comments, an agent's most of all. Leave out the
   obvious; no flourish.
 
