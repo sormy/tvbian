@@ -568,3 +568,15 @@ MPP 1.1.0's `osal/mpp_soc.c`, the `rk3528` entry, against `patches/ffmpeg/`; not
 - `drm-rockchip-tve-composite-connector.patch`: the TV encoder registers its connector as Composite,
   `Composite-1`, as on every other SoC; `BOARD_CMDLINE` carries `video=Composite-1:d`. With HDMI
   unplugged at boot: `Composite-1` `disconnected`, no console until a screen is plugged.
+
+## 2026-11-08 — AV out
+
+- The kit's 3.5 mm AV cable on the jack, measured through the CTIA-to-OMTP adapter: tip white, ring
+  1 yellow, ring 2 red, sleeve ground. `Composite-1` turned on: video port 1 at 720x576i50, BT.656
+  to the TV encoder. The yellow plug in the converter's video input gave no picture and a buzz on
+  the audio; the red plug gave colour bars, the right colours, the framebuffer's top-left corner.
+- The jack: tip left audio, ring 1 right audio, ring 2 video, sleeve ground. A picture needs the
+  adapter and the cable's red and yellow plugs swapped.
+- Audio: a left-only tone on the white plug, a right-only one on the yellow, each alone.
+- `kmscube` on composite fills the screen at 720x576i. Only the console was cut to its top-left
+  corner: it was made at 2256x1504 with HDMI in, and a framebuffer keeps its size.

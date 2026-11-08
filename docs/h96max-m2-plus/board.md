@@ -178,7 +178,7 @@ in their own table.
 | DDC/CI read                | ✅   | `i2c-gpio` DDC: `ddcutil` finds MCCS 2.2                 |
 | DDC/CI write               | ✅   | Brightness 100 to 80 and back, read back                 |
 | S/PDIF heard               | ➖   | No S/PDIF connector on the PCB                           |
-| AV out                     | ❓   | Optional                                                 |
+| AV out                     | ✅   | 576i50, L/R audio; CTIA-to-OMTP, red/yellow swapped      |
 | GPU on screen              | ✅   | glmark2 43 at 1080p; `terrain` unsupported               |
 | Console font               | ✅   | Owner read the console at 2256x1504, 16×32 font          |
 | Planes listed              | ✅   | Planes 59, 75, 124: formats, alpha, zpos 0–5             |
@@ -431,6 +431,14 @@ next decode is right.
 
 With a real screen that takes YCbCr, the writeback refuses YCbCr output
 (`YUV2RGB is not supported by writeback`): run the suite with the connector off.
+
+## AV jack
+
+- **Pinout**: tip left audio, ring 1 right audio, ring 2 video, sleeve ground.
+- **The kit's AV cable**: through a CTIA-to-OMTP adapter, its red and yellow plugs swapped: red into
+  the video input, yellow into the right audio.
+- **Composite**: off by default; `echo on > /sys/class/drm/card0-Composite-1/status` turns it on,
+  720x576i50 or 720x480i60, and `off` back.
 
 ## Per unit
 

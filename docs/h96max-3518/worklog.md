@@ -2430,3 +2430,10 @@ card once the same DDR blob was on its eMMC. The eMMC's FIT is 2026.10 again.
   unplugged at boot: `Composite-1` `disconnected`, no console until a screen is plugged.
 - `echo on` to its `status`: connected, 720x576i, the console on it at 90x36; `echo off`:
   disconnected again.
+
+## 2026-11-08 — AV out
+
+- The kit's AV cable through the CTIA-to-OMTP adapter, its red and yellow plugs swapped, as the R69
+  and H96 Max M2 Plus need: `Composite-1` turned on, the console at 720x576 filling the screen, then
+  colour bars with a moving square. A 1 kHz tone on the left and a 440 Hz one on the right, each on
+  its own plug.

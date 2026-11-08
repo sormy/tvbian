@@ -69,7 +69,7 @@ An alias runs its board's image unchanged, so it reads that board's column:
 | HDMI hotplug re-detect                            |  🟡   |       🟡        |        ✅        |         ✅         |        ❓         |
 | HDMI 4K60                                         |  🟡   |       🟡        |        ✅        |         🟡         |        ❓         |
 | HDMI-CEC                                          |  🟡   |       🟡        |        ✅        |         🟡         |        ❓         |
-| AV jack — composite video and audio               |  ❓   |       ❓        |        ➖        |         ❓         |        ❓         |
+| AV jack — composite video and audio               |  ✅   |       ✅        |        ➖        |         ✅         |        ❓         |
 | GPU — Mali-450 under lima                         |  ✅   |       ✅        |        ✅        |         ✅         |        ❓         |
 | Hardware decode — H.264, HEVC to 8K               |  ✅   |       ✅        |        ✅        |         ✅         |        ❓         |
 | Hardware decode — VP9 to 8K                       |  ✅   |       ✅        |        ✅        |         ➖         |        ➖         |

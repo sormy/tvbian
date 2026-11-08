@@ -1945,3 +1945,10 @@ nothing failed. The previous tree is kept at `/root/board.dtb.known-good`.
 - `drm-rockchip-tve-composite-connector.patch`: the TV encoder registers its connector as Composite,
   `Composite-1`, as on every other SoC; `BOARD_CMDLINE` carries `video=Composite-1:d`. With HDMI
   unplugged at boot: `Composite-1` `disconnected`, no console until a screen is plugged.
+
+## 2026-11-08 — AV out
+
+- The kit's AV cable through the CTIA-to-OMTP adapter, its red and yellow plugs swapped, as the H96
+  Max M2 Plus needs: `Composite-1` turned on, the console at 720x576 filling the screen, then colour
+  bars with a moving square. A 1 kHz tone on the left and a 440 Hz one on the right, each on its own
+  plug.

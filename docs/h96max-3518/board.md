@@ -220,6 +220,14 @@ Recessed **inside the AV jack** — a toothpick reaches it through the socket. A
 `KEY_VOLUMEUP` on its own event node, free to remap. Held at power-on it is the BootROM's maskrom
 trigger.
 
+## AV jack
+
+- **Pinout**: tip left audio, ring 1 right audio, ring 2 video, sleeve ground.
+- **The kit's AV cable**: through a CTIA-to-OMTP adapter, its red and yellow plugs swapped: red into
+  the video input, yellow into the right audio.
+- **Composite**: off by default; `echo on > /sys/class/drm/card0-Composite-1/status` turns it on,
+  720x576i50 or 720x480i60, and `off` back.
+
 ## HDMI on a PC monitor
 
 🟡 A monitor whose native mode needs a non-standard pixel clock, such as 2256x1504 at 235.7 MHz,

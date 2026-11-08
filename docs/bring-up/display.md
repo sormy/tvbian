@@ -10,7 +10,8 @@
 3. **Audio**: every sound card times 3 s in 3 s (`tools/validate/validate.sh`).
 4. **The AV jack and S/PDIF** through the kit's adapters: the composite picture on an HDMI screen,
    the jack's audio in headphones. First find the jack's ground: the RCA that beeps to a USB shell,
-   box off. A cable grounded elsewhere gives no picture; the CTIA-to-OMTP adapter fixes it.
+   box off. A cable grounded elsewhere gives no picture; the CTIA-to-OMTP adapter fixes it. Video
+   can still sit on another plug: colour bars on composite, each plug in turn in the video input.
    **Composite is `Composite-1`, off by default**: the connector of type Composite, a driver that
    names it otherwise patched; `video=Composite-1:d` in `BOARD_CMDLINE`, else it sizes the console
    when HDMI is plugged in after boot. Turn it on for the test with
