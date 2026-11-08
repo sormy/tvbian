@@ -33,7 +33,7 @@ kernel.
 
 ## Serial console
 
-- **Location**: four pads by the SD slot.
+- **Location**: four plated holes by the SD slot, no header.
 - **Pinout**: **GND · TX · RX · 3V3**, GND the square pad.
 - **Level**: 3.3 V.
 - **Console**: `ttyFIQ0`, 1500000 8N1.

@@ -1,0 +1,14 @@
+# tvb-h96max-rk3528's files (mode src dest, src under boards/; link target dest for a symlink).
+# package/board.sh adds the tree, the loader and the u-boot-menu drop-in; tvb-base holds what every
+# board shares. No LED hooks: the factory tree names no power or standby LED.
+
+# a short press suspends, IR wakes it
+0644 common/powerkey.conf          /usr/lib/systemd/logind.conf.d/zz-tvb-powerkey.conf
+
+# the video engines for a normal user, Bluetooth unblocked at registration
+0644 common/vpu.rules              /usr/lib/udev/rules.d/99-tvb-vpu.rules
+0644 common/rfkill-bt.rules        /usr/lib/udev/rules.d/60-tvb-rfkill-bt.rules
+
+# tvb-install, and what it never writes on the eMMC: the family's preserve list
+0755 common/tvb-install                   /usr/sbin/tvb-install
+0644 common/preserve-sectors.rk35xx       /usr/lib/tvb/preserve-sectors

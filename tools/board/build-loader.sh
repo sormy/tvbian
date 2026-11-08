@@ -57,7 +57,7 @@ for BOARD in $BOARDS; do
 	SEC=$(od -An -tu2 -j "$IDB_DDR_ENTRY" -N 2 "$IDB" | tr -d ' ')
 	CNT=$(od -An -tu2 -j "$((IDB_DDR_ENTRY + 2))" -N 2 "$IDB" | tr -d ' ')
 	dd if="$IDB" of="$RKBIN/$DDR" bs=512 skip="$SEC" count="$CNT" status=none
-	strings "$RKBIN/$DDR" | grep -q "^ddr-v" || { echo "no DDR blob at sector $SEC of $IDB"; exit 1; }
+	strings "$RKBIN/$DDR" | grep -qE "^(ddr-v|DDR V)" || { echo "no DDR blob at sector $SEC of $IDB"; exit 1; }
 
 	# Rockchip's own ini with this board's DDR swapped in, so NEWIDB and RC4_OFF come from their file
 	# rather than from ours. Paths in it are relative to the rkbin root, so pack from there.

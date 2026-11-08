@@ -327,7 +327,7 @@ The only view of U-Boot and early boot; under stock Android it is a **root shell
 > movement of the cable or the board. Allow real time for it, work with the box wedged so nothing
 > can shift, and solder a short flying lead if it will be on the bench for more than one session.
 
-- **Location**: three **tiny round test points** beside the board-name silkscreen
+- **Location**: three **tiny round test points** near the heatsink, beside the board-name silkscreen
   (`3518_DG_ZX_V01`). They are bare pads — **no holes, no header** — so there is nothing to insert
   or hook into; contact is surface-only, against a pad barely wider than a probe tip.
 - **Pinout**: **TX · GND · RX**, with **TX nearest the HDMI-jack side**. That reference needs no

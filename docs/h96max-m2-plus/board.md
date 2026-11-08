@@ -122,30 +122,30 @@ in their own table.
 
 ### System
 
-| Check                   | Mark | Evidence                                                  |
-| ----------------------- | ---- | --------------------------------------------------------- |
-| Network, no serial      | ✅   | Up on the network every boot; no serial attached          |
-| U-Boot on serial        | ❓   | —                                                         |
-| Kernel on serial        | ❓   | —                                                         |
-| Login on serial         | ❓   | —                                                         |
-| Boot on HDMI            | ✅   | From the kernel's first lines; U-Boot has no display      |
-| dmesg accounted         | ✅   | Every line accounted; tolerated lines below               |
-| Boot time explained     | ✅   | 5.1 s to graphical; NetworkManager 1.4 s longest          |
-| Second boot time        | ✅   | 10.3 s                                                    |
-| Board identity files    | ✅   | Installed ID, model and complete PCB match                |
-| Modules loaded          | ✅   | All three SWT6621S modules; AIC8800 package family-wide   |
-| Ten warm reboots        | ✅   | 10 of 10, with `power-off-delay-us`                       |
-| RAM size                | ✅   | 4 GiB fitted; see Measured                                |
-| RAM stress              | ✅   | 2800M VM, verify, 60 seconds; exit 0                      |
-| Watchdog timeout        | ✅   | 24 MHz clock; journal grants 89 seconds                   |
-| Watchdog fires          | ✅   | Set 10 s, granted 11 s; reset at it, not 89 s             |
-| Panic reboots           | ✅   | SysRq panic rebooted; dmesg-ramoops archived              |
-| No userspace setup      | ✅   | Packages ship one rfkill rule, one module option          |
-| Lean image              | ✅   | Image list only; bring-up tools added by hand             |
-| CPU OPP table           | ✅   | All nine factory CPU OPPs exposed                         |
-| CPU stress, no throttle | ✅   | Five-minute four-core verify; no throttling               |
-| Combined soak           | 🟠   | 30 min, 103 °C; no eMMC, RAM, Wi-Fi error; one Lima fault |
-| Lockup recovery         | ✅   | Lockups panic, reboot, keep records                       |
+| Check                   | Mark | Evidence                                                     |
+| ----------------------- | ---- | ------------------------------------------------------------ |
+| Network, no serial      | ✅   | Up on the network every boot; no serial attached             |
+| U-Boot on serial        | ✅   | Our U-Boot's menu, 1500000 8N1; `2026-11-07-serial-boot.log` |
+| Kernel on serial        | ✅   | `6.1.172-tvb-rk35xx` from its first line                     |
+| Login on serial         | ✅   | `h96max-m2-plus login:` on `ttyFIQ0`                         |
+| Boot on HDMI            | ✅   | From the kernel's first lines; U-Boot has no display         |
+| dmesg accounted         | ✅   | Every line accounted; tolerated lines below                  |
+| Boot time explained     | ✅   | 5.1 s to graphical; NetworkManager 1.4 s longest             |
+| Second boot time        | ✅   | 10.3 s                                                       |
+| Board identity files    | ✅   | Installed ID, model and complete PCB match                   |
+| Modules loaded          | ✅   | All three SWT6621S modules; AIC8800 package family-wide      |
+| Ten warm reboots        | ✅   | 10 of 10, with `power-off-delay-us`                          |
+| RAM size                | ✅   | 4 GiB fitted; see Measured                                   |
+| RAM stress              | ✅   | 2800M VM, verify, 60 seconds; exit 0                         |
+| Watchdog timeout        | ✅   | 24 MHz clock; journal grants 89 seconds                      |
+| Watchdog fires          | ✅   | Set 10 s, granted 11 s; reset at it, not 89 s                |
+| Panic reboots           | ✅   | SysRq panic rebooted; dmesg-ramoops archived                 |
+| No userspace setup      | ✅   | Packages ship one rfkill rule, one module option             |
+| Lean image              | ✅   | Image list only; bring-up tools added by hand                |
+| CPU OPP table           | ✅   | All nine factory CPU OPPs exposed                            |
+| CPU stress, no throttle | ✅   | Five-minute four-core verify; no throttling                  |
+| Combined soak           | 🟠   | 30 min, 103 °C; no eMMC, RAM, Wi-Fi error; one Lima fault    |
+| Lockup recovery         | ✅   | Lockups panic, reboot, keep records                          |
 
 ### Video
 

@@ -1,0 +1,159 @@
+--- factory_board.dts
++++ board.dts
+@@ -11,11 +11,12 @@
+ #include <dt-bindings/thermal/thermal.h>
+ 
+ / {
+-	compatible = "rockchip,rk3528-evb2-ddr3-v10", "rockchip,rk3528";
++	/* board name first, as on the other boards */
++	compatible = "h96max-rk3528,rk3528-tvbox", "rockchip,rk3528-evb2-ddr3-v10", "rockchip,rk3528";
+ 	interrupt-parent = <&gic>;
+ 	#address-cells = <2>;
+ 	#size-cells = <2>;
+-	model = "Rockchip RK3528 EVB2 DDR3 V10 Board";
++	model = "H96 Max RK3528 RK3528_DDR3_8X4_V12";
+ 
+ 	aliases {
+ 		ethernet0 = "/ethernet@ffbd0000";
+@@ -922,6 +923,8 @@
+ 			mode-charge = <0x5242c30b>;
+ 			mode-fastboot = <0x5242c309>;
+ 			mode-loader = <0x5242c301>;
++			/* Factory SPL reads this flag to enter Maskrom. */
++			mode-maskrom = <0xef08a53c>;
+ 			mode-normal = <0x5242c300>;
+ 			mode-recovery = <0x5242c303>;
+ 			mode-ums = <0x5242c30c>;
+@@ -1046,9 +1049,10 @@
+ 		             <GIC_SPI 93 IRQ_TYPE_LEVEL_HIGH>,
+ 		             <GIC_SPI 90 IRQ_TYPE_LEVEL_HIGH>,
+ 		             <GIC_SPI 91 IRQ_TYPE_LEVEL_HIGH>;
+-		interrupt-names = "Mali_GP_IRQ", "Mali_GP_MMU_IRQ", "IRQPP", "Mali_PP0_IRQ", "Mali_PP0_MMU_IRQ", "Mali_PP1_IRQ", "Mali_PP1_MMU_IRQ";
+-		clocks = <&scmi_clk SCMI_CLK_GPU>, <&cru ACLK_GPU_MALI>, <&cru PCLK_GPU_ROOT>;
+-		clock-names = "clk_mali", "aclk_gpu_mali", "pclk_gpu";
++		/* Mainline lima bindings replace the vendor Mali names. */
++		interrupt-names = "gp", "gpmmu", "pp", "pp0", "ppmmu0", "pp1", "ppmmu1";
++		clocks = <&cru ACLK_GPU_MALI>, <&cru ACLK_GPU_MALI>;
++		clock-names = "bus", "core";
+ 		assigned-clocks = <&scmi_clk SCMI_CLK_GPU>;
+ 		assigned-clock-rates = <300000000>;
+ 		power-domains = <&power RK3528_PD_GPU>;
+@@ -1323,8 +1327,8 @@
+ 		iommus = <&vop_mmu>;
+ 		rockchip,grf = <&grf>;
+ 		status = "okay";
+-		esmart_lb_mode = [03];
+-		support-multi-area;
++		/* Give Esmart0 a 4K line buffer; sub-windows do not reach HDMI. */
++		esmart_lb_mode = [02];
+ 		phandle = <0xd9>;
+ 
+ 		vop_out: ports {
+@@ -1561,6 +1565,7 @@
+ 		rockchip,grf = <&grf>;
+ 		pinctrl-names = "default", "idle";
+ 		pinctrl-0 = <&hdmi_pins>;
++		ddc-i2c-bus = <&hdmi_ddc>;
+ 		pinctrl-1 = <&hdmi_pins_idle>;
+ 		phys = <&hdmiphy>;
+ 		phy-names = "hdmi";
+@@ -1654,11 +1659,17 @@
+ 		clock-names = "baudclk", "apb_pclk";
+ 		reg-shift = <2>;
+ 		reg-io-width = <4>;
+-		dmas = <&dmac 13>, <&dmac 12>;
++		/* no dma-names, as Rockchip ships it: interrupt mode, without the DMA request failing */
+ 		status = "okay";
+ 		pinctrl-names = "default";
+ 		pinctrl-0 = <&uart2m1_xfer>, <&uart2m1_ctsn>;
+ 		phandle = <0xe4>;
++
++		/* the AIC8800's Bluetooth, bound on the serdev bus by bluetooth-hci-h4-serdev */
++		bluetooth {
++			compatible = "aicsemi,aic8800-bt";
++			max-speed = <1500000>;
++		};
+ 	};
+ 
+ 	uart3: serial@ffa08000 {
+@@ -1910,7 +1921,8 @@
+ 		status = "okay";
+ 		remote_pwm_id = <0x03>;
+ 		handle_cpu_id = <0x01>;
+-		remote_support_psci = <0x00>;
++		/* Register IR as an ATF wake source. */
++		remote_support_psci = <0x01>;
+ 		phandle = <0xf7>;
+ 
+ 		ir_key1 {
+@@ -2008,7 +2020,8 @@
+ 		clocks = <&cru TCLK_WDT_NS>, <&cru PCLK_WDT_NS>;
+ 		clock-names = "tclk", "pclk";
+ 		interrupts = <GIC_SPI 28 IRQ_TYPE_LEVEL_HIGH>;
+-		status = "disabled";
++		/* Let systemd recover a hung kernel. */
++		status = "okay";
+ 		phandle = <0xfb>;
+ 	};
+ 
+@@ -3207,12 +3220,15 @@
+ 		hdmi {
+ 
+ 			hdmi_pins: hdmi-pins {
+-				rockchip,pins = <0 RK_PA3 1 &pcfg_pull_none>,
+-				                <0 RK_PA4 1 &pcfg_pull_none>,
+-				                <0 RK_PA5 1 &pcfg_pull_none>;
++				rockchip,pins = <0 RK_PA3 1 &pcfg_pull_none>;
+ 				phandle = <0x3a>;
+ 			};
+ 
++			hdmi_ddc_gpio: hdmi-ddc-gpio {
++				rockchip,pins = <0 RK_PA4 RK_FUNC_GPIO &pcfg_pull_none>,
++				                <0 RK_PA5 RK_FUNC_GPIO &pcfg_pull_none>;
++			};
++
+ 			hdmi_pins_idle: hdmi-pins-idle {
+ 				rockchip,pins = <0 RK_PA3 1 &pcfg_pull_none>,
+ 				                <0 RK_PA4 RK_FUNC_GPIO &pcfg_output_low_pull_down>,
+@@ -4117,6 +4133,18 @@
+ 		dat_pin = <0x84 0x14 0x00>;
+ 	};
+ 
++	/* the HDMI DDC lines as a full I2C bus: dw-hdmi's own master reads the EDID but refuses DDC/CI */
++	hdmi_ddc: i2c-hdmi-ddc {
++		compatible = "i2c-gpio";
++		sda-gpios = <&gpio0 RK_PA5 GPIO_OPEN_DRAIN>;
++		scl-gpios = <&gpio0 RK_PA4 GPIO_OPEN_DRAIN>;
++		i2c-gpio,delay-us = <5>;
++		pinctrl-names = "default";
++		pinctrl-0 = <&hdmi_ddc_gpio>;
++		#address-cells = <1>;
++		#size-cells = <0>;
++	};
++
+ 	adc_keys: adc-keys {
+ 		status = "okay";
+ 		compatible = "adc-keys";
+@@ -4128,7 +4156,8 @@
+ 
+ 		vol-up-key {
+ 			label = "volume up";
+-			linux,code = <KEY_VOLUMEUP>;
++			/* The recovery button, not a volume key: mainline's code for one. */
++			linux,code = <KEY_VENDOR>;
+ 			press-threshold-microvolt = <1750>;
+ 		};
+ 	};
+@@ -4389,10 +4418,8 @@
+ 		phandle = <0x1b2>;
+ 	};
+ 
+-	chosen: chosen {
+-		bootargs = "earlycon=uart8250,mmio32,0xff9f0000 console=ttyFIQ0 driver_async_probe=dwmmc_rockchip,rockchip-drm drm_kms_helper.fbdev_emulation=0";
+-		phandle = <0x1b3>;
+-	};
++	/* chosen dropped: U-Boot overwrites /chosen/bootargs with extlinux.conf's append before
++	 * handing the tree to Linux, so anything here is inert */
+ 
+ 	fiq-debugger {
+ 		compatible = "rockchip,fiq-debugger";

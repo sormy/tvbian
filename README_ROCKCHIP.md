@@ -20,11 +20,13 @@ Amlogic boxes are in [README_AMLOGIC.md](README_AMLOGIC.md), Allwinner ones in
 | <img src="docs/leffot-h313/image1.jpg" width="260">    | **Leffot H313**<br>`3518_ZX_V01`<br>an H96 Max 3518: its image | as the H96 Max 3518                                                                                                           | as the H96 Max 3518                                      |
 | <img src="docs/h96max-3518d/image1.png" width="260">   | **[H96 Max 3518D][h96d]**<br>`3518_DG_ZX_V01`<br>`2025-04-01`  | SoC RK3518<br>2 GB RAM · 16 GB eMMC, **no SD slot**<br>USB-C 2.0 (OTG) + USB-A 2.0<br>**no Ethernet** · SWT6621S Wi-Fi + BT   | [2](#2-otg-cable): OTG cable                             |
 | <img src="docs/h96max-m2-plus/image1.jpg" width="260"> | **[H96 Max M2 Plus][m2p]**<br>`M2_P_ZX_20250328`               | SoC RK3528<br>4 GB RAM · 32 GB eMMC, **no SD slot**<br>USB-A 3.0 (OTG)<br>10/100 Ethernet · SWT6621S Wi-Fi + BT               | [2](#2-otg-cable): OTG cable                             |
+| <img src="docs/h96max-rk3528/image1.jpg" width="260">  | **[H96 Max RK3528][rk3528]** ❓<br>`RK3528_DDR3_8X4_V12`       | SoC RK3528<br>4 GB RAM · 64 GB eMMC<br>USB-A 3.0 (OTG) + USB-A 2.0<br>10/100 Ethernet · AIC8800D80 Wi-Fi + BT                 | [1](#1-sd-card): SD card<br>[2](#2-otg-cable): OTG cable |
 
 [r69]: docs/r69-1/board.md
 [h96]: docs/h96max-3518/board.md
 [h96d]: docs/h96max-3518d/board.md
 [m2p]: docs/h96max-m2-plus/board.md
+[rk3528]: docs/h96max-rk3528/board.md
 
 ## What works
 
@@ -37,51 +39,62 @@ Amlogic boxes are in [README_AMLOGIC.md](README_AMLOGIC.md), Allwinner ones in
 |  ❌  | broken                                                               |
 |  ➖  | not on this board                                                    |
 
-| Hardware                                          | R69-1 | H96 Max 3518 | H96 Max 3518D | M2 Plus |
-| ------------------------------------------------- | :---: | :----------: | :-----------: | :-----: |
-| **Storage**                                       |       |              |               |         |
-| eMMC — boot and rootfs                            |  ✅   |      ✅      |      ✅       |   ✅    |
-| microSD — boot and rootfs                         |  ✅   |      ✅      |      ➖       |   ➖    |
-| microSD hotplug                                   |  🟡   |      🟡      |      ➖       |   ➖    |
-| microSD SDR104 (UHS)                              |  ✅   |      ✅      |      ➖       |   ➖    |
-| USB 2.0                                           |  ✅   |      ✅      |      ✅       |   ✅    |
-| USB 3.0 — 5 Gbps, `uas`                           |  ✅   |      ✅      |      ➖       |   ✅    |
-| **Network**                                       |       |              |               |         |
-| Ethernet 10/100                                   |  ✅   |      ✅      |      ➖       |   ✅    |
-| Wi-Fi 2.4 GHz                                     |  ✅   |      ✅      |      ✅       |   ✅    |
-| Wi-Fi 5 GHz                                       |  ✅   |      ✅      |      ✅       |   ✅    |
-| Bluetooth                                         |  ✅   |      ✅      |      ✅       |   ✅    |
-| **Display and video**                             |       |              |               |         |
-| HDMI video                                        |  ✅   |      ✅      |      ✅       |   ✅    |
-| HDMI audio                                        |  ✅   |      ✅      |      ✅       |   ✅    |
-| HDMI EDID mode list                               |  🟡   |      🟡      |      ✅       |   ✅    |
-| HDMI hotplug re-detect                            |  🟡   |      🟡      |      ✅       |   ✅    |
-| HDMI 4K60                                         |  🟡   |      🟡      |      ✅       |   🟡    |
-| HDMI-CEC                                          |  🟡   |      🟡      |      ✅       |   🟡    |
-| AV jack — composite video and audio               |  ❓   |      ❓      |      ➖       |   ❓    |
-| GPU — Mali-450 under lima                         |  ✅   |      ✅      |      ✅       |   ✅    |
-| Hardware decode — H.264, HEVC to 8K               |  ✅   |      ✅      |      ✅       |   ✅    |
-| Hardware decode — VP9 to 8K                       |  ✅   |      ✅      |      ✅       |   ➖    |
-| Hardware decode — MPEG-1/2/4, VP8 to 1080p, H.263 |  ✅   |      ✅      |      ✅       |   ✅    |
-| Hardware decode — MJPEG, in FFmpeg                |  ❌   |      ❌      |      ❌       |   ❌    |
-| Hardware encode — H.264 to 8K                     |  ✅   |      ✅      |      ✅       |   ✅    |
-| Hardware encode — HEVC to 8K, some widths garbled |  🟠   |      🟠      |      🟠       |   🟠    |
-| Hardware encode — MJPEG, in FFmpeg                |  ❌   |      ❌      |      ❌       |   ❌    |
-| **Input and indicators**                          |       |              |               |         |
-| Bundled remote over IR                            |  ✅   |      ✅      |      ➖       |   ✅    |
-| Bundled remote over Bluetooth, air-mouse          |  ✅   |      ✅      |      ✅       |   ✅    |
-| Remote voice mic                                  |  🟡   |      🟡      |      🟡       |   🟡    |
-| IR-extender jack                                  |  🟡   |      ➖      |      ➖       |   ➖    |
-| Recovery button → Maskrom                         |  ✅   |      ✅      |      ✅       |   ✅    |
-| Power button on the remote                        |  ✅   |      ✅      |      ✅       |   ✅    |
-| Front LEDs                                        |  ✅   |      ✅      |      ✅       |   ✅    |
-| **Power and recovery**                            |       |              |               |         |
-| Sleep/Wake from Remote                            |  ✅   |      ✅      |      ❌       |   ✅    |
-| Hardware watchdog                                 |  ✅   |      ✅      |      ✅       |   ✅    |
-| Serial console                                    |  ✅   |      ✅      |      ✅       |   ❓    |
-| Maskrom recovery over USB                         |  ✅   |      ✅      |      ✅       |   ✅    |
+An alias runs its board's image unchanged, so it reads that board's column:
+
+| Board       | PCB           | Alias of     |
+| ----------- | ------------- | ------------ |
+| T8S         | `R69MAX V1.1` | R69-1        |
+| Leffot H313 | `3518_ZX_V01` | H96 Max 3518 |
+
+| Hardware / Board                                  | R69-1 | H96 Max<br>3518 | H96 Max<br>3518D | H96 Max<br>M2 Plus | H96 Max<br>RK3528 |
+| ------------------------------------------------- | :---: | :-------------: | :--------------: | :----------------: | :---------------: |
+| **Storage**                                       |       |                 |                  |                    |                   |
+| eMMC — boot and rootfs                            |  ✅   |       ✅        |        ✅        |         ✅         |        ❓         |
+| microSD — boot and rootfs                         |  ✅   |       ✅        |        ➖        |         ➖         |        ❓         |
+| microSD hotplug                                   |  🟡   |       🟡        |        ➖        |         ➖         |        ❓         |
+| microSD SDR104 (UHS)                              |  ✅   |       ✅        |        ➖        |         ➖         |        ❓         |
+| USB 2.0                                           |  ✅   |       ✅        |        ✅        |         ✅         |        ❓         |
+| USB 3.0 — 5 Gbps, `uas`                           |  ✅   |       ✅        |        ➖        |         ✅         |        ❓         |
+| **Network**                                       |       |                 |                  |                    |                   |
+| Ethernet 10/100                                   |  ✅   |       ✅        |        ➖        |         ✅         |        ❓         |
+| Wi-Fi 2.4 GHz                                     |  ✅   |       ✅        |        ✅        |         ✅         |        ❓         |
+| Wi-Fi 5 GHz                                       |  ✅   |       ✅        |        ✅        |         ✅         |        ❓         |
+| Bluetooth                                         |  ✅   |       ✅        |        ✅        |         ✅         |        ❓         |
+| **Display and video**                             |       |                 |                  |                    |                   |
+| HDMI video                                        |  ✅   |       ✅        |        ✅        |         ✅         |        ❓         |
+| HDMI audio                                        |  ✅   |       ✅        |        ✅        |         ✅         |        ❓         |
+| HDMI EDID mode list                               |  🟡   |       🟡        |        ✅        |         ✅         |        ❓         |
+| HDMI hotplug re-detect                            |  🟡   |       🟡        |        ✅        |         ✅         |        ❓         |
+| HDMI 4K60                                         |  🟡   |       🟡        |        ✅        |         🟡         |        ❓         |
+| HDMI-CEC                                          |  🟡   |       🟡        |        ✅        |         🟡         |        ❓         |
+| AV jack — composite video and audio               |  ❓   |       ❓        |        ➖        |         ❓         |        ❓         |
+| GPU — Mali-450 under lima                         |  ✅   |       ✅        |        ✅        |         ✅         |        ❓         |
+| Hardware decode — H.264, HEVC to 8K               |  ✅   |       ✅        |        ✅        |         ✅         |        ❓         |
+| Hardware decode — VP9 to 8K                       |  ✅   |       ✅        |        ✅        |         ➖         |        ➖         |
+| Hardware decode — MPEG-1/2/4, VP8 to 1080p, H.263 |  ✅   |       ✅        |        ✅        |         ✅         |        ❓         |
+| Hardware decode — MJPEG, in FFmpeg                |  ❌   |       ❌        |        ❌        |         ❌         |        ❓         |
+| Hardware encode — H.264 to 8K                     |  ✅   |       ✅        |        ✅        |         ✅         |        ❓         |
+| Hardware encode — HEVC to 8K, some widths garbled |  🟠   |       🟠        |        🟠        |         🟠         |        ❓         |
+| Hardware encode — MJPEG, in FFmpeg                |  ❌   |       ❌        |        ❌        |         ❌         |        ❓         |
+| **Input and indicators**                          |       |                 |                  |                    |                   |
+| Bundled remote over IR                            |  ✅   |       ✅        |        ➖        |         ✅         |        ❓         |
+| Bundled remote over Bluetooth, air-mouse          |  ✅   |       ✅        |        ✅        |         ✅         |        ❓         |
+| Remote voice mic                                  |  🟡   |       🟡        |        🟡        |         🟡         |        ❓         |
+| IR-extender jack                                  |  🟡   |       ➖        |        ➖        |         ➖         |        ➖         |
+| Recovery button → Maskrom                         |  ✅   |       ✅        |        ✅        |         ✅         |        ❓         |
+| Power button on the remote                        |  ✅   |       ✅        |        ✅        |         ✅         |        ❓         |
+| Front LEDs                                        |  ✅   |       ✅        |        ✅        |         ✅         |        ➖         |
+| Front display                                     |  ➖   |       ➖        |        ➖        |         ➖         |        ❌         |
+| **Power and recovery**                            |       |                 |                  |                    |                   |
+| Sleep/Wake from Remote                            |  ✅   |       ✅        |        ❌        |         ✅         |        ❓         |
+| Hardware watchdog                                 |  ✅   |       ✅        |        ✅        |         ✅         |        ❓         |
+| Serial console                                    |  ✅   |       ✅        |        ✅        |         ✅         |        ❓         |
+| Maskrom recovery over USB                         |  ✅   |       ✅        |        ✅        |         ✅         |        ❓         |
 
 The remote's voice button stays 🟡: nobody here has worked out what to say to a TV box.
+
+The H96 Max RK3528's front display is an FD655 with no driver here;
+[tm16xx-display](https://github.com/jefflessard/tm16xx-display) drives it out of tree.
 
 ## Get an image
 
@@ -196,14 +209,16 @@ echo "${MAC:-not found}"
 
 ## Serial console
 
-The only view of U-Boot and of any hang before the network. **3.3 V, 1500000 baud.** Both cases open
+The only view of U-Boot and of any hang before the network. **3.3 V, 1500000 baud.** The cases open
 with a plastic pry tool; the 3518 needs a couple of screws out to reach the pads from the back.
 
-| Board             | Where                                       | Pinout, `[square pad]` where marked |
-| ----------------- | ------------------------------------------- | ----------------------------------- |
-| **R69-1**         | 4-pad header beside the SD slot             | **[GND] · TX · RX · 3V3**           |
-| **H96 Max 3518**  | 3 plated holes between the SD slot and LEDs | **[RX] · GND · TX**                 |
-| **H96 Max 3518D** | 3 tiny round test points, no holes          | **TX · GND · RX**, TX nearest HDMI  |
+| Board               | Where                                                   | Pinout, `[square pad]` where marked |
+| ------------------- | ------------------------------------------------------- | ----------------------------------- |
+| **R69-1**           | 4 plated holes beside the SD slot                       | **[GND] · TX · RX · 3V3**           |
+| **H96 Max 3518**    | 3 plated holes between the SD slot and LEDs             | **[RX] · GND · TX**                 |
+| **H96 Max 3518D**   | 3 tiny round test points by the heatsink, no holes      | **TX · GND · RX**, TX nearest HDMI  |
+| **H96 Max M2 Plus** | 3 plated holes by the heatsink's corner, beside the LED | **TX · GND · [RX]**                 |
+| **H96 Max RK3528**  | 3 holes marked `DEBUG`, beside the SD slot              | not known yet                       |
 
 - **Adapter:** 3.3 V USB-TTL doing 1.5 Mbaud — **FT232 or CH340**, e.g.
   [Waveshare FT232RNL](https://www.amazon.com/dp/B0CX55K4RG) (~$14). **Not a CP2102** — it cannot do

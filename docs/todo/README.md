@@ -23,6 +23,9 @@ below.
 - [ ] **The BLE remote wakes every box from sleep.** Today only IR does; it matters most where there
       is no IR receiver.
 
+- [ ] **Front clock displays show the time**: the FD655 on the H96 Max RK3528, the TM1628 and kin on
+      other boxes, which no board drives today.
+
 - [ ] **A `tools/validate/` test shows decoded AFBC and scaled frames on a plane**, unattended.
 
 - [ ] **Blu-ray 3D plays in 3D on a 3D TV.** Today only its 2D view.
