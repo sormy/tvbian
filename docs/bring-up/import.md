@@ -18,8 +18,9 @@ that needs the box stays ❓ until one boots.
 5. **Write `board.conf`** from the closest board's, with `BOARD_SUPPORT=not_tested`.
 6. **Write the trees**: empty patches, then `./build.sh board-dtb <board>` and `uboot-dtb <board>`;
    apply the family's recipe from the closest board's patch. Per-board rows (names, LEDs, remote,
-   radio UART, Ethernet) come from this factory tree and the photos. Ask about any the evidence does
-   not settle; never guess.
+   radio UART, Ethernet) come from this factory tree, the image's files and the photos, each naming
+   its source. A sibling's value is a question, not a row: ask, never guess. Search the tree before
+   calling a part absent.
 7. **Build**: `./build.sh loader <board>`, `uboot <board>`, `board <board>`, `image <board>`.
 8. **Document**: `board.md` with the Test report and the image's source, `dtb.md`, `worklog.md`; the
    board's rows in `README.md` and its family's README, marked ❓.
@@ -46,11 +47,20 @@ Allwinner and Amlogic images are not run yet.
 
 ## Bites
 
-- **A download's name is not the board.** Match the tree to the photos' chips.
+- **A download's name is not the board, nor is what its image shares with others**: a DRAM init or a
+  tree built on a vendor's evaluation board can sit on several boards. Match the tree to the photos'
+  chips.
 - **A multi-Wi-Fi image names no chip**: it ships every chip's firmware, and its tree's radio entry
-  can be a placeholder. Read the chip from the module's marking or an owner's log.
-- **An image can be older than the boards in the field.** Read a chip's revision from an owner's
-  boot log, not from what the image supports.
+  can be a placeholder. Read the chip from an owner's log, or from the module's marking where it
+  reads clearly.
+- **An image can be older than the boards in the field.** Its driver and firmware dates against an
+  owner's boot log show it; read a chip's revision from that log, not from what the image supports.
+- **A node is not a part, a name not a use**: every factory tree enables `sdmmc`, slot or not; a
+  `pwr-wifi` LED can be the box's only LED.
+- **A calibration file fits the board** when it equals the image's own in every enabled value; a
+  vendor's template shared by every box is not evidence either way.
+- **Shared tools change only for a tied image.** An unchecked image's quirk is not a reason to widen
+  a build script.
 - **An image is not a dump**: no per-unit data, MACs or DRAM training.
 
 ## Marks
@@ -61,13 +71,15 @@ Allwinner and Amlogic images are not run yet.
 | SoC block identical to a sister's           | 🟡, the sister named       |
 | board wiring, per-unit values, anything run | ❓                         |
 
+One fact moves a claim one mark, never from one end to the other.
+
 ## Check
 
 - [ ] **P1** The board identified from an owner's photos and a seller or vendor page
 - [ ] **P2** The image tied to that board, the evidence recorded
 - [ ] **P3** The DRAM init classified
 - [ ] **P4** The factory trees decompile with no cell left a number
-- [ ] **P5** The recipe applied; every per-board row sourced or asked
+- [ ] **P5** The recipe applied; every per-board row names its source, or was asked
 - [ ] **P6** `loader`, `uboot`, `board` and `image` build
 - [ ] **P7** `BOARD_SUPPORT=not_tested`; `board.md` names the image's source
 - [ ] **P8** The Test report marks only what the files show; each 🟡 names its sister

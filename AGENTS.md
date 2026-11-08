@@ -146,6 +146,9 @@ Six states, meaning exactly what they say:
 ✅ plus a weak check on this board, a sister being identical for that block: the same SoC, chip and
 tree node. 🟡 and ❓ are not interchangeable: 🟡 has a reason behind it, ❓ is an unknown.
 
+**A per-board claim names its source**: the file, log line or photo it came from. A sibling's value
+or a reading nobody is sure of is a question until this board's own evidence answers it.
+
 **Check before asserting** — read the file, query the box, run the command. A doc is not evidence
 about hardware; reconcile against the box. Don't publish a recipe you haven't run, and when a claim
 cannot be backed, say so rather than rounding up.
