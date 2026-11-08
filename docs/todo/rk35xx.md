@@ -27,3 +27,8 @@
       fringe on the right, then that a 1080p display still comes up clean.
 
 - [ ] **The R69's Wi-Fi comes back after every warm reboot.**
+
+- [ ] **RK3528: name the DDR parameters a vendor tunes.** The H96 Max 3518's factory DDR init is
+      rkbin's `rk3528_ddr_1056MHz_4BIT_PCB_v1.11.bin` with three bytes changed in its parameter
+      table; read which fields with `ddrbin_tool`, and whether rkbin's blob with them set equals a
+      factory loader, so an imported board's DRAM need not wait for its dump.

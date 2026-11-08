@@ -23,6 +23,11 @@ below.
 - [ ] **The BLE remote wakes every box from sleep.** Today only IR does; it matters most where there
       is no IR receiver.
 
+- [ ] **A board names its radio's driver, not its kernel's every driver**: one `tvb-<chip>-modules`
+      package per out-of-tree driver, Debian's naming, carrying its build for each kernel and
+      depending on its `tvb-firmware-<chip>`; a board's `BOARD_DEPENDS` names it, and the kernel
+      metapackage depends on the kernel alone.
+
 - [ ] **Front clock displays show the time**: the FD655 on the H96 Max RK3528, the TM1628 and kin on
       other boxes, which no board drives today.
 
@@ -41,10 +46,6 @@ below.
       keep their factory trees' codes: the R69 and H96 Max 3518 `KEY_VOLUMEUP`, the H96 Max 3518D
       `KEY_F11`. Each change says why in its `board.patch`, and a press under
       `evtest /dev/input/recovery-button` checks it.
-
-- [ ] **Consider: a browser decodes video in hardware.** Debian's Chromium bundles its own FFmpeg
-      and Google Chrome links none, so both decode in software here. Firefox loads the system's
-      FFmpeg, ours, at run time; else a Chromium built with its V4L2 decoders.
 
 - [ ] **Consider: the console fits each screen plugged after the first.** The kernel's console is
       one framebuffer, sized by the first screen and cloned to every output, so a larger screen
@@ -156,6 +157,7 @@ below.
 | File                            | Open question                               |
 | ------------------------------- | ------------------------------------------- |
 | `docs/todo/video.md`            | hardware video: what is left, every SoC     |
+| `docs/todo/hwaccel.md`          | hardware video in Debian's own programs     |
 | `docs/todo/media-stick.md`      | the universal media stick                   |
 | `docs/todo/kodi.md`             | Kodi 22 on our FFmpeg, built on trixie      |
 | `docs/todo/extras-upstream.md`  | extras built from an upstream release       |
@@ -168,5 +170,5 @@ below.
 | `docs/todo/h96max-m20.md`       | the H96 Max M20: what is left               |
 | `docs/todo/h96max-m2-plus.md`   | the H96 Max M2 Plus: what is left           |
 | `docs/todo/swt6621s.md`         | the SWT6621S Wi-Fi/BT: what is left         |
-| `docs/todo/website.md`          | tvbian.com: one page on GitHub Pages        |
+| `docs/todo/website.md`          | tvbian.com: what the page still lacks       |
 | `docs/todo/repo-layout.md`      | folders, patches, tools and docs, regrouped |
