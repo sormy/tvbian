@@ -537,6 +537,41 @@
         object-fit: contain;
         mix-blend-mode: multiply;
       }
+      .stage .shot {
+        opacity: 0;
+        transition: opacity 0.6s;
+      }
+      .stage .shot.active,
+      .stage .shot.blank {
+        opacity: 1;
+      }
+      .slide {
+        position: absolute;
+        top: 50%;
+        z-index: 1;
+        transform: translateY(-50%);
+        width: 30px;
+        height: 30px;
+        border: 0;
+        border-radius: 50%;
+        background: color-mix(in srgb, var(--surface) 75%, transparent);
+        color: var(--ink);
+        font-size: 20px;
+        line-height: 1;
+        cursor: pointer;
+        opacity: 0;
+        transition: opacity 0.2s;
+      }
+      .slide.prev {
+        left: 8px;
+      }
+      .slide.next {
+        right: 8px;
+      }
+      .stage:hover .slide,
+      .slide:focus-visible {
+        opacity: 1;
+      }
       .shot.blank {
         display: grid;
         place-items: center;
@@ -581,6 +616,53 @@
       .board-title {
         font-size: 24px;
         margin-bottom: 8px;
+      }
+      .support {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        z-index: 1;
+        display: flex;
+        padding: 5px;
+        border-radius: 50%;
+        background: color-mix(in srgb, #2e9e5b 90%, transparent);
+        border: 2px solid #ffffffe6;
+        box-shadow: 0 1px 5px #00000059;
+        color: #fff;
+      }
+      .support::after {
+        content: attr(aria-label);
+        position: absolute;
+        left: calc(100% + 6px);
+        top: 50%;
+        transform: translateY(-50%);
+        padding: 3px 8px;
+        border-radius: 6px;
+        background: var(--surface);
+        color: var(--ink);
+        font: 12px/1.4 var(--sans);
+        white-space: nowrap;
+        box-shadow: 0 1px 4px #00000040;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.15s;
+      }
+      .support:hover::after,
+      .support:focus-visible::after {
+        opacity: 1;
+      }
+      .support svg {
+        width: 22px;
+        height: 22px;
+      }
+      .board[data-support="tested_by_user"] .support {
+        background: color-mix(in srgb, #2f6fd0 90%, transparent);
+      }
+      .board[data-support="not_tested"] .support {
+        background: color-mix(in srgb, #d08a12 90%, transparent);
+      }
+      .board[data-support="tested_broken"] .support {
+        background: color-mix(in srgb, #cf3b3b 90%, transparent);
       }
       .actions {
         display: flex;
@@ -1270,6 +1352,24 @@
           root.dataset.theme = preference.matches ? "light" : "dark";
           paintTheme();
         }
+      });
+      const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+      document.querySelectorAll(".stage").forEach((stage) => {
+        const shots = [...stage.querySelectorAll("img.shot")];
+        if (shots.length < 2) return;
+        let current = 0;
+        const show = (step) => {
+          shots[current].classList.remove("active");
+          current = (current + step + shots.length) % shots.length;
+          shots[current].classList.add("active");
+        };
+        stage.querySelector(".prev").addEventListener("click", () => show(-1));
+        stage.querySelector(".next").addEventListener("click", () => show(1));
+        if (still) return;
+        let paused = false;
+        stage.addEventListener("mouseenter", () => (paused = true));
+        stage.addEventListener("mouseleave", () => (paused = false));
+        setInterval(() => paused || document.hidden || show(1), 4000);
       });
       const cards = [...document.querySelectorAll(".board")];
       document.querySelectorAll("[data-filter]").forEach((button) =>

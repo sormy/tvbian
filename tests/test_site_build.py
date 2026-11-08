@@ -51,6 +51,7 @@ class Parse(unittest.TestCase):
         assert rockchip is not None
         self.assertEqual(rockchip.install, "SD or OTG")
         self.assertEqual(rockchip.guide, "README_ROCKCHIP.md")
+        self.assertTrue(all(card.support in build.SUPPORT for card in cards))
 
     def test_readme_names_every_alias(self) -> None:
         readme = (ROOT / "README.md").read_text()
@@ -135,9 +136,9 @@ class Parse(unittest.TestCase):
             self.assertIsNone(build.fetch_stars())
 
     def test_card_escapes(self) -> None:
-        card = build.Card("x", "<b>", "pcb", "rk35xx", "Rockchip", "", None, None)
+        card = build.Card("x", "<b>", "pcb", "rk35xx", "Rockchip", "", None, None, ())
         release = build.parse_release(release_json([]))
-        html = build.card_html(card, release, None, None)
+        html = build.card_html(card, release, [])
         self.assertIn("&lt;b&gt;", html)
         self.assertNotIn("<b>", html)
 
@@ -171,6 +172,8 @@ class Write(unittest.TestCase):
             self.assertNotIn("SD card", stick)
             self.assertIn("README_AMLOGIC.md#install", article(page, "H96 Max M20"))
             self.assertIn("README_ALLWINNER.md#install", article(page, "Tanix TX1"))
+            self.assertIn('aria-label="Tested by TVBian"', page)
+            self.assertIn('data-support="tested_by_tvbian"', page)
 
     def test_coffee_button(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -316,6 +319,37 @@ class Discovery(unittest.TestCase):
         page = (out / "index.html").read_text()
         self.assertIn('id="new-box"', page)
         self.assertIn(image_name("old-box"), page)
+
+    def test_alternate_photos_slide_in_number_order(self) -> None:
+        photos = self.root / "docs/new-box"
+        photos.mkdir(parents=True, exist_ok=True)
+        for name in ("image1_alt10.jpg", "image1_alt2.jpg", "image1_alt1.jpg", "image1_altx.jpg"):
+            shutil.copyfile(ROOT / "docs/r69-1/image1.jpg", photos / name)
+        card = build.load_cards(self.root)[0]
+        self.assertEqual(
+            [path.name for path in card.alternates],
+            ["image1_alt1.jpg", "image1_alt2.jpg", "image1_alt10.jpg"],
+        )
+        one = build.card_html(card, self.release, [("media/a.jpg", None)])
+        self.assertNotIn('class="slide', one)
+        two = build.card_html(card, self.release, [("media/a.jpg", None), ("media/b.jpg", None)])
+        self.assertEqual(two.count('class="shot'), 2)
+        self.assertEqual(two.count('class="shot active"'), 1)
+        self.assertIn('class="slide next"', two)
+
+    def test_untested_board_says_so(self) -> None:
+        conf = self.root / "boards/new-box/board.conf"
+        conf.write_text(conf.read_text() + "BOARD_SUPPORT=not_tested\n")
+        card = build.load_cards(self.root)[0]
+        html = build.card_html(card, self.release, [])
+        self.assertIn('data-support="not_tested"', html)
+        self.assertIn('aria-label="Not tested"', html)
+
+    def test_support_refuses_an_unknown_level(self) -> None:
+        conf = self.root / "boards/new-box/board.conf"
+        conf.write_text(conf.read_text() + "BOARD_SUPPORT=maybe\n")
+        with self.assertRaisesRegex(SystemExit, "BOARD_SUPPORT"):
+            build.load_cards(self.root)
 
     def test_unlisted_board_is_not_advertised(self) -> None:
         board = self.root / "boards/work-in-progress"

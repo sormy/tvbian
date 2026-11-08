@@ -44,6 +44,25 @@ MD_LINK = re.compile(r"\[([^\]]*)\]\[([^\]]+)\]")
 BOARD_DOC = re.compile(r"docs/([^/]+)/board\.md")
 IMAGE = r"^tvbian-{board}-[a-z]+-\d{{4}}-\d{{2}}-\d{{2}}\.img\.xz$"
 PHOTOS = ("image1.jpg", "image1.png", "image1.jpeg", "image1.webp")
+ALT_PHOTO = re.compile(r"^image1_alt(\d+)\.(jpg|png|jpeg|webp)$")
+SUPPORT = {
+    "tested_by_tvbian": (
+        "Tested by TVBian",
+        '<path d="m6 12.5 4 4 8-9"/>',
+    ),
+    "tested_by_user": (
+        "Tested by user",
+        '<circle cx="9" cy="8" r="3.5"/><path d="M3 20c0-3.5 2.7-6 6-6s6 2.5 6 6"/><path d="m15.5 11 2 2 4-4"/>',
+    ),
+    "not_tested": (
+        "Not tested",
+        '<path d="M8.8 8.8a3.3 3.3 0 1 1 4.6 3c-.9.4-1.4 1.1-1.4 2v.6"/><path d="M12 18.5h.01"/>',
+    ),
+    "tested_broken": (
+        "Tested: broken",
+        '<path d="m7 7 10 10M17 7 7 17"/>',
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -81,8 +100,10 @@ class Card:
     previous: str
     row: Row | None
     photo: Path | None
+    alternates: tuple[Path, ...]
     home: str = ""
     store: str = ""
+    support: str = "tested_by_tvbian"
     alias_of: str = ""
     alias_of_name: str = ""
 
@@ -231,6 +252,22 @@ def row_from(fields: dict[str, str], refs: dict[str, str]) -> Row:
     )
 
 
+def board_support(text: str, board_id: str) -> str:
+    level = conf_value(text, "BOARD_SUPPORT") or "tested_by_tvbian"
+    if level not in SUPPORT:
+        die(f"{board_id}: BOARD_SUPPORT must be one of {', '.join(SUPPORT)}")
+    return level
+
+
+def find_alternates(folder: Path) -> tuple[Path, ...]:
+    found = [
+        (int(match.group(1)), path)
+        for path in (folder.iterdir() if folder.is_dir() else ())
+        if (match := ALT_PHOTO.match(path.name))
+    ]
+    return tuple(path for _, path in sorted(found))
+
+
 def find_photo(folder: Path) -> Path | None:
     for name in PHOTOS:
         photo = folder / name
@@ -262,8 +299,10 @@ def load_aliases(root: Path, boards: dict[str, Card]) -> dict[str, list[Card]]:
                 parent.previous,
                 parent.row,
                 find_photo(root / "docs" / alias_id),
+                find_alternates(root / "docs" / alias_id),
                 conf_value(text, "BOARD_HOME"),
                 conf_value(text, "BOARD_STORE"),
+                board_support(text, alias_id),
                 alias_of=parent.id,
                 alias_of_name=parent.name,
             )
@@ -291,6 +330,7 @@ def load_cards(root: Path) -> list[Card]:
         if conf_value(text, "BOARD_ID") != board_id:
             die(f"boards/{board_id}/board.conf BOARD_ID does not match its directory")
         family = conf_value(text, "BOARD_FAMILY")
+        support = board_support(text, board_id)
         if not (root / "docs" / board_id / "board.md").is_file():
             die(f"{board_id}: missing board report")
         row = by_id[board_id]
@@ -306,8 +346,10 @@ def load_cards(root: Path) -> list[Card]:
                 conf_value(text, "BOARD_RENAMED_FROM"),
                 row,
                 find_photo(root / "docs" / board_id),
+                find_alternates(root / "docs" / board_id),
                 conf_value(text, "BOARD_HOME"),
                 conf_value(text, "BOARD_STORE"),
+                support,
             )
         )
     aliases = load_aliases(root, {card.id: card for card in cards})
@@ -403,24 +445,34 @@ def spec_line(card: Card) -> str:
     return " · ".join(bits)
 
 
-def card_html(
-    card: Card, release: Release, photo: str | None, size: tuple[int, int] | None
-) -> str:
+Shot = tuple[str, tuple[int, int] | None]
+
+
+def card_html(card: Card, release: Release, shots: list[Shot]) -> str:
     row = card.row
     kind = ALT.get(row.form, "Android TV box") if row else "Android TV box"
     alt = esc(f"{card.name}, {kind}")
-    if photo and size:
-        shot = (
-            f'<img class="shot" src="{esc(photo)}" alt="{alt}" width="{size[0]}" height="{size[1]}" '
-            'loading="lazy" decoding="async" />'
+    images = []
+    for index, (src, size) in enumerate(shots):
+        dims = f' width="{size[0]}" height="{size[1]}"' if size else ""
+        active = " active" if index == 0 else ""
+        images.append(
+            f'<img class="shot{active}" src="{esc(src)}" alt="{alt}"{dims} loading="lazy" decoding="async" />'
         )
-    elif photo:
-        shot = f'<img class="shot" src="{esc(photo)}" alt="{alt}" loading="lazy" decoding="async" />'
-    else:
-        shot = '<div class="shot blank">no photo</div>'
+    shot = "".join(images) or '<div class="shot blank">no photo</div>'
+    if len(shots) > 1:
+        shot += (
+            '<button class="slide prev" type="button" aria-label="Previous case">‹</button>'
+            '<button class="slide next" type="button" aria-label="Next case">›</button>'
+        )
     radio = [f"Wi-Fi/BT {row.radio}"] if row and row.radio else []
     ports = [port.strip() for port in row.ports.split(",")] if row and row.ports else []
     hardware = " · ".join(radio + ports)
+    label, icon = SUPPORT[card.support]
+    support = (
+        f'<span class="support" role="img" tabindex="0" aria-label="{label}">'
+        f'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{icon}</svg></span>'
+    )
     parts = [
         f'<p class="pcb"><span>PCB</span> {esc(card.pcb)}</p>' if card.pcb else "",
         f'<p class="pcb"><span>ALIAS</span> {esc(card.alias_of_name)}</p>' if card.alias_of else "",
@@ -445,8 +497,8 @@ def card_html(
     sources = f'<div class="board-links">{sources}</div>' if sources else ""
     doc = f"{REPO}/blob/main/docs/{card.alias_of or card.id}/board.md"
     return (
-        f'<article class="board" id="{esc(card.id)}" data-family="{esc(card.family)}">'
-        f'<figure class="stage">{shot}</figure><div class="body">'
+        f'<article class="board" id="{esc(card.id)}" data-family="{esc(card.family)}" data-support="{esc(card.support)}">'
+        f'<figure class="stage">{shot}{support}</figure><div class="body">'
         f'<h3 class="board-title"><a href="{esc(doc)}">{esc(card.name)}</a></h3>'
         f'{"".join(parts)}<div class="actions">{actions}{sources}</div></div></article>'
     )
@@ -586,13 +638,13 @@ def write_site(
     media.mkdir()
     blocks: list[str] = []
     for card in cards:
-        src: str | None = None
-        size: tuple[int, int] | None = None
-        if card.photo is not None:
-            src = f"media/{card.id}{card.photo.suffix}"
-            shutil.copyfile(card.photo, out / src)
-            size = image_size(card.photo)
-        blocks.append(card_html(card, release, src, size))
+        shots: list[Shot] = []
+        photos = ((card.photo,) if card.photo else ()) + card.alternates
+        for index, photo in enumerate(photos):
+            src = f"media/{card.id}{f'-{index}' if index else ''}{photo.suffix}"
+            shutil.copyfile(photo, out / src)
+            shots.append((src, image_size(photo)))
+        blocks.append(card_html(card, release, shots))
     page = (HERE / "template.html").read_text()
     replacements = {
         "@@STARS@@": (
