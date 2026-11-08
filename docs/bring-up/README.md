@@ -9,6 +9,7 @@ folder is the whole procedure: this file, read whole first, then one phase at a 
 | chip   | a Wi-Fi, BT or other chip has no driver | as a board, with `chip.md` before `finish.md`         |
 | family | the SoC family is new                   | `contact.md`, `family.md`, then as a board            |
 | alias  | a listed board's hardware, another name | `alias.md` alone                                      |
+| import | no box: a known family, its stock image | `import.md` alone                                     |
 
 **A board of a known family with known chips is mostly authoring**: its trees (`trees.md`) and its
 board data (`boot.md`), with no stock runtime capture, the image and its factory trees carrying it.
@@ -35,6 +36,7 @@ sibling.
 | `chip.md`     | a driver for a chip that has none                         |
 | `family.md`   | what every board of a new family inherits                 |
 | `alias.md`    | another box on a listed board's image                     |
+| `import.md`   | a board from its stock image, no box in hand              |
 | `finish.md`   | the full pass, `-next`'s kernel lines, the pull request   |
 
 ## The run
