@@ -493,6 +493,16 @@
         font-size: 14px;
         cursor: pointer;
       }
+      .search {
+        margin-left: auto;
+        min-width: 180px;
+        padding: 7px 14px;
+        border: 1px solid var(--line);
+        border-radius: 99px;
+        background: transparent;
+        color: var(--ink);
+        font: 14px var(--sans);
+      }
       .filter[aria-pressed="true"] {
         background: var(--ink);
         color: var(--bg);
@@ -617,11 +627,17 @@
         font-size: 24px;
         margin-bottom: 8px;
       }
-      .support {
+      .badges {
         position: absolute;
         top: 10px;
         left: 10px;
         z-index: 1;
+        display: flex;
+        gap: 6px;
+      }
+      .support,
+      .alias {
+        position: relative;
         display: flex;
         padding: 5px;
         border-radius: 50%;
@@ -630,12 +646,15 @@
         box-shadow: 0 1px 5px #00000059;
         color: #fff;
       }
-      .support::after {
+      .alias {
+        background: color-mix(in srgb, #5b5f6b 90%, transparent);
+      }
+      .support::after,
+      .alias::after {
         content: attr(aria-label);
         position: absolute;
-        left: calc(100% + 6px);
-        top: 50%;
-        transform: translateY(-50%);
+        left: 0;
+        top: calc(100% + 6px);
         padding: 3px 8px;
         border-radius: 6px;
         background: var(--surface);
@@ -648,10 +667,13 @@
         transition: opacity 0.15s;
       }
       .support:hover::after,
-      .support:focus-visible::after {
+      .support:focus-visible::after,
+      .alias:hover::after,
+      .alias:focus-visible::after {
         opacity: 1;
       }
-      .support svg {
+      .support svg,
+      .alias svg {
         width: 22px;
         height: 22px;
       }
@@ -672,31 +694,58 @@
         margin-top: auto;
         padding-top: 16px;
       }
-      .board .btn {
-        font-size: 12px;
-        padding: 9px 10px;
-      }
-      .board-links {
-        display: flex;
-        gap: 6px;
-        color: var(--muted);
-      }
-      .board-links a {
+      .act {
+        position: relative;
         display: grid;
         place-items: center;
-        width: 34px;
-        height: 34px;
+        width: 36px;
+        height: 36px;
         border: 1px solid var(--line);
-        border-radius: 6px;
+        border-radius: 8px;
+        color: var(--muted);
         text-decoration: none;
       }
-      .board-links svg {
+      .act svg {
         width: 18px;
         height: 18px;
       }
-      .board-links a:hover {
+      .act:hover {
         color: var(--accent);
         border-color: var(--accent);
+      }
+      .act.primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: var(--on-accent);
+      }
+      .act.primary:hover {
+        background: color-mix(in srgb, var(--accent) 85%, var(--ink));
+        color: var(--on-accent);
+      }
+      .act[aria-disabled="true"] {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+      .act::after {
+        content: attr(aria-label);
+        position: absolute;
+        bottom: calc(100% + 6px);
+        left: 0;
+        padding: 3px 8px;
+        border-radius: 6px;
+        background: var(--surface);
+        color: var(--ink);
+        font: 12px/1.4 var(--sans);
+        white-space: nowrap;
+        box-shadow: 0 1px 4px #00000040;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.15s;
+        z-index: 2;
+      }
+      .act:hover::after,
+      .act:focus-visible::after {
+        opacity: 1;
       }
       .note {
         font-size: 16px;
@@ -1096,12 +1145,20 @@
           <span aria-hidden="true">↳</span
           ><span
             ><strong>Same case. Surprise motherboard.</strong> Box names are creative writing. Open
-            yours and match its printed PCB identifier before downloading.</span
+            yours: a matching PCB label is the quick check, and the board photos in its report
+            settle it when the label differs.</span
           >
         </p>
         <div class="filters" role="group" aria-label="Filter hardware by chip family">
           <button class="filter" data-filter="all" aria-pressed="true">All hardware</button>
           @@FILTERS@@
+          <input
+            class="search"
+            type="search"
+            placeholder="Search boxes"
+            aria-label="Search boxes by name, PCB or chip"
+            autocomplete="off"
+          />
         </div>
         <p class="sr-only" id="filter-status" role="status"></p>
         <div class="boards">@@BOARDS@@</div>
@@ -1371,19 +1428,47 @@
         stage.addEventListener("mouseleave", () => (paused = false));
         setInterval(() => paused || document.hidden || show(1), 4000);
       });
-      const cards = [...document.querySelectorAll(".board")];
+      const words = (text) =>
+        text
+          .toLowerCase()
+          .split(/[^a-z0-9]+/)
+          .filter(Boolean);
+      const cards = [...document.querySelectorAll(".board")].map((element) => ({
+        element,
+        family: element.dataset.family,
+        words: words(element.dataset.search),
+      }));
+      let family = "all";
+      let query = { whole: [], start: "" };
+      // a word followed by a space is complete and matches whole; the one being typed, by its start
+      const matches = (card) =>
+        (family === "all" || card.family === family) &&
+        query.whole.every((word) => card.words.includes(word)) &&
+        (!query.start || card.words.some((word) => word.startsWith(query.start)));
+      const apply = () => {
+        let shown = 0;
+        cards.forEach((card) => {
+          const hidden = !matches(card);
+          if (card.element.hidden !== hidden) card.element.hidden = hidden;
+          if (!hidden) shown++;
+        });
+        document.getElementById("filter-status").textContent = shown + " boards shown";
+      };
+      document.querySelector(".search").addEventListener("input", (event) => {
+        const typed = words(event.target.value);
+        const done = /[^a-z0-9]$/i.test(event.target.value);
+        query = done
+          ? { whole: typed, start: "" }
+          : { whole: typed.slice(0, -1), start: typed.at(-1) ?? "" };
+        apply();
+      });
       document.querySelectorAll("[data-filter]").forEach((button) =>
         button.addEventListener("click", () => {
           document
             .querySelectorAll("[data-filter]")
             .forEach((other) => other.setAttribute("aria-pressed", String(other === button)));
-          let shown = 0;
-          cards.forEach((card) => {
-            card.hidden =
-              button.dataset.filter !== "all" && card.dataset.family !== button.dataset.filter;
-            if (!card.hidden) shown++;
-          });
-          document.getElementById("filter-status").textContent = shown + " boards shown";
+          family = button.dataset.filter;
+          apply();
         }),
       );
     </script>

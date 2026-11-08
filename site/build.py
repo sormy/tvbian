@@ -64,6 +64,64 @@ SUPPORT = {
     ),
 }
 
+REPORT_BODY = """Board: {board} (PCB {pcb})
+Image: {image}
+
+**Result:** works / broken
+
+**What I checked** (strike what you did not try):
+- [ ] boots from SD, USB or eMMC
+- [ ] HDMI picture and audio
+- [ ] Ethernet
+- [ ] Wi-Fi and Bluetooth
+- [ ] the remote
+- [ ] video playback
+
+**What went wrong**, if anything:
+
+**Boot log** (serial console or `journalctl -b`):
+```
+paste here
+```
+"""
+ALIAS_ICON = (
+    '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/>'
+    '<path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>'
+)
+
+
+ACTION_ICONS = {
+    "Download": '<path d="M12 4v11m-5-5 5 5 5-5M5 20h14"/>',
+    "Unreleased: wait for next Monday": '<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>',
+    "Install guide": '<path d="M4 5a2 2 0 0 1 2-2h13v15H6a2 2 0 0 0-2 2Z"/><path d="M4 20a2 2 0 0 0 2 1h13v-3"/>',
+    "Report a test": '<path d="M5 21V4h11l-2 4 2 4H5"/>',
+    "Product page": '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c5 5 5 13 0 18-5-5-5-13 0-18Z"/>',
+    "Store": '<path d="M5 8h14l1 13H4L5 8Z"/><path d="M8 8V6a4 4 0 0 1 8 0v2"/>',
+}
+
+
+def svg(icon: str, stroke: str) -> str:
+    return (
+        f'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="{stroke}" '
+        f'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{icon}</svg>'
+    )
+
+
+def action(label: str, url: str, kind: str) -> str:
+    """An icon button, its label the tooltip; no URL renders it disabled."""
+    icon = svg(ACTION_ICONS[label], "1.8")
+    classes = f"act {kind}".strip()
+    if url:
+        return f'<a class="{classes}" href="{esc(url)}" aria-label="{esc(label)}">{icon}</a>'
+    return f'<span class="{classes}" role="img" aria-disabled="true" aria-label="{esc(label)}" tabindex="0">{icon}</span>'
+
+
+def badge(kind: str, label: str, icon: str) -> str:
+    return (
+        f'<span class="{kind}" role="img" tabindex="0" aria-label="{esc(label)}">'
+        f'{svg(icon, "2.2")}</span>'
+    )
+
 
 @dataclass(frozen=True)
 class Asset:
@@ -193,11 +251,19 @@ def cells(line: str) -> list[str]:
     return [part.strip() for part in line.strip().strip("|").split("|")]
 
 
-def box_table(text: str) -> tuple[dict[str, str], list[tuple[str, dict[str, str]]]]:
+Fields = dict[str, str]
+ALIAS_MARK = "↳"
+
+
+def box_table(
+    text: str,
+) -> tuple[dict[str, str], list[tuple[str, Fields]], dict[tuple[str, str], Fields]]:
+    """The box table's references, its board rows, and each alias row under its board."""
     refs = {match.group(1): match.group(2) for match in REF_LINE.finditer(text)}
     lines = text.splitlines()
     header: list[str] | None = None
-    rows: list[tuple[str, dict[str, str]]] = []
+    rows: list[tuple[str, Fields]] = []
+    aliases: dict[tuple[str, str], Fields] = {}
     for line in lines:
         if not line.startswith("|"):
             if header is not None:
@@ -214,6 +280,12 @@ def box_table(text: str) -> tuple[dict[str, str], list[tuple[str, dict[str, str]
             continue
         if set(fields[0]) <= {"-", ":"}:
             continue
+        named = {header[i]: fields[i] for i in range(min(len(header), len(fields)))}
+        if fields[0].startswith(ALIAS_MARK):
+            if not rows:
+                die(f"alias row before any board: {fields[0]}")
+            aliases[(rows[-1][0], fields[0].removeprefix(ALIAS_MARK).strip())] = named
+            continue
         link = MD_LINK.search(fields[0])
         if link is None:
             die(f"box row has no board link: {fields[0]}")
@@ -221,18 +293,13 @@ def box_table(text: str) -> tuple[dict[str, str], list[tuple[str, dict[str, str]
         found = BOARD_DOC.fullmatch(target)
         if found is None:
             die(f"{link.group(2)} does not point at docs/<board>/board.md")
-        rows.append(
-            (
-                found.group(1),
-                {header[i]: fields[i] for i in range(min(len(header), len(fields)))},
-            )
-        )
+        rows.append((found.group(1), named))
     if header is None:
         die("README.md has no box table")
-    return refs, rows
+    return refs, rows, aliases
 
 
-def row_from(fields: dict[str, str], refs: dict[str, str]) -> Row:
+def row_from(fields: Fields, refs: dict[str, str]) -> Row:
     missing = [column for column in COLUMNS if column not in fields]
     if missing:
         die(f"box table is missing {', '.join(missing)}")
@@ -276,7 +343,9 @@ def find_photo(folder: Path) -> Path | None:
     return None
 
 
-def load_aliases(root: Path, boards: dict[str, Card]) -> dict[str, list[Card]]:
+def load_aliases(
+    root: Path, boards: dict[str, Card], rows: dict[tuple[str, str], Row]
+) -> dict[str, list[Card]]:
     aliases: dict[str, list[Card]] = {}
     for conf in sorted((root / "boards").glob("*/alias.conf")):
         alias_id = conf.parent.name
@@ -289,6 +358,9 @@ def load_aliases(root: Path, boards: dict[str, Card]) -> dict[str, list[Card]]:
         name = conf_value(text, "BOARD_NAME")
         if not name:
             die(f"boards/{alias_id}/alias.conf names no BOARD_NAME")
+        row = rows.get((parent.id, name))
+        if row is None:
+            die(f"README.md lists no {name} under {parent.name}")
         aliases.setdefault(parent.id, []).append(
             Card(
                 alias_id,
@@ -297,7 +369,7 @@ def load_aliases(root: Path, boards: dict[str, Card]) -> dict[str, list[Card]]:
                 parent.family_id,
                 parent.family,
                 parent.previous,
-                parent.row,
+                row,
                 find_photo(root / "docs" / alias_id),
                 find_alternates(root / "docs" / alias_id),
                 conf_value(text, "BOARD_HOME"),
@@ -311,7 +383,7 @@ def load_aliases(root: Path, boards: dict[str, Card]) -> dict[str, list[Card]]:
 
 
 def load_cards(root: Path) -> list[Card]:
-    refs, rows = box_table((root / "README.md").read_text())
+    refs, rows, listed_aliases = box_table((root / "README.md").read_text())
     if not rows:
         die("README.md has no listed boards")
     by_id = {board_id: row_from(fields, refs) for board_id, fields in rows}
@@ -352,8 +424,10 @@ def load_cards(root: Path) -> list[Card]:
                 support,
             )
         )
-    aliases = load_aliases(root, {card.id: card for card in cards})
-    return [each for card in cards for each in (card, *aliases.get(card.id, []))]
+    alias_rows = {key: row_from(fields, refs) for key, fields in listed_aliases.items()}
+    aliases = load_aliases(root, {card.id: card for card in cards}, alias_rows)
+    every = cards + [alias for group in aliases.values() for alias in group]
+    return sorted(every, key=lambda card: card.name.casefold())
 
 
 def image_for(board_id: str, release: Release, previous: str = "") -> Asset | None:
@@ -430,6 +504,19 @@ def ram(value: str) -> str:
     return f"{gb(value)} RAM"
 
 
+def report_url(card: Card, image: Asset | None) -> str:
+    body = REPORT_BODY.format(
+        board=card.id, pcb=card.pcb or "?", image=image.name if image else "?"
+    )
+    query = urllib.parse.urlencode({"title": f"Test report: {card.name}", "body": body})
+    return f"{REPO}/issues/new?{query}"
+
+
+def search_text(card: Card) -> str:
+    soc = card.row.soc if card.row else ""
+    return " ".join((card.name, card.pcb, card.alias_of_name, card.family, soc))
+
+
 def spec_line(card: Card) -> str:
     row = card.row
     if row is None:
@@ -468,11 +555,10 @@ def card_html(card: Card, release: Release, shots: list[Shot]) -> str:
     radio = [f"Wi-Fi/BT {row.radio}"] if row and row.radio else []
     ports = [port.strip() for port in row.ports.split(",")] if row and row.ports else []
     hardware = " · ".join(radio + ports)
-    label, icon = SUPPORT[card.support]
-    support = (
-        f'<span class="support" role="img" tabindex="0" aria-label="{label}">'
-        f'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{icon}</svg></span>'
-    )
+    badges = [badge("support", *SUPPORT[card.support])]
+    if card.alias_of:
+        badges.append(badge("alias", f"Alias of {card.alias_of_name}", ALIAS_ICON))
+    badge_row = f'<div class="badges">{"".join(badges)}</div>'
     parts = [
         f'<p class="pcb"><span>PCB</span> {esc(card.pcb)}</p>' if card.pcb else "",
         f'<p class="pcb"><span>ALIAS</span> {esc(card.alias_of_name)}</p>' if card.alias_of else "",
@@ -480,27 +566,23 @@ def card_html(card: Card, release: Release, shots: list[Shot]) -> str:
         f'<p class="spec">{esc(hardware)}</p>' if hardware else "",
     ]
     image = image_for(card.alias_of or card.id, release, card.previous)
-    actions = f'<a class="btn primary" href="{esc(image.url)}">Download</a>' if image else ""
-    guide = row.guide if row else ""
-    if guide and row and row.install:
-        actions += f'<a class="btn" href="{esc(f"{REPO}/blob/main/{guide}#install")}">Install</a>'
-    icons = {
-        "Product page": '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c5 5 5 13 0 18-5-5-5-13 0-18Z"/>',
-        "Store": '<path d="M5 8h14l1 13H4L5 8Z"/><path d="M8 8V6a4 4 0 0 1 8 0v2"/>',
-    }
-    sources = "".join(
-        f'<a href="{esc(url)}" title="{esc(label)}" aria-label="{esc(label)} for {esc(card.name)}">'
-        f'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{icons[label]}</svg></a>'
-        for label, url in (("Product page", card.home), ("Store", card.store))
-        if url
+    guide = row.guide if row and row.install else ""
+    links = (
+        ("Download", image.url if image else "", "primary"),
+        ("Install guide", f"{REPO}/blob/main/{guide}#install" if guide else "", ""),
+        ("Report a test", report_url(card, image) if card.support == "not_tested" else "", ""),
+        ("Product page", card.home, ""),
+        ("Store", card.store, ""),
     )
-    sources = f'<div class="board-links">{sources}</div>' if sources else ""
+    actions = "".join(action(label, url, kind) for label, url, kind in links if url)
+    if not image:
+        actions = action("Unreleased: wait for next Monday", "", "primary") + actions
     doc = f"{REPO}/blob/main/docs/{card.alias_of or card.id}/board.md"
     return (
-        f'<article class="board" id="{esc(card.id)}" data-family="{esc(card.family)}" data-support="{esc(card.support)}">'
-        f'<figure class="stage">{shot}{support}</figure><div class="body">'
+        f'<article class="board" id="{esc(card.id)}" data-family="{esc(card.family)}" data-support="{esc(card.support)}" data-search="{esc(search_text(card))}">'
+        f'<figure class="stage">{shot}{badge_row}</figure><div class="body">'
         f'<h3 class="board-title"><a href="{esc(doc)}">{esc(card.name)}</a></h3>'
-        f'{"".join(parts)}<div class="actions">{actions}{sources}</div></div></article>'
+        f'{"".join(parts)}<div class="actions">{actions}</div></div></article>'
     )
 
 
@@ -518,7 +600,7 @@ def motd_field(label: str, html: str, text: str, cell: int = 0) -> str:
 def terminal_html(root: Path, cards: list[Card], release: Release | None = None) -> str:
     if not cards:
         return ""
-    card = cards[0]
+    card = next(card for card in cards if not card.alias_of)
     image = image_for(card.id, release, card.previous) if release else None
     suite = image.name.rsplit("-", 4)[1] if image else "trixie"
     conf = (root / "boards" / card.id / "board.conf").read_text()

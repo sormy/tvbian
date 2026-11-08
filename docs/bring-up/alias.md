@@ -14,14 +14,14 @@ Anything it needs that the listed board's image lacks makes it a board.
    listing. Its photos in `docs/<id>/`, the box first as `image1.*`.
 3. **The listed board's docs**: an "Also sold as" row in its `board.md` Identity, ✅ where this box
    booted the image here, else ❓; a dated worklog entry; the box under its board's row in
-   `README.md` and its family's README.
+   `README.md`, a `↳ <name>` row of its own, every column filled, and its family's README.
 4. **Its own boot**, where the box is to hand: the image from an SD card or USB stick, then the
    listed board's smoke checks: network, Wi-Fi, HDMI, the remote.
 
 ## Bites
 
 - **The case label can lie**: the Leffot H313's says "H96 Max H313", an Allwinner model's name, over
-  an RK3518. The silkscreen decides.
+  an RK3518. The board's chips and layout decide; its silkscreen can be relabelled too.
 - **A reporter stays private**: a name or address someone reports a box under never reaches the
   repo.
 

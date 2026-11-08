@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import html
 import json
+import re
 import shutil
 import sys
 import tempfile
 import unittest
+import urllib.parse
 from unittest.mock import patch
 from pathlib import Path
 
@@ -53,12 +56,6 @@ class Parse(unittest.TestCase):
         self.assertEqual(rockchip.guide, "README_ROCKCHIP.md")
         self.assertTrue(all(card.support in build.SUPPORT for card in cards))
 
-    def test_readme_names_every_alias(self) -> None:
-        readme = (ROOT / "README.md").read_text()
-        for card in CARDS:
-            if card.alias_of:
-                self.assertIn(card.name, readme)
-
     def test_image_name_is_the_plain_image(self) -> None:
         names = [
             image_name("h96max-3518"),
@@ -99,8 +96,9 @@ class Parse(unittest.TestCase):
     def test_terminal_follows_first_board_and_repo_logo(self) -> None:
         cards = build.load_cards(ROOT)
         banner = build.terminal_html(ROOT, cards)
-        self.assertIn("ssh root@r69-1", banner)
-        self.assertIn("XR821_V1.1", banner)
+        first = next(card for card in cards if not card.alias_of)
+        self.assertIn(f"ssh root@{first.id}", banner)
+        self.assertIn(first.pcb, banner)
         logo = (
             (ROOT / "base/motd")
             .read_text()
@@ -167,7 +165,7 @@ class Write(unittest.TestCase):
             r69 = article(page, "R69-1")
             self.assertIn(image_name("r69-1"), r69)
             self.assertIn("README_ROCKCHIP.md#install", r69)
-            self.assertIn(">Install</a>", r69)
+            self.assertIn('aria-label="Install guide"', r69)
             stick = article(page, "H96 Max 3518D")
             self.assertNotIn("SD card", stick)
             self.assertIn("README_AMLOGIC.md#install", article(page, "H96 Max M20"))
@@ -239,7 +237,19 @@ class Discovery(unittest.TestCase):
         self.assertIn("Debian stable (trixie)", page)
         self.assertNotIn("@@", page)
 
-    def alias(self, conf: str, alias_id: str = "new-alias") -> Path:
+    def page(self, name: str) -> str:
+        out = self.root / name
+        build.write_site(self.root, self.release, out)
+        return (out / "index.html").read_text()
+
+    def alias(
+        self, conf: str, alias_id: str = "new-alias", listed: str = "", emmc: str = "32G"
+    ) -> Path:
+        if listed:
+            readme = self.root / "README.md"
+            board = "| [New board][new] | stick | TEST9000 | 4G | 32G | RADIO9 | HDMI, USB | [OTG][guide] |\n"
+            row = f"| ↳ {listed} | stick | TEST9000 | 4G | {emmc} | RADIO9 | HDMI, USB | [OTG][guide] |\n"
+            readme.write_text(readme.read_text().replace(board, board + row))
         folder = self.root / "boards" / alias_id
         folder.mkdir()
         (folder / "alias.conf").write_text(conf)
@@ -248,7 +258,9 @@ class Discovery(unittest.TestCase):
     def test_alias_follows_its_board_with_its_own_photo_and_the_boards_image(self) -> None:
         self.alias(
             'BOARD_ALIAS_OF=new-box\nBOARD_NAME="Other Name"\nBOARD_PCB=PCB_OTHER\n'
-            "BOARD_STORE=https://example.test/other-store\n"
+            "BOARD_STORE=https://example.test/other-store\n",
+            listed="Other Name",
+            emmc="8G",
         )
         photos = self.root / "docs/new-alias"
         photos.mkdir()
@@ -264,6 +276,8 @@ class Discovery(unittest.TestCase):
             "Other Name",
             "PCB_OTHER",
             "<span>ALIAS</span> Brand New",
+            "TEST9000 · 4 GB RAM · 8 GB eMMC",
+            'class="alias" role="img" tabindex="0" aria-label="Alias of Brand New"',
             "https://example.test/other-store",
             image_name("new-box"),
             "docs/new-box/board.md",
@@ -272,10 +286,17 @@ class Discovery(unittest.TestCase):
             self.assertIn(expected, alias)
         self.assertTrue((out / "media/new-alias.jpg").is_file())
 
+    def test_cards_sort_by_name_and_the_terminal_shows_a_board(self) -> None:
+        self.alias('BOARD_ALIAS_OF=new-box\nBOARD_NAME="aardvark box"\n', listed="aardvark box")
+        cards = build.load_cards(self.root)
+        self.assertEqual([card.id for card in cards], ["new-alias", "new-box"])
+        self.assertIn("new-host", build.terminal_html(self.root, cards))
+
     def test_alias_errors(self) -> None:
         for conf, error in (
             ('BOARD_ALIAS_OF=missing\nBOARD_NAME="X"\n', "names no listed board"),
             ("BOARD_ALIAS_OF=new-box\n", "names no BOARD_NAME"),
+            ('BOARD_ALIAS_OF=new-box\nBOARD_NAME="Unlisted"\n', "lists no Unlisted under Brand New"),
         ):
             folder = self.alias(conf, "bad-alias")
             with self.assertRaisesRegex(SystemExit, error):
@@ -344,6 +365,26 @@ class Discovery(unittest.TestCase):
         html = build.card_html(card, self.release, [])
         self.assertIn('data-support="not_tested"', html)
         self.assertIn('aria-label="Not tested"', html)
+
+    def test_a_board_missing_from_the_release_is_unreleased(self) -> None:
+        card = build.load_cards(self.root)[0]
+        empty = build.parse_release(release_json([]))
+        self.assertIn('aria-label="Download"', build.card_html(card, self.release, []))
+        unreleased = build.card_html(card, empty, [])
+        self.assertIn('aria-disabled="true" aria-label="Unreleased: wait for next Monday"', unreleased)
+        self.assertNotIn('aria-label="Download"', unreleased)
+
+    def test_only_a_not_tested_card_asks_for_a_report(self) -> None:
+        conf = self.root / "boards/new-box/board.conf"
+        self.assertNotIn('aria-label="Report a test"', self.page("tested"))
+        conf.write_text(conf.read_text() + "BOARD_SUPPORT=not_tested\n")
+        page = self.page("not-tested")
+        link = re.search(r'href="([^"]+)" aria-label="Report a test"', page)
+        assert link
+        query = urllib.parse.parse_qs(urllib.parse.urlparse(html.unescape(link[1])).query)
+        self.assertEqual(query["title"], ["Test report: Brand New"])
+        self.assertIn("Board: new-box (PCB PCB_NEW)", query["body"][0])
+        self.assertIn(f"Image: {image_name('new-box')}", query["body"][0])
 
     def test_support_refuses_an_unknown_level(self) -> None:
         conf = self.root / "boards/new-box/board.conf"

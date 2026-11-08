@@ -12,7 +12,8 @@ Writes `build/out/site/index.html`, `media/` and `CNAME`. The domain is `tvbian.
 
 | Data                        | Source                                 |
 | --------------------------- | -------------------------------------- |
-| Listed boards, order, specs | `README.md` box table                  |
+| Listed boards, specs        | `README.md` box table                  |
+| Card order                  | `BOARD_NAME`, alphabetical             |
 | Identity, family, hostname  | `boards/<board>/board.conf`            |
 | Product and store links     | `BOARD_HOME`, `BOARD_STORE`            |
 | Support level               | `BOARD_SUPPORT`, or `tested_by_tvbian` |
@@ -22,12 +23,14 @@ Writes `build/out/site/index.html`, `media/` and `CNAME`. The domain is `tvbian.
 | Previous board ID           | `BOARD_RENAMED_FROM`                   |
 | Aliases, on their own cards | `boards/<id>/alias.conf`               |
 | Family filters              | Listed boards' families                |
+| Search                      | Name, PCB, alias's board, family, SoC  |
 | GitHub stars                | Repository API, at build time          |
 
 An alias is another box that runs a listed board's image unchanged: `boards/<id>/alias.conf` holds
 `BOARD_ALIAS_OF`, the board, and its own `BOARD_NAME`, `BOARD_PCB`, `BOARD_HOME`, `BOARD_STORE`; its
-photo is `docs/<id>/image1.*`, as a board's. Its card follows its board's, with "ALIAS" and the
-board's name under its PCB, and the board's download.
+specs are its own `↳ <name>` row under its board's in the box table; its photo is
+`docs/<id>/image1.*`, as a board's. Its card carries an alias badge, "ALIAS" and the board's name
+under its PCB, and the board's download.
 
 The table's board link joins its row to `boards/<board>/board.conf`. Unlisted board directories are
 not advertised. A listed board must have a matching ID, a board report and an install guide. Photos
@@ -37,12 +40,14 @@ and by its arrows.
 
 `BOARD_SUPPORT`, in `board.conf` or `alias.conf`, is `tested_by_tvbian` (left out),
 `tested_by_user`, `not_tested` or `tested_broken`. The card shows it as a badge on the photo, its
-words on hover; where an untested board came from is its `board.md`'s.
+words on hover, as each of the card's icon buttons does; where an untested board came from is its
+`board.md`'s. A `not_tested` card adds a report button: a new GitHub issue, prefilled with the
+board, its PCB and image, and a checklist.
 
 Downloads match `tvbian-<board>-<suite>-<date>.img.xz`; variants are excluded. A renamed board falls
 back to its previous ID when the release predates the rename. Multiple matching images are an error.
-A missing board download is labelled; a release with no downloads for listed boards fails before
-writing the page.
+A board with no download in the release shows a disabled download button until the next Monday's
+release; a release with no downloads for listed boards fails before writing the page.
 
 `--tag` selects an image release; absent, the latest non-prerelease is used. `--release-json` reads
 a saved GitHub API response offline and omits the star count. `GH_TOKEN`, or `GITHUB_TOKEN`,

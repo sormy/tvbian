@@ -16,20 +16,20 @@ kernel.
 
 ## Identity — check yours matches before flashing
 
-|               |                                                                                                                                                 |
-| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| Name          | **"R69"** (stock `ro.product.name=R69-1`), Android 14                                                                                           |
-| Sold as       | [amazon.com/dp/B0GK8P5YFT](https://www.amazon.com/dp/B0GK8P5YFT) — ~$35 complete with PSU                                                       |
-| SoC           | **RK3518A** — `SoC: 35181001`, reports `rk3528` (RK3518 is a variant in the RK3528 family)                                                      |
-| RAM / storage | 2 GB DRAM (**~1.5 GB usable** — boot-chain ceiling) · 16 GB Samsung eMMC 5.x (HS200) · microSD                                                  |
-| Runs from     | eMMC since 2026-08-09 (`mmcblk2p1`); factory Android overwritten — backup in `backup/r69-1-stock.img.xz`                                        |
-| Label MAC     | **`C4:2A:FE:10:51:77`** — assigned, and held in eMMC vendor storage as `LAN_MAC`                                                                |
-| Wi-Fi / BT    | **AIC8800D80** — SDIO Wi-Fi + UART Bluetooth                                                                                                    |
-| Ports         | HDMI · USB 2.0 · USB 3.0 · 10/100 Ethernet · microSD · AV jack · IR-extender jack                                                               |
-| Remote        | bundled 22-button remote — **dual-mode**: IR unpaired, BLE when paired                                                                          |
-| Serial header | 4 pads by the SD slot, **1500000** baud                                                                                                         |
-| PCB marking   | `XR821_V1.1` over `BY-XH 2540` — match the **first** line; the second looks like a fab + YYWW date code and will differ between production runs |
-| Also sold as  | **T8S**, its board the same to the eye but marked `R69MAX V1.1`: reported to boot this image; ❓ untested here                                  |
+|               |                                                                                                                                                                      |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Name          | **"R69"** (stock `ro.product.name=R69-1`), Android 14                                                                                                                |
+| Sold as       | [amazon.com/dp/B0GK8P5YFT](https://www.amazon.com/dp/B0GK8P5YFT) — ~$35 complete with PSU                                                                            |
+| SoC           | **RK3518A** — `SoC: 35181001`, reports `rk3528` (RK3518 is a variant in the RK3528 family)                                                                           |
+| RAM / storage | 2 GB DRAM (**~1.5 GB usable** — boot-chain ceiling) · 16 GB Samsung eMMC 5.x (HS200) · microSD                                                                       |
+| Runs from     | eMMC since 2026-08-09 (`mmcblk2p1`); factory Android overwritten — backup in `backup/r69-1-stock.img.xz`                                                             |
+| Label MAC     | **`C4:2A:FE:10:51:77`** — assigned, and held in eMMC vendor storage as `LAN_MAC`                                                                                     |
+| Wi-Fi / BT    | **AIC8800D80** — SDIO Wi-Fi + UART Bluetooth                                                                                                                         |
+| Ports         | HDMI · USB 2.0 · USB 3.0 · 10/100 Ethernet · microSD · AV jack · IR-extender jack                                                                                    |
+| Remote        | bundled 22-button remote — **dual-mode**: IR unpaired, BLE when paired                                                                                               |
+| Serial header | 4 pads by the SD slot, **1500000** baud                                                                                                                              |
+| PCB marking   | `XR821_V1.1` over `BY-XH 2540` — match the **first** line; the second looks like a fab + YYWW date code and will differ between production runs                      |
+| Also sold as  | **T8S**, its board the same to the eye but marked `R69MAX V1.1`, sold with 2 GB RAM and 8 GB eMMC: reported to boot this image; ❓ untested here, its usable RAM too |
 
 ## Serial console
 
