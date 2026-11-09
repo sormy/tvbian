@@ -4,7 +4,7 @@ Applied through `kernel/sunxi64.conf` (6.18) and `kernel/sunxi64-next.conf` (new
 each listing its patches one by one; each leaves on the bump that brings it from upstream. The top
 level is the current kernel's series, 6.18's; `next/` holds what only `-next` does: patches written
 for its API, and rewrites of top-level ones it takes in their place (`0103`, `0246`, `0257`, `0263`,
-`0265`, `0276`, `0281`, `0282`, `0289`, for 7.3).
+`0265`, `0276`, `0281`, `0282`, `0289`, `0712`, `0721`, for 7.3).
 
 | Patch         | Holds                                            |
 | ------------- | ------------------------------------------------ |
@@ -93,6 +93,10 @@ every later stream decodes to garbage until a reboot. After its watchdog resets 
 resets the port again, with nothing in flight; the vendor BSP's `sunxi_reset_device_iommu()` is the
 same reset. Not yet submitted.
 
+Ethernet on an H616 with the AC300 EPHY is the same on both kernels: EMAC1 (`0708`), the sun20i PWM
+that clocks the EPHY (`0712`–`0715`) and the AC200/AC300 EPHY driver (`0720`–`0721`). The AC200 core
+and its PHY (`0600`–`0607`) are on 7.3 only.
+
 Audio is LibreELEC's on both kernels: the H616 audio hub (`0520`), its HDMI path (`0500`–`0505`,
 `0514`), the PLL's sigma-delta table and rate changes (`0518`, `0519`) and the codec's 1024 × fs
 module clock (`0521`). 6.18 needs `0037`, 7.2's IEC958 subframe masks, and `0038`, the hub's
@@ -134,7 +138,9 @@ keys. Not yet submitted.
 | `0246`, `0263`         | AFBC framebuffers, the writeback check on 7.3     |
 | `0276`, `0281`, `0289` | the CDC LUT, HDR10+, HDR's formats on 7.3's API   |
 | `0282`                 | the MP closest rate on 7.3's `determine_rate`     |
+| `0712`                 | the sun20i PWM in 7.3's `drivers/pwm/Makefile`    |
 | `0039`                 | gpiolib: a hog on the line the chip's xlate names |
+| `0721`                 | the ACx00 EPHY on 7.3's autonomous-EEE hook       |
 
 ## LibreELEC's series and ours
 

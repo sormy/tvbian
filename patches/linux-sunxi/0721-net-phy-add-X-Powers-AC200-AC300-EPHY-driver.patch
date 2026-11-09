@@ -56,6 +56,8 @@ A failed suspend is not followed by a normal resume to restore these
 settings. Power down again if recovery fails, and unwind package power if
 reset, resume or configuration fails after power-on.
 
+[backported to 6.18: phylib there has no disable_autonomous_eee hook, and
+the H616 EMAC has no LPI, so config_init turns autonomous EEE off]
 Signed-off-by: James Hilliard <james.hilliard1@gmail.com>
 ---
  drivers/net/phy/Kconfig          |  11 +
@@ -831,7 +833,7 @@ new file mode 100644
 index 000000000000..d19ba6d8069a
 --- /dev/null
 +++ b/drivers/net/phy/xpowers/acx00.c
-@@ -0,0 +1,633 @@
+@@ -0,0 +1,634 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * X-Powers AC200/AC300 Ethernet PHY driver
@@ -1325,8 +1327,10 @@ index 000000000000..d19ba6d8069a
 +	if (ret)
 +		acx00_ephy_control_power_off_warn(priv);
 +	mutex_unlock(&priv->state_lock);
++	if (ret)
++		return ret;
 +
-+	return ret;
++	return acx00_ephy_disable_autonomous_eee(phydev);
 +}
 +
 +static int __acx00_ephy_power_on_and_resume(struct phy_device *phydev)
@@ -1449,7 +1453,6 @@ index 000000000000..d19ba6d8069a
 +		.write_page = acx00_ephy_write_page,
 +		.soft_reset = acx00_ephy_soft_reset,
 +		.config_init = acx00_ephy_config_init,
-+		.disable_autonomous_eee = acx00_ephy_disable_autonomous_eee,
 +		.suspend = acx00_ephy_suspend,
 +		.resume = acx00_ephy_resume,
 +	},

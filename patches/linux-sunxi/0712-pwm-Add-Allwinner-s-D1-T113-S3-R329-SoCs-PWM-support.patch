@@ -52,7 +52,7 @@ index 0dc0d2b69025..12f370aaca0e 100644
 +obj-$(CONFIG_PWM_SUN20I)	+= pwm-sun20i.o
  obj-$(CONFIG_PWM_SUNPLUS)	+= pwm-sunplus.o
  obj-$(CONFIG_PWM_TEGRA)		+= pwm-tegra.o
- obj-$(CONFIG_PWM_TH1520)	+= pwm_th1520.o
+ obj-$(CONFIG_PWM_TIECAP)	+= pwm-tiecap.o
 diff --git a/drivers/pwm/pwm-sun20i.c b/drivers/pwm/pwm-sun20i.c
 new file mode 100644
 index 000000000000..598bc1fedc82
