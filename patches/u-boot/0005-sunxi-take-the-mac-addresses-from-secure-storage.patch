@@ -1,0 +1,171 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] sunxi: take the MAC addresses from secure storage
+
+An Allwinner board assigned MAC addresses in the factory keeps them in
+the secure storage on its eMMC: an index of "name:size" entries at
+sector 12288, then a slot per item, each with a backup, all checked by
+CRC32. "mac" is the address on the label, "wifi_mac" the Wi-Fi's. Set
+ethaddr from "mac" and eth1addr from "wifi_mac" where the tree has the
+alias, and fall back to the address derived from the SID otherwise.
+
+Set bdaddr one above eth1addr, the Wi-Fi's address wherever it came from,
+for the Bluetooth fixup to hand the controller.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/board/sunxi/board.c b/board/sunxi/board.c
+--- a/board/sunxi/board.c
++++ b/board/sunxi/board.c
+@@ -18,6 +18,7 @@
+ #include <image.h>
+ #include <init.h>
+ #include <log.h>
++#include <memalign.h>
+ #include <mmc.h>
+ #include <axp_pmic.h>
+ #include <generic-phy.h>
+@@ -41,6 +42,7 @@
+ #include <asm/gpio.h>
+ #include <sunxi_gpio.h>
+ #include <asm/io.h>
++#include <asm/unaligned.h>
+ #include <u-boot/crc.h>
+ #include <env_internal.h>
+ #include <linux/libfdt.h>
+@@ -780,6 +782,111 @@
+ 	return true;
+ }
+ 
++#define SST_INDEX_SECTOR	12288
++#define SST_ITEM_SECTOR		(SST_INDEX_SECTOR + 2 * SST_SLOT_SECTORS)
++#define SST_SLOT_SECTORS	8
++#define SST_SLOT_SIZE		(SST_SLOT_SECTORS * 512)
++#define SST_MAGIC		0x17253948
++#define SST_NAME		0x08
++#define SST_NAME_LEN		64
++#define SST_LEN			0x60
++#define SST_DATA		0x64
++
++/* Read a slot, its primary copy or else its backup, whose CRC32 sits at @crc */
++static int sst_read_slot(struct blk_desc *desc, lbaint_t sector, u8 *buf, uint crc)
++{
++	int copy;
++
++	for (copy = 0; copy < 2; copy++) {
++		if (blk_dread(desc, sector + copy * SST_SLOT_SECTORS,
++			      SST_SLOT_SECTORS, buf) != SST_SLOT_SECTORS)
++			continue;
++		if (get_unaligned_le32(buf + crc) == crc32(0, buf, crc))
++			return 0;
++	}
++
++	return -EIO;
++}
++
++/* Copy item @name's text out of Allwinner's secure storage on the eMMC */
++static int sst_read(struct blk_desc *desc, const char *name, u8 *buf,
++		    char *out, uint size)
++{
++	const char *entry, *end = (const char *)buf + SST_SLOT_SIZE - 8;
++	int slot = 0;
++	uint len;
++
++	if (sst_read_slot(desc, SST_INDEX_SECTOR, buf, SST_SLOT_SIZE - 4))
++		return -EIO;
++
++	/* the index lists "name:size" strings, one per slot, in slot order */
++	for (entry = (const char *)buf; entry < end && *entry;
++	     entry += strnlen(entry, end - entry) + 1, slot++) {
++		const char *colon = strchr(entry, ':');
++
++		if (colon && colon - entry == strlen(name) &&
++		    !strncmp(entry, name, colon - entry))
++			break;
++	}
++	if (entry >= end || !*entry)
++		return -ENOENT;
++
++	len = simple_strtoul(strchr(entry, ':') + 1, NULL, 10);
++	if (len <= SST_DATA + 4 || len > SST_SLOT_SIZE)
++		return -EINVAL;
++	if (sst_read_slot(desc, SST_ITEM_SECTOR + 2 * slot * SST_SLOT_SECTORS,
++			  buf, len - 4))
++		return -EIO;
++	if (get_unaligned_le32(buf) != SST_MAGIC ||
++	    strncmp((char *)buf + SST_NAME, name, SST_NAME_LEN))
++		return -EINVAL;
++
++	len = min3(get_unaligned_le32(buf + SST_LEN), len - 4 - SST_DATA, size - 1);
++	memcpy(out, buf + SST_DATA, len);
++	out[len] = '\0';
++
++	return 0;
++}
++
++/* The addresses the factory assigned: "mac" for ethernet0, "wifi_mac" for ethernet1 */
++static void sst_setup_macaddr(const void *fdt)
++{
++	static const char * const items[] = { "mac", "wifi_mac" };
++	struct blk_desc *desc = NULL;
++	char alias[16], var[16], text[18];
++	u8 mac[ARP_HLEN], *buf;
++	int dev, i;
++
++	for (dev = 0; dev < 2 && !desc; dev++) {
++		struct mmc *mmc = find_mmc_device(dev);
++
++		if (mmc && !mmc_init(mmc) && !IS_SD(mmc))
++			desc = mmc_get_blk_desc(mmc);
++	}
++	if (!desc)
++		return;
++
++	buf = malloc_cache_aligned(SST_SLOT_SIZE);
++	if (!buf)
++		return;
++
++	for (i = 0; i < ARRAY_SIZE(items); i++) {
++		sprintf(alias, "ethernet%d", i);
++		if (i == 0)
++			strcpy(var, "ethaddr");
++		else
++			sprintf(var, "eth%daddr", i);
++		if (!fdt_get_alias(fdt, alias) || env_get(var) ||
++		    sst_read(desc, items[i], buf, text, sizeof(text)))
++			continue;
++		string_to_enetaddr(text, mac);
++		if (is_valid_ethaddr(mac))
++			eth_env_set_enetaddr(var, mac);
++	}
++
++	free(buf);
++}
++
+ /*
+  * Note this function gets called multiple times.
+  * It must not make any changes to env variables which already exist.
+@@ -792,6 +899,9 @@
+ 	char ethaddr[16];
+ 	int i;
+ 
++	if (CONFIG_IS_ENABLED(MMC))
++		sst_setup_macaddr(fdt);
++
+ 	if (!get_unique_sid(sid))
+ 		return;
+ 
+@@ -819,6 +929,14 @@
+ 		eth_env_set_enetaddr(ethaddr, mac_addr);
+ 	}
+ 
++	/* Bluetooth one above the Wi-Fi, ethernet1, wherever its address came from */
++	if (!env_get("bdaddr") && eth_env_get_enetaddr("eth1addr", mac_addr)) {
++		i = ARP_HLEN;
++		while (i-- && !++mac_addr[i])
++			;
++		eth_env_set_enetaddr("bdaddr", mac_addr);
++	}
++
+ 	if (!env_get("serial#")) {
+ 		snprintf(serial_string, sizeof(serial_string),
+ 			"%08x%08x", sid[0], sid[3]);

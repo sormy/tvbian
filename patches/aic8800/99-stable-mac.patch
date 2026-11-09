@@ -14,6 +14,10 @@ of random bytes, varying only the tail. Keep the vendor's 88:00:33 prefix but
 mark it locally administered: it is no registered OUI. The chip's own efuse
 still wins when it has one.
 
+Without one in efuse, take the address the bootloader put in the SDIO
+function's device-tree node, local-mac-address, before the fallback: a board
+whose bootloader derives it from the SoC keeps it across boots.
+
 The driver's existing call sites are gated on CONFIG_PLATFORM_ROCKCHIP, a build
 knob no in-tree config defines, so the vendor path never ran; key off
 CONFIG_RFKILL_RK instead, which is what actually provides rfkill-wlan.h.
@@ -28,7 +32,15 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
 --- a/src/SDIO/driver_fw/driver/aic8800/aic8800_fdrv/rwnx_main.c
 +++ b/src/SDIO/driver_fw/driver/aic8800/aic8800_fdrv/rwnx_main.c
-@@ -5840,8 +5840,11 @@
+@@ -22,6 +22,7 @@
+ #include <linux/if_arp.h>
+ #include <linux/ctype.h>
+ #include <linux/random.h>
++#include <linux/of_net.h>
+ #include <linux/vmalloc.h>
+ #include "rwnx_defs.h"
+ #include "rwnx_dini.h"
+@@ -5840,8 +5841,11 @@
  #endif//CONFIG_USE_CUSTOMER_MAC
  #endif//CONFIG_PLATFORM_ALLWINNER
  
@@ -41,7 +53,7 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
  #endif
  #ifdef CONFIG_PLATFORM_ROCKCHIP2
  #include <linux/rfkill-wlan.h>
-@@ -6022,6 +6025,7 @@
+@@ -6022,6 +6026,7 @@
  	//struct mm_set_rf_calib_cfm cfm;
  	struct mm_get_fw_version_cfm fw_version;
  	u8_l mac_addr_efuse[ETH_ALEN];
@@ -49,7 +61,7 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
  	struct aicbsp_feature_t feature;
  	struct mm_set_stack_start_cfm set_start_cfm;
  #ifdef CONFIG_TEMP_COMP
-@@ -6035,7 +6039,22 @@
+@@ -6035,7 +6040,22 @@
  	memset(fw_path, 0, 200);
  	aicbsp_get_feature(&feature, fw_path);
  
@@ -73,7 +85,7 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
  #ifdef CONFIG_POWER_LIMIT
  	memcpy(country_code, default_ccode, 4);
  #endif
-@@ -6286,9 +6305,24 @@
+@@ -6286,9 +6306,28 @@
          memcpy(init_conf.mac_addr, dflt_mac, ETH_ALEN);
      }
  #else
@@ -91,6 +103,10 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 +		if (ret)
 +			goto err_lmac_reqs;
 +	}
++	/* without one in efuse, the address the bootloader put in the device tree */
++	if (!(mac_addr_efuse[0] | mac_addr_efuse[1] | mac_addr_efuse[2] | mac_addr_efuse[3]) &&
++	    !of_get_mac_address(rwnx_hw->sdiodev->dev->of_node, mac_addr_efuse))
++		mac_src = "device tree";
 +	if (!(mac_addr_efuse[0] | mac_addr_efuse[1] | mac_addr_efuse[2] | mac_addr_efuse[3])) {
 +#ifdef RWNX_HAVE_SOC_SERIAL
 +		mac_src = (system_serial_high || system_serial_low) ? "soc otp id" : "random";
@@ -101,7 +117,7 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
  #endif
  
  	if (mac_addr_efuse[0] | mac_addr_efuse[1] | mac_addr_efuse[2] | mac_addr_efuse[3]) {
-@@ -6301,6 +6335,7 @@
+@@ -6301,6 +6340,7 @@
  	AICWFDBG(LOGINFO, "get macaddr: %02x:%02x:%02x:%02x:%02x:%02x\r\n",
  			mac_addr_efuse[0], mac_addr_efuse[1], mac_addr_efuse[2],
  			mac_addr_efuse[3], mac_addr_efuse[4], mac_addr_efuse[5]);

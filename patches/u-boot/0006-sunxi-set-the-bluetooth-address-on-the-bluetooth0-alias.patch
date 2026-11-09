@@ -1,0 +1,39 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] sunxi: set the Bluetooth address on the bluetooth0 alias
+
+CONFIG_BLUETOOTH_DT_DEVICE_FIXUP names one compatible for every board a
+build serves, so a second Bluetooth chip needs a second build. Find the
+controller through the tree's bluetooth0 alias first, as the Ethernet
+fixup finds ethernetN, and keep the compatible as the fallback.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+--- a/board/sunxi/board.c
++++ b/board/sunxi/board.c
+@@ -1000,9 +1000,10 @@
+ 	 */
+ 	uchar tmp[ETH_ALEN], bdaddr[ETH_ALEN];
+ 	unsigned int sid[4];
+-	int i;
++	int node, i;
+ 
+-	if (!CONFIG_BLUETOOTH_DT_DEVICE_FIXUP[0])
++	node = fdt_path_offset(blob, "bluetooth0");
++	if (node < 0 && !CONFIG_BLUETOOTH_DT_DEVICE_FIXUP[0])
+ 		return;
+ 
+ 	if (eth_env_get_enetaddr("bdaddr", tmp)) {
+@@ -1021,8 +1022,11 @@
+ 		bdaddr[5] = 0x02;
+ 	}
+ 
+-	do_fixup_by_compat(blob, CONFIG_BLUETOOTH_DT_DEVICE_FIXUP,
+-			   "local-bd-address", bdaddr, ETH_ALEN, 1);
++	if (node >= 0)
++		fdt_setprop(blob, node, "local-bd-address", bdaddr, ETH_ALEN);
++	else
++		do_fixup_by_compat(blob, CONFIG_BLUETOOTH_DT_DEVICE_FIXUP,
++				   "local-bd-address", bdaddr, ETH_ALEN, 1);
+ }
+ 
+ #define PINEPHONE_LIS3MDL_I2C_ADDR	0x1e

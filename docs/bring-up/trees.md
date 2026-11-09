@@ -26,6 +26,7 @@ supported board means the patch targets mainline's tree.
    | LEDs: labels `power`, `standby`             | the shared LED hooks                           |
    | Recovery button → `KEY_VENDOR`              | a button the kernel sees; not a boot-ROM strap |
    | LEDs: `retain-state-shutdown`, `-suspended` | the hooks, not the LED core, own the LEDs      |
+   | sunxi: alias `bluetooth0` on a UART BT node | U-Boot's Bluetooth address                     |
    | `watchdog` → `okay`                         | systemd's `RuntimeWatchdogSec`                 |
    | VOP `esmart_lb_mode` → `02`                 | 4K on Rockchip                                 |
    | `model` → the box's name                    | identity; the factory names the EVB            |
@@ -66,3 +67,4 @@ supported board means the patch targets mainline's tree.
 - [ ] **T6** `dtb.md` records every change, reverted ones too
 - [ ] **T7** The suspend setup is the best-measured candidate, the others in `dtb.md`
 - [ ] **T8** The booted memory node holds U-Boot's `reg` and no `linux,usable-memory`
+- [ ] **T11** On sunxi, `bluetooth0` names the tree's Bluetooth node, where it has one

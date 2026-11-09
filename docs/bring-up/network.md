@@ -7,7 +7,8 @@
    Station mode is the bar; access point and Wi-Fi Direct are the vendor's parity, each against the
    interface modes stock's `iw list` shows.
 3. Bluetooth: the controller up, a scan, the bundled remote paired.
-4. Every address read at its source.
+4. Every address read at its source. Ask the owner for the printed one, usually Ethernet's, or
+   Wi-Fi's on a box without; unattended, its check waits in the board's todo.
 
 ## Bites
 
@@ -21,10 +22,10 @@
 - **Conditions match before kernels are compared**: a quiet box, the link rate in the result, the
   median of three runs.
 
-- **Addresses, best first**: the printed label, vendor storage its readable copy; the interface
-  chip's eFUSE; that chip's ID; the SoC's ID, for an interface with none. Random is the bug. Each is
-  shown by a read: the driver's eFUSE dump, or the address the driver writes. A BT address one above
-  the Wi-Fi one is derived when it is public and the same on every load.
+- **Addresses, best first**: the chip's eFUSE; the label, or the factory store holding it; the
+  chip's ID; the SoC's. Random is the bug. Bluetooth is the Wi-Fi's plus one where nothing holds its
+  own.
+- **An eFUSE may hold an address per mode**: the label names the station's.
 - **BLE wake needs the BT driver to set `hdev->wakeup`**, or only IR wakes the box.
 
 ## Check
@@ -51,3 +52,5 @@
       chip
 - [ ] **N19** Wi-Fi Direct connects to a peer, where stock offers it, or a scoped to-do; once a chip
 - [ ] **N20** `iw list`'s interface modes match stock's; once a chip
+- [ ] **N21** Each address comes from the best source the box has
+- [ ] **N22** 👤 The printed address is in use on its interface

@@ -9,7 +9,7 @@ Selected kernels: `rk35xx`, `rk35xx-next`, `sunxi64`, `sunxi64-next`.
 | --------- | --------------------------------------------------------------------------------- |
 | `01`–`17` | radxa-pkg/aic8800's `debian/patches`, in its series order, cut to the SDIO driver |
 | `98`      | ours: two bare `printk()`s, one per management frame, deleted                     |
-| `99`      | ours: the MAC from vendor storage or the SoC's OTP id, not random                 |
+| `99`      | ours: the MAC from vendor storage, efuse, the device tree or the SoC's id         |
 
 `10` drops the default log level from every debug class to errors only. `99` is the old driver's
 stable-MAC patch, rebased: with it, the R69 keeps `8a:00:33:65:64:b6` across boots.
