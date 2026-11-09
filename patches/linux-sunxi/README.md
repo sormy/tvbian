@@ -23,6 +23,7 @@ for its API, and rewrites of top-level ones it takes in their place (`0103`, `02
 | `0046`        | SRAM C1 for the H616 video engine                |
 | `0047`        | `sun50i-iommu`: a master's port reset, exported  |
 | `0048`        | Cedrus: reset its IOMMU port after a timeout     |
+| `0049`–`0050` | the H96 Max remote's keymap, `rc-h96max`         |
 | `0052`–`0063` | Cedrus: VP9, P010 10-bit, AFBC out on the H616   |
 | `0064`–`0065` | VC-1: parsed-slice uAPI and Cedrus decoding      |
 | `0066`        | Cedrus: AFBC out for HEVC                        |
@@ -123,8 +124,8 @@ in 8-pixel units and a macroblock row buffer at `0xb9c`, and past 2048 wide writ
 to memory. On top: the stop command ffmpeg and GStreamer drain with, escaped headers, the SPS timing
 and cropping, references kept out of the picture buffers, and frame rate control. `0083` lets
 `sunxi-cir` wake the system; `0085` keeps P010 the 10-bit default over `0066`'s AFBC, which a
-software consumer cannot read; `0088` is the TX1's remote keymap, `rc-tanix-tx1`, on the canonical
-keys. Not yet submitted.
+software consumer cannot read; `0088` is the TX1's remote keymap, `rc-tanix-tx1`, and `0050` the H96
+Max's, `rc-h96max`, both on the canonical keys. Not yet submitted.
 
 ## `next/`: `sunxi64-next`
 

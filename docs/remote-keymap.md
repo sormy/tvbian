@@ -3,10 +3,11 @@
 A dual-mode handset is two independent keymaps wearing one shell. Validating one proves nothing
 about the other, and on these boxes they genuinely disagree.
 
-| Transport | Node                   | Keymap from              | Ours?       |
-| --------- | ---------------------- | ------------------------ | ----------- |
-| IR        | `/dev/input/ir-remote` | `ir_keyN` in the tree    | in the tree |
-| BLE       | `/dev/input/bt-remote` | the handset's HID usages | `hwdb` only |
+| Transport    | Node                   | Keymap from              | Ours?       |
+| ------------ | ---------------------- | ------------------------ | ----------- |
+| IR           | `/dev/input/ir-remote` | `ir_keyN` in the tree    | in the tree |
+| IR, mainline | `rc` input device      | a kernel keymap          | a patch     |
+| BLE          | `/dev/input/bt-remote` | the handset's HID usages | `hwdb` only |
 
 `rockchip-pwm-remotectl` drives the IR node; `hid-input` drives the BLE ones.
 
