@@ -3,6 +3,8 @@
 `modules/aic8800.conf` builds `src/SDIO/driver_fw/driver/aic8800` at radxa-pkg/aic8800 `fce8802`,
 AIC's release `2026_0123_5f7be68d`, with these on top, in order.
 
+Selected kernels: `rk35xx`, `rk35xx-next`, `sunxi64`, `sunxi64-next`.
+
 | Patch     | Source                                                                            |
 | --------- | --------------------------------------------------------------------------------- |
 | `01`–`17` | radxa-pkg/aic8800's `debian/patches`, in its series order, cut to the SDIO driver |

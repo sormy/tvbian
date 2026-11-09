@@ -16,6 +16,8 @@ carry only the rest.
 | `6.12/devfreq-event-rockchip-dfi-rk3528` | 6.12 only: no RK3528 DFI, so the DDR never scales                           |
 | `mmc-dw-mmc-rockchip-per-host-inherit`   | `static bool inherit` in `dw_mci_v2_execute_tuning()` — **not needed here** |
 
+The sunxi kernels apply `6.12/bluetooth-hci-h4-serdev` too, against mainline's `hci_h4`.
+
 **`net-stmmac-skip-absent-mdio-reset-gpio` is worth more than the rest combined for log hygiene.**
 One WARN at probe emits its call trace and register dump — ~416 lines, 78% of all err/warn on the
 R69 and 82% on the H96 Max.

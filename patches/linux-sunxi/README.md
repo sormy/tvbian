@@ -6,65 +6,66 @@ level is the current kernel's series, 6.18's; `next/` holds what only `-next` do
 for its API, and rewrites of top-level ones it takes in their place (`0103`, `0246`, `0257`, `0263`,
 `0265`, `0276`, `0281`, `0282`, `0289`, `0712`, `0721`, for 7.3).
 
-| Patch         | Holds                                            |
-| ------------- | ------------------------------------------------ |
-| `0034`        | 7.2.12's display drivers                         |
-| `0035`        | `drm_gem_dma`: through the DRM DMA device        |
-| `0036`        | 7.2's display drivers on 6.18's API              |
-| `0037`        | 7.2's IEC958 subframe definitions                |
-| `0038`        | the H616 audio hub on 6.18's ASoC API            |
-| `0001`–`0033` | LibreELEC's: MMC, clocks, SCPI, wake, Bluetooth  |
-| `0100`–`0903` | LibreELEC's: HDMI, display, video, audio, AC200  |
-| `0041`        | the H616 display pipeline in `sun50i-h616.dtsi`  |
-| `0042`        | `sunxi_wdt`: timeouts past its 16 s              |
-| `0043`        | `sunxi-mmc`: the vendor's output phase in DDR    |
-| `0044`        | `sunxi-mmc`: the sample delay from the tree      |
-| `0045`        | Cedrus: the H616 on the H6 variant               |
-| `0046`        | SRAM C1 for the H616 video engine                |
-| `0047`        | `sun50i-iommu`: a master's port reset, exported  |
-| `0048`        | Cedrus: reset its IOMMU port after a timeout     |
-| `0049`–`0050` | the H96 Max remote's keymap, `rc-h96max`         |
-| `0052`–`0063` | Cedrus: VP9, P010 10-bit, AFBC out on the H616   |
-| `0064`–`0065` | VC-1: parsed-slice uAPI and Cedrus decoding      |
-| `0066`        | Cedrus: AFBC out for HEVC                        |
-| `0067`        | the DI300 deinterlacer                           |
-| `0068`        | `0067` on 6.18's `v4l2_m2m_buf_copy_metadata()`  |
-| `0069`–`0074` | Cedrus: Bootlin's H.264 encoder, for the V3s     |
-| `0075`–`0088` | Cedrus encode, P010; IR wake, the remote         |
-| `0089`        | `sun4i_tv`: the H616 TV encoder                  |
-| `0090`        | `tve0` kept on its assigned parent               |
-| `0091`        | mixer: the H616 display engine at 696 MHz        |
-| `0092`        | `sunxi_wdt`: stopped across system sleep         |
-| `0093`        | `sun50i-iommu`: page sizes to 1 MiB advertised   |
-| `0094`        | Cedrus: CAPTURE scaled by 2 or 4 via COMPOSE     |
-| `0095`        | bridge connector: a mode set on HDR change       |
-| `0096`        | planes: AFBC past the scaler alone refused       |
-| `0097`        | Cedrus: 10-bit H.265 scaled as P010              |
-| `0098`        | TCON-TOP: the H616's TV1 gate at bit 21          |
-| `0099`        | VI scaler: edge-directed only to enlarge         |
-| `0276`        | DE33: the CDC 3D LUT on the VI planes            |
-| `0277`        | TCON: FIFO underflows counted in debugfs         |
-| `0278`        | DE33: 10-bit RGB and YCbCr 4:2:2 out             |
-| `0279`        | UI layers: no scaling past the line buffer       |
-| `0280`        | dw-hdmi: an HDR10+ VSIF, sent in place           |
-| `0281`        | CRTC: `HDR10PLUS_VSIF`, no mode set to change it |
-| `0282`        | ccu: MP clocks round to the closest rate         |
-| `0283`        | H616: video clocks round to the closest rate     |
-| `0284`        | no early flip event on a TCON CRTC               |
-| `0285`        | H616: TV TCON rates reachable by HDMI            |
-| `0287`        | dw-hdmi: 4:2:2 on the PHY's 8-bit setting        |
-| `0288`        | H616 PHY: PLL settings bounded by TMDS rate      |
-| `0289`        | dw-hdmi: HDR in 10 bits, RGB or 4:2:2            |
-| `0800`–`0804` | Cedrus: VP8 to 4096 wide, JPEG both ways         |
-| `0805`–`0806` | Cedrus: MPEG-4 Part 2 and H.263 decode           |
-| `0807`        | Cedrus: a coded format sized by its own engine   |
-| `0808`        | Cedrus: HEVC and VP9's largest picture, measured |
-| `0809`        | Cedrus: a missing HEVC reference skipped quietly |
-| `0810`        | Cedrus: scaled H.264 referenced from tiles       |
-| `0811`        | Cedrus: VP9's low 2 bits plane by frame height   |
-| `0812`        | Cedrus: H.264 and HEVC lines at a 32-byte pitch  |
-| `0813`        | Cedrus: cache hints on the capture queue         |
-| `0904`        | audio hub: rewinds for ordinary HDMI PCM         |
+| Patch         | Holds                                                  |
+| ------------- | ------------------------------------------------------ |
+| `0034`        | 7.2.12's display drivers                               |
+| `0035`        | `drm_gem_dma`: through the DRM DMA device              |
+| `0036`        | 7.2's display drivers on 6.18's API                    |
+| `0037`        | 7.2's IEC958 subframe definitions                      |
+| `0038`        | the H616 audio hub on 6.18's ASoC API                  |
+| `0001`–`0033` | LibreELEC's: MMC, clocks, SCPI, wake, Bluetooth        |
+| `0100`–`0903` | LibreELEC's: HDMI, display, video, audio, AC200        |
+| `0040`        | `hci_h4`: an AIC8800 without eFuse, the tree's address |
+| `0041`        | the H616 display pipeline in `sun50i-h616.dtsi`        |
+| `0042`        | `sunxi_wdt`: timeouts past its 16 s                    |
+| `0043`        | `sunxi-mmc`: the vendor's output phase in DDR          |
+| `0044`        | `sunxi-mmc`: the sample delay from the tree            |
+| `0045`        | Cedrus: the H616 on the H6 variant                     |
+| `0046`        | SRAM C1 for the H616 video engine                      |
+| `0047`        | `sun50i-iommu`: a master's port reset, exported        |
+| `0048`        | Cedrus: reset its IOMMU port after a timeout           |
+| `0049`–`0050` | the H96 Max remote's keymap, `rc-h96max`               |
+| `0052`–`0063` | Cedrus: VP9, P010 10-bit, AFBC out on the H616         |
+| `0064`–`0065` | VC-1: parsed-slice uAPI and Cedrus decoding            |
+| `0066`        | Cedrus: AFBC out for HEVC                              |
+| `0067`        | the DI300 deinterlacer                                 |
+| `0068`        | `0067` on 6.18's `v4l2_m2m_buf_copy_metadata()`        |
+| `0069`–`0074` | Cedrus: Bootlin's H.264 encoder, for the V3s           |
+| `0075`–`0088` | Cedrus encode, P010; IR wake, the remote               |
+| `0089`        | `sun4i_tv`: the H616 TV encoder                        |
+| `0090`        | `tve0` kept on its assigned parent                     |
+| `0091`        | mixer: the H616 display engine at 696 MHz              |
+| `0092`        | `sunxi_wdt`: stopped across system sleep               |
+| `0093`        | `sun50i-iommu`: page sizes to 1 MiB advertised         |
+| `0094`        | Cedrus: CAPTURE scaled by 2 or 4 via COMPOSE           |
+| `0095`        | bridge connector: a mode set on HDR change             |
+| `0096`        | planes: AFBC past the scaler alone refused             |
+| `0097`        | Cedrus: 10-bit H.265 scaled as P010                    |
+| `0098`        | TCON-TOP: the H616's TV1 gate at bit 21                |
+| `0099`        | VI scaler: edge-directed only to enlarge               |
+| `0276`        | DE33: the CDC 3D LUT on the VI planes                  |
+| `0277`        | TCON: FIFO underflows counted in debugfs               |
+| `0278`        | DE33: 10-bit RGB and YCbCr 4:2:2 out                   |
+| `0279`        | UI layers: no scaling past the line buffer             |
+| `0280`        | dw-hdmi: an HDR10+ VSIF, sent in place                 |
+| `0281`        | CRTC: `HDR10PLUS_VSIF`, no mode set to change it       |
+| `0282`        | ccu: MP clocks round to the closest rate               |
+| `0283`        | H616: video clocks round to the closest rate           |
+| `0284`        | no early flip event on a TCON CRTC                     |
+| `0285`        | H616: TV TCON rates reachable by HDMI                  |
+| `0287`        | dw-hdmi: 4:2:2 on the PHY's 8-bit setting              |
+| `0288`        | H616 PHY: PLL settings bounded by TMDS rate            |
+| `0289`        | dw-hdmi: HDR in 10 bits, RGB or 4:2:2                  |
+| `0800`–`0804` | Cedrus: VP8 to 4096 wide, JPEG both ways               |
+| `0805`–`0806` | Cedrus: MPEG-4 Part 2 and H.263 decode                 |
+| `0807`        | Cedrus: a coded format sized by its own engine         |
+| `0808`        | Cedrus: HEVC and VP9's largest picture, measured       |
+| `0809`        | Cedrus: a missing HEVC reference skipped quietly       |
+| `0810`        | Cedrus: scaled H.264 referenced from tiles             |
+| `0811`        | Cedrus: VP9's low 2 bits plane by frame height         |
+| `0812`        | Cedrus: H.264 and HEVC lines at a 32-byte pitch        |
+| `0813`        | Cedrus: cache hints on the capture queue               |
+| `0904`        | audio hub: rewinds for ordinary HDMI PCM               |
 
 The display stack is 7.2's on both kernels. `0034` takes 7.2.12's `drivers/gpu/drm/sun4i`,
 `bridge/synopsys`, `ccu-sun8i-de2.c`, `sun50i-iommu.c` and `dw_hdmi.h` as they are; LibreELEC's

@@ -1,0 +1,116 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 8 Nov 2026 20:30:00 -0500
+Subject: [PATCH] Bluetooth: hci_h4: Give an AIC8800 without efuse the tree's address
+
+With nothing fused, the AIC8800's firmware reports an address of its own
+making, with the I/G bit set and under no registered OUI. Then take the
+tree's local-bd-address, written with AIC's vendor command 0xfc70; an
+address from efuse stays.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+--- a/drivers/bluetooth/hci_h4.c
++++ b/drivers/bluetooth/hci_h4.c
+@@ -158,21 +158,22 @@
+ #define H4_SYNC_STEADY		6
+ #define H4_SYNC_BEAT_MS		500
+ #define H4_SYNC_TRIES		40
++/* an AIC8800 with nothing in efuse makes up its address */
++#define H4_QUIRK_AIC_BDADDR	BIT(1)
++
++/* AIC's vendor command: the address, least significant byte first, until power-off */
++#define H4_AIC_WRITE_BDADDR	0xfc70
+ 
+ struct h4_serdev {
+ 	struct hci_uart hu;
+ 	unsigned long quirks;
+ };
+ 
+-static int h4_serdev_setup(struct hci_uart *hu)
++static int h4_sync_reset(struct hci_uart *hu)
+ {
+-	struct h4_serdev *h4 = serdev_device_get_drvdata(hu->serdev);
+ 	struct sk_buff *skb;
+ 	int i, steady = 0;
+ 
+-	if (!(h4->quirks & H4_QUIRK_SYNC_RESET))
+-		return 0;
+-
+ 	bt_dev_info(hu->hdev, "syncing controller, a command timeout here is expected");
+ 
+ 	for (i = 0; i < H4_SYNC_TRIES && steady < H4_SYNC_STEADY; i++) {
+@@ -195,6 +196,64 @@
+ 	return 0;
+ }
+ 
++static int h4_aic_set_bdaddr(struct hci_dev *hdev, const bdaddr_t *bdaddr)
++{
++	struct sk_buff *skb;
++
++	skb = __hci_cmd_sync(hdev, H4_AIC_WRITE_BDADDR, sizeof(*bdaddr), bdaddr,
++			     HCI_INIT_TIMEOUT);
++	if (IS_ERR(skb))
++		return PTR_ERR(skb);
++
++	kfree_skb(skb);
++
++	return 0;
++}
++
++/*
++ * The firmware's made-up address has the I/G bit set: then take the tree's
++ * local-bd-address. An address from efuse stays.
++ */
++static int h4_aic_bdaddr(struct hci_uart *hu)
++{
++	struct hci_dev *hdev = hu->hdev;
++	struct hci_rp_read_bd_addr *rp;
++	struct sk_buff *skb;
++	bool made_up;
++
++	skb = __hci_cmd_sync(hdev, HCI_OP_READ_BD_ADDR, 0, NULL, HCI_INIT_TIMEOUT);
++	if (IS_ERR(skb))
++		return PTR_ERR(skb);
++
++	rp = (struct hci_rp_read_bd_addr *)skb->data;
++	made_up = skb->len >= sizeof(*rp) && !rp->status && (rp->bdaddr.b[5] & 0x01);
++	kfree_skb(skb);
++
++	if (made_up) {
++		hdev->set_bdaddr = h4_aic_set_bdaddr;
++		hci_set_quirk(hdev, HCI_QUIRK_USE_BDADDR_PROPERTY);
++	}
++
++	return 0;
++}
++
++static int h4_serdev_setup(struct hci_uart *hu)
++{
++	struct h4_serdev *h4 = serdev_device_get_drvdata(hu->serdev);
++	int err;
++
++	if (h4->quirks & H4_QUIRK_SYNC_RESET) {
++		err = h4_sync_reset(hu);
++		if (err)
++			return err;
++	}
++
++	if (h4->quirks & H4_QUIRK_AIC_BDADDR)
++		return h4_aic_bdaddr(hu);
++
++	return 0;
++}
++
+ /* not h4p: a ->setup there would suppress the tty path's vendor detect */
+ static const struct hci_uart_proto h4_serdev_proto = {
+ 	.id		= HCI_UART_H4,
+@@ -236,7 +295,7 @@
+ 
+ static const struct of_device_id h4_serdev_of_match[] = {
+ 	{ .compatible = "aicsemi,aic8800-bt",
+-	  .data = (void *)H4_QUIRK_SYNC_RESET },
++	  .data = (void *)(H4_QUIRK_SYNC_RESET | H4_QUIRK_AIC_BDADDR) },
+ 	{ }
+ };
+ MODULE_DEVICE_TABLE(of, h4_serdev_of_match);

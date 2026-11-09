@@ -170,5 +170,6 @@ below.
 | `docs/todo/h96max-m20.md`       | the H96 Max M20: what is left               |
 | `docs/todo/h96max-m2-plus.md`   | the H96 Max M2 Plus: what is left           |
 | `docs/todo/swt6621s.md`         | the SWT6621S Wi-Fi/BT: what is left         |
+| `docs/todo/aic8800.md`          | the AIC8800 Wi-Fi/BT: what is left          |
 | `docs/todo/website.md`          | tvbian.com: what the page still lacks       |
 | `docs/todo/repo-layout.md`      | folders, patches, tools and docs, regrouped |

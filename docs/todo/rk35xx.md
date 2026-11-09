@@ -32,3 +32,7 @@
       rkbin's `rk3528_ddr_1056MHz_4BIT_PCB_v1.11.bin` with three bytes changed in its parameter
       table; read which fields with `ddrbin_tool`, and whether rkbin's blob with them set equals a
       factory loader, so an imported board's DRAM need not wait for its dump.
+
+- [ ] **AIC8800 Bluetooth address as on sunxi.** The chip's eFuse first, then the Wi-Fi's own
+      address plus one, wherever it came from; today a tree address beats the eFuse, and the
+      fallback is the SoC serial's.
