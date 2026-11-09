@@ -58,7 +58,7 @@ diff -urN a/drivers/gpu/drm/sun4i/sun4i_crtc.c b/drivers/gpu/drm/sun4i/sun4i_crt
 +		return -EINVAL;
 +
 +	ret = drm_property_replace_blob_from_id(crtc->dev, &scrtc_state->hdr10plus,
-+						val, DW_HDMI_HDR10PLUS_LEN, -1, -1,
++						val, -1, DW_HDMI_HDR10PLUS_LEN, -1,
 +						&replaced);
 +	if (ret || !scrtc_state->hdr10plus)
 +		return ret;

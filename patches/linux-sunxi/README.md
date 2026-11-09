@@ -134,6 +134,7 @@ keys. Not yet submitted.
 | `0246`, `0263`         | AFBC framebuffers, the writeback check on 7.3     |
 | `0276`, `0281`, `0289` | the CDC LUT, HDR10+, HDR's formats on 7.3's API   |
 | `0282`                 | the MP closest rate on 7.3's `determine_rate`     |
+| `0039`                 | gpiolib: a hog on the line the chip's xlate names |
 
 ## LibreELEC's series and ours
 

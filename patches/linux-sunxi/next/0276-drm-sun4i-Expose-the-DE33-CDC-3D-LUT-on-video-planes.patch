@@ -156,9 +156,9 @@ diff -urN a/drivers/gpu/drm/sun4i/sun8i_cdc.c b/drivers/gpu/drm/sun4i/sun8i_cdc.
 +		return -EINVAL;
 +
 +	ret = drm_property_replace_blob_from_id(plane->dev, &cdc_state->lut,
-+						value,
++						value, -1,
 +						SUN8I_CDC_ENTRIES * sizeof(*entries),
-+						-1, -1, &replaced);
++						-1, &replaced);
 +	if (ret || !cdc_state->lut)
 +		return ret;
 +

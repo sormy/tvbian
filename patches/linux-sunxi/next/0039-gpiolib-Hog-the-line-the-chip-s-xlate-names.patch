@@ -1,0 +1,108 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 8 Nov 2026 20:00:00 -0500
+Subject: [PATCH] gpiolib: Hog the line the chip's xlate names
+
+gpiochip_add_hog() runs a device-tree hog's cells through the chip's
+of_xlate, but only to take the flags: it then hogs the line numbered by
+the first cell. That is right for two-cell chips only. On a three-cell
+chip such as sunxi's, where the cells are bank, pin and flags, a hog of
+PG19 claims line 6 instead, PA6, and a second hog in bank G fails as a
+duplicate.
+
+Return the descriptor of_xlate found and hog that one.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+--- a/drivers/gpio/gpiolib-of.c
++++ b/drivers/gpio/gpiolib-of.c
+@@ -721,9 +721,9 @@
+ 	return desc;
+ }
+ 
+-int of_gpiochip_get_lflags(struct gpio_chip *chip,
+-			   struct fwnode_reference_args *gpiospec,
+-			   unsigned long *lflags)
++struct gpio_desc *of_gpiochip_get_hog(struct gpio_chip *chip,
++				      struct fwnode_reference_args *gpiospec,
++				      unsigned long *lflags)
+ {
+ 	enum of_gpio_flags xlate_flags;
+ 	struct of_phandle_args args;
+@@ -737,11 +737,11 @@
+ 
+ 	desc = of_xlate_and_get_gpiod_flags(chip, &args, &xlate_flags);
+ 	if (IS_ERR(desc))
+-		return PTR_ERR(desc);
++		return desc;
+ 
+ 	*lflags = of_convert_gpio_flags(xlate_flags);
+ 
+-	return 0;
++	return desc;
+ }
+ 
+ #ifdef CONFIG_OF_DYNAMIC
+--- a/drivers/gpio/gpiolib-of.h
++++ b/drivers/gpio/gpiolib-of.h
+@@ -25,9 +25,9 @@
+ void of_gpiochip_remove(struct gpio_chip *gc);
+ bool of_gpiochip_instance_match(struct gpio_chip *gc, unsigned int index);
+ int of_gpio_count(const struct fwnode_handle *fwnode, const char *con_id);
+-int of_gpiochip_get_lflags(struct gpio_chip *chip,
+-			   struct fwnode_reference_args *gpiospec,
+-			   unsigned long *lflags);
++struct gpio_desc *of_gpiochip_get_hog(struct gpio_chip *chip,
++				      struct fwnode_reference_args *gpiospec,
++				      unsigned long *lflags);
+ #else
+ static inline struct gpio_desc *of_find_gpio(struct device_node *np,
+ 					     const char *con_id,
+@@ -48,11 +48,11 @@
+ {
+ 	return 0;
+ }
+-static inline int of_gpiochip_get_lflags(struct gpio_chip *chip,
+-					 struct fwnode_reference_args *gpiospec,
+-					 unsigned long *lflags)
++static inline struct gpio_desc *of_gpiochip_get_hog(struct gpio_chip *chip,
++						    struct fwnode_reference_args *gpiospec,
++						    unsigned long *lflags)
+ {
+-	return -ENOENT;
++	return ERR_PTR(-ENOENT);
+ }
+ #endif /* CONFIG_OF_GPIO */
+ 
+--- a/drivers/gpio/gpiolib.c
++++ b/drivers/gpio/gpiolib.c
+@@ -1026,9 +1026,10 @@
+ 			for (unsigned int j = 0; j < cells; j++)
+ 				gpiospec.args[j] = gpios[i * cells + j];
+ 
+-			ret = of_gpiochip_get_lflags(gc, &gpiospec, &lflags);
+-			if (ret)
+-				return ret;
++			/* the chip's own xlate maps the cells to a line */
++			desc = of_gpiochip_get_hog(gc, &gpiospec, &lflags);
++			if (IS_ERR(desc))
++				return PTR_ERR(desc);
+ 
+ 			/*
+ 			 * If no line-name property is present, fall back to the OF
+@@ -1043,11 +1044,11 @@
+ 			 */
+ 			if (gpios[i * cells + 1])
+ 				lflags |= GPIO_ACTIVE_LOW;
+-		}
+ 
+-		desc = gpiochip_get_desc(gc, gpios[i * cells]);
+-		if (IS_ERR(desc))
+-			return PTR_ERR(desc);
++			desc = gpiochip_get_desc(gc, gpios[i * cells]);
++			if (IS_ERR(desc))
++				return PTR_ERR(desc);
++		}
+ 
+ 		ret = gpiod_hog(desc, name, lflags, dflags);
+ 		if (ret)
