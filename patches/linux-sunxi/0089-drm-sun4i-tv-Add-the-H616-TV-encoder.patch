@@ -10,19 +10,27 @@ unused. Program the top, write Allwinner's PAL and NTSC settings, take
 the encoder's three clocks and two resets. The DAC's load detection
 stays off: armed, it clicks on the AV jack and sensed no cable here.
 
+The encoder takes YCbCr, which the H616's display engine gives once the
+CRTC's output format says so, and its composite output needs bit 16 of
+the configuration register, as Allwinner's tables set it. Allwinner's
+tables also make the encoder interlace a progressive frame at 27 MHz,
+so drive the CRTC with Allwinner's progressive PAL and NTSC timings.
+
 Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
 --- a/drivers/gpu/drm/sun4i/sun4i_tv.c
 +++ b/drivers/gpu/drm/sun4i/sun4i_tv.c
-@@ -9,6 +9,7 @@
+@@ -8,7 +8,9 @@
+ 
  #include <linux/clk.h>
  #include <linux/component.h>
++#include <linux/media-bus-format.h>
  #include <linux/module.h>
 +#include <linux/nvmem-consumer.h>
  #include <linux/of_address.h>
  #include <linux/of_device.h>
  #include <linux/platform_device.h>
-@@ -163,14 +164,52 @@
+@@ -163,14 +165,52 @@
  struct sun4i_tv_quirks {
  	unsigned int calibration;
  	unsigned int unknown : 1;
@@ -40,7 +48,7 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 +
 +/* Allwinner's H616 encoder settings, as its own driver writes them */
 +static const struct reg_sequence sun50i_h616_tve_pal[] = {
-+	{ 0x004, 0x07060001 }, { 0x008, 0x00000000 }, { 0x00c, 0x02004000 },
++	{ 0x004, 0x07070001 }, { 0x008, 0x00000000 }, { 0x00c, 0x02004000 },
 +	{ 0x010, 0x2a098acb }, { 0x014, 0x008a0018 }, { 0x018, 0x00000016 },
 +	{ 0x01c, 0x00160271 }, { 0x020, 0x00fc00fc }, { 0x100, 0x00000000 },
 +	{ 0x104, 0x00000001 }, { 0x108, 0x00000005 }, { 0x10c, 0x00002929 },
@@ -53,7 +61,7 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 +};
 +
 +static const struct reg_sequence sun50i_h616_tve_ntsc[] = {
-+	{ 0x004, 0x07060000 }, { 0x008, 0x00000000 }, { 0x00c, 0x02004000 },
++	{ 0x004, 0x07070000 }, { 0x008, 0x00000000 }, { 0x00c, 0x02004000 },
 +	{ 0x010, 0x21f07c1f }, { 0x014, 0x00760020 }, { 0x018, 0x00000016 },
 +	{ 0x01c, 0x0016020d }, { 0x020, 0x00f000f0 }, { 0x100, 0x00000001 },
 +	{ 0x104, 0x00000000 }, { 0x108, 0x00000002 }, { 0x10c, 0x0000004f },
@@ -76,7 +84,50 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
  	struct reset_control	*reset;
  
  	struct sun4i_drv	*drv;
-@@ -278,9 +317,38 @@
+@@ -266,6 +306,42 @@
+ 	return NULL;
+ }
+ 
++/* Allwinner's composite timings: a progressive frame the encoder interlaces */
++static const struct drm_display_mode sun50i_h616_tv_pal_mode = {
++	DRM_MODE("720x576", DRM_MODE_TYPE_DRIVER, 27000,
++		 720, 732, 796, 864, 0, 576, 581, 586, 625, 0,
++		 DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC),
++};
++
++static const struct drm_display_mode sun50i_h616_tv_ntsc_mode = {
++	DRM_MODE("720x480", DRM_MODE_TYPE_DRIVER, 27000,
++		 720, 736, 798, 858, 0, 480, 489, 495, 525, 0,
++		 DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC),
++};
++
++static int sun4i_tv_atomic_check(struct drm_encoder *encoder,
++				 struct drm_crtc_state *crtc_state,
++				 struct drm_connector_state *conn_state)
++{
++	struct sun4i_tv *tv = drm_encoder_to_sun4i_tv(encoder);
++	struct sun4i_crtc_state *scrtc_state =
++		drm_crtc_state_to_sun4i_crtc_state(crtc_state);
++
++	if (!tv->top)
++		return 0;
++
++	/* the H616's display engine converts to YCbCr by the CRTC's format */
++	scrtc_state->format = MEDIA_BUS_FMT_YUV8_1X24;
++	scrtc_state->encoding = DRM_COLOR_YCBCR_BT601;
++
++	drm_mode_copy(&crtc_state->adjusted_mode,
++		      conn_state->tv.mode == DRM_MODE_TV_MODE_PAL ?
++		      &sun50i_h616_tv_pal_mode : &sun50i_h616_tv_ntsc_mode);
++	drm_mode_set_crtcinfo(&crtc_state->adjusted_mode, 0);
++
++	return 0;
++}
++
+ static void sun4i_tv_disable(struct drm_encoder *encoder,
+ 			    struct drm_atomic_commit *state)
+ {
+@@ -278,9 +354,38 @@
  			   SUN4I_TVE_EN_ENABLE,
  			   0);
  
@@ -115,7 +166,7 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
  static void sun4i_tv_enable(struct drm_encoder *encoder,
  			    struct drm_atomic_commit *state)
  {
-@@ -297,6 +365,11 @@
+@@ -297,6 +402,11 @@
  
  	DRM_DEBUG_DRIVER("Enabling the TV Output\n");
  
@@ -127,7 +178,15 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
  	/* Enable and map the DAC to the output */
  	regmap_update_bits(tv->regs, SUN4I_TVE_EN_REG,
  			   SUN4I_TVE_EN_DAC_MAP_MASK,
-@@ -413,7 +486,24 @@
+@@ -404,6 +514,7 @@
+ static const struct drm_encoder_helper_funcs sun4i_tv_helper_funcs = {
+ 	.atomic_disable	= sun4i_tv_disable,
+ 	.atomic_enable	= sun4i_tv_enable,
++	.atomic_check	= sun4i_tv_atomic_check,
+ };
+ 
+ static const struct drm_connector_helper_funcs sun4i_tv_comp_connector_helper_funcs = {
+@@ -417,7 +528,24 @@
  	drm_atomic_helper_connector_tv_reset(connector);
  }
  
@@ -152,7 +211,7 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
  	.fill_modes		= drm_helper_probe_single_connector_modes,
  	.destroy		= drm_connector_cleanup,
  	.reset			= sun4i_tv_connector_reset,
-@@ -429,6 +519,22 @@
+@@ -433,6 +561,22 @@
  	.name		= "tv-encoder",
  };
  
@@ -175,7 +234,7 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
  static int sun4i_tv_bind(struct device *dev, struct device *master,
  			 void *data)
  {
-@@ -464,7 +570,7 @@
+@@ -468,7 +612,7 @@
  		return PTR_ERR(tv->regs);
  	}
  
@@ -184,7 +243,7 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
  	if (IS_ERR(tv->reset)) {
  		dev_err(dev, "Couldn't get our reset line\n");
  		return PTR_ERR(tv->reset);
-@@ -476,13 +582,24 @@
+@@ -480,13 +624,24 @@
  		return ret;
  	}
  
@@ -214,7 +273,7 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
  
  	if (quirks->calibration)
  		regmap_write(tv->regs, 0x304, quirks->calibration);
-@@ -536,7 +653,7 @@
+@@ -540,7 +695,7 @@
  err_cleanup_encoder:
  	drm_encoder_cleanup(&tv->encoder);
  err_disable_clk:
@@ -223,7 +282,7 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
  err_assert_reset:
  	reset_control_assert(tv->reset);
  	return ret;
-@@ -549,7 +666,7 @@
+@@ -553,7 +708,7 @@
  
  	drm_connector_cleanup(&tv->connector);
  	drm_encoder_cleanup(&tv->encoder);
@@ -232,7 +291,7 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
  	reset_control_assert(tv->reset);
  }
  
-@@ -580,10 +697,15 @@
+@@ -584,10 +739,15 @@
  	.unknown = 1,
  };
  

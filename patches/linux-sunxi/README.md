@@ -39,6 +39,7 @@ for its API, and rewrites of top-level ones it takes in their place (`0103`, `02
 | `0095`        | bridge connector: a mode set on HDR change       |
 | `0096`        | planes: AFBC past the scaler alone refused       |
 | `0097`        | Cedrus: 10-bit H.265 scaled as P010              |
+| `0098`        | TCON-TOP: the H616's TV1 gate at bit 21          |
 | `0099`        | VI scaler: edge-directed only to enlarge         |
 | `0276`        | DE33: the CDC 3D LUT on the VI planes            |
 | `0277`        | TCON: FIFO underflows counted in debugfs         |

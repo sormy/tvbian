@@ -1,0 +1,69 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 8 Nov 2026 19:00:00 -0500
+Subject: [PATCH] drm/sun4i: tcon-top: Gate the H616's TCON TV1 at bit 21
+
+The R40 gates TCON TV1 at bit 24 of the gate register; the H616 at bit
+21, where Allwinner's driver sets it, and its bit 24 gates nothing. With
+the R40's bit, the clock framework reports the gate open while TCON TV1
+stays stopped: no vblank, and every commit on the composite output times
+out. Make the TV1 gate a per-SoC quirk.
+
+The H616's TCON TV1 feeds only the TV encoder, and takes its clock from
+it, as Allwinner's driver sets the mux: select it at probe.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+--- a/drivers/gpu/drm/sun4i/sun8i_tcon_top.c
++++ b/drivers/gpu/drm/sun4i/sun8i_tcon_top.c
+@@ -15,9 +15,14 @@
+ 
+ #include "sun8i_tcon_top.h"
+ 
++#define SUN50I_H616_TCON_TOP_TCON_TV1_GATE	21
++#define SUN50I_H616_TCON_TOP_TV1_CLK_FROM_TVE	BIT(4)
++
+ struct sun8i_tcon_top_quirks {
+ 	bool has_tcon_tv1;
+ 	bool has_dsi;
++	u8 tcon_tv1_gate;
++	bool tv1_clk_from_tve;
+ };
+ 
+ static bool sun8i_tcon_top_node_is_tcon_top(struct device_node *node)
+@@ -228,6 +233,9 @@
+ 
+ 	writel(0, regs + TCON_TOP_PORT_SEL_REG);
+ 	writel(0, regs + TCON_TOP_GATE_SRC_REG);
++	if (quirks->tv1_clk_from_tve)
++		writel(SUN50I_H616_TCON_TOP_TV1_CLK_FROM_TVE,
++		       regs + TCON_TOP_TCON_TV_SETUP_REG);
+ 
+ 	/*
+ 	 * TCON TOP has two muxes, which select parent clock for each TCON TV
+@@ -247,7 +255,7 @@
+ 		clk_data->hws[CLK_TCON_TOP_TV1] =
+ 			sun8i_tcon_top_register_gate(dev, "tcon-tv1", regs,
+ 						     &tcon_top->reg_lock,
+-						     TCON_TOP_TCON_TV1_GATE, i++);
++						     quirks->tcon_tv1_gate, i++);
+ 
+ 	if (quirks->has_dsi)
+ 		clk_data->hws[CLK_TCON_TOP_DSI] =
+@@ -314,6 +322,7 @@
+ 
+ static const struct sun8i_tcon_top_quirks sun8i_r40_tcon_top_quirks = {
+ 	.has_tcon_tv1	= true,
++	.tcon_tv1_gate	= TCON_TOP_TCON_TV1_GATE,
+ 	.has_dsi	= true,
+ };
+ 
+@@ -327,6 +336,8 @@
+ 
+ static const struct sun8i_tcon_top_quirks sun50i_h616_tcon_top_quirks = {
+ 	.has_tcon_tv1	= true,
++	.tcon_tv1_gate	= SUN50I_H616_TCON_TOP_TCON_TV1_GATE,
++	.tv1_clk_from_tve = true,
+ };
+ 
+ /* sun4i_drv uses this list to check if a device node is a TCON TOP */
