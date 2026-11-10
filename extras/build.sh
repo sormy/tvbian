@@ -4,35 +4,74 @@
 # upstream release beside Debian's, by the extra's own build.sh, at <VERSION>+tvb<revision>.
 #   build.sh <name>, from extras/<name>/extra.conf
 set -euo pipefail
+
+NAME=$1
+EXTRA=/repo/extras/$NAME
 # shellcheck source=/dev/null
-. "/repo/extras/$1/extra.conf"
-debian=$(bash /repo/extras/version.sh "$1")
-version=$debian+tvb$TVB_BUILD_REVISION
-[ ! -f "/repo/extras/$1/build.sh" ] || exec bash "/repo/extras/$1/build.sh" "$version"
-src=/work/extras/$SOURCE
-rm -rf "$src" && mkdir -p "$src" && cd "$src"
-apt-get source -qq --only-source "$SOURCE=$debian" >/dev/null
-cd "$SOURCE"-*/
-DEBIAN_FRONTEND=noninteractive apt-get build-dep -y -qq ./ >/dev/null
-mkdir -p debian/patches
-for p in $PATCHES; do
-  cp "/repo/$p" debian/patches/
-  basename "$p" >>debian/patches/series
-done
+. "$EXTRA/extra.conf"
+
+UPSTREAM_VERSION=$(bash /repo/extras/version.sh "$NAME")
+PACKAGE_VERSION=$UPSTREAM_VERSION+tvb$TVB_BUILD_REVISION
+OUT=/out/debs
+
+[ ! -f "$EXTRA/build.sh" ] || exec bash "$EXTRA/build.sh" "$PACKAGE_VERSION"
+
+WORK=/work/extras/$SOURCE
+LOG=$WORK/build.log
+
+fetch_source() {
+  rm -rf "$WORK" && mkdir -p "$WORK" && cd "$WORK"
+  apt-get source -qq --only-source "$SOURCE=$UPSTREAM_VERSION" >/dev/null
+  cd "$SOURCE"-*/
+  DEBIAN_FRONTEND=noninteractive apt-get build-dep -y -qq ./ >/dev/null
+}
+
+add_patches() {
+  mkdir -p debian/patches
+  for p in $PATCHES; do
+    cp "/repo/$p" debian/patches/
+    basename "$p" >>debian/patches/series
+  done
+}
+
 # into the template too where the package regenerates its control from one, as mesa does
-inputs=$(bash /repo/release/inputs.sh extra "$1" "$debian")
-for f in debian/control debian/control.in; do
-  [ ! -f "$f" ] || sed -i "/^Package: $PACKAGE\$/a XB-X-Tvb-Inputs: $inputs" "$f"
-done
-grep -q "^XB-X-Tvb-Inputs: " debian/control || { echo "✗ $PACKAGE: no such package in $SOURCE" >&2; exit 1; }
-# the entry dated as Debian's newest, so the same inputs build the same bytes
-{
-  printf '%s (%s) %s; urgency=medium\n\n' "$SOURCE" "$version" "$TVB_BUILD_SUITE"
-  for p in $PATCHES; do printf '  * %s\n' "$(basename "$p" .patch)"; done
-  printf '\n -- TVBian <archive@tvbian.com>  %s\n\n' "$(dpkg-parsechangelog -S Date)"
-  cat debian/changelog
-} >debian/changelog.tvb && mv debian/changelog.tvb debian/changelog
-DEB_BUILD_OPTIONS="nocheck parallel=$TVB_BUILD_CPUS" dpkg-buildpackage -b -uc -us >"$src/build.log" 2>&1 ||
-  { tail -30 "$src/build.log"; exit 1; }
-find .. -maxdepth 1 -name '*.deb' ! -name '*-dbgsym_*' -exec cp {} /out/debs/ \;
-echo "✓ $SOURCE $version: $(find .. -maxdepth 1 -name '*.deb' ! -name '*-dbgsym_*' | wc -l) debs"
+stamp_inputs() {
+  local inputs f
+  inputs=$(bash /repo/release/inputs.sh extra "$NAME" "$UPSTREAM_VERSION")
+  for f in debian/control debian/control.in; do
+    [ ! -f "$f" ] || sed -i "/^Package: $PACKAGE\$/a XB-X-Tvb-Inputs: $inputs" "$f"
+  done
+  grep -q "^XB-X-Tvb-Inputs: " debian/control ||
+    { echo "✗ $PACKAGE: no such package in $SOURCE" >&2; exit 1; }
+}
+
+# dated as Debian's newest entry, so the same inputs build the same bytes
+add_changelog_entry() {
+  local p
+  {
+    printf '%s (%s) %s; urgency=medium\n\n' "$SOURCE" "$PACKAGE_VERSION" "$TVB_BUILD_SUITE"
+    for p in $PATCHES; do printf '  * %s\n' "$(basename "$p" .patch)"; done
+    printf '\n -- TVBian <archive@tvbian.com>  %s\n\n' "$(dpkg-parsechangelog -S Date)"
+    cat debian/changelog
+  } >debian/changelog.tvb
+  mv debian/changelog.tvb debian/changelog
+}
+
+build() {
+  DEB_BUILD_OPTIONS="nocheck parallel=$TVB_BUILD_CPUS" dpkg-buildpackage -b -uc -us >"$LOG" 2>&1 ||
+    { tail -30 "$LOG"; exit 1; }
+}
+
+collect_debs() {
+  local debs
+  debs=$(find .. -maxdepth 1 -name '*.deb' ! -name '*-dbgsym_*')
+  cp $debs "$OUT/"
+  echo "✓ $SOURCE $PACKAGE_VERSION: $(echo "$debs" | wc -l) debs"
+}
+
+fetch_source
+add_patches
+stamp_inputs
+add_changelog_entry
+build
+collect_debs
