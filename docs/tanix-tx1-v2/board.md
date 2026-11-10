@@ -216,6 +216,7 @@ Beyond the checklist:
 | What                        | Value                                      |
 | --------------------------- | ------------------------------------------ |
 | eMMC sequential write       | 67.3–70.8 MB/s, 500 MB `oflag=direct`      |
+| RAM bandwidth, 1 / 4 cores  | 861 / 841 MB/s read, 600 MHz, 2026-11-09   |
 | eMMC 4 KiB write + fsync    | ~37 MB/s                                   |
 | eMMC bus                    | DDR52, 50 MHz, 8 bits, 1.8 V               |
 | Wi-Fi, against a wired host | 67.3 Mbit/s up, 78.0–81.4 down, 2026-10-27 |

@@ -1952,3 +1952,10 @@ nothing failed. The previous tree is kept at `/root/board.dtb.known-good`.
   Max M2 Plus needs: `Composite-1` turned on, the console at 720x576 filling the screen, then colour
   bars with a moving square. A 1 kHz tone on the left and a 440 Hz one on the right, each on its own
   plug.
+
+## 2026-11-09 — RAM type and bandwidth
+
+- `PMUGRF_OS_REG18` (GRF `0xff300000` + `0x70248`, the DFI driver's register): `0x5000caa0`, type
+  field 6, LPDDR3, one channel; `REG19` `0x30000001`, version 3, no extended type bits. DMC at 780
+  MHz (`/sys/class/devfreq/dmc/cur_freq`).
+- `stress-ng --stream`, 15 s: 1129 / 753 MB/s read / write on one core, 2604 / 1736 on four.

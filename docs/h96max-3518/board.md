@@ -47,6 +47,7 @@ Not a spec — one box, one kernel. If yours lands in the same ballpark, nothing
 | Ethernet          | **87 Mbit/s goodput** — wire speed for 100FD, both directions          |
 | Wi-Fi (5 GHz, ax) | **414 Mbit/s down / 380 Mbit/s up** to a wired peer, −34 dBm           |
 | eMMC sequential   | **91.6 MB/s read · 44.0 MB/s write** (read is the HS200 ceiling)       |
+| RAM read          | **1124 / 2626 MB/s** on 1 / 4 cores, 786 MHz                           |
 | eMMC random 4K    | **3,016 read / 3,783 write IOPS**                                      |
 | SD, SDR104        | **60.0 MB/s** raw sequential read, 148.5 MHz, 1.8 V                    |
 | SD, high speed    | **22.8 MB/s read · 19.7 write**, 1913/393 IOPS: the 50 MHz bus         |

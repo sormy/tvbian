@@ -21,7 +21,7 @@ kernel.
 | Name          | **"R69"** (stock `ro.product.name=R69-1`), Android 14                                                                                                                |
 | Sold as       | [amazon.com/dp/B0GK8P5YFT](https://www.amazon.com/dp/B0GK8P5YFT) — ~$35 complete with PSU                                                                            |
 | SoC           | **RK3518A** — `SoC: 35181001`, reports `rk3528` (RK3518 is a variant in the RK3528 family)                                                                           |
-| RAM / storage | 2 GB DRAM (**~1.5 GB usable** — boot-chain ceiling) · 16 GB Samsung eMMC 5.x (HS200) · microSD                                                                       |
+| RAM / storage | 2 GB LPDDR3 at 780 MHz (**~1.5 GB usable** — boot-chain ceiling) · 16 GB Samsung eMMC 5.x (HS200) · microSD                                                          |
 | Runs from     | eMMC since 2026-08-09 (`mmcblk2p1`); factory Android overwritten — backup in `backup/r69-1-stock.img.xz`                                                             |
 | Label MAC     | **`C4:2A:FE:10:51:77`** — assigned, and held in eMMC vendor storage as `LAN_MAC`                                                                                     |
 | Wi-Fi / BT    | **AIC8800D80** — SDIO Wi-Fi + UART Bluetooth                                                                                                                         |
@@ -44,6 +44,7 @@ kernel.
 | ---------------- | ----------------------------------------------------------------------------------------------------- |
 | Ethernet         | **100 Mb/s full duplex** — the hardware ceiling (no gigabit PHY)                                      |
 | Ethernet goodput | **94 Mbit/s both ways**, idle and under 4-core load — wire speed, no dip                              |
+| RAM bandwidth    | **1129 / 2604 MB/s read** on 1 / 4 cores, `stress-ng --stream`, 2026-11-09                            |
 | eMMC sequential  | **91.6 MB/s read · 74.6 MB/s write** (read is the HS200/100 MHz ceiling)                              |
 | eMMC random 4K   | **4,542 read / 4,620 write IOPS**                                                                     |
 | SD card read     | **23.4 MB/s** (the card in this box, not a board limit)                                               |

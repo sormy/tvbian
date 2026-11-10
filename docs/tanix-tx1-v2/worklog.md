@@ -1762,3 +1762,8 @@ gain, the unit's own DRAM init on the eMMC, is not worth it; the install keeps w
   which is the `CS_H313_TX1_EMCP_V1.1` PCB's; `v2.0` adds `SUNXI_RVBAR_ALTERNATIVE` only. Neither
   came from a V2.0 boot0: against ours, `CA_DRI`, `TPR6`, `TPR11` and `TPR12` differ and the clock
   is 720 MHz to the factory's 600.
+
+## 2026-11-09 — RAM bandwidth
+
+- `stress-ng --stream`, 15 s, read / write MB/s: 861 / 574 on one core, 841 / 560 on four: flat, as
+  on the H96 Max H313. Both run our U-Boot with their boot0's LPDDR3 at 600 MHz.

@@ -580,3 +580,8 @@ MPP 1.1.0's `osal/mpp_soc.c`, the `rk3528` entry, against `patches/ffmpeg/`; not
 - Audio: a left-only tone on the white plug, a right-only one on the yellow, each alone.
 - `kmscube` on composite fills the screen at 720x576i. Only the console was cut to its top-left
   corner: it was made at 2256x1504 with HDMI in, and a framebuffer keeps its size.
+
+## 2026-11-09 — RAM bandwidth
+
+- `stress-ng --stream`, 15 s, read / write MB/s: 1267 / 844 on one core, 2833 / 1889 on four; DMC
+  786 MHz.

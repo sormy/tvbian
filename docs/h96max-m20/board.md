@@ -48,27 +48,28 @@ gone. Known gaps are at the bottom.
 
 Kernel 6.18.44, image of 2026-09-17. `fio --direct=1`, `iperf3` to a wired host.
 
-| Measure                         | Value                                             |
-| ------------------------------- | ------------------------------------------------- |
-| Boot to `graphical.target`      | 14.1-16.7 s over 10 boots, mt76 at boot ✅        |
-| TVBian: reboot to SSH           | 34-38 s over 3 boots, 2026-10-20 ✅               |
-| RAM                             | 1954 MB ✅                                        |
-| eMMC sequential read            | 43.3 MiB/s ✅                                     |
-| eMMC sequential write           | 32.7 MiB/s ✅                                     |
-| eMMC random 4K read             | 2711 IOPS, 10.6 MiB/s ✅                          |
-| eMMC random 4K write            | 3839 IOPS, 15.0 MiB/s ✅                          |
-| USB drive (rootfs) read         | 21.3 MiB/s ✅                                     |
-| USB drive (rootfs) write        | 21.1 MiB/s ✅                                     |
-| USB drive random 4K read        | 1842 IOPS ✅                                      |
-| USB drive random 4K write       | 1644 IOPS ✅                                      |
-| USB throughput (via Gb NIC)     | 196 Mbit/s, idle and under 4-core load ✅         |
-| `stress-ng` 4×cpu + 2×vm        | 120 s `--verify`, 6 passed, 0 failed ✅           |
-| Watchdog                        | systemd 80 s, hardware 65.5 s; lockups panic ✅   |
-| CPU, idle                       | 50 °C                                             |
-| CPU, 10 min `stress-ng --cpu 4` | 86 °C peak; 1.752 GHz for 5 min, then 1.4-1.5 GHz |
-| HDMI                            | 2256x1504 @ 60.00 Hz, the panel's native mode ✅  |
-| GPU, `kmscube`                  | 60.0 fps vsync-locked, Mali-450 at 744 MHz ✅     |
-| GPU, `glmark2-es2-drm`          | **64** at 2256x1504 on screen, no artifacts ✅    |
+| Measure                            | Value                                                    |
+| ---------------------------------- | -------------------------------------------------------- |
+| Boot to `graphical.target`         | 14.1-16.7 s over 10 boots, mt76 at boot ✅               |
+| TVBian: reboot to SSH              | 34-38 s over 3 boots, 2026-10-20 ✅                      |
+| RAM                                | 1954 MB ✅                                               |
+| TVBian: RAM bandwidth, 1 / 4 cores | 954 / 2087 MB/s read, `stress-ng --stream` 2026-11-09 ✅ |
+| eMMC sequential read               | 43.3 MiB/s ✅                                            |
+| eMMC sequential write              | 32.7 MiB/s ✅                                            |
+| eMMC random 4K read                | 2711 IOPS, 10.6 MiB/s ✅                                 |
+| eMMC random 4K write               | 3839 IOPS, 15.0 MiB/s ✅                                 |
+| USB drive (rootfs) read            | 21.3 MiB/s ✅                                            |
+| USB drive (rootfs) write           | 21.1 MiB/s ✅                                            |
+| USB drive random 4K read           | 1842 IOPS ✅                                             |
+| USB drive random 4K write          | 1644 IOPS ✅                                             |
+| USB throughput (via Gb NIC)        | 196 Mbit/s, idle and under 4-core load ✅                |
+| `stress-ng` 4×cpu + 2×vm           | 120 s `--verify`, 6 passed, 0 failed ✅                  |
+| Watchdog                           | systemd 80 s, hardware 65.5 s; lockups panic ✅          |
+| CPU, idle                          | 50 °C                                                    |
+| CPU, 10 min `stress-ng --cpu 4`    | 86 °C peak; 1.752 GHz for 5 min, then 1.4-1.5 GHz        |
+| HDMI                               | 2256x1504 @ 60.00 Hz, the panel's native mode ✅         |
+| GPU, `kmscube`                     | 60.0 fps vsync-locked, Mali-450 at 744 MHz ✅            |
+| GPU, `glmark2-es2-drm`             | **64** at 2256x1504 on screen, no artifacts ✅           |
 
 The eMMC write figures were taken in the last 128 MiB, outside the factory partitions, and the
 region was saved and restored byte-identical afterwards.

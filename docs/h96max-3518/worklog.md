@@ -2437,3 +2437,8 @@ card once the same DDR blob was on its eMMC. The eMMC's FIT is 2026.10 again.
   and H96 Max M2 Plus need: `Composite-1` turned on, the console at 720x576 filling the screen, then
   colour bars with a moving square. A 1 kHz tone on the left and a 440 Hz one on the right, each on
   its own plug.
+
+## 2026-11-09 — RAM type and bandwidth
+
+- `PMUGRF_OS_REG18` `0x1000caa0`: LPDDR3, one channel; DMC 786 MHz. `stress-ng --stream`, 15 s, read
+  / write MB/s: 1124 / 749 on one core, 2626 / 1750 on four.

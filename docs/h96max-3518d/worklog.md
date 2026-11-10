@@ -3191,3 +3191,8 @@ driver loads, brings in `skw_sdio_lite`, and the devices it creates bring in the
 - BOE monitor attached: EDID 256 bytes, `ddcutil detect` Display 1, MCCS 2.2 on `i2c-hdmi-ddc`;
   brightness 100, set 80 and read 80, set back 100.
 - `ddc read failed`: 0 lines this boot, with the screen attached; 15 at every boot before.
+
+## 2026-11-09 — RAM bandwidth
+
+- `stress-ng --stream`, 15 s, read / write MB/s: 1065 / 710 on one core, 2282 / 1521 on four; DMC
+  666 MHz.

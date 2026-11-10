@@ -1787,3 +1787,7 @@ before), CMA 768 MiB as before, `wlan0` connected, nothing failed. The previous 
   start.
 - The status-0 interrupt fired in none of the 30 runs (dynamic debug on `codec_hevc.c`): no
   regression, the fix itself not exercised. 🟡
+
+## 2026-11-09 — RAM bandwidth
+
+- `stress-ng --stream`, 15 s, read / write MB/s: 954 / 636 on one core, 2087 / 1392 on four.

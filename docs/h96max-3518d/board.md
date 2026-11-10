@@ -88,6 +88,7 @@ tested and broken · ➖ not on this board. Nothing is inherited from the siblin
 | TVBian: boot             | **15.0 s** — 4.6 s kernel + 10.4 s userspace, 2026-10-20                   |
 | TVBian: reboot to SSH    | **31 s**, 2026-10-20                                                       |
 | eMMC sequential          | **44.0 MB/s** read · **38.8 MB/s** write                                   |
+| RAM read, 1 / 4 cores    | **1065 / 2282 MB/s**, 666 MHz                                              |
 | eMMC random 4k           | **2917 IOPS** read (11.4 MB/s) · **3863 IOPS** write (15.1 MB/s)           |
 | USB 2 stick, seq read    | **35.1 MB/s** — at the 480 Mbps ceiling                                    |
 | Wi-Fi 5 GHz throughput   | **185** Mbit/s idle · **191** under 4-core load · **206** after            |
