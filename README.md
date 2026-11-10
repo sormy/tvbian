@@ -12,22 +12,22 @@ and a robot that builds fresh images every week whether anyone asked or not.
 **Images:** the [latest release](https://github.com/sormy/tvbian/releases/latest). Checksums signed,
 because we have trust issues too.
 
-## Boxes
+## Boards
 
-| Box                         | Board                      | Form     | SoC    | RAM\*     | eMMC\* | Wi-Fi/BT   | Ports                                                 | Install         |
-| --------------------------- | -------------------------- | -------- | ------ | --------- | ------ | ---------- | ----------------------------------------------------- | --------------- |
-| [R69-1][r69]                | `XR821_V1.1`               | box      | RK3518 | 2G (1.5G) | 16G    | AIC8800D80 | HDMI, USB 3.0 + 2.0, LAN 100M, SD, AV, IR             | [SD or OTG][rk] |
-| ↳ T8S                       | `R69MAX V1.1`              | box      | RK3518 | 2G        | 8G     | AIC8800D80 | HDMI, USB 3.0 + 2.0, LAN 100M, SD, AV, IR             | [SD or OTG][rk] |
-| [H96 Max 3518][a]           | `3518_ZX_V01`              | box      | RK3518 | 2G        | 16G    | SWT6621S   | HDMI, USB 3.0 + 2.0, LAN 100M, SD, AV, IR             | [SD or OTG][rk] |
-| ↳ Leffot H313               | `3518_ZX_V01`              | box      | RK3518 | 2G        | 16G    | SWT6621S   | HDMI, USB 3.0 + 2.0, LAN 100M, SD, AV, IR             | [SD or OTG][rk] |
-| [H96 Max 3518D][b]          | `3518_DG_ZX_V01`           | stick    | RK3518 | 2G        | 16G    | SWT6621S   | HDMI, USB-C + USB-A                                   | [OTG][rk]       |
-| [H96 Max M2 Plus][m2p]      | `M2_P_ZX_20250328`         | box      | RK3528 | 4G        | 32G    | SWT6621S   | HDMI, USB 3.0, LAN 100M, AV, IR                       | [OTG][rk]       |
-| [H96 Max RK3528][rk3528] ❓ | `RK3528_DDR3_8X4_V12`      | box      | RK3528 | 4G        | 64G    | AIC8800D80 | HDMI, USB 3.0 + 2.0, LAN 100M, SD, AV, SPDIF, IR, LCD | [SD or OTG][rk] |
-| [H96 Max M20][m20]          | `905_DG_ZX01_V01`          | stick    | S905L3 | 2G        | 16G    | MT7668S    | HDMI, USB-C + USB-A                                   | [OTG][aml]      |
-| [Tanix TX1 V2.0][tx1]       | `QHZIW_H313_TX1_EMCP_V2.0` | mini box | H313   | 2G (1.5G) | 16G    | ATBM6031-X | HDMI, USB-A, AV, IR                                   | [OTG][aw]       |
+| Board                       | PCB                        | Form     | Hardware\*                                                                                                                                                | Install         |
+| --------------------------- | -------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------- |
+| [R69-1][r69]                | `XR821_V1.1`               | box      | SoC RK3518 · 2 GB RAM LPDDR3 (1.5 GB usable) · 16 GB eMMC HS200 · SD HS · USB-A 3.0 (OTG) + USB-A 2.0 · LAN 100M · AIC8800D80 Wi-Fi + BT · HDMI · AV · IR | [SD or OTG][rk] |
+| ↳ T8S                       | `R69MAX V1.1`              | box      | SoC RK3518 · 2 GB RAM LPDDR3 (1.5 GB usable) · 8 GB eMMC HS200 · SD HS · USB-A 3.0 (OTG) + USB-A 2.0 · LAN 100M · AIC8800D80 Wi-Fi + BT · HDMI · AV · IR  | [SD or OTG][rk] |
+| [H96 Max 3518][a]           | `3518_ZX_V01`              | box      | SoC RK3518 · 2 GB RAM LPDDR3 · 16 GB eMMC HS200 · SD UHS-I · USB-A 3.0 (OTG) + USB-A 2.0 · LAN 100M · SWT6621S Wi-Fi + BT · HDMI · AV · IR                | [SD or OTG][rk] |
+| ↳ Leffot H313               | `3518_ZX_V01`              | box      | SoC RK3518 · 2 GB RAM LPDDR3 · 16 GB eMMC HS200 · SD UHS-I · USB-A 3.0 (OTG) + USB-A 2.0 · LAN 100M · SWT6621S Wi-Fi + BT · HDMI · AV · IR                | [SD or OTG][rk] |
+| [H96 Max 3518D][b]          | `3518_DG_ZX_V01`           | stick    | SoC RK3518 · 2 GB RAM LPDDR3 · 16 GB eMMC HS · **no SD** · USB-C 2.0 (OTG) + USB-A 2.0 · **no LAN** · SWT6621S Wi-Fi + BT · HDMI                          | [OTG][rk]       |
+| [H96 Max M2 Plus][m2p]      | `M2_P_ZX_20250328`         | box      | SoC RK3528 · 4 GB RAM DDR3 · 32 GB eMMC HS200 · **no SD** · USB-A 3.0 (OTG) · LAN 100M · SWT6621S Wi-Fi + BT · HDMI · AV · IR                             | [OTG][rk]       |
+| [H96 Max RK3528][rk3528] ❓ | `RK3528_DDR3_8X4_V12`      | box      | SoC RK3528 · 4 GB RAM DDR3 · 64 GB eMMC HS400 · SD UHS-I · USB-A 3.0 (OTG) + USB-A 2.0 · LAN 100M · AIC8800D80 Wi-Fi + BT · HDMI · AV · SPDIF · IR · LCD  | [SD or OTG][rk] |
+| [H96 Max M20][m20]          | `905_DG_ZX01_V01`          | stick    | SoC S905L3 · 2 GB RAM LPDDR3 · 16 GB eMMC HS · **no SD** · USB-C 2.0 (OTG) + USB-A 2.0 · **no LAN** · MT7668S Wi-Fi + BT · HDMI                           | [OTG][aml]      |
+| [Tanix TX1 V2.0][tx1]       | `QHZIW_H313_TX1_EMCP_V2.0` | mini box | SoC H313 · 1.5 GB RAM LPDDR3 (sold as 2 GB) · 16 GB eMMC DDR52 · **no SD** · USB-A 2.0 (OTG) · **no LAN** · ATBM6031-X Wi-Fi + BLE · HDMI · AV · IR       | [OTG][aw]       |
+| [H96 Max H313][h313]        | `BA979_627_V1.0`           | box      | SoC H313 · 2 GB RAM LPDDR3 · 16 GB eMMC HS200 · SD HS · USB-A 2.0 (OTG) + USB-A 2.0 · LAN 100M · AIC8800D40L Wi-Fi + BLE · HDMI · AV · IR                 | [SD or OTG][aw] |
 
-\*What our units carry. The same model ships with more or less of either, and the image takes what
-it finds: no device tree fixes either size.
+\*What our units carry; the same model may ship with other RAM or eMMC. Any size works.
 
 ❓ Not tested here: built from the box's stock firmware, waiting for an owner's report.
 
@@ -38,6 +38,7 @@ it finds: no device tree fixes either size.
 [rk3528]: docs/h96max-rk3528/board.md
 [m20]: docs/h96max-m20/board.md
 [tx1]: docs/tanix-tx1-v2/board.md
+[h313]: docs/h96max-h313/board.md
 [rk]: README_ROCKCHIP.md
 [aml]: README_AMLOGIC.md
 [aw]: README_ALLWINNER.md

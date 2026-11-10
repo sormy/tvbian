@@ -190,9 +190,9 @@ class Discovery(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         (self.root / "README.md").write_text(
-            "| Box | Form | SoC | RAM | eMMC | Wi-Fi/BT | Ports | Install |\n"
-            "| --- | --- | --- | --- | --- | --- | --- | --- |\n"
-            "| [New board][new] | stick | TEST9000 | 4G | 32G | RADIO9 | HDMI, USB | [OTG][guide] |\n"
+            "| Board | Form | Hardware | Install |\n"
+            "| --- | --- | --- | --- |\n"
+            "| [New board][new] | stick | SoC TEST9000 · 4 GB RAM · 32 GB eMMC · RADIO9 · HDMI · USB | [OTG][guide] |\n"
             "\n[new]: docs/new-box/board.md\n[guide]: README_NEW.md\n"
         )
         board = self.root / "boards/new-box"
@@ -243,12 +243,12 @@ class Discovery(unittest.TestCase):
         return (out / "index.html").read_text()
 
     def alias(
-        self, conf: str, alias_id: str = "new-alias", listed: str = "", emmc: str = "32G"
+        self, conf: str, alias_id: str = "new-alias", listed: str = "", emmc: str = "32 GB"
     ) -> Path:
         if listed:
             readme = self.root / "README.md"
-            board = "| [New board][new] | stick | TEST9000 | 4G | 32G | RADIO9 | HDMI, USB | [OTG][guide] |\n"
-            row = f"| ↳ {listed} | stick | TEST9000 | 4G | {emmc} | RADIO9 | HDMI, USB | [OTG][guide] |\n"
+            board = "| [New board][new] | stick | SoC TEST9000 · 4 GB RAM · 32 GB eMMC · RADIO9 · HDMI · USB | [OTG][guide] |\n"
+            row = f"| ↳ {listed} | stick | SoC TEST9000 · 4 GB RAM · {emmc} eMMC · RADIO9 · HDMI · USB | [OTG][guide] |\n"
             readme.write_text(readme.read_text().replace(board, board + row))
         folder = self.root / "boards" / alias_id
         folder.mkdir()
@@ -260,7 +260,7 @@ class Discovery(unittest.TestCase):
             'BOARD_ALIAS_OF=new-box\nBOARD_NAME="Other Name"\nBOARD_PCB=PCB_OTHER\n'
             "BOARD_STORE=https://example.test/other-store\n",
             listed="Other Name",
-            emmc="8G",
+            emmc="8 GB",
         )
         photos = self.root / "docs/new-alias"
         photos.mkdir()
@@ -478,3 +478,23 @@ class Json(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Compact(unittest.TestCase):
+    def test_a_readme_item_compacts_to_its_card_form(self) -> None:
+        for item, card in (
+            ("2 GB RAM LPDDR3 (1.5 GB usable)", "2 GB RAM"),
+            ("4 GB RAM DDR3", "4 GB RAM"),
+            ("16 GB eMMC HS200", "16 GB eMMC"),
+            ("16 GB eMMC DDR52", "16 GB eMMC"),
+            ("1.5 GB RAM LPDDR3 (sold as 2 GB)", "1.5 GB RAM"),
+            ("SD HS", "SD"),
+            ("4 GB RAM (on a spare rank)", "4 GB RAM (on a spare rank)"),
+            ("SD UHS-I", "SD"),
+            ("no SD", "no SD"),
+            ("USB-A 3.0 (OTG) + USB-A 2.0", "USB-A 3.0 + USB-A 2.0"),
+            ("USB-C 2.0 (OTG) + USB-A 2.0", "USB-C 2.0 + USB-A 2.0"),
+            ("LAN 100M", "LAN 100M"),
+        ):
+            with self.subTest(item=item):
+                self.assertEqual(build.compact(item), card)

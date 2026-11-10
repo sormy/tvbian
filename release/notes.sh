@@ -17,7 +17,7 @@ version() { awk -v c="kernel/$1.conf" '$1 == "kernel" && $2 == c { sub(/-[0-9]+$
 {
   echo "Weekly release of TVBian."
   echo
-  echo "| Box | Silkscreen | Family | Base | Kernel | Opt-in next | Extras | Image |"
+  echo "| Board | PCB | Family | Base | Kernel | Opt-in next | Extras | Image |"
   echo "| --- | --- | --- | --- | --- | --- | --- | --- |"
   for img in /out/images/*.img.xz; do
     board=$(basename "$img" | sed -E 's/^tvbian-(.*)-[a-z]+-[0-9]{4}-[0-9]{2}-[0-9]{2}\.img\.xz$/\1/')

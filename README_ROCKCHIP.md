@@ -12,15 +12,15 @@ Amlogic boxes are in [README_AMLOGIC.md](README_AMLOGIC.md), Allwinner ones in
 
 ## Boxes
 
-| Box                                                    | Board                                                          | Hardware                                                                                                                      | Install                                                  |
-| ------------------------------------------------------ | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
-| <img src="docs/r69-1/image1.jpg" width="260">          | **[R69-1][r69]**<br>`XR821_V1.1`                               | SoC RK3518<br>2 GB RAM (1.5 GB usable) · 16 GB eMMC<br>USB-A 3.0 (OTG) + USB-A 2.0<br>10/100 Ethernet · AIC8800D80 Wi-Fi + BT | [1](#1-sd-card): SD card<br>[2](#2-otg-cable): OTG cable |
-| <img src="docs/t8s/image1.jpg" width="260">            | **T8S**<br>`R69MAX V1.1`<br>an R69-1: its image                | SoC RK3518<br>2 GB RAM (usable ❓) · 8 GB eMMC<br>USB-A 3.0 (OTG) + USB-A 2.0<br>10/100 Ethernet · AIC8800D80 Wi-Fi + BT      | [1](#1-sd-card): SD card<br>[2](#2-otg-cable): OTG cable |
-| <img src="docs/h96max-3518/image1.jpg" width="260">    | **[H96 Max 3518][h96]**<br>`3518_ZX_V01`<br>`2025-08-18`       | SoC RK3518<br>2 GB RAM · 16 GB eMMC<br>USB-A 3.0 (OTG) + USB-A 2.0<br>10/100 Ethernet · SWT6621S Wi-Fi + BT                   | [1](#1-sd-card): SD card<br>[2](#2-otg-cable): OTG cable |
-| <img src="docs/leffot-h313/image1.jpg" width="260">    | **Leffot H313**<br>`3518_ZX_V01`<br>an H96 Max 3518: its image | SoC RK3518<br>2 GB RAM · 16 GB eMMC<br>USB-A 3.0 (OTG) + USB-A 2.0<br>10/100 Ethernet · SWT6621S Wi-Fi + BT                   | [1](#1-sd-card): SD card<br>[2](#2-otg-cable): OTG cable |
-| <img src="docs/h96max-3518d/image1.png" width="260">   | **[H96 Max 3518D][h96d]**<br>`3518_DG_ZX_V01`<br>`2025-04-01`  | SoC RK3518<br>2 GB RAM · 16 GB eMMC, **no SD slot**<br>USB-C 2.0 (OTG) + USB-A 2.0<br>**no Ethernet** · SWT6621S Wi-Fi + BT   | [2](#2-otg-cable): OTG cable                             |
-| <img src="docs/h96max-m2-plus/image1.jpg" width="260"> | **[H96 Max M2 Plus][m2p]**<br>`M2_P_ZX_20250328`               | SoC RK3528<br>4 GB RAM · 32 GB eMMC, **no SD slot**<br>USB-A 3.0 (OTG)<br>10/100 Ethernet · SWT6621S Wi-Fi + BT               | [2](#2-otg-cable): OTG cable                             |
-| <img src="docs/h96max-rk3528/image1.jpg" width="260">  | **[H96 Max RK3528][rk3528]** ❓<br>`RK3528_DDR3_8X4_V12`       | SoC RK3528<br>4 GB RAM · 64 GB eMMC<br>USB-A 3.0 (OTG) + USB-A 2.0<br>10/100 Ethernet · AIC8800D80 Wi-Fi + BT<br>Front LCD    | [1](#1-sd-card): SD card<br>[2](#2-otg-cable): OTG cable |
+| Box                                                    | Board                                                          | Hardware                                                                                                                                                  | Install                                                  |
+| ------------------------------------------------------ | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| <img src="docs/r69-1/image1.jpg" width="260">          | **[R69-1][r69]**<br>`XR821_V1.1`                               | SoC RK3518 · 2 GB RAM LPDDR3 (1.5 GB usable) · 16 GB eMMC HS200 · SD HS · USB-A 3.0 (OTG) + USB-A 2.0 · LAN 100M · AIC8800D80 Wi-Fi + BT · HDMI · AV · IR | [1](#1-sd-card): SD card<br>[2](#2-otg-cable): OTG cable |
+| <img src="docs/t8s/image1.jpg" width="260">            | **T8S**<br>`R69MAX V1.1`<br>an R69-1: its image                | SoC RK3518 · 2 GB RAM LPDDR3 (1.5 GB usable) · 8 GB eMMC HS200 · SD HS · USB-A 3.0 (OTG) + USB-A 2.0 · LAN 100M · AIC8800D80 Wi-Fi + BT · HDMI · AV · IR  | [1](#1-sd-card): SD card<br>[2](#2-otg-cable): OTG cable |
+| <img src="docs/h96max-3518/image1.jpg" width="260">    | **[H96 Max 3518][h96]**<br>`3518_ZX_V01`<br>`2025-08-18`       | SoC RK3518 · 2 GB RAM LPDDR3 · 16 GB eMMC HS200 · SD UHS-I · USB-A 3.0 (OTG) + USB-A 2.0 · LAN 100M · SWT6621S Wi-Fi + BT · HDMI · AV · IR                | [1](#1-sd-card): SD card<br>[2](#2-otg-cable): OTG cable |
+| <img src="docs/leffot-h313/image1.jpg" width="260">    | **Leffot H313**<br>`3518_ZX_V01`<br>an H96 Max 3518: its image | SoC RK3518 · 2 GB RAM LPDDR3 · 16 GB eMMC HS200 · SD UHS-I · USB-A 3.0 (OTG) + USB-A 2.0 · LAN 100M · SWT6621S Wi-Fi + BT · HDMI · AV · IR                | [1](#1-sd-card): SD card<br>[2](#2-otg-cable): OTG cable |
+| <img src="docs/h96max-3518d/image1.png" width="260">   | **[H96 Max 3518D][h96d]**<br>`3518_DG_ZX_V01`<br>`2025-04-01`  | SoC RK3518 · 2 GB RAM LPDDR3 · 16 GB eMMC HS · **no SD** · USB-C 2.0 (OTG) + USB-A 2.0 · **no LAN** · SWT6621S Wi-Fi + BT · HDMI                          | [2](#2-otg-cable): OTG cable                             |
+| <img src="docs/h96max-m2-plus/image1.jpg" width="260"> | **[H96 Max M2 Plus][m2p]**<br>`M2_P_ZX_20250328`               | SoC RK3528 · 4 GB RAM DDR3 · 32 GB eMMC HS200 · **no SD** · USB-A 3.0 (OTG) · LAN 100M · SWT6621S Wi-Fi + BT · HDMI · AV · IR                             | [2](#2-otg-cable): OTG cable                             |
+| <img src="docs/h96max-rk3528/image1.jpg" width="260">  | **[H96 Max RK3528][rk3528]** ❓<br>`RK3528_DDR3_8X4_V12`       | SoC RK3528 · 4 GB RAM DDR3 · 64 GB eMMC HS400 · SD UHS-I · USB-A 3.0 (OTG) + USB-A 2.0 · LAN 100M · AIC8800D80 Wi-Fi + BT · HDMI · AV · SPDIF · IR · LCD  | [1](#1-sd-card): SD card<br>[2](#2-otg-cable): OTG cable |
 
 ❓ Not tested here: built from the box's stock firmware, waiting for an owner's report.
 
@@ -29,6 +29,19 @@ Amlogic boxes are in [README_AMLOGIC.md](README_AMLOGIC.md), Allwinner ones in
 [h96d]: docs/h96max-3518d/board.md
 [m2p]: docs/h96max-m2-plus/board.md
 [rk3528]: docs/h96max-rk3528/board.md
+
+## Memory
+
+Read bandwidth from the CPU, `stress-ng --stream` for 15 s on one core, then four. Video and the
+display read the same RAM: little to spare starves them at 4K.
+
+| Board           | RAM    | Channels |   Clock |    1 core |   4 cores |
+| --------------- | ------ | -------: | ------: | --------: | --------: |
+| R69-1           | LPDDR3 |        1 | 780 MHz | 1129 MB/s | 2604 MB/s |
+| H96 Max 3518    | LPDDR3 |        1 | 786 MHz | 1124 MB/s | 2626 MB/s |
+| H96 Max 3518D   | LPDDR3 |        1 | 666 MHz | 1065 MB/s | 2282 MB/s |
+| H96 Max M2 Plus | DDR3   |        1 | 786 MHz | 1267 MB/s | 2833 MB/s |
+| H96 Max RK3528  | DDR3   |        1 |       — |         — |         — |
 
 ## What works
 
@@ -48,17 +61,17 @@ An alias runs its board's image unchanged, so it reads that board's column:
 | T8S         | `R69MAX V1.1` | R69-1        |
 | Leffot H313 | `3518_ZX_V01` | H96 Max 3518 |
 
-| Hardware / Board                                  | R69-1 | H96 Max<br>3518 | H96 Max<br>3518D | H96 Max<br>M2 Plus | H96 Max<br>RK3528 |
+| Hardware                                          | R69-1 | H96 Max<br>3518 | H96 Max<br>3518D | H96 Max<br>M2 Plus | H96 Max<br>RK3528 |
 | ------------------------------------------------- | :---: | :-------------: | :--------------: | :----------------: | :---------------: |
 | **Storage**                                       |       |                 |                  |                    |                   |
 | eMMC — boot and rootfs                            |  ✅   |       ✅        |        ✅        |         ✅         |        ❓         |
-| microSD — boot and rootfs                         |  ✅   |       ✅        |        ➖        |         ➖         |        ❓         |
-| microSD hotplug                                   |  🟡   |       🟡        |        ➖        |         ➖         |        ❓         |
-| microSD SDR104 (UHS)                              |  ✅   |       ✅        |        ➖        |         ➖         |        ❓         |
+| SD — boot and rootfs                              |  ✅   |       ✅        |        ➖        |         ➖         |        ❓         |
+| SD hotplug                                        |  🟡   |       🟡        |        ➖        |         ➖         |        ❓         |
+| SD SDR104 (UHS)                                   |  ✅   |       ✅        |        ➖        |         ➖         |        ❓         |
 | USB 2.0                                           |  ✅   |       ✅        |        ✅        |         ✅         |        ❓         |
 | USB 3.0 — 5 Gbps, `uas`                           |  ✅   |       ✅        |        ➖        |         ✅         |        ❓         |
 | **Network**                                       |       |                 |                  |                    |                   |
-| Ethernet 10/100                                   |  ✅   |       ✅        |        ➖        |         ✅         |        ❓         |
+| LAN 100M                                          |  ✅   |       ✅        |        ➖        |         ✅         |        ❓         |
 | Wi-Fi 2.4 GHz                                     |  ✅   |       ✅        |        ✅        |         ✅         |        ❓         |
 | Wi-Fi 5 GHz                                       |  ✅   |       ✅        |        ✅        |         ✅         |        ❓         |
 | Bluetooth                                         |  ✅   |       ✅        |        ✅        |         ✅         |        ❓         |
@@ -88,7 +101,7 @@ An alias runs its board's image unchanged, so it reads that board's column:
 | Front LEDs                                        |  ✅   |       ✅        |        ✅        |         ✅         |        ➖         |
 | Front display                                     |  ➖   |       ➖        |        ➖        |         ➖         |        ❌         |
 | **Power and recovery**                            |       |                 |                  |                    |                   |
-| Sleep/Wake from Remote                            |  ✅   |       ✅        |        ❌        |         ✅         |        ❓         |
+| Sleep and wake from the remote                    |  ✅   |       ✅        |        ❌        |         ✅         |        ❓         |
 | Hardware watchdog                                 |  ✅   |       ✅        |        ✅        |         ✅         |        ❓         |
 | Serial console                                    |  ✅   |       ✅        |        ✅        |         ✅         |        ❓         |
 | Maskrom recovery over USB                         |  ✅   |       ✅        |        ✅        |         ✅         |        ❓         |
@@ -145,8 +158,8 @@ sudo poweroff                                # pull the SD; it boots from eMMC
 
 ### 2. OTG cable
 
-For a box with no SD slot: backup and install both go over USB in Maskrom. Hold the recovery button,
-then plug the OTG cable in — the cable powers the box, so the PSU stays out.
+For a box with no microSD slot: backup and install both go over USB in Maskrom. Hold the recovery
+button, then plug the OTG cable in — the cable powers the box, so the PSU stays out.
 
 **One cable, ordered before you need it:** a [USB-A male-to-male][amm] (~$4), with a [USB-C→USB-A
 female adapter][ca] (~$8 for 4) on whichever end is USB-C.
@@ -243,8 +256,9 @@ Power-cycle to see the log.
 **SD still boots** — write the backup straight back:
 `sudo dd if=emmc-stock.img of=/dev/mmcblkX bs=4M status=progress; sync`.
 
-**Nothing boots, or the box has no SD slot** — go in over USB: `docs/rockchip-maskrom.md`, section
-**Write an image over USB**. It is very hard to truly brick these boxes. Not impossible. Hard.
+**Nothing boots, or the box has no microSD slot** — go in over USB: `docs/rockchip-maskrom.md`,
+section **Write an image over USB**. It is very hard to truly brick these boxes. Not impossible.
+Hard.
 
 ## Credits
 

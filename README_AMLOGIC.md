@@ -13,11 +13,20 @@ came with Android and a promise of updates; one of those two was real. Rockchip 
 
 ## Boxes
 
-| Box                                                | Board                                                       | Hardware                                                                                                   | Install   |
-| -------------------------------------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | --------- |
-| <img src="docs/h96max-m20/image1.png" width="260"> | **[H96 Max M20][doc]**<br>`905_DG_ZX01_V01`<br>`2025-09-03` | SoC S905L3<br>2 GB RAM · 16 GB eMMC<br>USB-C 2.0 (OTG) + USB-A 2.0<br>**no Ethernet** · MT7668S Wi-Fi + BT | OTG cable |
+| Box                                                | Board                                                       | Hardware                                                                                                                        | Install   |
+| -------------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| <img src="docs/h96max-m20/image1.png" width="260"> | **[H96 Max M20][doc]**<br>`905_DG_ZX01_V01`<br>`2025-09-03` | SoC S905L3 · 2 GB RAM LPDDR3 · 16 GB eMMC HS · **no SD** · USB-C 2.0 (OTG) + USB-A 2.0 · **no LAN** · MT7668S Wi-Fi + BT · HDMI | OTG cable |
 
 [doc]: docs/h96max-m20/board.md
+
+## Memory
+
+Read bandwidth from the CPU, `stress-ng --stream` for 15 s on one core, then four. Video and the
+display read the same RAM: little to spare starves them at 4K.
+
+| Board       | RAM    | Channels |   Clock |   1 core |   4 cores |
+| ----------- | ------ | -------: | ------: | -------: | --------: |
+| H96 Max M20 | LPDDR3 |        1 | 600 MHz | 954 MB/s | 2087 MB/s |
 
 ## What works
 
@@ -35,12 +44,12 @@ came with Android and a promise of updates; one of those two was real. Rockchip 
 | **Storage**                                              |                 |
 | USB stick — boot and rootfs                              |       ✅        |
 | eMMC — boot and rootfs                                   |       ✅        |
-| microSD — boot and rootfs                                |       ➖        |
+| SD — boot and rootfs                                     |       ➖        |
 | USB 2.0                                                  |       ✅        |
-| USB 3.0                                                  |       ➖        |
+| USB 3.0 — 5 Gbps, `uas`                                  |       ➖        |
 | **Network**                                              |                 |
-| Ethernet, onboard                                        |       ➖        |
-| Ethernet, USB adapter                                    |       ✅        |
+| LAN 100M, onboard                                        |       ➖        |
+| LAN, USB adapter                                         |       ✅        |
 | Wi-Fi 2.4 GHz — mainline mt76                            |       ✅        |
 | Wi-Fi 5 GHz — mainline mt76                              |       ✅        |
 | Wi-Fi, another access point — mt76                       |       ✅        |
@@ -48,7 +57,7 @@ came with Android and a promise of updates; one of those two was real. Rockchip 
 | **Display and video**                                    |                 |
 | HDMI video, the panel's native mode                      |       ✅        |
 | HDMI audio                                               |       ✅        |
-| GPU — Mali under lima                                    |       ✅        |
+| GPU — Mali-450 under lima                                |       ✅        |
 | Hardware decode — H.264, HEVC to 4K                      |       ✅        |
 | Hardware decode — VP9 to 4K, freezes under heavy writes  |       🟠        |
 | Hardware decode — 10-bit HEVC, VP9, 8-bit or compressed  |       🟠        |

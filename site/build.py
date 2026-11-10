@@ -30,15 +30,15 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 
 FAMILY_NAME = {"rk35xx": "Rockchip", "meson-gxl": "Amlogic", "sunxi-h616": "Allwinner"}
-COLUMNS = {
-    "form": "form",
-    "soc": "soc",
-    "ram": "ram",
-    "emmc": "emmc",
-    "wi-fi/bt": "radio",
-    "ports": "ports",
-    "install": "install",
-}
+COLUMNS = ("form", "hardware", "install")
+SPEC = re.compile(r" (RAM|eMMC)\b")
+COMPACT = (
+    (re.compile(r"(?<=RAM) (LP)?DDR\d\w*"), ""),
+    (re.compile(r" \([^)]*(usable|sold as)[^)]*\)"), ""),
+    (re.compile(r"(?<=eMMC) (HS\d*|DDR\d+)\b"), ""),
+    (re.compile(r"(?<=SD) (UHS-\w+|HS)\b"), ""),
+    (re.compile(r" \(OTG\)"), ""),
+)
 REF_LINE = re.compile(r"^\[([^\]]+)\]:\s+(\S+)", re.M)
 MD_LINK = re.compile(r"\[([^\]]*)\]\[([^\]]+)\]")
 BOARD_DOC = re.compile(r"docs/([^/]+)/board\.md")
@@ -139,13 +139,13 @@ class Release:
 @dataclass(frozen=True)
 class Row:
     form: str
-    soc: str
-    ram: str
-    emmc: str
-    radio: str
-    ports: str
+    hardware: tuple[str, ...]
     install: str
     guide: str
+
+    @property
+    def soc(self) -> str:
+        return self.hardware[0].removeprefix("SoC ") if self.hardware else ""
 
 
 @dataclass(frozen=True)
@@ -275,7 +275,7 @@ def box_table(
                 field.strip().lower().replace("\\", "").replace("*", "")
                 for field in fields
             ]
-            if "box" in names and "install" in names:
+            if "board" in names and "install" in names:
                 header = names
             continue
         if set(fields[0]) <= {"-", ":"}:
@@ -307,16 +307,8 @@ def row_from(fields: Fields, refs: dict[str, str]) -> Row:
     link = MD_LINK.search(install)
     guide = refs.get(link.group(2), "") if link else ""
     label = link.group(1) if link else install
-    return Row(
-        fields["form"],
-        fields["soc"],
-        fields["ram"],
-        fields["emmc"],
-        fields["wi-fi/bt"],
-        fields["ports"],
-        label,
-        guide,
-    )
+    hardware = tuple(item.strip().replace("**", "") for item in fields["hardware"].split("·"))
+    return Row(fields["form"], hardware, label, guide)
 
 
 def board_support(text: str, board_id: str) -> str:
@@ -493,17 +485,6 @@ DESCRIPTION = (
 )
 
 
-def gb(value: str) -> str:
-    return re.sub(r"G(?!B)", " GB", value)
-
-
-def ram(value: str) -> str:
-    sold, _, real = value.partition(" (")
-    if real:
-        return f"{gb(sold)} RAM ({gb(real.rstrip(')'))} real)"
-    return f"{gb(value)} RAM"
-
-
 def report_url(card: Card, image: Asset | None) -> str:
     body = REPORT_BODY.format(
         board=card.id, pcb=card.pcb or "?", image=image.name if image else "?"
@@ -517,18 +498,22 @@ def search_text(card: Card) -> str:
     return " ".join((card.name, card.pcb, card.alias_of_name, card.family, soc))
 
 
+def compact(item: str) -> str:
+    """A README hardware item as its card shows it, the details left to the README."""
+    for pattern, replacement in COMPACT:
+        item = pattern.sub(replacement, item)
+    return item
+
+
 def spec_line(card: Card) -> str:
     row = card.row
     if row is None:
         return ""
     bits: list[str] = []
-    chip = f"{card.family} {row.soc}".strip()
+    chip = row.soc
     if chip:
         bits.append(chip)
-    if row.ram:
-        bits.append(ram(row.ram))
-    if row.emmc:
-        bits.append(f"{gb(row.emmc)} eMMC")
+    bits += [compact(item) for item in row.hardware[1:] if SPEC.search(item)]
     return " · ".join(bits)
 
 
@@ -552,9 +537,8 @@ def card_html(card: Card, release: Release, shots: list[Shot]) -> str:
             '<button class="slide prev" type="button" aria-label="Previous case">‹</button>'
             '<button class="slide next" type="button" aria-label="Next case">›</button>'
         )
-    radio = [f"Wi-Fi/BT {row.radio}"] if row and row.radio else []
-    ports = [port.strip() for port in row.ports.split(",")] if row and row.ports else []
-    hardware = " · ".join(radio + ports)
+    items = row.hardware[1:] if row else ()
+    hardware = " · ".join(compact(item) for item in items if not SPEC.search(item))
     badges = [badge("support", *SUPPORT[card.support])]
     if card.alias_of:
         badges.append(badge("alias", f"Alias of {card.alias_of_name}", ALIAS_ICON))
