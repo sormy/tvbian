@@ -13,7 +13,7 @@ Boots from SD on 6.18.62, and on 7.3.3, the `-next` kernel.
 | Ethernet     | EMAC1 RMII, PA0–PA9                                |
 | EPHY         | AC300 package on EMAC1 MDIO, address 0             |
 | EPHY clock   | PWM5 PA12, 24 MHz bypass                           |
-| LEDs         | PH6 power active-low; PH7 standby active-high      |
+| LEDs         | PH6 power, blue, active-low; PH7 standby, red      |
 | Recovery     | None; FEL in the AV jack, the boot ROM's           |
 | IR           | PH10, `rc-h96max`                                  |
 | USB          | Factory host mode; FEL loader uses peripheral mode |
@@ -37,4 +37,4 @@ on TWI3, so the tree has no TWI3 and no AC200 node.
   `sdio-used-1v8`: its Wi-Fi bus runs at 1.8 V, ours at 3.3 V, held to high-speed.
 - CPU OPPs are the factory table, every bin, DCDC2 capped at 1160 mV.
 - Bluetooth host wake, PG16, is not wired; nothing wakes on it yet.
-- LED colors are blue and red; which pin drives which, and the remote's keys, need validation.
+- The remote's keys need validation.

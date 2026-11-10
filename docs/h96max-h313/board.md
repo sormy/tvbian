@@ -2,23 +2,23 @@
 
 ## Identity
 
-| Field           | Value                                 | Source                              |
-| --------------- | ------------------------------------- | ----------------------------------- |
-| Model           | H96 Max H313                          | Owner                               |
-| SoC family      | Allwinner H616/H313                   | FEL `soc=00001823(H616)`            |
-| Exact SoC       | H616 die, sold as H313                | FEL; listing                        |
-| RAM             | LPDDR3, 600 MHz, 2048 MiB configured  | Factory boot0                       |
-| eMMC            | 15758000128 bytes                     | USB block device                    |
-| PCB             | `BA979_627_V1.0`; code `24353`        | `pcb-top.jpeg`                      |
-| Ports           | SD, 2 × USB-A, AV, HDMI, Ethernet, DC | Owner                               |
-| OTG             | USB-A nearest SD slot                 | Owner's port description            |
-| Power           | 5 V / 2 A                             | Owner                               |
-| LED             | Bicolor: blue and red                 | Owner                               |
-| IR              | Bundled H96 Max remote, NEC 0x04      | Owner; stock wake list              |
-| Serial          | RX / TX / GND beside AV               | `pcb-bottom.jpeg`                   |
-| Wi-Fi / BT chip | AIC8800D40L                           | `pcb-wifi.jpeg`, sticker on the PCB |
-| Ethernet PHY    | AC300 EPHY, co-packaged, 100 Mb/s     | SID word 0x2c = `0x0507`            |
-| Photos          | Product, PCB top/bottom, radio        | JPEGs beside this file              |
+| Field           | Value                                  | Source                              |
+| --------------- | -------------------------------------- | ----------------------------------- |
+| Model           | H96 Max H313                           | Owner                               |
+| SoC family      | Allwinner H616/H313                    | FEL `soc=00001823(H616)`            |
+| Exact SoC       | H616 die, sold as H313                 | FEL; listing                        |
+| RAM             | LPDDR3, 600 MHz, 2048 MiB configured   | Factory boot0                       |
+| eMMC            | 15758000128 bytes                      | USB block device                    |
+| PCB             | `BA979_627_V1.0`; code `24353`         | `pcb-top.jpeg`                      |
+| Ports           | SD, 2 × USB-A, AV, HDMI, Ethernet, DC  | Owner                               |
+| OTG             | USB-A nearest SD slot                  | Owner's port description            |
+| Power           | 5 V / 2 A                              | Owner                               |
+| LED             | Blue running; red asleep, off, booting | Owner                               |
+| IR              | Bundled H96 Max remote, NEC 0x04       | Owner; stock wake list              |
+| Serial          | RX / TX / GND beside AV                | `pcb-bottom.jpeg`                   |
+| Wi-Fi / BT chip | AIC8800D40L                            | `pcb-wifi.jpeg`, sticker on the PCB |
+| Ethernet PHY    | AC300 EPHY, co-packaged, 100 Mb/s      | SID word 0x2c = `0x0507`            |
+| Photos          | Product, PCB top/bottom, radio         | JPEGs beside this file              |
 
 Product pages: <https://h5.h96max.com/products-details/h96-max-h313-android-14-4k-wifi-6-tv-box>
 (`BOARD_HOME`), and <https://www.h96tvbox.com/product/h96-max-h313-android-14-atv-tv-box/>. The
@@ -98,7 +98,7 @@ In the bring-up checklist's order, each kernel's mark side by side; numbers read
 | encode                  | ✅  | ✅  | H.264 and MJPEG to 4096×4096                       |
 | remote buttons          | ❓  | ❓  | 👤 press every button                              |
 | BLE remote              | ❓  | ❓  | 👤 pair, keep across reboot                        |
-| LED colours             | ❓  | ❓  | 👤 on, off, asleep                                 |
+| LED colours             | ✅  | ✅  | blue running; red asleep, off, booting             |
 | SD hotplug              | ❓  | ❓  | 👤 in and out                                      |
 | FEL button              | ✅  | ✅  | the boot ROM's; how FEL was entered for the backup |
 | eMMC install            | ❓  | ❓  | awaits the owner's go-ahead                        |

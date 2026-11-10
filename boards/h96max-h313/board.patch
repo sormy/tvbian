@@ -1496,7 +1496,7 @@
  			interrupts = <GIC_SPI 51 IRQ_TYPE_LEVEL_HIGH>,
  			             <GIC_SPI 52 IRQ_TYPE_LEVEL_HIGH>,
  			             <GIC_SPI 53 IRQ_TYPE_LEVEL_HIGH>,
-@@ -1314,4206 +231,1599 @@
+@@ -1314,4206 +231,1601 @@
  			             <GIC_SPI 55 IRQ_TYPE_LEVEL_HIGH>,
  			             <GIC_SPI 56 IRQ_TYPE_LEVEL_HIGH>,
  			             <GIC_SPI 57 IRQ_TYPE_LEVEL_HIGH>;
@@ -2005,8 +2005,13 @@
 -				allwinner,pull = <0>;
 -				linux,phandle = <0x106>;
 -				phandle = <0x106>;
--			};
--
++			sdc0_pins: sdc0-pins {
++				pins = "PF0", "PF1", "PF2", "PF3", "PF4", "PF5";
++				function = "mmc0";
++				drive-strength = <40>;
++				bias-pull-up;
+ 			};
+ 
 -			ahub_daudio0_pins_b: ahub_daudio0_sleep@0 {
 -				allwinner,pins = "PA6", "PA7", "PA8", "PA9";
 -				allwinner,function = "io_disabled";
@@ -2015,8 +2020,12 @@
 -				allwinner,pull = <0>;
 -				linux,phandle = <0x107>;
 -				phandle = <0x107>;
--			};
--
++			rmii_pins: rmii-pins {
++				pins = "PA0", "PA1", "PA2", "PA3", "PA4", "PA5", "PA6", "PA7", "PA8", "PA9";
++				function = "emac1";
++				drive-strength = <40>;
+ 			};
+ 
 -			ahub_daudio0_pins_c: h_ahub_daudio0@0 {
 -				allwinner,pins = "PI0", "PI1", "PI2", "PI3", "PI4";
 -				allwinner,function = "h_pcm0";
@@ -2025,8 +2034,11 @@
 -				allwinner,pull = <0>;
 -				linux,phandle = <0x6b>;
 -				phandle = <0x6b>;
--			};
--
++			pwm5_pin: pwm5-pin {
++				pins = "PA12";
++				function = "pwm5";
+ 			};
+ 
 -			ahub_daudio0_pins_d: h_ahub_daudio0_sleep@0 {
 -				allwinner,pins = "PI0", "PI1", "PI2", "PI3", "PI4";
 -				allwinner,function = "io_disabled";
@@ -2035,8 +2047,13 @@
 -				allwinner,pull = <0>;
 -				linux,phandle = <0x6c>;
 -				phandle = <0x6c>;
--			};
--
++			/* the AIC8800's Bluetooth UART, with flow control */
++			uart1_pins: uart1-pins {
++				pins = "PG6", "PG7", "PG8", "PG9";
++				function = "uart1";
++				bias-pull-up;
+ 			};
+ 
 -			ahub_daudio2_pins_a: ahub_daudio2@0 {
 -				allwinner,pins = "PG10", "PG11", "PG12", "PG13", "PG14";
 -				allwinner,function = "h_pcm2";
@@ -2045,8 +2062,14 @@
 -				allwinner,pull = <0>;
 -				linux,phandle = <0x6d>;
 -				phandle = <0x6d>;
--			};
--
++			/* the vendor's rfkill raises Bluetooth's reset; its wake line stays high */
++			bt-reset-hog {
++				gpio-hog;
++				gpios = <6 19 GPIO_ACTIVE_HIGH>;
++				output-high;
++				line-name = "bt-reset";
+ 			};
+ 
 -			ahub_daudio2_pins_b: ahub_daudio2_sleep@0 {
 -				allwinner,pins = "PG10", "PG11", "PG12", "PG13", "PG14";
 -				allwinner,function = "io_disabled";
@@ -2352,13 +2375,8 @@
 -				allwinner,pull = <0>;
 -				linux,phandle = <0x10f>;
 -				phandle = <0x10f>;
-+			sdc0_pins: sdc0-pins {
-+				pins = "PF0", "PF1", "PF2", "PF3", "PF4", "PF5";
-+				function = "mmc0";
-+				drive-strength = <40>;
-+				bias-pull-up;
- 			};
- 
+-			};
+-
 -			lvds1_pins_b: lvds1@1 {
 -				allwinner,pins = "PD10", "PD11", "PD12", "PD13", "PD14", "PD15", "PD18", "PD19", "PD16", "PD17";
 -				allwinner,pname = "PD10", "PD11", "PD12", "PD13", "PD14", "PD15", "PD18", "PD19", "PD16", "PD17";
@@ -2368,12 +2386,8 @@
 -				allwinner,pull = <0>;
 -				linux,phandle = <0x110>;
 -				phandle = <0x110>;
-+			rmii_pins: rmii-pins {
-+				pins = "PA0", "PA1", "PA2", "PA3", "PA4", "PA5", "PA6", "PA7", "PA8", "PA9";
-+				function = "emac1";
-+				drive-strength = <40>;
- 			};
- 
+-			};
+-
 -			lvds2link_pins_a: lvds2link@0 {
 -				allwinner,pins = "PD0", "PD1", "PD2", "PD3", "PD4", "PD5", "PD8", "PD9", "PD6", "PD7", "PD10", "PD11", "PD12", "PD13", "PD14", "PD15", "PD18", "PD19", "PD16", "PD17";
 -				allwinner,pname = "PD0", "PD1", "PD2", "PD3", "PD4", "PD5", "PD8", "PD9", "PD6", "PD7", "PD10", "PD11", "PD12", "PD13", "PD14", "PD15", "PD18", "PD19", "PD16", "PD17";
@@ -2383,11 +2397,8 @@
 -				allwinner,pull = <0>;
 -				linux,phandle = <0x111>;
 -				phandle = <0x111>;
-+			pwm5_pin: pwm5-pin {
-+				pins = "PA12";
-+				function = "pwm5";
- 			};
- 
+-			};
+-
 -			lvds2link_pins_b: lvds2link@1 {
 -				allwinner,pins = "PD0", "PD1", "PD2", "PD3", "PD4", "PD5", "PD8", "PD9", "PD6", "PD7", "PD10", "PD11", "PD12", "PD13", "PD14", "PD15", "PD18", "PD19", "PD16", "PD17";
 -				allwinner,pname = "PD0", "PD1", "PD2", "PD3", "PD4", "PD5", "PD8", "PD9", "PD6", "PD7", "PD10", "PD11", "PD12", "PD13", "PD14", "PD15", "PD18", "PD19", "PD16", "PD17";
@@ -2397,13 +2408,8 @@
 -				allwinner,pull = <0>;
 -				linux,phandle = <0x112>;
 -				phandle = <0x112>;
-+			/* the AIC8800's Bluetooth UART, with flow control */
-+			uart1_pins: uart1-pins {
-+				pins = "PG6", "PG7", "PG8", "PG9";
-+				function = "uart1";
-+				bias-pull-up;
- 			};
- 
+-			};
+-
 -			rgb24_pins_a: rgb24@0 {
 -				allwinner,pins = "PD0", "PD1", "PD2", "PD3", "PD4", "PD5", "PD6", "PD7", "PD8", "PD9", "PD10", "PD11", "PD12", "PD13", "PD14", "PD15", "PD16", "PD17", "PD18", "PD19", "PD20", "PD21", "PD22", "PD23", "PD24", "PD25", "PD26", "PD27";
 -				allwinner,pname = "PD0", "PD1", "PD2", "PD3", "PD4", "PD5", "PD6", "PD7", "PD8", "PD9", "PD10", "PD11", "PD12", "PD13", "PD14", "PD15", "PD16", "PD17", "PD18", "PD19", "PD20", "PD21", "PD22", "PD23", "PD24", "PD25", "PD26", "PD27";
@@ -2413,14 +2419,8 @@
 -				allwinner,pull = <0>;
 -				linux,phandle = <0x99>;
 -				phandle = <0x99>;
-+			/* the vendor's rfkill raises Bluetooth's reset; its wake line stays high */
-+			bt-reset-hog {
-+				gpio-hog;
-+				gpios = <6 19 GPIO_ACTIVE_HIGH>;
-+				output-high;
-+				line-name = "bt-reset";
- 			};
- 
+-			};
+-
 -			rgb24_pins_b: rgb24@1 {
 -				allwinner,pins = "PD0", "PD1", "PD2", "PD3", "PD4", "PD5", "PD6", "PD7", "PD8", "PD9", "PD10", "PD11", "PD12", "PD13", "PD14", "PD15", "PD16", "PD17", "PD18", "PD19", "PD20", "PD21", "PD22", "PD23", "PD24", "PD25", "PD26", "PD27";
 -				allwinner,pname = "PD0", "PD1", "PD2", "PD3", "PD4", "PD5", "PD6", "PD7", "PD8", "PD9", "PD10", "PD11", "PD12", "PD13", "PD14", "PD15", "PD16", "PD17", "PD18", "PD19", "PD20", "PD21", "PD22", "PD23", "PD24", "PD25", "PD26", "PD27";
@@ -6382,7 +6382,6 @@
 -			opp-hz = /bits/ 64 <1320000000>;
 -			opp-microvolt-c1 = <1160000>;
 -			clock-latency-ns = <244144>;
--		};
 +	/* the factory's zones, moved to the root, where the thermal core looks. Its CPU trips: 60 and
 +	   70 °C passive, 115 °C critical, and its CPU cooling map; the GPU, as on mainline, has no
 +	   cooling cells, so its map goes, as do the vendor's power-allocator gains. A zone needs a
@@ -6411,12 +6410,7 @@
 +					hysteresis = <0>;
 +				};
 +			};
- 
--		opp@1344000000-ab {
--			opp-hz = /bits/ 64 <1344000000>;
--			opp-microvolt-c0 = <1120000>;
--			opp-microvolt-c2 = <1120000>;
--			clock-latency-ns = <244144>;
++
 +			cooling-maps {
 +				map0 {
 +					trip = <&cpu_target>;
@@ -6426,10 +6420,10 @@
 +			};
  		};
  
--		opp@1416000000-ab {
--			opp-hz = /bits/ 64 <1416000000>;
--			opp-microvolt-a1 = <1100000>;
--			opp-microvolt-b1 = <1100000>;
+-		opp@1344000000-ab {
+-			opp-hz = /bits/ 64 <1344000000>;
+-			opp-microvolt-c0 = <1120000>;
+-			opp-microvolt-c2 = <1120000>;
 -			clock-latency-ns = <244144>;
 +		gpu-thermal {
 +			polling-delay-passive = <500>;
@@ -6446,11 +6440,10 @@
 +			};
  		};
  
--		opp@1512000000-ab {
--			opp-hz = /bits/ 64 <1512000000>;
--			opp-microvolt-a1 = <1160000>;
--			opp-microvolt-b1 = <1160000>;
--			opp-microvolt-b0 = <1120000>;
+-		opp@1416000000-ab {
+-			opp-hz = /bits/ 64 <1416000000>;
+-			opp-microvolt-a1 = <1100000>;
+-			opp-microvolt-b1 = <1100000>;
 -			clock-latency-ns = <244144>;
 +		ve-thermal {
 +			polling-delay-passive = <0>;
@@ -6465,37 +6458,13 @@
 +				};
 +			};
  		};
--	};
--
--	psci {
--		compatible = "arm,psci-1.0";
--		method = "smc";
--	};
--
--	n_brom {
--		compatible = "allwinner,n-brom";
--		reg = <0x00 0x00 0x00 0xa000>;
--	};
--
--	s_brom {
--		compatible = "allwinner,s-brom";
--		reg = <0x00 0x00 0x00 0x10000>;
--	};
--
--	sram_ctrl {
--		device_type = "sram_ctrl";
--		compatible = "allwinner,sram_ctrl";
--		reg = <0x00 0x3000000 0x00 0x100>;
--	};
--
--	sram_a1 {
--		compatible = "allwinner,sram_a1";
--		reg = <0x00 0x20000 0x00 0x8000>;
--	};
  
--	sram_a2 {
--		compatible = "allwinner,sram_a2";
--		reg = <0x00 0x100000 0x00 0x14000>;
+-		opp@1512000000-ab {
+-			opp-hz = /bits/ 64 <1512000000>;
+-			opp-microvolt-a1 = <1160000>;
+-			opp-microvolt-b1 = <1160000>;
+-			opp-microvolt-b0 = <1120000>;
+-			clock-latency-ns = <244144>;
 +		ddr-thermal {
 +			polling-delay-passive = <0>;
 +			polling-delay = <0>;
@@ -6508,12 +6477,9 @@
 +					hysteresis = <0>;
 +				};
 +			};
-+		};
+ 		};
  	};
  
--	prcm {
--		compatible = "allwinner,prcm";
--		reg = <0x00 0x1f01400 0x00 0x400>;
 +	/* the HDMI port, the display pipeline's end */
 +	connector {
 +		compatible = "hdmi-connector";
@@ -6524,11 +6490,8 @@
 +				remote-endpoint = <&hdmi_out_con>;
 +			};
 +		};
- 	};
- 
--	s_cpuscfg {
--		compatible = "allwinner,s_cpuscfg";
--		reg = <0x00 0x1f01c00 0x00 0x400>;
++	};
++
 +	/* Stock drives PH6 low while on and PH7 high in standby. */
 +	leds {
 +		compatible = "gpio-leds";
@@ -6536,6 +6499,7 @@
 +		led-0 {
 +			label = "power";
 +			function = LED_FUNCTION_POWER;
++			color = <LED_COLOR_ID_BLUE>;
 +			gpios = <&pio 7 6 GPIO_ACTIVE_LOW>;
 +			default-state = "on";
 +		};
@@ -6543,40 +6507,12 @@
 +		led-1 {
 +			label = "standby";
 +			function = LED_FUNCTION_STANDBY;
++			color = <LED_COLOR_ID_RED>;
 +			gpios = <&pio 7 7 GPIO_ACTIVE_HIGH>;
 +			default-state = "off";
 +		};
- 	};
- 
--	ion {
--		compatible = "allwinner,sunxi-ion";
--
--		heap_sys_user@0 {
--			compatible = "allwinner,sys_user";
--			heap-name = "sys_user";
--			heap-id = <0>;
--			heap-base = <0x00>;
--			heap-size = <0>;
--			heap-type = "ion_system";
--		};
--
--		heap_cma@0 {
--			compatible = "allwinner,cma";
--			heap-name = "cma";
--			heap-id = <4>;
--			heap-base = <0x00>;
--			heap-size = <0>;
--			heap-type = "ion_cma";
--		};
--
--		heap_secure@0 {
--			compatible = "allwinner,secure";
--			heap-name = "secure";
--			heap-id = <6>;
--			heap-base = <0x00>;
--			heap-size = <0>;
--			heap-type = "ion_secure";
--		};
++	};
++
 +	/* PG18 is Wi-Fi reset; PG19 belongs to Bluetooth. */
 +	wifi_pwrseq: pwrseq {
 +		compatible = "mmc-pwrseq-simple";
@@ -6609,8 +6545,80 @@
 +		vin-supply = <&reg_vcc5v>;
 +		gpio = <&pio 7 8 GPIO_ACTIVE_HIGH>;
 +		enable-active-high;
++	};
++
+ 	psci {
+ 		compatible = "arm,psci-1.0";
+ 		method = "smc";
  	};
  
+-	n_brom {
+-		compatible = "allwinner,n-brom";
+-		reg = <0x00 0x00 0x00 0xa000>;
+-	};
+-
+-	s_brom {
+-		compatible = "allwinner,s-brom";
+-		reg = <0x00 0x00 0x00 0x10000>;
+-	};
+-
+-	sram_ctrl {
+-		device_type = "sram_ctrl";
+-		compatible = "allwinner,sram_ctrl";
+-		reg = <0x00 0x3000000 0x00 0x100>;
+-	};
+-
+-	sram_a1 {
+-		compatible = "allwinner,sram_a1";
+-		reg = <0x00 0x20000 0x00 0x8000>;
+-	};
+-
+-	sram_a2 {
+-		compatible = "allwinner,sram_a2";
+-		reg = <0x00 0x100000 0x00 0x14000>;
+-	};
+-
+-	prcm {
+-		compatible = "allwinner,prcm";
+-		reg = <0x00 0x1f01400 0x00 0x400>;
+-	};
+-
+-	s_cpuscfg {
+-		compatible = "allwinner,s_cpuscfg";
+-		reg = <0x00 0x1f01c00 0x00 0x400>;
+-	};
+-
+-	ion {
+-		compatible = "allwinner,sunxi-ion";
+-
+-		heap_sys_user@0 {
+-			compatible = "allwinner,sys_user";
+-			heap-name = "sys_user";
+-			heap-id = <0>;
+-			heap-base = <0x00>;
+-			heap-size = <0>;
+-			heap-type = "ion_system";
+-		};
+-
+-		heap_cma@0 {
+-			compatible = "allwinner,cma";
+-			heap-name = "cma";
+-			heap-id = <4>;
+-			heap-base = <0x00>;
+-			heap-size = <0>;
+-			heap-type = "ion_cma";
+-		};
+-
+-		heap_secure@0 {
+-			compatible = "allwinner,secure";
+-			heap-name = "secure";
+-			heap-id = <6>;
+-			heap-base = <0x00>;
+-			heap-size = <0>;
+-			heap-type = "ion_secure";
+-		};
+-	};
+-
 -	dram: dram {
 -		compatible = "allwinner,dram";
 -		clocks = <&clk_pll_ddr0>;
@@ -6655,11 +6663,8 @@
 -		dram_mr16 = <0x00>;
 -		dram_mr17 = <0x00>;
 -		dram_mr22 = <0x00>;
-+	psci {
-+		compatible = "arm,psci-1.0";
-+		method = "smc";
- 	};
- 
+-	};
+-
 +	/* the factory's placeholder; U-Boot writes the size it finds */
  	memory@40000000 {
  		device_type = "memory";

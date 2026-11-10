@@ -508,3 +508,8 @@ Log paths in this table are under `build/logs/new-board/`.
 
 - The flat ceiling is the H616's: the Tanix TX1 V2.0 shows the same, 861 / 841 MB/s on one and four
   cores, and both run their factory boot0's DRAM settings. 4K reaches the screen only as AFBC.
+
+## 2026-11-09 — LED colours
+
+- The owner: blue while running, red asleep, off and booting. `power` (PH6) is blue, `standby` (PH7)
+  red: `color` added to both nodes.

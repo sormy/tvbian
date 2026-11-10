@@ -1738,6 +1738,7 @@
 		led-0 {
 			label = "power";
 			function = LED_FUNCTION_POWER;
+			color = <LED_COLOR_ID_BLUE>;
 			gpios = <&pio 7 6 GPIO_ACTIVE_LOW>;
 			default-state = "on";
 		};
@@ -1745,6 +1746,7 @@
 		led-1 {
 			label = "standby";
 			function = LED_FUNCTION_STANDBY;
+			color = <LED_COLOR_ID_RED>;
 			gpios = <&pio 7 7 GPIO_ACTIVE_HIGH>;
 			default-state = "off";
 		};
