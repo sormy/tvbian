@@ -17,7 +17,8 @@ supported board means the patch targets mainline's tree.
 4. **Every property is the factory's value**, or carries a comment saying why not. A value from a
    sibling's mainline tree is checked against the dump, line by line. One change per test boot,
    following the factory, never a third value.
-5. **Grafts known here**, starting from the closest board's patch:
+5. **Grafts known here**: the closest board's patch shows which nodes to touch, never their values;
+   each value is read from this board's factory tree, or is a question. Never apply its patch:
 
    | Graft                                       | Needed by                                      |
    | ------------------------------------------- | ---------------------------------------------- |
@@ -44,6 +45,8 @@ supported board means the patch targets mainline's tree.
   nothing; silence is not absence. No graft without a consumer.
 - **Nor the listing**: listings for one box disagree. A USB port's generation is its receptacle's
   lead count, nine for USB 3, and a SuperSpeed device's link speed.
+- **Kernel arguments live in `BOARD_CMDLINE`**, never in `/chosen/bootargs`: U-Boot replaces the
+  tree's with `extlinux.conf`'s, so an argument left there never reaches the kernel.
 - **Sizes come from the hardware, not the tree.** U-Boot writes the RAM it found into the memory
   node's `reg`, and nothing else: a factory `linux,usable-memory`, which the kernel prefers, caps
   every unit at the size it names. Drop it; the M20 carried one.
@@ -67,4 +70,6 @@ supported board means the patch targets mainline's tree.
 - [ ] **T6** `dtb.md` records every change, reverted ones too
 - [ ] **T7** The suspend setup is the best-measured candidate, the others in `dtb.md`
 - [ ] **T8** The booted memory node holds U-Boot's `reg` and no `linux,usable-memory`
+- [ ] **T9** No value in `board.patch` traces only to another board's tree
+- [ ] **T10** `/chosen` holds no `bootargs`
 - [ ] **T11** On sunxi, `bluetooth0` names the tree's Bluetooth node, where it has one

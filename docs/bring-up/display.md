@@ -32,6 +32,9 @@
 
 ## Bites
 
+- **Memory bandwidth can be the bottleneck**: every plane scans out of RAM each frame, beside the
+  decoder. Dropped frames that come with more planes or a larger mode are checked against the
+  board's Memory row first.
 - **Anything that looks off is a bug**: a missing mode, a wrong rate, a console font too big or too
   small. Known here: no 4K on Rockchip without the line-buffer graft; a 2K monitor's native mode
   pruned until a kernel patch; the console font set by the kernel config.

@@ -18,6 +18,9 @@ screen in a player, before any one stage is judged.
 
 ## Bites
 
+- **Memory bandwidth can be the bottleneck**: decode, scaling and scanout share one bus. A rate that
+  falls with resolution, or 8K that decodes but will not play, is checked against the board's Memory
+  row before the codec is blamed.
 - **Capability by doing.** A plane's formats are proven by `drmModeAddFB2WithModifiers` and a
   TEST_ONLY atomic commit, never a tool's listing: `modetest`'s list misdecodes here.
 

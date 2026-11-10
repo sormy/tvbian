@@ -36,3 +36,7 @@
 - [ ] **AIC8800 Bluetooth address as on sunxi.** The chip's eFuse first, then the Wi-Fi's own
       address plus one, wherever it came from; today a tree address beats the eFuse, and the
       fallback is the SoC serial's.
+
+- [ ] **8K in real time on the DDR3 boxes**: decode and display together at 8K, fps and dropped
+      frames, against an LPDDR3 box. The 8K line today is the engine alone; bandwidth is what DDR3
+      lacks.

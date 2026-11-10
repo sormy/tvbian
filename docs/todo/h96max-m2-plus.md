@@ -18,3 +18,7 @@ The board's open items.
       The DMC floor is 850 mV; the GPU bus wants up to 875 mV at 800 MHz. 900 mV read at idle.
 
 - [ ] **A few days of daily use**, each issue a worklog entry.
+- [ ] Drop the tree's `/chosen/bootargs`: U-Boot replaces it, so it never reaches the kernel. Its
+      `drm_kms_helper.fbdev_emulation=0` would blank the HDMI console and stays out;
+      `driver_async_probe=dwmmc_rockchip,rockchip-drm` joins `BOARD_CMDLINE` only if it saves boot
+      time.

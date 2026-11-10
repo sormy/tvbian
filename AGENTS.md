@@ -60,10 +60,11 @@ with `&label`s) · `rkdeveloptool` (`./build.sh tool rkdeveloptool`) and each bo
 same step · `amlcmd` and `gxlimg` (`./build.sh tool amlcmd`, `./build.sh tool gxlimg` — Amlogic's
 own are closed and x86-64 Linux only) · each board's `board.dtb` and `uboot.dts` from its factory
 trees (`./build.sh board-dtb <board>`, `./build.sh uboot-dtb <board>`) — or every board's boot files
-at once with `./build.sh boards`. **From the host:** `cc` and `patch` · `fdtput` · `fsck.ext4`
-(keg-only on Homebrew: `/opt/homebrew/opt/e2fsprogs/sbin/`) · `xz` · `npx prettier` · `python3` ·
-`mtools` and `mkimage`, for a board whose image carries a FAT boot partition. **On the box:**
-`evtest`, `fio`, `stress-ng`, `iw`, `bluez`.
+at once with `./build.sh boards`. **From the host:** a container runtime, on macOS Apple's native
+`container`, never Docker · `cc` and `patch` · `fdtput` · `fsck.ext4` (keg-only on Homebrew:
+`/opt/homebrew/opt/e2fsprogs/sbin/`) · `xz` · `npx prettier` · `python3` · `mtools` and `mkimage`,
+for a board whose image carries a FAT boot partition. **On the box:** `evtest`, `fio`, `stress-ng`,
+`iw`, `bluez`.
 
 **`e2tools`** (`./build.sh tool e2tools`) — edit a box's ext4 rootfs on an SD card or USB stick from
 a Mac, which cannot mount ext4; the stock one corrupts an image on delete.
@@ -190,9 +191,9 @@ cannot be backed, say so rather than rounding up.
   anything obvious or inferrable — if a competent reader can work it out, it does not go in.
 - **Simple to read**: the point first; short sentences, one idea each; plain words, a term the
   reader needs defined once; a list or a table for anything with parts.
-- **Every word earns its place.** Cut relentlessly: a sentence restating the one above it, a caveat
-  the command already enforces, an explanation of what the reader can see. Length is the symptom;
-  restatement is the disease.
+- **Prose value over prose amount: every word earns its place.** Cut relentlessly: a sentence
+  restating the one above it, a caveat the command already enforces, an explanation of what the
+  reader can see. Length is the symptom; restatement is the disease.
 - **One claim per line, backed by the command that shows it — not by your proof that you ran it.**
   "A full pass completes on a full-clock board", never "✅ proven on two boards, spot-verified".
   Dates and evidence belong in `worklog.md`.
@@ -257,6 +258,16 @@ name, path or claim it touches is left stale elsewhere in the repo.
 `$(…)` or `${…}`. A `-next` conf sources its base for the rest. Where a patch comes from is its
 directory's README, never its path.
 
+**All code is clean, readable and maintainable**, read top to bottom by a human. Settings first,
+named: paths, versions, URLs, limits. One step a line, each stage a named function; logic that needs
+decoding gets a name. No literal buried in a command. Shell runs steps; once a script parses,
+compares or builds data, that part is Python.
+
+**A board's tree is translated from its own factory tree, never copied from a sibling's.** Another
+board's `board.patch` shows which nodes need work, never their values: each value is read from this
+factory tree, or it is a question. A sibling's patch applied whole carries its rails, clocks, keys
+and OPPs onto hardware that does not have them.
+
 **U-Boot handles the SoC and vendor storage only**: it may set the SoC's Ethernet address and pass
 vendor-storage entries on; a radio's address belongs to that radio's driver.
 
@@ -291,6 +302,8 @@ higher one and record why.
 - **The first login asks for a new root password**: the image ships `1234`, expired. With a network,
   copy an SSH key into `/root/.ssh/authorized_keys` over serial once, and the rest of bring-up runs
   as `ssh root@<BOARD_HOSTNAME>.local`.
+- **Test everything unattended, and fast.** Synthetic EDIDs, emulators and writeback stand in for
+  screens and people; a suite fails fast and runs in minutes.
 - **Bring-up and fixes run unattended.** Exhaust the box's readback, the repo and `backup/` before
   asking a person to look, listen or plug in. Make the ask one step, and add the test it shows is
   missing. When the ask is timed, a person watching or acting soon after the agent starts something

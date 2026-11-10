@@ -32,8 +32,21 @@ below.
       depending on its `tvb-firmware-<chip>`; a board's `BOARD_DEPENDS` names it, and the kernel
       metapackage depends on the kernel alone.
 
+- [ ] **A remote's keymap named for the remote**, its maker and model, not the box it came with:
+      `rc-h96max` and `rc-tanix-tx1` today, in the kernel patches and the trees that select them.
+
+- [ ] **A vendor tree reaches mainline in a build step, not by hand**: factory blob → `dtcx`'s
+      readable tree → a table-driven translation to mainline's bindings → `board.patch` → the
+      board's tree. The patch alone is AI work, small, as on Rockchip's vendor-to-vendor boards; the
+      translation runs only where the target is mainline. Useful once the Tanix's and the H313's
+      patches shrink to their board-specific changes.
+
+- [ ] **Every script reads as `AGENTS.md` asks**: settings named at the top, one step a line, Python
+      where it parses. `extras/` already does.
+
 - [ ] **Front clock displays show the time**: the FD655 on the H96 Max RK3528, the TM1628 and kin on
       other boxes, which no board drives today.
+
 - [ ] **`ffmpeg9` quiet off Rockchip**: Rockchip's MPP library prints `can not found match soc name`
       at every start on an Allwinner or Amlogic box.
 

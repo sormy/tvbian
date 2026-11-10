@@ -7,8 +7,9 @@
    Station mode is the bar; access point and Wi-Fi Direct are the vendor's parity, each against the
    interface modes stock's `iw list` shows.
 3. Bluetooth: the controller up, a scan, the bundled remote paired.
-4. Every address read at its source. Ask the owner for the printed one, usually Ethernet's, or
-   Wi-Fi's on a box without; unattended, its check waits in the board's todo.
+4. Every address read at its source. The printed one, usually Ethernet's, or Wi-Fi's on a box
+   without, is read off its sticker's photo, `docs/<board>/label.*`: usually on the case, on some
+   boxes on the PCB; with no photo, ask, and the check waits in the board's todo.
 
 ## Bites
 

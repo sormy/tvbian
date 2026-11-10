@@ -36,7 +36,8 @@
 - [ ] **R2** 👤 A remote the keymap doc lacks: every button under `evtest`, over IR and over BLE
 - [ ] **R3** 👤 The remote cold-boots the box; each button registers or does its job; the recovery
       button reaches the service mode
-- [ ] **R4** Every `/dev/input/event*` has a name in `/dev/input`, from `base/input-names.rules`
+- [ ] **R4** Every on-board input — IR, CEC, a button — has a name in `/dev/input`, from
+      `base/input-names.rules`
 - [ ] **R5** A recovery button the kernel sees sends `KEY_VENDOR` on `/dev/input/recovery-button`; a
       FEL or maskrom button only the boot ROM reads is ➖
 - [ ] **E1** 👤 The LEDs on, off and asleep match the factory's

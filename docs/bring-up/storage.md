@@ -2,7 +2,11 @@
 
 ## Do
 
-1. `fio`, fixed so every board compares, in decimal MB/s:
+1. **Every MMC bus at stock's fastest mode**: eMMC HS200 then HS400, SD UHS, SDIO, with stock's
+   clock and tuning, read from its tree and boot log. Step up one mode a boot; keep the fastest that
+   holds `fio` with no CRC error. A slower mode kept goes in `dtb.md` with the error that stopped
+   the next.
+2. `fio`, fixed so every board compares, in decimal MB/s:
 
    ```sh
    fio --name=seq  --filename=<file> --rw=read|write         --bs=1M --size=1G   \
@@ -11,15 +15,13 @@
        --direct=1 --ioengine=libaio --iodepth=32 --numjobs=1 --runtime=30 --time_based
    ```
 
-2. The install cycle, in order: external media and `tvb-install`, or the service mode where the box
+3. The install cycle, in order: external media and `tvb-install`, or the service mode where the box
    boots none; the eMMC; the service mode on our U-Boot. A new family's also: a write over it, read
    back identical; a full write that boots shows the same, at more risk. Within a family the
    family's proof stands.
 
 ## Bites
 
-- **Mainline's eMMC defaults are not stock's**: read stock's boot log and runtime tree for the mode,
-  clock and tuning first.
 - **An intermittent storage fault needs a count, not a boot**: N boots under stress, errors per boot
   from the serial log. Stress the path that fails: a write hang is not found by a read stress.
 
@@ -39,3 +41,4 @@
 - [ ] **M8** 👤 The service mode enters on our U-Boot
 - [ ] **M9** A new family's: it loads the family's loader and reports the eMMC's true size
 - [ ] **M10** A new family's: over it, a write reads back identical, or a full write boots
+- [ ] **M11** Each MMC bus runs stock's fastest mode, or `dtb.md` names the error that stopped it

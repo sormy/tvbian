@@ -34,14 +34,17 @@ From loaders to an installed system, and how a running box is changed without lo
    The service-mode loader never depends on the board tree: a tree bug must not take the way in
    away.
 
+   Check the configured kernel drivers for enabled tree nodes and their clock, reset and regulator
+   providers before building the first image. A leaf driver alone does not complete its probe chain.
+
 3. **RAM before anything else**: `stress-ng --vm` over most of RAM on the first boot; `mtest` over
    every range first, optionally, where the service-mode U-Boot sizes every bank. A box that fails
    only under memory load has a RAM fault until shown otherwise.
 4. **Confirm the boot medium before writing it**: the selected connector must be present on the
    delivered box, and its bootloader must support that medium. A family sibling's connector is no
-   evidence for this board. **The first boot may come from RAM**, the safer route: the service mode
-   loads U-Boot, the tree and a boot script, and the kernel boots with nothing written. Or from an
-   SD card where there is a slot, or a USB stick, the eMMC untouched.
+   evidence for this board. **Use SD when a slot is available**, with the eMMC untouched. FEL is for
+   identification, backup and recovery; do not upload a kernel through FEL when SD is available.
+   Without SD, use a supported USB stick or a RAM boot through the service mode.
 5. **Network first**: a boot that comes up on Ethernet or Wi-Fi and takes `ssh`; the USB Ethernet
    adapter stands in until the board's own works (`r8152` is in every family's kernel).
 6. **Install** with `tvb-install` from external media, which keeps the eMMC's bootloader; a box that
@@ -68,8 +71,8 @@ From loaders to an installed system, and how a running box is changed without lo
   tree's marker line, or the run tested nothing. Bootstd ignores a FEL script and boots the disk.
 - **A build is not a boot test.** A first boot's risk is judged on the control tree, the factory
   tuning and the way back, against the closest sister's.
-- **A new tree's U-Boot is tested over the service mode** before it is written: there the SPL has
-  set nothing up for it.
+- **Test a new tree's U-Boot before installing it to eMMC**: use SD where available, otherwise the
+  service mode, whose SPL has set nothing up for it.
 
 ## Check
 
@@ -81,3 +84,5 @@ From loaders to an installed system, and how a running box is changed without lo
 - [ ] **O6** On Rockchip, the image's loaders at sectors 64 and 16384 are the board's
 - [ ] **O7** `/usr/lib/tvb/board.dtb` is identical to `boards/<board>/board.dtb`
 - [ ] **O8** Every firmware file is in its chip's or SoC's package, or the board's where it differs
+- [ ] **O9** Enabled tree nodes and their clock, reset and regulator providers have configured
+      drivers

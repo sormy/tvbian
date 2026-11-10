@@ -126,8 +126,8 @@ These hold in every phase.
 
 **Safety.** A working box is the expensive one to lose.
 
-- A tree or kernel change boots from RAM over the service mode first, or with a one-boot argument
-  typed at U-Boot's prompt, never written to the boot config.
+- A tree or kernel change boots from SD first where a slot is available. Otherwise use RAM over the
+  service mode or a one-boot argument typed at U-Boot's prompt, never written to the boot config.
 - A tree change only a driver off the boot path reads goes straight in, the known-good `board.dtb`
   kept where one copy over a network the change cannot touch restores it.
 - A second way in, USB Ethernet or serial, is plugged in before a kernel swap.
