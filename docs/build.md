@@ -52,6 +52,9 @@ do the tools they need: `./build.sh tool <name>` builds one from `tools/<name>/`
 ./build.sh test                         # host: tests/, in the build container
 ```
 
+An extra outranks Debian's package on a box by `tvb-base`'s apt pin on our repo, until the release
+plan retires it once Debian carries its patches.
+
 `./build.sh` alone lists every step and `TVB_BUILD_*` variable. A kernel's out-of-tree drivers,
 `modules/<name>.conf` naming it in `KERNELS`, build in its step into
 `tvb-<name>-modules-<kernelrelease>`; the metapackage depends on them. A local build is versioned

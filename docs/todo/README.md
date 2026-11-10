@@ -5,6 +5,10 @@ below.
 
 ## Open
 
+- [ ] **Our Mesa in the published repo**: `extras/mesa` is unreleased, so a box installing Mesa gets
+      Debian's, a third of Panfrost's on-screen speed at 2256×1504. Ours outranks Debian's by
+      version once published.
+
 - [ ] **Every board: the tree's `model` as `Box (Silkscreen Date)`**, in `board.patch` and
       `uboot.patch` alike, built from `BOARD_NAME`, `BOARD_PCB` and `BOARD_DATE`:
       `H96 Max 3518 (3518_ZX_V01 2025-08-18)`, not `H96 Max 3518 3518_ZX_V01`; the date left out
