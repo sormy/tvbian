@@ -143,3 +143,5 @@ CONFIG_SND_SOC_SUNXI_HDMI=y
 # the H616 EPHY, clocked from PWM5: built in, as the EMAC's reset needs its clock
 CONFIG_PWM_SUN20I=y
 CONFIG_XPOWERS_ACX00_PHY=y
+# the bring-up's lockup checks load it; nothing else does
+CONFIG_TEST_LOCKUP=m

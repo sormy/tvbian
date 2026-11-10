@@ -30,7 +30,7 @@ Test report marking each side by side; a number that differs between them is a f
   hard lockup detectors panic on it; the panic stops the pings, and the panic timeout or the
   watchdog resets the box. Its timeout outlasts a reboot cycle: shutdown, the loader and the boot up
   to systemd.
-- **A real hang is `lib/test_lockup.c`**, built out of tree: `disable_preempt=1`, `disable_irq=1`,
+- **A real hang is `modprobe test_lockup`**, the kernel's own: `disable_preempt=1`, `disable_irq=1`,
   `all_cpus=1`. The RCU stall timeout stays above the soft-lockup threshold.
 - **A panic must reboot the box**, and leave its record: `echo c > /proc/sysrq-trigger`, the box
   back on its own, the oops in `/sys/fs/pstore/`, archived by systemd to `/var/lib/systemd/pstore/`.

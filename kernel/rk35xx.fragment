@@ -39,3 +39,5 @@ CONFIG_CFG80211_CERTIFICATION_ONUS=y
 CONFIG_CFG80211_EXTRA_REGDB_KEYDIR="/repo/kernel/regdb-certs"
 # the AV jack's composite output, the R69's and the 3518's; a tree without the jack disables its TVE
 CONFIG_ROCKCHIP_DRM_TVE=y
+# the bring-up's lockup checks load it; nothing else does
+CONFIG_TEST_LOCKUP=m
