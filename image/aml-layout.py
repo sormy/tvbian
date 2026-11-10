@@ -18,6 +18,7 @@ are rewritten here, so the two agree from the first boot.
         size and offset stays. Without cache listed, U-Boot takes its own: 0 bytes, mask 0.
         cache's node is zeroed too, for anything reading it by name.
 """
+
 import gzip
 import struct
 import sys
@@ -61,7 +62,9 @@ def mpt(factory: bytes, emmc_bytes: int) -> bytes:
     entries = [factory[24 + i * ENTRY : 24 + (i + 1) * ENTRY] for i in range(count)]
     # the rules must reproduce this board's own table before they are trusted to write a new one
     if compose(factory, entries, emmc_bytes) != factory:
-        sys.exit("the factory MPT is not laid out by these rules - a different U-Boot, or a wrong eMMC size")
+        sys.exit(
+            "the factory MPT is not laid out by these rules - a different U-Boot, or a wrong eMMC size"
+        )
     by_name = {e[:16].split(b"\0")[0]: e for e in entries}
     kept = []
     for name in KEPT:
@@ -107,10 +110,14 @@ def single_boot(container: bytearray, base: int) -> None:
             sys.exit(f"DTB at {base}: no {'/'.join(path)}")
         return found[path]
 
-    data_phandle = container[slice(*(lambda o, n: (o, o + n))(*cell("partitions", "data", "phandle")))]
-    for path, value in ((("partitions", "parts"), struct.pack(">I", 1)),
-                        (("partitions", "part-0"), bytes(data_phandle)),
-                        (("partitions", "cache", "size"), bytes(8))):
+    data_phandle = container[
+        slice(*(lambda o, n: (o, o + n))(*cell("partitions", "data", "phandle")))
+    ]
+    for path, value in (
+        (("partitions", "parts"), struct.pack(">I", 1)),
+        (("partitions", "part-0"), bytes(data_phandle)),
+        (("partitions", "cache", "size"), bytes(8)),
+    ):
         off, length = cell(*path)
         if length != len(value):
             sys.exit(f"DTB at {base}: {'/'.join(path)} is {length} bytes, not {len(value)}")
@@ -128,7 +135,9 @@ def dtb_slot(multidtb: bytes) -> bytes:
         sys.exit("not an AML_ multi-DTB")
     count = struct.unpack("<I", container[8:12])[0]
     for i in range(count):
-        single_boot(container, struct.unpack("<I", container[12 + i * 56 + 48 : 12 + i * 56 + 52])[0])
+        single_boot(
+            container, struct.unpack("<I", container[12 + i * 56 + 48 : 12 + i * 56 + 52])[0]
+        )
     data = gzip.compress(bytes(container), mtime=0)
     if len(data) > SLOT - 16:
         sys.exit(f"the gzipped multi-DTB is {len(data)} bytes, past the {SLOT - 16}-byte slot")

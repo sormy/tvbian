@@ -40,6 +40,7 @@ Checks, each skipped where the box lacks what it needs:
     is recorded, as are the mappings the engine did and those left to the GPU.
 Exit 0 all passed, 1 a failure, 77 nothing to check.
 """
+
 import contextlib
 import ctypes
 import fcntl
@@ -63,51 +64,174 @@ def S(name, fields):
 
 
 ClientCap = S("ClientCap", [("capability", u64), ("value", u64)])
-CardRes = S("CardRes", [("fbs", u64), ("crtcs", u64), ("connectors", u64), ("encoders", u64),
-                         ("count_fbs", u32), ("count_crtcs", u32), ("count_connectors", u32),
-                         ("count_encoders", u32), ("min_w", u32), ("max_w", u32), ("min_h", u32),
-                         ("max_h", u32)])
-ModeInfo = S("ModeInfo", [("clock", u32), ("hdisplay", u16), ("hsync_start", u16), ("hsync_end", u16),
-                           ("htotal", u16), ("hskew", u16), ("vdisplay", u16), ("vsync_start", u16),
-                           ("vsync_end", u16), ("vtotal", u16), ("vscan", u16), ("vrefresh", u32),
-                           ("flags", u32), ("type", u32), ("name", ctypes.c_char * 32)])
-Crtc = S("Crtc", [("set_connectors", u64), ("count_connectors", u32), ("crtc_id", u32), ("fb_id", u32),
-                   ("x", u32), ("y", u32), ("gamma_size", u32), ("mode_valid", u32), ("mode", ModeInfo)])
-Connector = S("Connector", [("encoders", u64), ("modes", u64), ("props", u64), ("prop_values", u64),
-                             ("count_modes", u32), ("count_props", u32), ("count_encoders", u32),
-                             ("encoder_id", u32), ("connector_id", u32), ("connector_type", u32),
-                             ("connector_type_id", u32), ("connection", u32), ("mm_width", u32),
-                             ("mm_height", u32), ("subpixel", u32), ("pad", u32)])
+CardRes = S(
+    "CardRes",
+    [
+        ("fbs", u64),
+        ("crtcs", u64),
+        ("connectors", u64),
+        ("encoders", u64),
+        ("count_fbs", u32),
+        ("count_crtcs", u32),
+        ("count_connectors", u32),
+        ("count_encoders", u32),
+        ("min_w", u32),
+        ("max_w", u32),
+        ("min_h", u32),
+        ("max_h", u32),
+    ],
+)
+ModeInfo = S(
+    "ModeInfo",
+    [
+        ("clock", u32),
+        ("hdisplay", u16),
+        ("hsync_start", u16),
+        ("hsync_end", u16),
+        ("htotal", u16),
+        ("hskew", u16),
+        ("vdisplay", u16),
+        ("vsync_start", u16),
+        ("vsync_end", u16),
+        ("vtotal", u16),
+        ("vscan", u16),
+        ("vrefresh", u32),
+        ("flags", u32),
+        ("type", u32),
+        ("name", ctypes.c_char * 32),
+    ],
+)
+Crtc = S(
+    "Crtc",
+    [
+        ("set_connectors", u64),
+        ("count_connectors", u32),
+        ("crtc_id", u32),
+        ("fb_id", u32),
+        ("x", u32),
+        ("y", u32),
+        ("gamma_size", u32),
+        ("mode_valid", u32),
+        ("mode", ModeInfo),
+    ],
+)
+Connector = S(
+    "Connector",
+    [
+        ("encoders", u64),
+        ("modes", u64),
+        ("props", u64),
+        ("prop_values", u64),
+        ("count_modes", u32),
+        ("count_props", u32),
+        ("count_encoders", u32),
+        ("encoder_id", u32),
+        ("connector_id", u32),
+        ("connector_type", u32),
+        ("connector_type_id", u32),
+        ("connection", u32),
+        ("mm_width", u32),
+        ("mm_height", u32),
+        ("subpixel", u32),
+        ("pad", u32),
+    ],
+)
 PlaneRes = S("PlaneRes", [("planes", u64), ("count_planes", u32)])
-Plane = S("Plane", [("plane_id", u32), ("crtc_id", u32), ("fb_id", u32), ("possible_crtcs", u32),
-                     ("gamma_size", u32), ("count_format_types", u32), ("format_types", u64)])
-ObjProps = S("ObjProps", [("props", u64), ("values", u64), ("count_props", u32), ("obj_id", u32),
-                           ("obj_type", u32)])
-Property = S("Property", [("values", u64), ("enum_blobs", u64), ("prop_id", u32), ("flags", u32),
-                           ("name", ctypes.c_char * 32), ("count_values", u32), ("count_enum_blobs", u32)])
+Plane = S(
+    "Plane",
+    [
+        ("plane_id", u32),
+        ("crtc_id", u32),
+        ("fb_id", u32),
+        ("possible_crtcs", u32),
+        ("gamma_size", u32),
+        ("count_format_types", u32),
+        ("format_types", u64),
+    ],
+)
+ObjProps = S(
+    "ObjProps",
+    [("props", u64), ("values", u64), ("count_props", u32), ("obj_id", u32), ("obj_type", u32)],
+)
+Property = S(
+    "Property",
+    [
+        ("values", u64),
+        ("enum_blobs", u64),
+        ("prop_id", u32),
+        ("flags", u32),
+        ("name", ctypes.c_char * 32),
+        ("count_values", u32),
+        ("count_enum_blobs", u32),
+    ],
+)
 PropEnum = S("PropEnum", [("value", u64), ("name", ctypes.c_char * 32)])
 CreateBlob = S("CreateBlob", [("data", u64), ("length", u32), ("blob_id", u32)])
 GetBlob = S("GetBlob", [("blob_id", u32), ("length", u32), ("data", u64)])
 BlobId = S("BlobId", [("blob_id", u32)])
-CreateDumb = S("CreateDumb", [("height", u32), ("width", u32), ("bpp", u32), ("flags", u32),
-                               ("handle", u32), ("pitch", u32), ("size", u64)])
+CreateDumb = S(
+    "CreateDumb",
+    [
+        ("height", u32),
+        ("width", u32),
+        ("bpp", u32),
+        ("flags", u32),
+        ("handle", u32),
+        ("pitch", u32),
+        ("size", u64),
+    ],
+)
 MapDumb = S("MapDumb", [("handle", u32), ("pad", u32), ("offset", u64)])
-FbCmd2 = S("FbCmd2", [("fb_id", u32), ("width", u32), ("height", u32), ("pixel_format", u32),
-                       ("flags", u32), ("handles", u32 * 4), ("pitches", u32 * 4), ("offsets", u32 * 4),
-                       ("modifier", u64 * 4)])
-Atomic = S("Atomic", [("flags", u32), ("count_objs", u32), ("objs", u64), ("count_props", u64),
-                       ("props", u64), ("values", u64), ("reserved", u64), ("user_data", u64)])
+FbCmd2 = S(
+    "FbCmd2",
+    [
+        ("fb_id", u32),
+        ("width", u32),
+        ("height", u32),
+        ("pixel_format", u32),
+        ("flags", u32),
+        ("handles", u32 * 4),
+        ("pitches", u32 * 4),
+        ("offsets", u32 * 4),
+        ("modifier", u64 * 4),
+    ],
+)
+Atomic = S(
+    "Atomic",
+    [
+        ("flags", u32),
+        ("count_objs", u32),
+        ("objs", u64),
+        ("count_props", u64),
+        ("props", u64),
+        ("values", u64),
+        ("reserved", u64),
+        ("user_data", u64),
+    ],
+)
 
 
 def iowr(nr, struct_type):
     return (3 << 30) | (ctypes.sizeof(struct_type) << 16) | (ord("d") << 8) | nr
 
 
-IOCTL = {"cap": iowr(0x0D, ClientCap), "res": iowr(0xA0, CardRes), "crtc": iowr(0xA1, Crtc),
-         "connector": iowr(0xA7, Connector), "planes": iowr(0xB5, PlaneRes), "plane": iowr(0xB6, Plane),
-         "props": iowr(0xB9, ObjProps), "property": iowr(0xAA, Property), "blob": iowr(0xBD, CreateBlob),
-         "unblob": iowr(0xBE, BlobId), "getblob": iowr(0xAC, GetBlob), "dumb": iowr(0xB2, CreateDumb), "map": iowr(0xB3, MapDumb),
-         "addfb2": iowr(0xB8, FbCmd2), "atomic": iowr(0xBC, Atomic)}
+IOCTL = {
+    "cap": iowr(0x0D, ClientCap),
+    "res": iowr(0xA0, CardRes),
+    "crtc": iowr(0xA1, Crtc),
+    "connector": iowr(0xA7, Connector),
+    "planes": iowr(0xB5, PlaneRes),
+    "plane": iowr(0xB6, Plane),
+    "props": iowr(0xB9, ObjProps),
+    "property": iowr(0xAA, Property),
+    "blob": iowr(0xBD, CreateBlob),
+    "unblob": iowr(0xBE, BlobId),
+    "getblob": iowr(0xAC, GetBlob),
+    "dumb": iowr(0xB2, CreateDumb),
+    "map": iowr(0xB3, MapDumb),
+    "addfb2": iowr(0xB8, FbCmd2),
+    "atomic": iowr(0xBC, Atomic),
+}
 CAP_ATOMIC, CAP_WRITEBACK = 3, 5
 OBJ_CRTC, OBJ_CONNECTOR, OBJ_PLANE = 0xCCCCCCCC, 0xC0C0C0C0, 0xEEEEEEEE
 CONNECTOR_HDMIA, CONNECTOR_WRITEBACK = 11, 18
@@ -145,8 +269,16 @@ class Drm:
     def props(self, obj, kind):
         p = self.call("props", ObjProps(obj_id=obj, obj_type=kind))
         ids, values = self.ids(p.count_props), (u64 * max(p.count_props, 1))()
-        self.call("props", ObjProps(props=ctypes.addressof(ids), values=ctypes.addressof(values),
-                                    count_props=p.count_props, obj_id=obj, obj_type=kind))
+        self.call(
+            "props",
+            ObjProps(
+                props=ctypes.addressof(ids),
+                values=ctypes.addressof(values),
+                count_props=p.count_props,
+                obj_id=obj,
+                obj_type=kind,
+            ),
+        )
         result = {}
         for i in range(p.count_props):
             prop = self.call("property", Property(prop_id=ids[i]))
@@ -155,13 +287,21 @@ class Drm:
 
     def enum_value(self, prop, name):
         enums = (PropEnum * prop.count_enum_blobs)()
-        self.call("property", Property(prop_id=prop.prop_id, enum_blobs=ctypes.addressof(enums),
-                                       count_enum_blobs=prop.count_enum_blobs))
+        self.call(
+            "property",
+            Property(
+                prop_id=prop.prop_id,
+                enum_blobs=ctypes.addressof(enums),
+                count_enum_blobs=prop.count_enum_blobs,
+            ),
+        )
         return next(e.value for e in enums if e.name.decode() == name)
 
     def blob(self, data):
         buffer = ctypes.create_string_buffer(data, len(data))
-        return self.call("blob", CreateBlob(data=ctypes.addressof(buffer), length=len(data))).blob_id
+        return self.call(
+            "blob", CreateBlob(data=ctypes.addressof(buffer), length=len(data))
+        ).blob_id
 
     def unblob(self, blob_id):
         self.call("unblob", BlobId(blob_id=blob_id))
@@ -174,7 +314,10 @@ class Drm:
 
     def prop_range(self, prop):
         values = (u64 * 2)()
-        self.call("property", Property(prop_id=prop.prop_id, values=ctypes.addressof(values), count_values=2))
+        self.call(
+            "property",
+            Property(prop_id=prop.prop_id, values=ctypes.addressof(values), count_values=2),
+        )
         return values[0], values[1]
 
     def wait_flip(self, timeout=1.0):
@@ -191,9 +334,17 @@ class Drm:
         values = (u64 * len(flat))(*[v & (2**64 - 1) for _, v in flat])
         objarr = (u32 * len(objs))(*objs)
         try:
-            self.call("atomic", Atomic(flags=flags, count_objs=len(objs), objs=ctypes.addressof(objarr),
-                                       count_props=ctypes.addressof(counts), props=ctypes.addressof(props),
-                                       values=ctypes.addressof(values)))
+            self.call(
+                "atomic",
+                Atomic(
+                    flags=flags,
+                    count_objs=len(objs),
+                    objs=ctypes.addressof(objarr),
+                    count_props=ctypes.addressof(counts),
+                    props=ctypes.addressof(props),
+                    values=ctypes.addressof(values),
+                ),
+            )
             return 0
         except OSError as error:
             return error.errno
@@ -203,29 +354,36 @@ class Buffer:
     def __init__(self, drm, width, height, fourcc):
         yuv = fourcc in (NV12, P010)
         bpp = 16 if fourcc == P010 else 8 if fourcc == NV12 else 32
-        d = drm.call("dumb", CreateDumb(height=height * 3 // 2 if yuv else height, width=width, bpp=bpp))
+        d = drm.call(
+            "dumb", CreateDumb(height=height * 3 // 2 if yuv else height, width=width, bpp=bpp)
+        )
         self.width, self.height, self.pitch, self.format = width, height, d.pitch, fourcc
-        handles, pitches, offsets = [d.handle, d.handle if yuv else 0], [d.pitch, d.pitch if yuv else 0], \
-            [0, d.pitch * height if yuv else 0]
+        handles, pitches, offsets = (
+            [d.handle, d.handle if yuv else 0],
+            [d.pitch, d.pitch if yuv else 0],
+            [0, d.pitch * height if yuv else 0],
+        )
         cmd = FbCmd2(width=width, height=height, pixel_format=fourcc)
         for i in range(2):
             cmd.handles[i], cmd.pitches[i], cmd.offsets[i] = handles[i], pitches[i], offsets[i]
         self.fb = drm.call("addfb2", cmd).fb_id
         offset = drm.call("map", MapDumb(handle=d.handle)).offset
-        self.map = mmap.mmap(drm.fd, d.size, mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE, offset=offset)
+        self.map = mmap.mmap(
+            drm.fd, d.size, mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE, offset=offset
+        )
 
     def fill_rgb(self, rgb, alpha=255, rows=None):
         row = struct.pack("<I", alpha << 24 | rgb[0] << 16 | rgb[1] << 8 | rgb[2]) * self.width
         for y in rows or range(self.height):
-            self.map[y * self.pitch:y * self.pitch + len(row)] = row
+            self.map[y * self.pitch : y * self.pitch + len(row)] = row
 
     def fill_yuv(self, code):
         """The whole NV12 picture one 8-bit Y'CbCr code."""
         for y in range(self.height):
-            self.map[y * self.pitch:y * self.pitch + self.width] = bytes([code[0]]) * self.width
+            self.map[y * self.pitch : y * self.pitch + self.width] = bytes([code[0]]) * self.width
         for y in range(self.height // 2):
             row = (self.height + y) * self.pitch
-            self.map[row:row + self.width] = bytes([code[1], code[2]]) * (self.width // 2)
+            self.map[row : row + self.width] = bytes([code[1], code[2]]) * (self.width // 2)
 
     def fill_patches(self, codes, grid, side):
         """YUV codes, row-major over a grid of square patches; P010 codes are 10-bit."""
@@ -235,12 +393,14 @@ class Buffer:
             for y in range(side):
                 luma = b"".join(pack(codes[py * grid + px][0]) * side for px in range(grid))
                 row = py * side + y
-                self.map[row * self.pitch:row * self.pitch + len(luma)] = luma
+                self.map[row * self.pitch : row * self.pitch + len(luma)] = luma
             for y in range(side // 2):
-                chroma = b"".join((pack(codes[py * grid + px][1]) + pack(codes[py * grid + px][2])) * (side // 2)
-                                  for px in range(grid))
+                chroma = b"".join(
+                    (pack(codes[py * grid + px][1]) + pack(codes[py * grid + px][2])) * (side // 2)
+                    for px in range(grid)
+                )
                 row = self.height + py * side // 2 + y
-                self.map[row * self.pitch:row * self.pitch + len(chroma)] = chroma
+                self.map[row * self.pitch : row * self.pitch + len(chroma)] = chroma
 
     def pixel(self, x, y):
         """R'G'B' 8-bit; an NV12 capture, from a YCbCr output, read as BT.709 limited range."""
@@ -271,7 +431,7 @@ def hlg_eotf(e, peak=1000.0):
     e = [min(max(x, 0.0), 1.0) for x in e]
     lin = [x * x / 3 if x <= 0.5 else (math.exp((x - c) / a) + b) / 12 for x in e]
     luma = 0.2627 * lin[0] + 0.6780 * lin[1] + 0.0593 * lin[2]
-    gain = peak * luma ** 0.2 if luma > 0 else 0.0
+    gain = peak * luma**0.2 if luma > 0 else 0.0
     return [gain * x for x in lin]
 
 
@@ -285,8 +445,11 @@ def tone(nits, peak=1000.0, white=100.0):
 
 
 BT2020_TO_709 = ((1.6605, -0.5876, -0.0728), (-0.1246, 1.1329, -0.0083), (-0.0182, -0.1006, 1.1187))
-BT709_TO_2020 = ((0.627404, 0.329283, 0.043313), (0.069097, 0.919540, 0.011362),
-                 (0.016391, 0.088013, 0.895595))
+BT709_TO_2020 = (
+    (0.627404, 0.329283, 0.043313),
+    (0.069097, 0.919540, 0.011362),
+    (0.016391, 0.088013, 0.895595),
+)
 SDR_WHITE = 0.203  # of 1000 nits
 KR_KB = {709: (0.2126, 0.0722), 2020: (0.2627, 0.0593)}
 
@@ -307,8 +470,11 @@ def rgb_to_yuv(rgb, space):
     kr, kb = KR_KB[space]
     r, g, b = [min(max(c, 0.0), 1.0) for c in rgb]
     y = kr * r + (1 - kr - kb) * g + kb * b
-    return [(y * 876 + 64) / 1023, ((b - y) / (2 * (1 - kb)) * 896 + 512) / 1023,
-            ((r - y) / (2 * (1 - kr)) * 896 + 512) / 1023]
+    return [
+        (y * 876 + 64) / 1023,
+        ((b - y) / (2 * (1 - kb)) * 896 + 512) / 1023,
+        ((r - y) / (2 * (1 - kr)) * 896 + 512) / 1023,
+    ]
 
 
 def hdr10_to_sdr(v):
@@ -337,7 +503,7 @@ def hlg_oetf(e):
 
 def sdr_to_hdr(rgb, target):
     """BT.2408's SDR in HDR: gamma 2.2, BT.709 to BT.2020, white at 203 nits of PQ or of a 1000-nit HLG."""
-    lin = [SDR_WHITE * c for c in matrix(BT709_TO_2020, [c ** 2.2 for c in rgb])]
+    lin = [SDR_WHITE * c for c in matrix(BT709_TO_2020, [c**2.2 for c in rgb])]
     if target == "PQ":
         return [pq_oetf(c * 1000) for c in lin]
     luma = 0.2627 * lin[0] + 0.6780 * lin[1] + 0.0593 * lin[2]
@@ -349,24 +515,168 @@ def sdr_to_hdr(rgb, target):
 # The SDR inverse-gamma segments, as the engine takes them: 137 slopes, the input each segment
 # starts at, and the slope index each one changes at.
 RK_INV_GAMMA = (
-    0, 49, 223, 545, 1026, 1677, 2504, 3515, 4715, 6110, 7704, 3959, 4870, 5886, 7007, 3577, 4198, 4874,
-    5604, 6391, 7235, 8136, 4126, 4609, 5122, 5664, 6235, 6837, 7470, 8133, 4109, 4458, 4822, 5202, 5598,
-    6010, 6438, 6881, 7342, 7818, 3939, 4187, 4442, 4706, 4978, 5259, 5548, 5845, 6151, 6466, 6789, 7121,
-    7461, 7810, 8168, 4106, 4290, 4478, 4671, 4868, 5070, 5275, 5486, 5701, 5920, 6144, 6373, 6606, 6843,
-    7086, 7332, 7584, 7840, 8101, 4067, 4200, 4335, 4473, 4613, 4755, 4900, 5047, 5196, 5348, 5503, 5659,
-    5818, 5980, 6144, 6310, 6479, 6650, 6823, 6999, 7178, 7359, 7542, 7728, 7916, 8107, 4066, 4162, 4260,
-    4360, 4460, 4562, 4665, 4769, 4875, 4982, 5090, 5199, 5310, 5422, 5535, 5649, 5765, 5882, 6000, 6120,
-    6241, 6363, 6486, 6611, 6737, 6864, 6993, 7123, 7254, 7387, 7521, 7656, 7792, 7930, 8069, 4043, 4114, 0)
+    0,
+    49,
+    223,
+    545,
+    1026,
+    1677,
+    2504,
+    3515,
+    4715,
+    6110,
+    7704,
+    3959,
+    4870,
+    5886,
+    7007,
+    3577,
+    4198,
+    4874,
+    5604,
+    6391,
+    7235,
+    8136,
+    4126,
+    4609,
+    5122,
+    5664,
+    6235,
+    6837,
+    7470,
+    8133,
+    4109,
+    4458,
+    4822,
+    5202,
+    5598,
+    6010,
+    6438,
+    6881,
+    7342,
+    7818,
+    3939,
+    4187,
+    4442,
+    4706,
+    4978,
+    5259,
+    5548,
+    5845,
+    6151,
+    6466,
+    6789,
+    7121,
+    7461,
+    7810,
+    8168,
+    4106,
+    4290,
+    4478,
+    4671,
+    4868,
+    5070,
+    5275,
+    5486,
+    5701,
+    5920,
+    6144,
+    6373,
+    6606,
+    6843,
+    7086,
+    7332,
+    7584,
+    7840,
+    8101,
+    4067,
+    4200,
+    4335,
+    4473,
+    4613,
+    4755,
+    4900,
+    5047,
+    5196,
+    5348,
+    5503,
+    5659,
+    5818,
+    5980,
+    6144,
+    6310,
+    6479,
+    6650,
+    6823,
+    6999,
+    7178,
+    7359,
+    7542,
+    7728,
+    7916,
+    8107,
+    4066,
+    4162,
+    4260,
+    4360,
+    4460,
+    4562,
+    4665,
+    4769,
+    4875,
+    4982,
+    5090,
+    5199,
+    5310,
+    5422,
+    5535,
+    5649,
+    5765,
+    5882,
+    6000,
+    6120,
+    6241,
+    6363,
+    6486,
+    6611,
+    6737,
+    6864,
+    6993,
+    7123,
+    7254,
+    7387,
+    7521,
+    7656,
+    7792,
+    7930,
+    8069,
+    4043,
+    4114,
+    0,
+)
 RK_INV_GAMMA_START = (0, 81, 106, 155, 212, 285, 398, 543, 744, 1017, 1024, 0)
 RK_INV_GAMMA_CHANGE = (0, 11, 15, 22, 30, 40, 55, 74, 100, 135, 137, 0)
 # Per target: the SDR white's log scale and the engine's r and t terms, then sdr2hdr_ctrl (gating,
 # and bit 3 for an HLG output) and hdr_mode (SDR2HDR10_USERSPACE, SDR2HLG_USERSPACE).
-RK_TARGETS = {"PQ": (SDR_WHITE / 10, 1020, 0, 4913, 0x2, 100), "HLG": (SDR_WHITE, 850, -171, 4094, 0xA, 101)}
+RK_TARGETS = {
+    "PQ": (SDR_WHITE / 10, 1020, 0, 4913, 0x2, 100),
+    "HLG": (SDR_WHITE, 850, -171, 4094, 0xA, 101),
+}
 RK_HDRVIVID_EN = 0x203  # enable, gating, tone-scale bypass
 RK_HDR_EXTEND_SIZE = 12428
 RK_HDRVIVID_WORDS = 799
-RK_WORD = {"ctrl": 0, "fix": 1, "t_fix": 2, "csc": 3, "hdrvivid": 8, "inv_gamma": 365, "start": 434,
-           "change": 440, "smgain": 446, "hdr_mode": 510}
+RK_WORD = {
+    "ctrl": 0,
+    "fix": 1,
+    "t_fix": 2,
+    "csc": 3,
+    "hdrvivid": 8,
+    "inv_gamma": 365,
+    "start": 434,
+    "change": 440,
+    "smgain": 446,
+    "hdr_mode": 510,
+}
 
 
 def rk_sdr2hdr(target):
@@ -375,11 +685,19 @@ def rk_sdr2hdr(target):
     q13 = [round(c * 8192) for row in BT709_TO_2020 for c in row] + [0]
     s_fix = -round(math.log10(white) * scale)
     pairs = lambda v: [v[i] | v[i + 1] << 16 for i in range(0, len(v), 2)]
-    for name, words in (("ctrl", [ctrl]), ("fix", [s_fix & 0xFFF | (r_fix & 0xFFF) << 16]), ("t_fix", [t_fix]),
-                        ("csc", pairs(q13)), ("hdrvivid", [RK_HDRVIVID_EN]), ("inv_gamma", pairs(RK_INV_GAMMA)),
-                        ("start", pairs(RK_INV_GAMMA_START)), ("change", pairs(RK_INV_GAMMA_CHANGE)),
-                        ("smgain", [1024 | 1024 << 16] * 64), ("hdr_mode", [mode])):
-        regs[RK_WORD[name]:RK_WORD[name] + len(words)] = words
+    for name, words in (
+        ("ctrl", [ctrl]),
+        ("fix", [s_fix & 0xFFF | (r_fix & 0xFFF) << 16]),
+        ("t_fix", [t_fix]),
+        ("csc", pairs(q13)),
+        ("hdrvivid", [RK_HDRVIVID_EN]),
+        ("inv_gamma", pairs(RK_INV_GAMMA)),
+        ("start", pairs(RK_INV_GAMMA_START)),
+        ("change", pairs(RK_INV_GAMMA_CHANGE)),
+        ("smgain", [1024 | 1024 << 16] * 64),
+        ("hdr_mode", [mode]),
+    ):
+        regs[RK_WORD[name] : RK_WORD[name] + len(words)] = words
     data = struct.pack(f"<2I{RK_HDRVIVID_WORDS}I", 0, 4 * RK_HDRVIVID_WORDS, *regs)
     return data.ljust(RK_HDR_EXTEND_SIZE, b"\0")
 
@@ -387,7 +705,12 @@ def rk_sdr2hdr(target):
 def lattice(f):
     """17^3 nodes, the first component fastest, as 0..1 floats."""
     n = LUT_POINTS - 1
-    return [f([x / n, y / n, z / n]) for z in range(LUT_POINTS) for y in range(LUT_POINTS) for x in range(LUT_POINTS)]
+    return [
+        f([x / n, y / n, z / n])
+        for z in range(LUT_POINTS)
+        for y in range(LUT_POINTS)
+        for x in range(LUT_POINTS)
+    ]
 
 
 def quantized(nodes):
@@ -431,16 +754,29 @@ def edid_block(data):
 
 
 EOTF_SDR, EOTF_PQ, EOTF_HLG = 0, 2, 3
-SINKS = {"SDR": 1 << EOTF_SDR, "HDR10": 1 << EOTF_SDR | 1 << EOTF_PQ, "HLG": 1 << EOTF_SDR | 1 << EOTF_HLG,
-         "HDR10 and HLG": 1 << EOTF_SDR | 1 << EOTF_PQ | 1 << EOTF_HLG}
+SINKS = {
+    "SDR": 1 << EOTF_SDR,
+    "HDR10": 1 << EOTF_SDR | 1 << EOTF_PQ,
+    "HLG": 1 << EOTF_SDR | 1 << EOTF_HLG,
+    "HDR10 and HLG": 1 << EOTF_SDR | 1 << EOTF_PQ | 1 << EOTF_HLG,
+}
 
 
 # The rating's modes: name: (CTA VIC, width, height, refresh). 8K and 4K120 need HDMI 2.1, so a box on
 # HDMI 2.0 prunes them; 24 Hz is film's rate, 120 Hz frame-sequential 3D's and fast panels'.
-LADDER = {"8K60": (199, 7680, 4320, 60), "8K30": (196, 7680, 4320, 30), "4K120": (118, 3840, 2160, 120),
-          "4K60": (97, 3840, 2160, 60), "4K30": (95, 3840, 2160, 30), "4K24": (93, 3840, 2160, 24),
-          "1080p120": (63, 1920, 1080, 120), "1080p60": (16, 1920, 1080, 60), "1080p24": (32, 1920, 1080, 24),
-          "720p120": (47, 1280, 720, 120), "720p60": (4, 1280, 720, 60)}
+LADDER = {
+    "8K60": (199, 7680, 4320, 60),
+    "8K30": (196, 7680, 4320, 30),
+    "4K120": (118, 3840, 2160, 120),
+    "4K60": (97, 3840, 2160, 60),
+    "4K30": (95, 3840, 2160, 30),
+    "4K24": (93, 3840, 2160, 24),
+    "1080p120": (63, 1920, 1080, 120),
+    "1080p60": (16, 1920, 1080, 60),
+    "1080p24": (32, 1920, 1080, 24),
+    "720p120": (47, 1280, 720, 120),
+    "720p60": (4, 1280, 720, 60),
+}
 # Two verdicts from the same runs, each its rungs most demanding first: how large, and how fast.
 RESOLUTION_LADDER = ("8K60", "8K30", "4K60", "4K30", "4K24", "1080p60", "1080p24", "720p60")
 RATE_LADDER = ("4K120", "1080p120", "720p120", "4K60", "1080p60", "720p60")
@@ -451,10 +787,26 @@ DTD_1080P60 = (148500, 1920, 280, 88, 44, 1080, 45, 4, 5)
 
 def dtd(clock, ha, hb, hso, hsw, va, vb, vso, vsw):
     """An EDID detailed timing, 592x301 mm, digital separate sync, +H +V."""
-    return struct.pack("<H", clock // 10) + bytes([
-        ha & 255, hb & 255, ha >> 8 << 4 | hb >> 8, va & 255, vb & 255, va >> 8 << 4 | vb >> 8,
-        hso & 255, hsw & 255, (vso & 15) << 4 | vsw & 15, hso >> 8 << 6 | hsw >> 8 << 4 | vso >> 4 << 2 | vsw >> 4,
-        0x50, 0x2D, 0x21, 0x00, 0x00, 0x1E])
+    return struct.pack("<H", clock // 10) + bytes(
+        [
+            ha & 255,
+            hb & 255,
+            ha >> 8 << 4 | hb >> 8,
+            va & 255,
+            vb & 255,
+            va >> 8 << 4 | vb >> 8,
+            hso & 255,
+            hsw & 255,
+            (vso & 15) << 4 | vsw & 15,
+            hso >> 8 << 6 | hsw >> 8 << 4 | vso >> 4 << 2 | vsw >> 4,
+            0x50,
+            0x2D,
+            0x21,
+            0x00,
+            0x00,
+            0x1E,
+        ]
+    )
 
 
 def hdr_edid(eotfs=SINKS["HDR10 and HLG"], ladder=False):
@@ -463,19 +815,28 @@ def hdr_edid(eotfs=SINKS["HDR10 and HLG"], ladder=False):
     for an SDR screen."""
     base = b"\x00\xff\xff\xff\xff\xff\xff\x00" + struct.pack(">H", 20 << 10 | 22 << 5 | 2)  # TVB
     base += struct.pack("<HIBB", 1, 1, 1, 34) + bytes([1, 3, 0x80, 0x50, 0x2D, 0x78, 0x0A])
-    base += bytes([0x0D, 0xC9, 0xA0, 0x57, 0x47, 0x98, 0x27, 0x12, 0x48, 0x4C, 0, 0, 0]) + b"\x01\x01" * 8
+    base += (
+        bytes([0x0D, 0xC9, 0xA0, 0x57, 0x47, 0x98, 0x27, 0x12, 0x48, 0x4C, 0, 0, 0])
+        + b"\x01\x01" * 8
+    )
     base += dtd(*(DTD_4K60 if ladder else DTD_1080P60))
     base += b"\x00\x00\x00\xfc\x00" + b"TVB HDR test\n"
-    base += b"\x00\x00\x00\xfd\x00" + bytes([24, 75, 15, 140, 60 if ladder else 30, 0, 0x0A]) + b"\x20" * 6
+    base += (
+        b"\x00\x00\x00\xfd\x00"
+        + bytes([24, 75, 15, 140, 60 if ladder else 30, 0, 0x0A])
+        + b"\x20" * 6
+    )
     base += b"\x00\x00\x00\x10\x00" + b"\x00" * 13 + b"\x01"
     vics = [m[0] for m in LADDER.values()] if ladder else [16, 4]
     blocks = bytes([0x40 | len(vics)] + vics)
-    blocks += bytes([0x68, 0x03, 0x0C, 0x00, 0x10, 0x00, 0x30, 68 if ladder else 0x2D, 0x00])  # HDMI, 10/12-bit
+    blocks += bytes(
+        [0x68, 0x03, 0x0C, 0x00, 0x10, 0x00, 0x30, 68 if ladder else 0x2D, 0x00]
+    )  # HDMI, 10/12-bit
     if ladder:
-        blocks += bytes([0x67, 0xD8, 0x5D, 0xC4, 0x01, 120, 0x80, 0x00])          # HDMI 2.0: 600 MHz, SCDC
-    blocks += bytes([0xE3, 0x05, 0xC0, 0x00])                                    # BT.2020 RGB and YCC
+        blocks += bytes([0x67, 0xD8, 0x5D, 0xC4, 0x01, 120, 0x80, 0x00])  # HDMI 2.0: 600 MHz, SCDC
+    blocks += bytes([0xE3, 0x05, 0xC0, 0x00])  # BT.2020 RGB and YCC
     if eotfs & ~(1 << EOTF_SDR):
-        blocks += bytes([0xE6, 0x06, eotfs, 0x01, 0x78, 0x50, 0x00])             # HDR static, type 1
+        blocks += bytes([0xE6, 0x06, eotfs, 0x01, 0x78, 0x50, 0x00])  # HDR static, type 1
     ext = bytes([0x02, 0x03, 4 + len(blocks), 0x40]) + blocks
     return edid_block(base) + edid_block(ext + bytes(127 - len(ext)))
 
@@ -485,8 +846,12 @@ def hdr_sink(edid=None):
     """Gives the HDMI connector a synthetic screen: edid, or without one the HDR EDID wherever the
     screen lacks HDR or there is none, so the HDR cases run unattended. True while it stands in; the
     connector's own EDID and force state come back after."""
-    found = [(d, c) for d in glob.glob("/sys/kernel/debug/dri/*/HDMI-A-1")
-             for c in glob.glob("/sys/class/drm/card*-HDMI-A-1") if os.path.exists(f"{d}/edid_override")]
+    found = [
+        (d, c)
+        for d in glob.glob("/sys/kernel/debug/dri/*/HDMI-A-1")
+        for c in glob.glob("/sys/class/drm/card*-HDMI-A-1")
+        if os.path.exists(f"{d}/edid_override")
+    ]
     if not found:
         yield False
         return
@@ -496,7 +861,9 @@ def hdr_sink(edid=None):
             if status.read().strip() == "connected" and HDR_STATIC_METADATA_DB in own.read():
                 yield False
                 return
-        print("NOTE the HDMI screen lacks HDR, or there is none: a synthetic HDR10/HLG EDID stands in")
+        print(
+            "NOTE the HDMI screen lacks HDR, or there is none: a synthetic HDR10/HLG EDID stands in"
+        )
         edid = hdr_edid()
     with open(f"{debugfs}/force") as f:
         force = f.read().strip()
@@ -525,8 +892,11 @@ def settled_mode(timeout=10.0, steady=1.0):
         res = drm.call("res", CardRes())
         crtcs = drm.ids(res.count_crtcs)
         drm.call("res", CardRes(crtcs=ctypes.addressof(crtcs), count_crtcs=res.count_crtcs))
-        modes = [(c.mode.hdisplay, c.mode.vdisplay) for c in (drm.call("crtc", Crtc(crtc_id=i)) for i in crtcs)
-                 if c.mode_valid]
+        modes = [
+            (c.mode.hdisplay, c.mode.vdisplay)
+            for c in (drm.call("crtc", Crtc(crtc_id=i)) for i in crtcs)
+            if c.mode_valid
+        ]
         if modes != last:
             last, since = modes, time.monotonic()
         elif modes and time.monotonic() - since >= steady:
@@ -537,7 +907,9 @@ def settled_mode(timeout=10.0, steady=1.0):
 
 def kernel_log():
     """The kernel's warnings and worse, oldest first."""
-    result = subprocess.run(["dmesg", "--level=emerg,alert,crit,err,warn"], capture_output=True, text=True)
+    result = subprocess.run(
+        ["dmesg", "--level=emerg,alert,crit,err,warn"], capture_output=True, text=True
+    )
     return result.stdout.splitlines()
 
 
@@ -570,8 +942,15 @@ class Box:
             self.drm.call("cap", ClientCap(capability=cap, value=1))
         res = self.drm.call("res", CardRes())
         crtcs, connectors = self.drm.ids(res.count_crtcs), self.drm.ids(res.count_connectors)
-        self.drm.call("res", CardRes(crtcs=ctypes.addressof(crtcs), connectors=ctypes.addressof(connectors),
-                                     count_crtcs=res.count_crtcs, count_connectors=res.count_connectors))
+        self.drm.call(
+            "res",
+            CardRes(
+                crtcs=ctypes.addressof(crtcs),
+                connectors=ctypes.addressof(connectors),
+                count_crtcs=res.count_crtcs,
+                count_connectors=res.count_connectors,
+            ),
+        )
         self.crtc = self.index = None
         for i in range(res.count_crtcs):
             c = self.drm.call("crtc", Crtc(crtc_id=crtcs[i]))
@@ -596,13 +975,17 @@ class Box:
                     self.crtc = self.index = None
         pr = self.drm.call("planes", PlaneRes())
         ids = self.drm.ids(pr.count_planes)
-        self.drm.call("planes", PlaneRes(planes=ctypes.addressof(ids), count_planes=pr.count_planes))
+        self.drm.call(
+            "planes", PlaneRes(planes=ctypes.addressof(ids), count_planes=pr.count_planes)
+        )
         self.planes = []
         for i in range(pr.count_planes):
             p = self.drm.call("plane", Plane(plane_id=ids[i]))
             if self.crtc is not None and p.possible_crtcs & 1 << self.index:
                 self.planes.append(p.plane_id)
-        self.lut_planes = [p for p in self.planes if "SUNXI_CDC_LUT3D" in self.drm.props(p, OBJ_PLANE)]
+        self.lut_planes = [
+            p for p in self.planes if "SUNXI_CDC_LUT3D" in self.drm.props(p, OBJ_PLANE)
+        ]
         self.failures = self.passes = 0
         self.maps = set()
         self.synthetic_sink = False
@@ -629,28 +1012,45 @@ class Box:
     def compose(self, layers, capture=None, crtc=None, flags=ALLOW_MODESET):
         """layers: (plane, buffer, (x, y, w, h), {property: value or enum name}); every other plane off.
         A plane's EOTF goes back to SDR unless a layer sets it."""
-        changes = {p: {self.prop(p, OBJ_PLANE, "FB_ID"): 0, self.prop(p, OBJ_PLANE, "CRTC_ID"): 0}
-                   for p in self.planes if p not in [layer[0] for layer in layers]}
+        changes = {
+            p: {self.prop(p, OBJ_PLANE, "FB_ID"): 0, self.prop(p, OBJ_PLANE, "CRTC_ID"): 0}
+            for p in self.planes
+            if p not in [layer[0] for layer in layers]
+        }
         for plane, buffer, (x, y, w, h), extra in layers:
             props = self.drm.props(plane, OBJ_PLANE)
-            values = {"FB_ID": buffer.fb, "CRTC_ID": self.crtc, "SRC_X": 0, "SRC_Y": 0,
-                      "SRC_W": buffer.width << 16, "SRC_H": buffer.height << 16, "CRTC_X": x, "CRTC_Y": y,
-                      "CRTC_W": w, "CRTC_H": h}
+            values = {
+                "FB_ID": buffer.fb,
+                "CRTC_ID": self.crtc,
+                "SRC_X": 0,
+                "SRC_Y": 0,
+                "SRC_W": buffer.width << 16,
+                "SRC_H": buffer.height << 16,
+                "CRTC_X": x,
+                "CRTC_Y": y,
+                "CRTC_W": w,
+                "CRTC_H": h,
+            }
             if "EOTF" in props:
                 values["EOTF"] = 0
             values.update(extra)
             for name in OPTIONAL_PLANE_PROPS - set(props):
                 values.pop(name, None)
-            changes[plane] = {props[k][0]: self.drm.enum_value(props[k][2], v) if isinstance(v, str) else v
-                              for k, v in values.items()}
+            changes[plane] = {
+                props[k][0]: self.drm.enum_value(props[k][2], v) if isinstance(v, str) else v
+                for k, v in values.items()
+            }
         if crtc:
             changes[self.crtc] = {self.prop(self.crtc, OBJ_CRTC, k): v for k, v in crtc.items()}
         fence = ctypes.c_int32(-1)
         if capture:
-            changes[self.writeback] = {self.prop(self.writeback, OBJ_CONNECTOR, "CRTC_ID"): self.crtc,
-                                       self.prop(self.writeback, OBJ_CONNECTOR, "WRITEBACK_FB_ID"): capture.fb,
-                                       self.prop(self.writeback, OBJ_CONNECTOR, "WRITEBACK_OUT_FENCE_PTR"):
-                                           ctypes.addressof(fence)}
+            changes[self.writeback] = {
+                self.prop(self.writeback, OBJ_CONNECTOR, "CRTC_ID"): self.crtc,
+                self.prop(self.writeback, OBJ_CONNECTOR, "WRITEBACK_FB_ID"): capture.fb,
+                self.prop(
+                    self.writeback, OBJ_CONNECTOR, "WRITEBACK_OUT_FENCE_PTR"
+                ): ctypes.addressof(fence),
+            }
         error = self.drm.commit(changes, flags)
         if not error and capture:
             ready, _, _ = select.select([fence.value], [], [], 2)
@@ -661,42 +1061,75 @@ class Box:
     def plane_info(self, plane):
         p = self.drm.call("plane", Plane(plane_id=plane))
         fourccs = self.drm.ids(p.count_format_types)
-        self.drm.call("plane", Plane(plane_id=plane, count_format_types=p.count_format_types,
-                                     format_types=ctypes.addressof(fourccs)))
+        self.drm.call(
+            "plane",
+            Plane(
+                plane_id=plane,
+                count_format_types=p.count_format_types,
+                format_types=ctypes.addressof(fourccs),
+            ),
+        )
         props = self.drm.props(plane, OBJ_PLANE)
         modifiers = 0
         if "IN_FORMATS" in props and props["IN_FORMATS"][1]:
             blob = self.drm.getblob(props["IN_FORMATS"][1])
             modifiers = struct.unpack_from("<5I", blob)[3]
         zpos = self.drm.prop_range(props["zpos"][2]) if "zpos" in props else (0, 0)
-        return {"type": PLANE_TYPES.get(props["type"][1], "?"), "formats": list(fourccs[:p.count_format_types]),
-                "modifiers": modifiers, "zpos": zpos, "zpos_fixed": "zpos" in props and bool(
-                    props["zpos"][2].flags & PROP_IMMUTABLE), "alpha": "alpha" in props, "props": props}
+        return {
+            "type": PLANE_TYPES.get(props["type"][1], "?"),
+            "formats": list(fourccs[: p.count_format_types]),
+            "modifiers": modifiers,
+            "zpos": zpos,
+            "zpos_fixed": "zpos" in props and bool(props["zpos"][2].flags & PROP_IMMUTABLE),
+            "alpha": "alpha" in props,
+            "props": props,
+        }
 
     def planes_record(self):
         """H20: every plane the CRTC offers, and the video plane and interface plane the checks compose."""
         name = lambda f: struct.pack("<I", f).decode(errors="replace")
         info = {p: self.plane_info(p) for p in self.planes}
         for p, i in info.items():
-            print(f"PLANE {p} {i['type']} zpos {i['zpos'][0]}..{i['zpos'][1]}{' fixed' if i['zpos_fixed'] else ''} "
-                  f"alpha {'yes' if i['alpha'] else 'no'} modifiers {i['modifiers']} "
-                  f"formats {' '.join(name(f) for f in i['formats'])}")
+            print(
+                f"PLANE {p} {i['type']} zpos {i['zpos'][0]}..{i['zpos'][1]}{' fixed' if i['zpos_fixed'] else ''} "
+                f"alpha {'yes' if i['alpha'] else 'no'} modifiers {i['modifiers']} "
+                f"formats {' '.join(name(f) for f in i['formats'])}"
+            )
         video = [p for p, i in info.items() if NV12 in i["formats"]]
         if video:
             self.video_plane = video[0]
-            ui = [p for p, i in info.items() if p != self.video_plane and ARGB8888 in i["formats"]
-                  and i["zpos"][1] > info[self.video_plane]["zpos"][0]]
+            ui = [
+                p
+                for p, i in info.items()
+                if p != self.video_plane
+                and ARGB8888 in i["formats"]
+                and i["zpos"][1] > info[self.video_plane]["zpos"][0]
+            ]
             self.ui_plane = ui[0] if ui else None
-        self.check("planes: a YUV video plane and an interface plane above it", bool(self.video_plane and self.ui_plane),
-                   f"(video {self.video_plane}, interface {self.ui_plane})")
-        sub_windows = [n for p, n in plane_names().items() if p in self.planes and ESMART_SUB_WINDOW.fullmatch(n)]
-        self.check("planes: no Esmart sub-window, which reaches writeback but never HDMI", not sub_windows,
-                   f"({' '.join(sub_windows)})" if sub_windows else "")
+        self.check(
+            "planes: a YUV video plane and an interface plane above it",
+            bool(self.video_plane and self.ui_plane),
+            f"(video {self.video_plane}, interface {self.ui_plane})",
+        )
+        sub_windows = [
+            n
+            for p, n in plane_names().items()
+            if p in self.planes and ESMART_SUB_WINDOW.fullmatch(n)
+        ]
+        self.check(
+            "planes: no Esmart sub-window, which reaches writeback but never HDMI",
+            not sub_windows,
+            f"({' '.join(sub_windows)})" if sub_windows else "",
+        )
 
     def layer_zpos(self, plane, level):
         """A zpos that puts the plane at level (0 below, 1 above) where it can be set."""
         info = self.plane_info(plane)
-        return {} if info["zpos_fixed"] or "zpos" not in info["props"] else {"zpos": info["zpos"][0] + level}
+        return (
+            {}
+            if info["zpos_fixed"] or "zpos" not in info["props"]
+            else {"zpos": info["zpos"][0] + level}
+        )
 
     def capture_buffer(self):
         """A writeback target the engine takes: full size, or half where it scales its writeback; NV12
@@ -705,7 +1138,9 @@ class Box:
         for scale in (1, 2):
             for fourcc in (XRGB8888, ARGB8888, NV12):
                 capture = Buffer(self.drm, width // scale, height // scale, fourcc)
-                if not self.show(self.planes[0], Buffer(self.drm, width, height, XRGB8888), None, capture=capture):
+                if not self.show(
+                    self.planes[0], Buffer(self.drm, width, height, XRGB8888), None, capture=capture
+                ):
                     return capture
         return None
 
@@ -719,21 +1154,39 @@ class Box:
         ui = Buffer(self.drm, width, height, ARGB8888)
         ui.fill_rgb(ui_rgb, 255, range(height // 2))
         ui.fill_rgb((0, 0, 0), 0, range(height // 2, height))
-        layers = [(self.video_plane, video, (0, 0, width, height),
-                   dict(COLOR_ENCODING="ITU-R BT.709 YCbCr", COLOR_RANGE="YCbCr limited range",
-                        **self.layer_zpos(self.video_plane, 0), **(video_extra or {}))),
-                  (self.ui_plane, ui, (0, 0, width, height), self.layer_zpos(self.ui_plane, 1))]
+        layers = [
+            (
+                self.video_plane,
+                video,
+                (0, 0, width, height),
+                dict(
+                    COLOR_ENCODING="ITU-R BT.709 YCbCr",
+                    COLOR_RANGE="YCbCr limited range",
+                    **self.layer_zpos(self.video_plane, 0),
+                    **(video_extra or {}),
+                ),
+            ),
+            (self.ui_plane, ui, (0, 0, width, height), self.layer_zpos(self.ui_plane, 1)),
+        ]
         error = self.compose(layers, capture, crtc)
-        want = to8(yuv_to_rgb([(code[0] * 4) / 1023, (code[1] * 4) / 1023, (code[2] * 4) / 1023], 709))
+        want = to8(
+            yuv_to_rgb([(code[0] * 4) / 1023, (code[1] * 4) / 1023, (code[2] * 4) / 1023], 709)
+        )
         if error or not capture:
             return error, None, None, want
-        return 0, capture.pixel(capture.width // 2, capture.height // 4), \
-            capture.pixel(capture.width // 2, capture.height * 3 // 4), want
+        return (
+            0,
+            capture.pixel(capture.width // 2, capture.height // 4),
+            capture.pixel(capture.width // 2, capture.height * 3 // 4),
+            want,
+        )
 
     def compose_check(self):
         """H21: the engine composes the interface over the scaled video plane, alpha and all."""
         if not (self.video_plane and self.ui_plane) or not self.writeback:
-            print(f"SKIP compose: {'no writeback connector' if self.video_plane and self.ui_plane else 'no video and interface planes'}")
+            print(
+                f"SKIP compose: {'no writeback connector' if self.video_plane and self.ui_plane else 'no video and interface planes'}"
+            )
             return
         capture = self.capture_buffer()
         if not capture:
@@ -741,8 +1194,11 @@ class Box:
             return
         error, ui, video, want = self.video_and_interface(capture=capture)
         diff = lambda a, b: max(abs(x - y) for x, y in zip(a, b))
-        self.check("compose: interface over the scaled video plane", not error and diff(ui, (40, 200, 40)) <= TOLERANCE
-                   and diff(video, want) <= TOLERANCE, f"(errno {error}, interface {ui}, video {video} want {want})")
+        self.check(
+            "compose: interface over the scaled video plane",
+            not error and diff(ui, (40, 200, 40)) <= TOLERANCE and diff(video, want) <= TOLERANCE,
+            f"(errno {error}, interface {ui}, video {video} want {want})",
+        )
 
     def planes_all(self):
         """H16: every plane on the CRTC at once, each in its own cell at its own zpos, the YUV ones
@@ -754,9 +1210,18 @@ class Box:
         width, height = self.mode.hdisplay, self.mode.vdisplay
         cols = math.ceil(math.sqrt(len(self.planes)))
         cw, ch = width // cols, height // math.ceil(len(self.planes) / cols)
-        rgbs = [(200, 40, 40), (40, 200, 40), (40, 40, 200), (200, 200, 40), (200, 40, 200), (40, 200, 200)]
+        rgbs = [
+            (200, 40, 40),
+            (40, 200, 40),
+            (40, 40, 200),
+            (200, 200, 40),
+            (200, 40, 200),
+            (40, 200, 200),
+        ]
         codes = [(81, 90, 240), (145, 54, 34), (41, 240, 110), (170, 166, 16)]
-        sample = lambda x, y: capture.pixel(x * capture.width // width, y * capture.height // height)
+        sample = lambda x, y: capture.pixel(
+            x * capture.width // width, y * capture.height // height
+        )
         diff = lambda a, b: max(abs(x - y) for x, y in zip(a, b))
 
         def layer(plane, i, rect, scale):
@@ -769,37 +1234,59 @@ class Box:
                 buffer = Buffer(self.drm, rect[2] // scale & ~1, rect[3] // scale & ~1, NV12)
                 buffer.fill_yuv(code)
                 extra.update(COLOR_ENCODING="ITU-R BT.709 YCbCr", COLOR_RANGE="YCbCr limited range")
-                return (plane, buffer, rect, extra), to8(yuv_to_rgb([c * 4 / 1023 for c in code], 709))
+                return (plane, buffer, rect, extra), to8(
+                    yuv_to_rgb([c * 4 / 1023 for c in code], 709)
+                )
             fourcc = ARGB8888 if ARGB8888 in info["formats"] else XRGB8888
             buffer = Buffer(self.drm, rect[2], rect[3], fourcc)
             buffer.fill_rgb(rgbs[i % len(rgbs)])
             return (plane, buffer, rect, extra), rgbs[i % len(rgbs)]
 
-        cells = [((i % cols) * cw + 8, (i // cols) * ch + 8, cw - 16 & ~1, ch - 16 & ~1)
-                 for i in range(len(self.planes))]
-        layers, wants = zip(*(layer(p, i, rect, 2) for i, (p, rect) in enumerate(zip(self.planes, cells))))
+        cells = [
+            ((i % cols) * cw + 8, (i // cols) * ch + 8, cw - 16 & ~1, ch - 16 & ~1)
+            for i in range(len(self.planes))
+        ]
+        layers, wants = zip(
+            *(layer(p, i, rect, 2) for i, (p, rect) in enumerate(zip(self.planes, cells)))
+        )
         error = self.compose(list(layers), capture)
         seen = [sample(x + w // 2, y + h // 2) for x, y, w, h in cells] if not error else []
-        bad = [f"plane {layers[i][0]} {seen[i]} want {wants[i]}" for i in range(len(seen))
-               if diff(seen[i], wants[i]) > TOLERANCE]
-        self.check(f"planes-all: {len(self.planes)} planes at once, each in its cell", not error and not bad,
-                   f"(errno {error}{', ' + '; '.join(bad) if bad else ''})")
+        bad = [
+            f"plane {layers[i][0]} {seen[i]} want {wants[i]}"
+            for i in range(len(seen))
+            if diff(seen[i], wants[i]) > TOLERANCE
+        ]
+        self.check(
+            f"planes-all: {len(self.planes)} planes at once, each in its cell",
+            not error and not bad,
+            f"(errno {error}{', ' + '; '.join(bad) if bad else ''})",
+        )
 
         video = [p for p in self.planes if NV12 in self.plane_info(p)["formats"]]
         if len(video) < 2:
             print(f"SKIP planes-all: {len(video)} YUV plane, none to stack")
             return
-        (under, want_under), (over, want_over) = layer(video[0], 0, (0, 0, width, height), 4), \
-            layer(video[1], 1, (width // 4, height // 4, width // 2 & ~1, height // 2 & ~1), 2)
+        (under, want_under), (over, want_over) = layer(
+            video[0], 0, (0, 0, width, height), 4
+        ), layer(video[1], 1, (width // 4, height // 4, width // 2 & ~1, height // 2 & ~1), 2)
         error = self.compose([under, over], capture)
-        inner, outer = (sample(width // 2, height // 2), sample(width // 8, height // 8)) if not error else (None, None)
-        self.check("planes-all: a YUV plane over another", not error and diff(inner, want_over) <= TOLERANCE
-                   and diff(outer, want_under) <= TOLERANCE,
-                   f"(errno {error}, inner {inner} want {want_over}, outer {outer} want {want_under})")
+        inner, outer = (
+            (sample(width // 2, height // 2), sample(width // 8, height // 8))
+            if not error
+            else (None, None)
+        )
+        self.check(
+            "planes-all: a YUV plane over another",
+            not error
+            and diff(inner, want_over) <= TOLERANCE
+            and diff(outer, want_under) <= TOLERANCE,
+            f"(errno {error}, inner {inner} want {want_over}, outer {outer} want {want_under})",
+        )
 
     def pace(self, seconds, frame_size):
         """Nonblocking commits, each after the last flip event, as a player makes them: the video plane
-        full screen from frames of frame_size, the interface over it, an idle plane in every commit."""
+        full screen from frames of frame_size, the interface over it, an idle plane in every commit.
+        """
         width, height = self.mode.hdisplay, self.mode.vdisplay
         frames = [Buffer(self.drm, *frame_size, NV12) for _ in range(2)]
         for i, frame in enumerate(frames):
@@ -807,10 +1294,21 @@ class Box:
         ui = Buffer(self.drm, width, height, ARGB8888)
         ui.fill_rgb((40, 200, 40), 255, range(height // 2))
         ui.fill_rgb((0, 0, 0), 0, range(height // 2, height))
-        error = self.compose([(self.video_plane, frames[0], (0, 0, width, height),
-                               dict(COLOR_ENCODING="ITU-R BT.709 YCbCr", COLOR_RANGE="YCbCr limited range",
-                                    **self.layer_zpos(self.video_plane, 0))),
-                              (self.ui_plane, ui, (0, 0, width, height), self.layer_zpos(self.ui_plane, 1))])
+        error = self.compose(
+            [
+                (
+                    self.video_plane,
+                    frames[0],
+                    (0, 0, width, height),
+                    dict(
+                        COLOR_ENCODING="ITU-R BT.709 YCbCr",
+                        COLOR_RANGE="YCbCr limited range",
+                        **self.layer_zpos(self.video_plane, 0),
+                    ),
+                ),
+                (self.ui_plane, ui, (0, 0, width, height), self.layer_zpos(self.ui_plane, 1)),
+            ]
+        )
         fb = self.prop(self.video_plane, OBJ_PLANE, "FB_ID")
         idle = [p for p in self.planes if p not in (self.video_plane, self.ui_plane)][:1]
         commits = refused = failed = late = 0
@@ -818,7 +1316,10 @@ class Box:
         while not error and time.monotonic() < end:
             changes = {self.video_plane: {fb: frames[commits % 2].fb}}
             for p in idle:
-                changes[p] = {self.prop(p, OBJ_PLANE, "FB_ID"): 0, self.prop(p, OBJ_PLANE, "CRTC_ID"): 0}
+                changes[p] = {
+                    self.prop(p, OBJ_PLANE, "FB_ID"): 0,
+                    self.prop(p, OBJ_PLANE, "CRTC_ID"): 0,
+                }
             result = self.drm.commit(changes, NONBLOCK | PAGE_FLIP_EVENT)
             commits += 1
             if result == EBUSY:
@@ -828,8 +1329,14 @@ class Box:
                 failed += 1
             elif not self.drm.wait_flip():
                 late += 1
-        return {"error": error, "commits": commits, "rate": commits / seconds, "refused": refused,
-                "failed": failed, "late": late}
+        return {
+            "error": error,
+            "commits": commits,
+            "rate": commits / seconds,
+            "refused": refused,
+            "failed": failed,
+            "late": late,
+        }
 
     def pacing(self):
         """H23: a player's pace for a minute, the video at the mode's size."""
@@ -837,24 +1344,39 @@ class Box:
             print("SKIP pacing: no video and interface planes")
             return
         r = self.pace(PACING_SECONDS, (self.mode.hdisplay, self.mode.vdisplay))
-        self.check(f"pacing: {PACING_SECONDS} s of flip-paced nonblocking commits",
-                   not r["error"] and not r["refused"] and not r["failed"] and not r["late"],
-                   f"(errno {r['error']}, {r['commits']} commits, {r['rate']:.1f}/s, {r['refused']} refused, "
-                   f"{r['failed']} failed, {r['late']} without an event)")
+        self.check(
+            f"pacing: {PACING_SECONDS} s of flip-paced nonblocking commits",
+            not r["error"] and not r["refused"] and not r["failed"] and not r["late"],
+            f"(errno {r['error']}, {r['commits']} commits, {r['rate']:.1f}/s, {r['refused']} refused, "
+            f"{r['failed']} failed, {r['late']} without an event)",
+        )
 
     def connector_modes(self):
         c = self.drm.call("connector", Connector(connector_id=self.hdmi_connector))
         modes = (ModeInfo * max(c.count_modes, 1))()
-        self.drm.call("connector", Connector(connector_id=self.hdmi_connector, count_modes=c.count_modes,
-                                             modes=ctypes.addressof(modes)))
-        return list(modes[:c.count_modes])
+        self.drm.call(
+            "connector",
+            Connector(
+                connector_id=self.hdmi_connector,
+                count_modes=c.count_modes,
+                modes=ctypes.addressof(modes),
+            ),
+        )
+        return list(modes[: c.count_modes])
 
     def set_mode(self, mode):
         blob = self.drm.blob(bytes(mode))
-        error = self.drm.commit({self.crtc: {self.prop(self.crtc, OBJ_CRTC, "MODE_ID"): blob,
-                                             self.prop(self.crtc, OBJ_CRTC, "ACTIVE"): 1},
-                                 self.hdmi_connector: {self.prop(self.hdmi_connector, OBJ_CONNECTOR, "CRTC_ID"):
-                                                       self.crtc}})
+        error = self.drm.commit(
+            {
+                self.crtc: {
+                    self.prop(self.crtc, OBJ_CRTC, "MODE_ID"): blob,
+                    self.prop(self.crtc, OBJ_CRTC, "ACTIVE"): 1,
+                },
+                self.hdmi_connector: {
+                    self.prop(self.hdmi_connector, OBJ_CONNECTOR, "CRTC_ID"): self.crtc
+                },
+            }
+        )
         if not error:
             self.mode = mode
         return error
@@ -867,44 +1389,80 @@ class Box:
             print("SKIP rating: no HDMI connector, or no video and interface planes")
             return
         offered = self.connector_modes()
-        print("RECORD rating: offered " + " ".join(sorted({f"{m.hdisplay}x{m.vdisplay}@{m.vrefresh}" for m in offered})))
+        print(
+            "RECORD rating: offered "
+            + " ".join(sorted({f"{m.hdisplay}x{m.vdisplay}@{m.vrefresh}" for m in offered}))
+        )
         sustained = set()
         for name, (_, ha, va, hz) in LADDER.items():
-            mode = next((m for m in offered if (m.hdisplay, m.vdisplay, m.vrefresh) == (ha, va, hz)), None)
+            mode = next(
+                (m for m in offered if (m.hdisplay, m.vdisplay, m.vrefresh) == (ha, va, hz)), None
+            )
             if mode is None:
                 print(f"RECORD rating: {name} not offered: the driver pruned it")
                 continue
             log, counter = kernel_log(), underrun_count()
             error = self.set_mode(mode)
             time.sleep(0.5)
-            r = self.pace(RUNG_SECONDS, (min(ha, 3840), min(va, 2160))) if not error else {"error": error}
-            new = [line for line in kernel_log()[len(log):]]
-            glitches = [line for line in new if not NO_SCREEN_NOISE.search(line) and not OFF_PATH_NOISE.search(line)]
+            r = (
+                self.pace(RUNG_SECONDS, (min(ha, 3840), min(va, 2160)))
+                if not error
+                else {"error": error}
+            )
+            new = [line for line in kernel_log()[len(log) :]]
+            glitches = [
+                line
+                for line in new
+                if not NO_SCREEN_NOISE.search(line) and not OFF_PATH_NOISE.search(line)
+            ]
             underruns = None if counter is None else underrun_count() - counter
-            ok = not error and not r["error"] and not r["refused"] and not r["failed"] and not r["late"] \
-                and r["rate"] >= 0.95 * mode.vrefresh and not glitches and not underruns
-            detail = (f"errno {error}" if error else
-                      f"{r['commits']} commits, {r['rate']:.1f}/s of {mode.vrefresh}, {r['refused']} refused, "
-                      f"{r['late']} late, {'underruns unmeasured' if underruns is None else f'{underruns} underruns'}, "
-                      f"{len(glitches)} kernel lines")
-            verdict = "not sustained" if not ok else "kept pace, underruns unmeasured" if underruns is None else "sustained"
+            ok = (
+                not error
+                and not r["error"]
+                and not r["refused"]
+                and not r["failed"]
+                and not r["late"]
+                and r["rate"] >= 0.95 * mode.vrefresh
+                and not glitches
+                and not underruns
+            )
+            detail = (
+                f"errno {error}"
+                if error
+                else f"{r['commits']} commits, {r['rate']:.1f}/s of {mode.vrefresh}, {r['refused']} refused, "
+                f"{r['late']} late, {'underruns unmeasured' if underruns is None else f'{underruns} underruns'}, "
+                f"{len(glitches)} kernel lines"
+            )
+            verdict = (
+                "not sustained"
+                if not ok
+                else "kept pace, underruns unmeasured" if underruns is None else "sustained"
+            )
             print(f"RECORD rating: {name} {verdict} ({detail})")
             for line in sorted(set(re.sub(r"^\[[ 0-9.]+\] ", "", g) for g in glitches))[:3]:
                 print(f"  kernel: {line}")
             if len(new) > len(glitches):
-                print(f"  ({len(new) - len(glitches)} lines from the absent screen or off the display path, not counted)")
+                print(
+                    f"  ({len(new) - len(glitches)} lines from the absent screen or off the display path, not counted)"
+                )
             if ok:
                 sustained.add(name)
         size = next((n for n in RESOLUTION_LADDER if n in sustained), None)
         rate = next((n for n in RATE_LADDER if n in sustained), None)
-        unmeasured = " (underruns unmeasured: the driver reports none)" if underrun_count() is None else ""
+        unmeasured = (
+            " (underruns unmeasured: the driver reports none)" if underrun_count() is None else ""
+        )
         print(f"RATING display: largest {size or 'none'}, fastest {rate or 'none'}{unmeasured}")
-        self.check("rating: the display sustains a ladder mode", bool(sustained), f"({size}, {rate})")
+        self.check(
+            "rating: the display sustains a ladder mode", bool(sustained), f"({size}, {rate})"
+        )
 
     def scope(self):
         """H24: what each colour stage maps, the interface and an HDR video plane under it."""
         if not (self.video_plane and self.ui_plane) or not self.writeback:
-            print(f"SKIP scope: {'no writeback connector' if self.video_plane and self.ui_plane else 'no video and interface planes'}")
+            print(
+                f"SKIP scope: {'no writeback connector' if self.video_plane and self.ui_plane else 'no video and interface planes'}"
+            )
             return
         capture = self.capture_buffer()
         if not capture:
@@ -915,10 +1473,15 @@ class Box:
         if self.video_plane in self.lut_planes:
             nodes, data = quantized(lattice(lambda v: [1 - c for c in v]))
             blob = self.drm.blob(data)
-            error, ui, video, _ = self.video_and_interface({"SUNXI_CDC_LUT3D": blob}, capture=capture)
+            error, ui, video, _ = self.video_and_interface(
+                {"SUNXI_CDC_LUT3D": blob}, capture=capture
+            )
             per_plane = not error and diff(ui, ui0) <= TOLERANCE and diff(video, video0) > TOLERANCE
-            self.check("scope: SUNXI_CDC_LUT3D maps its plane alone", per_plane,
-                       f"(errno {error}, interface {ui0} -> {ui}, video {video0} -> {video})")
+            self.check(
+                "scope: SUNXI_CDC_LUT3D maps its plane alone",
+                per_plane,
+                f"(errno {error}, interface {ui0} -> {ui}, video {video0} -> {video})",
+            )
             self.drm.unblob(blob)
         if "HDR_EXT_DATA" in self.drm.props(self.crtc, OBJ_CRTC):
             blob = self.drm.blob(rk_sdr2hdr("PQ"))
@@ -927,19 +1490,30 @@ class Box:
             error, ui, hdr, _ = self.video_and_interface(tagged, {"HDR_EXT_DATA": blob}, capture)
             want = to8(sdr_to_hdr([c / 255 for c in (40, 200, 40)], "PQ"))
             mapped = not error and diff(ui, want) <= TOLERANCE
-            scope = "per plane, the PQ video plane passing" if diff(hdr, hdr0) <= TOLERANCE else "the whole output"
-            self.check(f"scope: HDR_EXT_DATA SDR to PQ maps the interface; scope {scope}", mapped,
-                       f"(errno {error}, interface {ui} want {want}, PQ video {hdr0} -> {hdr})")
+            scope = (
+                "per plane, the PQ video plane passing"
+                if diff(hdr, hdr0) <= TOLERANCE
+                else "the whole output"
+            )
+            self.check(
+                f"scope: HDR_EXT_DATA SDR to PQ maps the interface; scope {scope}",
+                mapped,
+                f"(errno {error}, interface {ui} want {want}, PQ video {hdr0} -> {hdr})",
+            )
             self.drm.unblob(blob)
-            self.compose([(self.video_plane, Buffer(self.drm, 64, 64, XRGB8888), (0, 0, 64, 64), {})],
-                         crtc={"HDR_EXT_DATA": 0})
+            self.compose(
+                [(self.video_plane, Buffer(self.drm, 64, 64, XRGB8888), (0, 0, 64, 64), {})],
+                crtc={"HDR_EXT_DATA": 0},
+            )
 
     def record_maps(self):
         """H25: the mappings the engine did, and those left to the GPU."""
         mappings = ("HDR10 to SDR", "HLG to SDR", "SDR to PQ", "SDR to HLG", "HLG to PQ")
         engine = [m for m in mappings if m in self.maps]
-        print(f"RECORD maps in the engine: {', '.join(engine) or 'none'}; "
-              f"to the GPU: {', '.join(m for m in mappings if m not in engine) or 'none'}")
+        print(
+            f"RECORD maps in the engine: {', '.join(engine) or 'none'}; "
+            f"to the GPU: {', '.join(m for m in mappings if m not in engine) or 'none'}"
+        )
 
     def lut(self):
         if not self.lut_planes or not self.writeback:
@@ -962,31 +1536,53 @@ class Box:
             signal = (105, 174, 49)
             rgb.fill_rgb(signal)
             centre = (width // 4, height // 4)
-            tables = [("identity", lambda v: v), ("channel mix", lambda v: [.4 * v[0] + .2 * v[1] + .1 * v[2],
-                       .1 * v[0] + .3 * v[1] + .4 * v[2], .2 * v[0] + .3 * v[1] + .1 * v[2]]),
-                      ("inversion, switched while active", lambda v: [1 - c for c in v])]
+            tables = [
+                ("identity", lambda v: v),
+                (
+                    "channel mix",
+                    lambda v: [
+                        0.4 * v[0] + 0.2 * v[1] + 0.1 * v[2],
+                        0.1 * v[0] + 0.3 * v[1] + 0.4 * v[2],
+                        0.2 * v[0] + 0.3 * v[1] + 0.1 * v[2],
+                    ],
+                ),
+                ("inversion, switched while active", lambda v: [1 - c for c in v]),
+            ]
             for name, f in tables:
                 nodes, data = quantized(lattice(f))
                 blob = self.drm.blob(data)
                 error = self.show(plane, rgb, blob, capture=capture)
                 want = to8(trilinear(nodes, [c / 255 for c in signal]))
                 got = capture.pixel(*centre) if not error else None
-                self.check(f"plane {plane}: RGB {name}", not error and max(abs(a - b) for a, b in zip(got, want)) <= TOLERANCE,
-                           f"got {got} want {want}")
+                self.check(
+                    f"plane {plane}: RGB {name}",
+                    not error and max(abs(a - b) for a, b in zip(got, want)) <= TOLERANCE,
+                    f"got {got} want {want}",
+                )
                 if name == "channel mix":
                     held = 0
                     for flip in range(60):
                         rgb.fill_rgb(signal)
                         self.show(plane, rgb, blob, capture=capture if flip % 10 == 9 else None)
-                        held += flip % 10 == 9 and max(abs(a - b) for a, b in zip(capture.pixel(*centre), want)) <= TOLERANCE
-                    self.check(f"plane {plane}: the table held across 60 flips", held == 6, f"({held} of 6 captures)")
+                        held += (
+                            flip % 10 == 9
+                            and max(abs(a - b) for a, b in zip(capture.pixel(*centre), want))
+                            <= TOLERANCE
+                        )
+                    self.check(
+                        f"plane {plane}: the table held across 60 flips",
+                        held == 6,
+                        f"({held} of 6 captures)",
+                    )
                 self.drm.unblob(blob)
 
             grid, side = 8, 64
-            cases = [("HDR10 to SDR", P010, 2020, hdr10_to_sdr, "ITU-R BT.709 YCbCr", 709),
-                     ("HLG to SDR", P010, 2020, hlg_to_sdr, "ITU-R BT.709 YCbCr", 709),
-                     ("SDR to PQ", NV12, 709, sdr_to_pq, "ITU-R BT.2020 YCbCr", 2020),
-                     ("HLG to PQ", P010, 2020, hlg_to_pq, "ITU-R BT.2020 YCbCr", 2020)]
+            cases = [
+                ("HDR10 to SDR", P010, 2020, hdr10_to_sdr, "ITU-R BT.709 YCbCr", 709),
+                ("HLG to SDR", P010, 2020, hlg_to_sdr, "ITU-R BT.709 YCbCr", 709),
+                ("SDR to PQ", NV12, 709, sdr_to_pq, "ITU-R BT.2020 YCbCr", 2020),
+                ("HLG to PQ", P010, 2020, hlg_to_pq, "ITU-R BT.2020 YCbCr", 2020),
+            ]
             seed = 12345
             for name, fourcc, _, f, encoding, out_space in cases:
                 depth = 1023 if fourcc == P010 else 255
@@ -997,13 +1593,20 @@ class Box:
                         codes.append(((16 + i * 219 // 15) * scale, 128 * scale, 128 * scale))
                     else:
                         seed = (seed * 1664525 + 1013904223) & 0xFFFFFFFF
-                        codes.append(((16 + (seed >> 8) % 220) * scale, (40 + (seed >> 12) % 177) * scale,
-                                      (40 + (seed >> 16) % 177) * scale))
+                        codes.append(
+                            (
+                                (16 + (seed >> 8) % 220) * scale,
+                                (40 + (seed >> 12) % 177) * scale,
+                                (40 + (seed >> 16) % 177) * scale,
+                            )
+                        )
                 picture = Buffer(self.drm, grid * side, grid * side, fourcc)
                 picture.fill_patches(codes, grid, side)
                 nodes, data = quantized(lattice(f))
                 blob = self.drm.blob(data)
-                error = self.show(plane, picture, blob, encoding, capture) or self.show(plane, picture, blob, encoding, capture)
+                error = self.show(plane, picture, blob, encoding, capture) or self.show(
+                    plane, picture, blob, encoding, capture
+                )
                 worst, total = 0, 0
                 for i, code in enumerate(codes):
                     x = (i % grid * side + side // 2) * height // (grid * side) // 2
@@ -1012,8 +1615,15 @@ class Box:
                     got = capture.pixel(x, y)
                     error_here = max(abs(a - b) for a, b in zip(got, want))
                     worst, total = max(worst, error_here), total + error_here
-                if self.check(f"plane {plane}: {name}, 64 patches", not error and worst <= TOLERANCE,
-                              f"max {worst} mean {total / len(codes):.2f}" if not error else f"(errno {error})"):
+                if self.check(
+                    f"plane {plane}: {name}, 64 patches",
+                    not error and worst <= TOLERANCE,
+                    (
+                        f"max {worst} mean {total / len(codes):.2f}"
+                        if not error
+                        else f"(errno {error})"
+                    ),
+                ):
                     self.maps.add(name)
                 self.drm.unblob(blob)
             self.show(plane, rgb, 0)
@@ -1034,28 +1644,46 @@ class Box:
         for target in RK_TARGETS:
             blob = self.drm.blob(rk_sdr2hdr(target))
             worst, error = 0, 0
-            for signal in ((64, 64, 64), (128, 128, 128), (255, 255, 255), (255, 0, 0), (0, 255, 0), (0, 0, 255),
-                           (105, 174, 49)):
+            for signal in (
+                (64, 64, 64),
+                (128, 128, 128),
+                (255, 255, 255),
+                (255, 0, 0),
+                (0, 255, 0),
+                (0, 0, 255),
+                (105, 174, 49),
+            ):
                 rgb.fill_rgb(signal)
-                error = error or self.show(plane, rgb, None, capture=capture, crtc={"HDR_EXT_DATA": blob})
+                error = error or self.show(
+                    plane, rgb, None, capture=capture, crtc={"HDR_EXT_DATA": blob}
+                )
                 want = to8(sdr_to_hdr([c / 255 for c in signal], target))
                 got = capture.pixel(width // 2, height // 2)
                 worst = max([worst] + [abs(a - b) for a, b in zip(got, want)])
-            if self.check(f"sdr2hdr: SDR to {target}, 7 colours", not error and worst <= TOLERANCE,
-                          f"max {worst}" if not error else f"(errno {error})"):
+            if self.check(
+                f"sdr2hdr: SDR to {target}, 7 colours",
+                not error and worst <= TOLERANCE,
+                f"max {worst}" if not error else f"(errno {error})",
+            ):
                 self.maps.add(f"SDR to {target}")
             self.drm.unblob(blob)
         self.show(plane, rgb, None, crtc={"HDR_EXT_DATA": 0})
 
     def hdmi_registers(self):
-        paths = glob.glob("/sys/kernel/debug/regmap/*.hdmi/registers") + \
-            glob.glob("/sys/kernel/debug/regmap/*.hdmi-tx/registers")
+        paths = glob.glob("/sys/kernel/debug/regmap/*.hdmi/registers") + glob.glob(
+            "/sys/kernel/debug/regmap/*.hdmi-tx/registers"
+        )
         if not paths:
             return None
         with open(paths[0]) as f:
-            regs = {int(address, 16): int(value, 16) for address, value in (line.split(":") for line in f)}
+            regs = {
+                int(address, 16): int(value, 16)
+                for address, value in (line.split(":") for line in f)
+            }
         addresses = sorted(regs)
-        stride = math.gcd(*(b - a for a, b in zip(addresses, addresses[1:]))) or 1  # 4 at reg-io-width 4
+        stride = (
+            math.gcd(*(b - a for a, b in zip(addresses, addresses[1:]))) or 1
+        )  # 4 at reg-io-width 4
         return {address // stride: value for address, value in regs.items()}
 
     def hdmi_signal(self, props, eotf, bpc):
@@ -1065,8 +1693,26 @@ class Box:
         if eotf is not None:
             # hdr_output_metadata: type 0, then the static type 1 block: EOTF, BT.2020 primaries, D65,
             # 1000 / 0.005 nits, MaxCLL 1000, MaxFALL 400.
-            blob = self.drm.blob(struct.pack("<I2B8H4H2x", 0, eotf, 0, 35400, 14600, 8500, 39850, 6550, 2300,
-                                             15635, 16450, 1000, 50, 1000, 400))
+            blob = self.drm.blob(
+                struct.pack(
+                    "<I2B8H4H2x",
+                    0,
+                    eotf,
+                    0,
+                    35400,
+                    14600,
+                    8500,
+                    39850,
+                    6550,
+                    2300,
+                    15635,
+                    16450,
+                    1000,
+                    50,
+                    1000,
+                    400,
+                )
+            )
         # BT.2020 as YCbCr, or as RGB where the output is RGB; a connector without Colorspace sends its own
         for space in ("Default",) if eotf is None else ("BT2020_YCC", "BT2020_RGB"):
             values = {props["HDR_OUTPUT_METADATA"][0]: blob, props["max bpc"][0]: bpc}
@@ -1079,7 +1725,9 @@ class Box:
         # as the output comes up: cycle it.
         if not error and self.synthetic_sink:
             active = self.prop(self.crtc, OBJ_CRTC, "ACTIVE")
-            error = self.drm.commit({self.crtc: {active: 0}}) or self.drm.commit({self.crtc: {active: 1}})
+            error = self.drm.commit({self.crtc: {active: 0}}) or self.drm.commit(
+                {self.crtc: {active: 1}}
+            )
         time.sleep(1)
         if blob:
             self.drm.unblob(blob)
@@ -1090,7 +1738,9 @@ class Box:
 
     def hdmi_props(self, case):
         if not self.hdmi_connector or self.hdmi_registers() is None:
-            print(f"SKIP {case}: no connected HDMI connector, or no dw-hdmi register map in debugfs")
+            print(
+                f"SKIP {case}: no connected HDMI connector, or no dw-hdmi register map in debugfs"
+            )
             return None
         props = self.drm.props(self.hdmi_connector, OBJ_CONNECTOR)
         if not all(k in props for k in ("HDR_OUTPUT_METADATA", "max bpc")):
@@ -1114,9 +1764,16 @@ class Box:
             for bpc in [b for b in (8, 10) if low <= b <= high]:
                 error, sent, fmt, ec = self.hdmi_signal(props, eotf, bpc)
                 # without Colorspace the colorimetry is the driver's: recorded, not judged
-                ok = not error and sent == eotf and ("Colorspace" not in props or (ec == 6) == (eotf is not None))
-                self.check(f"hdmi: {name}, max bpc {bpc}", ok,
-                           f"(errno {error}) DRM InfoFrame {'off' if sent is None else 'EOTF %d' % sent}, {fmt}, EC {ec}")
+                ok = (
+                    not error
+                    and sent == eotf
+                    and ("Colorspace" not in props or (ec == 6) == (eotf is not None))
+                )
+                self.check(
+                    f"hdmi: {name}, max bpc {bpc}",
+                    ok,
+                    f"(errno {error}) DRM InfoFrame {'off' if sent is None else 'EOTF %d' % sent}, {fmt}, EC {ec}",
+                )
         self.hdmi_sdr(props, bpc_before)
 
     def sinks(self, name, eotfs):
@@ -1127,17 +1784,24 @@ class Box:
         for eotf, signal in ((EOTF_PQ, "PQ"), (EOTF_HLG, "HLG")):
             error, sent, _, _ = self.hdmi_signal(props, eotf, 8)
             if eotfs >> eotf & 1:
-                self.check(f"sinks: a {name} screen takes {signal}", not error and sent == eotf,
-                           f"(errno {error}, DRM InfoFrame {'off' if sent is None else 'EOTF %d' % sent})")
+                self.check(
+                    f"sinks: a {name} screen takes {signal}",
+                    not error and sent == eotf,
+                    f"(errno {error}, DRM InfoFrame {'off' if sent is None else 'EOTF %d' % sent})",
+                )
             else:
-                print(f"RECORD sinks: a {name} screen, {signal} asked: errno {error}, DRM InfoFrame "
-                      f"{'off' if sent is None else 'EOTF %d' % sent}")
+                print(
+                    f"RECORD sinks: a {name} screen, {signal} asked: errno {error}, DRM InfoFrame "
+                    f"{'off' if sent is None else 'EOTF %d' % sent}"
+                )
         self.hdmi_sdr(props, 8)
 
     def hdr10plus(self):
         regs = self.hdmi_registers()
         if not self.hdmi_connector or regs is None:
-            print("SKIP hdr10plus: no connected HDMI connector, or no dw-hdmi register map in debugfs")
+            print(
+                "SKIP hdr10plus: no connected HDMI connector, or no dw-hdmi register map in debugfs"
+            )
             return
         props = self.drm.props(self.crtc, OBJ_CRTC)
         if "HDR10PLUS_VSIF" not in props:
@@ -1152,33 +1816,55 @@ class Box:
             regs = self.hdmi_registers()
             if not regs[0x10B3] & 0x08:
                 return None
-            return bytes([regs[0x1029], regs[0x1030], regs[0x1031]] + [regs[0x1032 + i] for i in range(24)]), regs[0x102A]
+            return (
+                bytes(
+                    [regs[0x1029], regs[0x1030], regs[0x1031]]
+                    + [regs[0x1032 + i] for i in range(24)]
+                ),
+                regs[0x102A],
+            )
 
-        for name, data in (("short", oui + bytes(23)), ("wrong OUI", bytes(3) + bytes(range(1, 25)))):
+        for name, data in (
+            ("short", oui + bytes(23)),
+            ("wrong OUI", bytes(3) + bytes(range(1, 25))),
+        ):
             blob = self.drm.blob(data)
             error = self.drm.commit({self.crtc: {prop: blob}}, TEST_ONLY)
             self.check(f"hdr10plus: a {name} payload refused", error == 22, f"(errno {error})")
             self.drm.unblob(blob)
-        for name, data in (("a payload", oui + bytes(range(1, 25))), ("a second payload", oui + bytes(range(64, 88))),
-                           ("none", None)):
+        for name, data in (
+            ("a payload", oui + bytes(range(1, 25))),
+            ("a second payload", oui + bytes(range(64, 88))),
+            ("none", None),
+        ):
             blob = self.drm.blob(data) if data else 0
             error = self.drm.commit({self.crtc: {prop: blob}}, 0)
             time.sleep(0.2)
             got = sent()
             # none: the slot goes back to HDMI's own VSIF, OUI 0x000c03
-            ok = not error and (got == (data, 27) if data else got is None or got[0][:3] == bytes((3, 12, 0)))
-            self.check(f"hdr10plus: {name} in place, no mode set", ok,
-                       f"(errno {error}, VSIF {'off' if got is None else got[0][:6].hex() + '..., size %d' % got[1]})")
+            ok = not error and (
+                got == (data, 27) if data else got is None or got[0][:3] == bytes((3, 12, 0))
+            )
+            self.check(
+                f"hdr10plus: {name} in place, no mode set",
+                ok,
+                f"(errno {error}, VSIF {'off' if got is None else got[0][:6].hex() + '..., size %d' % got[1]})",
+            )
             if blob:
                 self.drm.unblob(blob)
         data = oui + bytes(range(1, 25))
         blob = self.drm.blob(data)
         before = connector_props["max bpc"][1]
-        error = self.drm.commit({self.crtc: {prop: blob}, self.hdmi_connector: {bpc: 10 if before != 10 else 8}})
+        error = self.drm.commit(
+            {self.crtc: {prop: blob}, self.hdmi_connector: {bpc: 10 if before != 10 else 8}}
+        )
         time.sleep(1)
         got = sent()
-        self.check("hdr10plus: kept across a mode set", not error and got == (data, 27),
-                   f"(errno {error}, VSIF {'off' if got is None else 'sent'})")
+        self.check(
+            "hdr10plus: kept across a mode set",
+            not error and got == (data, 27),
+            f"(errno {error}, VSIF {'off' if got is None else 'sent'})",
+        )
         self.drm.commit({self.crtc: {prop: 0}, self.hdmi_connector: {bpc: before}})
         self.drm.unblob(blob)
 
@@ -1232,7 +1918,9 @@ def run(synthetic_sink):
     if box.crtc is None:
         print("SKIP: no active CRTC")
         return None
-    print(f"CRTC {box.crtc} {box.mode.hdisplay}x{box.mode.vdisplay}, LUT planes {box.lut_planes}, writeback {box.writeback}")
+    print(
+        f"CRTC {box.crtc} {box.mode.hdisplay}x{box.mode.vdisplay}, LUT planes {box.lut_planes}, writeback {box.writeback}"
+    )
     box.planes_record()
     box.compose_check()
     box.planes_all()

@@ -72,9 +72,9 @@ esac
         )
 
     def image(self) -> None:
-        (
-            self.root / "build/out/images/tvbian-example-trixie-2026-11-04.img.xz"
-        ).write_bytes(b"image fixture")
+        (self.root / "build/out/images/tvbian-example-trixie-2026-11-04.img.xz").write_bytes(
+            b"image fixture"
+        )
 
     def test_success_exposes_the_published_tag(self) -> None:
         self.image()

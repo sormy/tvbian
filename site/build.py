@@ -271,10 +271,7 @@ def box_table(
             continue
         fields = cells(line)
         if header is None:
-            names = [
-                field.strip().lower().replace("\\", "").replace("*", "")
-                for field in fields
-            ]
+            names = [field.strip().lower().replace("\\", "").replace("*", "") for field in fields]
             if "board" in names and "install" in names:
                 header = names
             continue
@@ -384,9 +381,7 @@ def load_cards(root: Path) -> list[Card]:
     known = {path.parent.name for path in (root / "boards").glob("*/board.conf")}
     missing = [board_id for board_id in by_id if board_id not in known]
     if missing:
-        die(
-            f"README names a board with no boards/<id>/board.conf: {', '.join(missing)}"
-        )
+        die(f"README names a board with no boards/<id>/board.conf: {', '.join(missing)}")
     cards: list[Card] = []
     order = [board_id for board_id, _ in rows]
     for board_id in order:
@@ -674,9 +669,7 @@ def linked_data(cards: list[Card]) -> str:
             "itemListElement": devices,
         },
     ]
-    return json.dumps(
-        {"@context": "https://schema.org", "@graph": graph}, ensure_ascii=True
-    )
+    return json.dumps({"@context": "https://schema.org", "@graph": graph}, ensure_ascii=True)
 
 
 def coffee_html(root: Path) -> str:
@@ -691,9 +684,7 @@ def coffee_html(root: Path) -> str:
     return f'<a class="coffee" href="{esc(url)}">Buy a coffee</a>'
 
 
-def write_site(
-    root: Path, release: Release, out: Path, stars: int | None = None
-) -> None:
+def write_site(root: Path, release: Release, out: Path, stars: int | None = None) -> None:
     cards = load_cards(root)
     if not any(image_for(card.id, release, card.previous) for card in cards):
         die(f"{release.tag}: no image downloads for the listed boards")
@@ -754,9 +745,7 @@ def main(argv: list[str]) -> None:
     else:
         release = fetch_release(args.tag)
     stars = fetch_stars() if not args.release_json else None
-    write_site(
-        args.root, release, args.out or args.root / "build" / "out" / "site", stars
-    )
+    write_site(args.root, release, args.out or args.root / "build" / "out" / "site", stars)
 
 
 if __name__ == "__main__":

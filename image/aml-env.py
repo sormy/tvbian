@@ -6,6 +6,7 @@
 The format is U-Boot's non-redundant env: a CRC32 of the rest, then NUL-terminated name=value
 pairs and a closing NUL, padded to the env size - the size of the factory file.
 """
+
 import struct
 import sys
 import zlib

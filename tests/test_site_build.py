@@ -70,9 +70,7 @@ class Parse(unittest.TestCase):
         sibling = build.image_for("h96max-3518d", release)
         assert sibling is not None
         self.assertEqual(sibling.name, image_name("h96max-3518d"))
-        renamed = build.parse_release(
-            release_json([image_name("r69"), image_name("r69-1")])
-        )
+        renamed = build.parse_release(release_json([image_name("r69"), image_name("r69-1")]))
         current = build.image_for("r69-1", renamed, "r69")
         assert current is not None
         self.assertEqual(current.name, image_name("r69-1"))
@@ -121,12 +119,10 @@ class Parse(unittest.TestCase):
             ("7", None),
             (None, None),
         ):
-            with self.subTest(count=count), patch(
-                "build.urllib.request.urlopen"
-            ) as request:
-                request.return_value.__enter__.return_value.read.return_value = (
-                    json.dumps({"stargazers_count": count}).encode()
-                )
+            with self.subTest(count=count), patch("build.urllib.request.urlopen") as request:
+                request.return_value.__enter__.return_value.read.return_value = json.dumps(
+                    {"stargazers_count": count}
+                ).encode()
                 self.assertEqual(build.fetch_stars(), expected)
 
     def test_stars_api_failure_is_optional(self) -> None:
@@ -296,7 +292,10 @@ class Discovery(unittest.TestCase):
         for conf, error in (
             ('BOARD_ALIAS_OF=missing\nBOARD_NAME="X"\n', "names no listed board"),
             ("BOARD_ALIAS_OF=new-box\n", "names no BOARD_NAME"),
-            ('BOARD_ALIAS_OF=new-box\nBOARD_NAME="Unlisted"\n', "lists no Unlisted under Brand New"),
+            (
+                'BOARD_ALIAS_OF=new-box\nBOARD_NAME="Unlisted"\n',
+                "lists no Unlisted under Brand New",
+            ),
         ):
             folder = self.alias(conf, "bad-alias")
             with self.assertRaisesRegex(SystemExit, error):
@@ -371,7 +370,9 @@ class Discovery(unittest.TestCase):
         empty = build.parse_release(release_json([]))
         self.assertIn('aria-label="Download"', build.card_html(card, self.release, []))
         unreleased = build.card_html(card, empty, [])
-        self.assertIn('aria-disabled="true" aria-label="Unreleased: wait for next Monday"', unreleased)
+        self.assertIn(
+            'aria-disabled="true" aria-label="Unreleased: wait for next Monday"', unreleased
+        )
         self.assertNotIn('aria-label="Download"', unreleased)
 
     def test_only_a_not_tested_card_asks_for_a_report(self) -> None:
@@ -469,9 +470,7 @@ def article(page: str, name: str) -> str:
 
 class Json(unittest.TestCase):
     def test_round_trip_types(self) -> None:
-        release = build.parse_release(
-            json.loads(json.dumps(release_json([image_name("r69-1")])))
-        )
+        release = build.parse_release(json.loads(json.dumps(release_json([image_name("r69-1")]))))
         self.assertEqual(release.tag, "2026-11-02")
         self.assertEqual(release.assets[0].name, image_name("r69-1"))
 

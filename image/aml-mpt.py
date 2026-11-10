@@ -5,6 +5,7 @@
 
 The MPT format is in aml-layout.py.
 """
+
 import struct
 import sys
 
