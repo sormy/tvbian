@@ -36,6 +36,10 @@ SCALE_FLOOR_DB = 30.0
 ENCODE_FLOOR_DB = 30.0
 SCALE_FROM = "3840x2160"
 SCALE_LINES = 1080
+AFBC_SIZES = ["1920x1080", "3840x2160"]
+TEN_BIT = {"h264p10", "hevc10", "vp9p2"}
+# the engine's deinterlacer is not bwdif: a floor that catches a broken field, not a different filter
+DEINTERLACE_FLOOR_DB = 25.0
 # frame rate: a FRAMES-long run and a longer one, differenced so setup cancels out; the longer one
 # grows until it outlasts the short one by FPS_SPAN seconds
 FPS_FRAMES = [12, 60]
@@ -48,6 +52,8 @@ X265 = ["-preset", "ultrafast", "-x265-params", "log-level=0"]
 VPX = ["-deadline", "realtime", "-cpu-used", "8", "-row-mt", "1"]
 CODECS = {
     "h264": ("mp4", ["-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "veryfast", "-bf", "2"], LADDER, True),
+    "h264i": ("mp4", ["-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "veryfast", "-flags", "+ildct+ilme",
+                      "-x264-params", "tff=1"], ["1920x1080"], True),
     "h264p10": ("mp4", ["-pix_fmt", "yuv420p10le", "-c:v", "libx264", "-profile:v", "high10", "-preset", "veryfast"], LADDER, True),
     "hevc": ("mp4", ["-pix_fmt", "yuv420p", "-c:v", "libx265"] + X265, LADDER, True),
     "hevc10": ("mp4", ["-pix_fmt", "yuv420p10le", "-c:v", "libx265"] + X265, LADDER, True),
@@ -70,6 +76,10 @@ ENGINES = {
                             "-hwaccel", "v4l2request", "-hwaccel_device", "v"],
         "download": "",
         "keep": ["-hwaccel_output_format", "drm_prime"],
+        "afbc": lambda c: ["-init_hw_device", f"v4l2request=v:,afbc={10 if c in TEN_BIT else 8}", "-hwaccel",
+                           "v4l2request", "-hwaccel_device", "v", "-hwaccel_output_format", "drm_prime"],
+        "afbc_formats": r"\b(AS12|AS01)\b",
+        "deinterlace": "deinterlace_v4l2m2m",
         "fallback": r"Failed setup for format|hwaccel initialisation returned error|Failed to get a hw",
         "irq": r"cedrus",
         "encoders": {"h264": "h264_v4l2m2m", "mjpeg": "mjpeg_v4l2m2m"},
@@ -290,6 +300,46 @@ def scale_case(ff, engine, codec, clip):
     return {"verdict": "pass" if ok else "broken", "out": out, "psnr_y": y}
 
 
+def afbc_case(ff, engine, codec, clip, ref):
+    """Frames asked in the decoder's AFBC format: they cannot be downloaded, so every frame decoded,
+    the AFBC capture format in the log and a quiet kernel."""
+    eng = ENGINES[engine]
+    if eng["decode"](codec) is None:
+        return {"verdict": "unoffered"}
+    before = dmesg_lines()
+    rc, log, _ = sh([ff, "-hide_banner", "-nostdin", "-v", "verbose"] + eng["afbc"](codec) +
+                    ["-i", clip, "-f", "null", "-"])
+    n, errs = frames_of(log), kernel_errors(before)
+    r = {"frames_hw": n, "frames_sw": len(ref), "kernel": errs[:3]}
+    if re.search(eng["fallback"], log):
+        r["verdict"] = "refused"
+    elif rc or n != len(ref) or errs:
+        r["verdict"] = "broken"
+    else:
+        r["verdict"] = "pass" if re.search(eng["afbc_formats"], log) else "linear"
+    return r
+
+
+def deinterlace_case(ff, engine, codec, clip):
+    """A frame per field from the engine's deinterlacer, against bwdif's frame per field."""
+    eng = ENGINES[engine]
+    before = dmesg_lines()
+    hw = f"[0:v]{eng['deinterlace']},hwdownload,format=nv12,format=yuv420p10le,setpts=N[a]"
+    sw = "[1:v]bwdif=mode=send_field,format=yuv420p10le,setpts=N[b]"
+    rc, out, _ = sh([ff, "-hide_banner", "-nostdin", "-v", "info"] + eng["decode"](codec) + eng["keep"] +
+                    ["-i", clip, "-i", clip, "-lavfi", f"{hw};{sw};[a][b]psnr=stats_file=-", "-f", "null", "-"])
+    ys = [float(dict(kv.split(":") for kv in line.split() if ":" in kv).get("psnr_y", "inf"))
+          for line in out.splitlines() if line.startswith("n:")]
+    errs = kernel_errors(before)
+    r = {"frames": len(ys), "fields": 2 * FRAMES, "psnr_y": min(ys) if ys else None, "kernel": errs[:3]}
+    if re.search(eng["fallback"], out):
+        r["verdict"] = "refused"
+    else:
+        r["verdict"] = "pass" if not rc and not errs and len(ys) >= 2 * FRAMES - 1 and \
+            min(ys) >= DEINTERLACE_FLOOR_DB else "broken"
+    return r
+
+
 def clip_size(clip):
     return re.search(r"-(\d+x\d+)\.", os.path.basename(clip)).group(1)
 
@@ -385,6 +435,17 @@ def cmd_box(args):
             ladder(runnable("decode", codec, sizes), lambda s: decode_case(ff, args.engine, codec, s, clip(s),
                                                 manifest[f"{codec}-{s}.{ext}"]["framemd5"]),
                    lambda rec: emit(dict(rec, suite="decode", codec=codec)), start("decode", codec))
+        eng = ENGINES[args.engine]
+        if "afbc" in args.suite and "afbc" in eng:
+            for size in runnable("afbc", codec, [s for s in sizes if s in AFBC_SIZES]):
+                start("afbc", codec)(size)
+                emit(dict(afbc_case(ff, args.engine, codec, clip(size), manifest[f"{codec}-{size}.{ext}"]["framemd5"]),
+                          suite="afbc", codec=codec, size=size))
+        if "deinterlace" in args.suite and "deinterlace" in eng and codec == "h264i":
+            for size in runnable("deinterlace", codec, sizes):
+                start("deinterlace", codec)(size)
+                emit(dict(deinterlace_case(ff, args.engine, codec, clip(size)), suite="deinterlace", codec=codec,
+                          size=size))
         if "scale" in args.suite and SCALE_FROM in sizes and runnable("scale", codec, [SCALE_FROM]):
             start("scale", codec)(SCALE_FROM)
             emit(dict(scale_case(ff, args.engine, codec, clip(SCALE_FROM)), suite="scale", codec=codec,
@@ -512,7 +573,7 @@ def useful_rate(c):
     return (c.get("fps") or 0) >= PLAYABLE_FPS
 
 
-MARK = {"pass": "✅", "full": "▢", "refused": "↷", "broken": "❌", "flaky": "⚠", "unoffered": "·", "hang": "💥", "software": "🖥",
+MARK = {"pass": "✅", "full": "▢", "linear": "▭", "refused": "↷", "broken": "❌", "flaky": "⚠", "unoffered": "·", "hang": "💥", "software": "🖥",
         "skipped": "⏭"}
 
 
@@ -520,7 +581,7 @@ def cmd_matrix(args):
     """Every case as a grid, one table a suite, to publish in a board's board.md."""
     head, cases = load(args.run)
     print(f"{head['kernel']}, {head['ffmpeg'].split(' Copyright')[0]}\n")
-    for suite in ("decode", "scale", "encode"):
+    for suite in ("decode", "scale", "encode", "afbc", "deinterlace"):
         rows = [c for c in cases if c["suite"] == suite]
         if not rows:
             continue
@@ -548,7 +609,7 @@ def cmd_compare(args):
     _, old = load(args.old)
     _, new = load(args.new)
     before = {key(c): c for c in old}
-    rank = {"pass": 3, "full": 2, "refused": 2, "unoffered": 1, "flaky": 1, "broken": 0, "hang": -1, "software": 1}
+    rank = {"pass": 3, "full": 2, "linear": 2, "refused": 2, "unoffered": 1, "flaky": 1, "broken": 0, "hang": -1, "software": 1}
     worse = []
     for c in new:
         o = before.get(key(c))
@@ -569,8 +630,8 @@ def main():
     for name in ("run", "box"):
         p = sub.add_parser(name)
         p.add_argument("--engine", choices=ENGINES, required=True)
-        p.add_argument("--ffmpeg", default="ffmpeg")
-        p.add_argument("--suite", default="decode,scale,encode")
+        p.add_argument("--ffmpeg", default="ffmpeg9")
+        p.add_argument("--suite", default="decode,scale,encode,afbc,deinterlace")
         p.add_argument("--only", help="a regex over <codec>-<size>")
         p.add_argument("--skip", help="a regex over <suite>:<codec>-<size>: cases known to hang, recorded, not run")
         if name == "run":

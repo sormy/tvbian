@@ -15,3 +15,5 @@
       panic or pstore record; 6.18's soft-lockup detector panics first and keeps the oops.
 - [ ] **H616 on 6.18: CEC reads no physical address** where 7.3 reads `1.0.0.0` from the same
       monitor.
+- [ ] **`screen.py` at 1080p and 4K whatever the panel**: an EDID override pins the mode, so the
+      on-screen GPU check reaches the framebuffer sizes the tiler bug needs.

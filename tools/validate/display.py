@@ -15,6 +15,8 @@ Checks, each skipped where the box lacks what it needs:
   - planes: every plane the CRTC offers, listed (type, zpos, alpha, modifiers, formats), a YUV
     video plane with an interface plane that can sit above it, and no Esmart sub-window;
   - compose: the interface over the scaled video plane, opaque and transparent, by writeback;
+  - planes-all: every plane at once, each in its own cell and zpos, the YUV ones scaled, then a YUV
+    plane over another, by writeback;
   - lut: a plane's SUNXI_CDC_LUT3D refuses malformed blobs, and tables (identity, a channel mix,
     an inversion switched while active, held across flips, then the tone mappings HDR10 to SDR,
     HLG to SDR, SDR to PQ and HLG to PQ on 64 YUV patches) come back by writeback within two 8-bit
@@ -742,6 +744,59 @@ class Box:
         self.check("compose: interface over the scaled video plane", not error and diff(ui, (40, 200, 40)) <= TOLERANCE
                    and diff(video, want) <= TOLERANCE, f"(errno {error}, interface {ui}, video {video} want {want})")
 
+    def planes_all(self):
+        """H16: every plane on the CRTC at once, each in its own cell at its own zpos, the YUV ones
+        scaled up; then a YUV plane over another, by writeback."""
+        capture = self.capture_buffer() if self.writeback else None
+        if not capture:
+            print("SKIP planes-all: no writeback capture at this mode")
+            return
+        width, height = self.mode.hdisplay, self.mode.vdisplay
+        cols = math.ceil(math.sqrt(len(self.planes)))
+        cw, ch = width // cols, height // math.ceil(len(self.planes) / cols)
+        rgbs = [(200, 40, 40), (40, 200, 40), (40, 40, 200), (200, 200, 40), (200, 40, 200), (40, 200, 200)]
+        codes = [(81, 90, 240), (145, 54, 34), (41, 240, 110), (170, 166, 16)]
+        sample = lambda x, y: capture.pixel(x * capture.width // width, y * capture.height // height)
+        diff = lambda a, b: max(abs(x - y) for x, y in zip(a, b))
+
+        def layer(plane, i, rect, scale):
+            info = self.plane_info(plane)
+            extra = {}
+            if not info["zpos_fixed"] and "zpos" in info["props"]:
+                extra["zpos"] = min(info["zpos"][1], info["zpos"][0] + i)
+            if NV12 in info["formats"]:
+                code = codes[i % len(codes)]
+                buffer = Buffer(self.drm, rect[2] // scale & ~1, rect[3] // scale & ~1, NV12)
+                buffer.fill_yuv(code)
+                extra.update(COLOR_ENCODING="ITU-R BT.709 YCbCr", COLOR_RANGE="YCbCr limited range")
+                return (plane, buffer, rect, extra), to8(yuv_to_rgb([c * 4 / 1023 for c in code], 709))
+            fourcc = ARGB8888 if ARGB8888 in info["formats"] else XRGB8888
+            buffer = Buffer(self.drm, rect[2], rect[3], fourcc)
+            buffer.fill_rgb(rgbs[i % len(rgbs)])
+            return (plane, buffer, rect, extra), rgbs[i % len(rgbs)]
+
+        cells = [((i % cols) * cw + 8, (i // cols) * ch + 8, cw - 16 & ~1, ch - 16 & ~1)
+                 for i in range(len(self.planes))]
+        layers, wants = zip(*(layer(p, i, rect, 2) for i, (p, rect) in enumerate(zip(self.planes, cells))))
+        error = self.compose(list(layers), capture)
+        seen = [sample(x + w // 2, y + h // 2) for x, y, w, h in cells] if not error else []
+        bad = [f"plane {layers[i][0]} {seen[i]} want {wants[i]}" for i in range(len(seen))
+               if diff(seen[i], wants[i]) > TOLERANCE]
+        self.check(f"planes-all: {len(self.planes)} planes at once, each in its cell", not error and not bad,
+                   f"(errno {error}{', ' + '; '.join(bad) if bad else ''})")
+
+        video = [p for p in self.planes if NV12 in self.plane_info(p)["formats"]]
+        if len(video) < 2:
+            print(f"SKIP planes-all: {len(video)} YUV plane, none to stack")
+            return
+        (under, want_under), (over, want_over) = layer(video[0], 0, (0, 0, width, height), 4), \
+            layer(video[1], 1, (width // 4, height // 4, width // 2 & ~1, height // 2 & ~1), 2)
+        error = self.compose([under, over], capture)
+        inner, outer = (sample(width // 2, height // 2), sample(width // 8, height // 8)) if not error else (None, None)
+        self.check("planes-all: a YUV plane over another", not error and diff(inner, want_over) <= TOLERANCE
+                   and diff(outer, want_under) <= TOLERANCE,
+                   f"(errno {error}, inner {inner} want {want_over}, outer {outer} want {want_under})")
+
     def pace(self, seconds, frame_size):
         """Nonblocking commits, each after the last flip event, as a player makes them: the video plane
         full screen from frames of frame_size, the interface over it, an idle plane in every commit."""
@@ -1180,6 +1235,7 @@ def run(synthetic_sink):
     print(f"CRTC {box.crtc} {box.mode.hdisplay}x{box.mode.vdisplay}, LUT planes {box.lut_planes}, writeback {box.writeback}")
     box.planes_record()
     box.compose_check()
+    box.planes_all()
     box.lut()
     box.sdr2hdr()
     box.scope()

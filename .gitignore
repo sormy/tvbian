@@ -18,3 +18,4 @@ __pycache__/
 /keyring/*.key
 # notes that can't be public: the owner's network and sessions
 *.local.md
+.ruff_cache

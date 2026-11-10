@@ -7,15 +7,25 @@ One script a component, each run from the host or on the box as its header says.
 | `validate.sh` | boot, watchdog, Wi-Fi, decode, audio: one regression pass                         |
 | `video.py`    | the hardware video matrix: decode, scale, encode                                  |
 | `display.py`  | the display: planes, composition, pacing, colour stages, HDMI HDR out, unattended |
+| `gpu.py`      | GLES conformance: dEQP against Mesa CI's expectations, from the host              |
+| `screen.py`   | the GPU's frames at the display's mode, by writeback, against llvmpipe's          |
+
+## Build the box tools
+
+The box needs `ffmpeg9`, the patched FFmpeg: `./build.sh extra ffmpeg9` on the host, then
+`apt install ./ffmpeg9_*.deb` on the box.
 
 ## video.py
 
 Every codec the box's video engine offers, at every size of a fixed ladder, decoded in hardware and
-compared with FFmpeg's software decoder; the decoder's own downscaling; each hardware encoder,
-decoded back. The same run is the hardware video tables, a board's measured matrix, and the
-regression check after a kernel or FFmpeg change.
+compared with FFmpeg's software decoder; the decoder's own downscaling; AFBC frames at 1080 lines
+and 4K, decoded clean in the decoder's AFBC format; the deinterlacer's frame per field against
+`bwdif`'s; each hardware encoder, decoded back. The same run is the hardware video tables, a board's
+measured matrix, and the regression check after a kernel or FFmpeg change.
 
 ### Run
+
+Each run uses a private directory under the box's `/var/tmp` and removes it on exit.
 
 All from the host, in the repo checkout. The clips, 3 frames each, come from the host's FFmpeg,
 which has the software encoders the boxes' builds lack; `build/validate/video/clips/manifest.json`
@@ -25,17 +35,17 @@ counts.
 
 ```sh
 python3 tools/validate/video.py clips
-python3 tools/validate/video.py run --box root@<box> --engine sunxi --ffmpeg /root/ffmpeg
+python3 tools/validate/video.py run --box root@<box> --engine sunxi
 python3 tools/validate/video.py report build/validate/video/<box>-<kernel>.json
 python3 tools/validate/video.py matrix build/validate/video/<box>-<kernel>.json
 python3 tools/validate/video.py compare <before>.json <after>.json
 ```
 
 `--engine` is `sunxi` (Cedrus through `v4l2request`), `rkmpp` (Rockchip's MPP) or `meson`
-(`meson_vdec` through `v4l2m2m`); `--ffmpeg` an FFmpeg built with `patches/ffmpeg/`. `--only` takes
-a regex over `<codec>-<size>`, `--suite` any of `decode,scale,encode`. `--skip` takes a regex over
-`<suite>:<codec>-<size>` for the cases known to hang a box its watchdog does not reset: recorded as
-skipped, never run, so the pass finishes.
+(`meson_vdec` through `v4l2m2m`); `--ffmpeg` the FFmpeg to run, `ffmpeg9` by default. `--only` takes
+a regex over `<codec>-<size>`, `--suite` any of `decode,scale,encode,afbc,deinterlace`. `--skip`
+takes a regex over `<suite>:<codec>-<size>` for the cases known to hang a box its watchdog does not
+reset: recorded as skipped, never run, so the pass finishes.
 
 `report` gives the largest passing size per codec, its frame rate, the largest that runs at 24 fps,
 and what failed past it; `matrix` the whole grid, the table a board's `board.md` publishes with its
@@ -46,6 +56,8 @@ kernel and date; `compare` lists every case that got worse and exits 1 if any di
 - **Planes:** every plane listed; a YUV video plane and an interface plane that can sit above it.
 - **Compose:** the interface, opaque over the top half and transparent below, over a scaled video
   plane, by writeback.
+- **Planes at once:** every plane in its own cell at its own zpos, the YUV ones scaled, then a YUV
+  plane over another, by writeback.
 - **LUT:** malformed blobs refused; tables applied while active and held over 60 flips; HDR10 to
   SDR, HLG to SDR, SDR to PQ and HLG to PQ on 64 YUV patches, within two 8-bit codes of the same
   table on the host. It checks that the hardware applies a table, not how good the table is.
