@@ -1,0 +1,1829 @@
+/dts-v1/;
+
+/* dt-bindings from torvalds/linux v6.18 (7d0a66e4bb9081d75c82ec4957c50034cb0ea449), include/ */
+#include <dt-bindings/clock/sun50i-h616-ccu.h>
+#include <dt-bindings/clock/sun50i-h6-r-ccu.h>
+#include <dt-bindings/clock/sun6i-rtc.h>
+#include <dt-bindings/clock/sun8i-de2.h>
+#include <dt-bindings/clock/sun8i-tcon-top.h>
+#include <dt-bindings/reset/sun50i-h616-ccu.h>
+#include <dt-bindings/reset/sun50i-h6-r-ccu.h>
+#include <dt-bindings/reset/sun8i-de2.h>
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/interrupt-controller/arm-gic.h>
+#include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/input/linux-event-codes.h>
+#include <dt-bindings/leds/common.h>
+#include <dt-bindings/thermal/thermal.h>
+
+/* the vendor's secure OS window; mainline's TF-A reserves its own at 0x40000000 (reserved-memory) */
+/ {
+	/* wakeupgen is the vendor kernel's GIC proxy; mainline routes straight to the GIC */
+	interrupt-parent = <&gic>;
+	#address-cells = <2>;
+	#size-cells = <2>;
+	/* the factory model is the SoC's codename; the board's name, as on the other boards */
+	model = "H96 Max H313 (BA979_627_V1.0)";
+	/* board name first, as on the other boards; mainline's SoC compatible last, which
+	   sun50i-cpufreq-nvmem keys on */
+	compatible = "h96max-h313,h313-tvbox", "allwinner,sun50i-h616";
+
+	/* mainline's SoC bus: one address cell, as every mainline H616 node is written */
+	soc: soc {
+		compatible = "simple-bus";
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges = <0x0 0x0 0x0 0x40000000>;
+		linux,phandle = <0x102>;
+		phandle = <0x102>;
+
+		/* the factory's di, on mainline's DI300 binding, as LibreELEC's */
+		deinterlace@1420000 {
+			compatible = "allwinner,sun50i-h616-deinterlace";
+			reg = <0x01420000 0x40000>;
+			clocks = <&ccu CLK_BUS_DEINTERLACE>, <&ccu CLK_DEINTERLACE>;
+			clock-names = "bus", "mod";
+			resets = <&ccu RST_BUS_DEINTERLACE>;
+			interrupts = <GIC_SPI 89 IRQ_TYPE_LEVEL_HIGH>;
+			iommus = <&iommu 1>;
+		};
+
+		/* the factory's ve@01c0e000: Cedrus, on the H6's variant */
+		video-codec@1c0e000 {
+			compatible = "allwinner,sun50i-h616-video-engine";
+			reg = <0x01c0e000 0x2000>;
+			clocks = <&ccu CLK_BUS_VE>, <&ccu CLK_VE>, <&ccu CLK_MBUS_VE>;
+			clock-names = "ahb", "mod", "ram";
+			resets = <&ccu RST_BUS_VE>;
+			interrupts = <GIC_SPI 93 IRQ_TYPE_LEVEL_HIGH>;
+			allwinner,sram = <&ve_sram 1>;
+			/* its buffers through the IOMMU, as the factory's: 4K frames outgrow the CMA pool */
+			iommus = <&iommu 3>;
+		};
+
+		/* mainline's SoC infrastructure, as its sun50i-h616.dtsi writes it: the factory describes
+		   clocks as nodes and runs its own interrupt and memory drivers, none of which mainline has */
+		syscon: syscon@3000000 {
+			compatible = "allwinner,sun50i-h616-system-control";
+			reg = <0x03000000 0x1000>;
+			#address-cells = <1>;
+			#size-cells = <1>;
+			ranges;
+
+			sram_c: sram@28000 {
+				compatible = "mmio-sram";
+				reg = <0x00028000 0x30000>;
+				#address-cells = <1>;
+				#size-cells = <1>;
+				ranges = <0 0x00028000 0x30000>;
+
+				de3_sram: sram-section@0 {
+					compatible = "allwinner,sun50i-h616-sram-c",
+						     "allwinner,sun50i-a64-sram-c";
+					reg = <0x0000 0x1e000>;
+				};
+			};
+
+			sram_c1: sram@1a00000 {
+				compatible = "mmio-sram";
+				reg = <0x01a00000 0x200000>;
+				#address-cells = <1>;
+				#size-cells = <1>;
+				ranges = <0 0x01a00000 0x200000>;
+
+				ve_sram: sram-section@0 {
+					/* 6.18's name, then 7.2's */
+					compatible = "allwinner,sun50i-h616-sram-c1",
+						     "allwinner,sun50i-h616-ve-sram";
+					reg = <0x000000 0x200000>;
+				};
+			};
+		};
+
+		ccu: clock@3001000 {
+			compatible = "allwinner,sun50i-h616-ccu";
+			reg = <0x03001000 0x1000>;
+			clocks = <&osc24M>, <&rtc CLK_OSC32K>, <&rtc CLK_IOSC>;
+			clock-names = "hosc", "losc", "iosc";
+			#clock-cells = <1>;
+			#reset-cells = <1>;
+		};
+
+		sid: efuse@3006000 {
+			compatible = "allwinner,sun50i-h616-sid", "allwinner,sun50i-a64-sid";
+			reg = <0x03006000 0x1000>;
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			ths_calibration: thermal-sensor-calibration@14 {
+				reg = <0x14 0x8>;
+			};
+
+			cpu_speed_grade: cpu-speed-grade@0 {
+				reg = <0x0 2>;
+			};
+
+			/* the TVE DAC calibration, in its upper half */
+			tve_calibration: tve-calibration@2c {
+				reg = <0x2c 4>;
+			};
+
+			ephy_config: ephy-config@2c {
+				reg = <0x2c 0x2>;
+			};
+		};
+
+		gic: interrupt-controller@3021000 {
+			compatible = "arm,gic-400";
+			reg = <0x03021000 0x1000>,
+			      <0x03022000 0x2000>,
+			      <0x03024000 0x2000>,
+			      <0x03026000 0x2000>;
+			interrupts = <GIC_PPI 9 (GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_HIGH)>;
+			interrupt-controller;
+			#interrupt-cells = <3>;
+		};
+
+		iommu: iommu@30f0000 {
+			compatible = "allwinner,sun50i-h616-iommu";
+			reg = <0x030f0000 0x10000>;
+			interrupts = <GIC_SPI 61 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&ccu CLK_BUS_IOMMU>;
+			resets = <&ccu RST_BUS_IOMMU>;
+			#iommu-cells = <1>;
+		};
+
+		gpu: gpu@1800000 {
+			compatible = "allwinner,sun50i-h616-mali",
+				     "arm,mali-bifrost";
+			reg = <0x1800000 0x40000>;
+			interrupts = <GIC_SPI 95 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 96 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 97 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "job", "mmu", "gpu";
+			clocks = <&ccu CLK_GPU0>, <&ccu CLK_BUS_GPU>;
+			clock-names = "core", "bus";
+			power-domains = <&prcm_ppu 2>;
+			resets = <&ccu RST_BUS_GPU>;
+			/* the Mali-G31 on DCDC1, as the factory powers it */
+			status = "okay";
+			mali-supply = <&reg_dcdc1>;
+			operating-points-v2 = <&gpu_opp_table>;
+		};
+
+		r_ccu: clock@7010000 {
+			compatible = "allwinner,sun50i-h616-r-ccu";
+			reg = <0x07010000 0x210>;
+			clocks = <&osc24M>, <&rtc CLK_OSC32K>, <&rtc CLK_IOSC>,
+				 <&ccu CLK_PLL_PERIPH0>;
+			clock-names = "hosc", "losc", "iosc", "pll-periph";
+			#clock-cells = <1>;
+			#reset-cells = <1>;
+		};
+
+		prcm_ppu: power-controller@7010250 {
+			compatible = "allwinner,sun50i-h616-prcm-ppu";
+			reg = <0x07010250 0x10>;
+			#power-domain-cells = <1>;
+		};
+
+		nmi_intc: interrupt-controller@7010320 {
+			compatible = "allwinner,sun50i-h616-nmi",
+				     "allwinner,sun9i-a80-nmi";
+			reg = <0x07010320 0xc>;
+			interrupt-controller;
+			#interrupt-cells = <2>;
+			interrupts = <GIC_SPI 103 IRQ_TYPE_LEVEL_HIGH>;
+		};
+
+		/* mainline's binding: two gpio cells, the ccu's clocks; the factory's groups below, in the
+		   generic binding U-Boot reads too */
+		r_pio: pinctrl@7022000 {
+			compatible = "allwinner,sun50i-h616-r-pinctrl";
+			reg = <0x7022000 0x400>;
+			clocks = <&r_ccu CLK_R_APB1>, <&osc24M>, <&rtc CLK_OSC32K>;
+			clock-names = "apb", "hosc", "losc";
+			gpio-controller;
+			#gpio-cells = <3>;
+			linux,phandle = <0x103>;
+			phandle = <0x103>;
+
+			s_twi0_pins_a: s_twi0@0 {
+				pins = "PL0", "PL1";
+				/* mainline's function names, the mux from them: the vendor muxsel and pname go */
+				function = "s_i2c";
+				drive-strength = <20>;
+				bias-pull-up;
+				linux,phandle = <0x4b>;
+				phandle = <0x4b>;
+			};
+
+		};
+
+		pio: pinctrl@300b000 {
+			compatible = "allwinner,sun50i-h616-pinctrl";
+			reg = <0x300b000 0x400>;
+			interrupts = <GIC_SPI 51 IRQ_TYPE_LEVEL_HIGH>,
+			             <GIC_SPI 52 IRQ_TYPE_LEVEL_HIGH>,
+			             <GIC_SPI 53 IRQ_TYPE_LEVEL_HIGH>,
+			             <GIC_SPI 43 IRQ_TYPE_LEVEL_HIGH>,
+			             <GIC_SPI 54 IRQ_TYPE_LEVEL_HIGH>,
+			             <GIC_SPI 55 IRQ_TYPE_LEVEL_HIGH>,
+			             <GIC_SPI 56 IRQ_TYPE_LEVEL_HIGH>,
+			             <GIC_SPI 57 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&ccu CLK_APB1>, <&osc24M>, <&rtc CLK_OSC32K>;
+			clock-names = "apb", "hosc", "losc";
+			gpio-controller;
+			#gpio-cells = <3>;
+			interrupt-controller;
+			#interrupt-cells = <3>;
+			/* the I/O rails the banks run at; port G, the Wi-Fi, at 3.3 V: the factory sets a bias
+			   on port C alone */
+			vcc-pc-supply = <&reg_aldo1>;
+			vcc-pf-supply = <&reg_dldo1>;
+			vcc-pg-supply = <&reg_dldo1>;
+			vcc-ph-supply = <&reg_dldo1>;
+			vcc-pi-supply = <&reg_dldo1>;
+			linux,phandle = <0x53>;
+			phandle = <0x53>;
+
+			clk_losc_pins_a: clk_losc@0 {
+				pins = "PG10";
+				function = "clock";
+				drive-strength = <30>;
+				bias-pull-up;
+				linux,phandle = <0xd3>;
+				phandle = <0xd3>;
+			};
+
+			s_cir0_pins_a: s_cir0@0 {
+				pins = "PH10";
+				function = "ir_rx";
+				drive-strength = <30>;
+				bias-pull-up;
+				linux,phandle = <0x24>;
+				phandle = <0x24>;
+			};
+
+			sdc1_pins_a: sdc1@0 {
+				pins = "PG0", "PG1", "PG2", "PG3", "PG4", "PG5";
+				function = "mmc1";
+				drive-strength = <40>;
+				bias-pull-up;
+				linux,phandle = <0x96>;
+				phandle = <0x96>;
+			};
+
+			sdc2_pins_a: sdc2@0 {
+				pins = "PC1", "PC5", "PC6", "PC8", "PC9", "PC10", "PC11", "PC13", "PC14", "PC15", "PC16";
+				function = "mmc2";
+				drive-strength = <30>;
+				bias-pull-up;
+				linux,phandle = <0x8a>;
+				phandle = <0x8a>;
+			};
+
+			sdc2_pins_c: sdc2@2 {
+				pins = "PC0";
+				function = "mmc2";
+				drive-strength = <30>;
+				bias-pull-down;
+				linux,phandle = <0x8b>;
+				phandle = <0x8b>;
+			};
+
+			sdc0_pins: sdc0-pins {
+				pins = "PF0", "PF1", "PF2", "PF3", "PF4", "PF5";
+				function = "mmc0";
+				drive-strength = <40>;
+				bias-pull-up;
+			};
+
+			rmii_pins: rmii-pins {
+				pins = "PA0", "PA1", "PA2", "PA3", "PA4", "PA5", "PA6", "PA7", "PA8", "PA9";
+				function = "emac1";
+				drive-strength = <40>;
+			};
+
+			pwm5_pin: pwm5-pin {
+				pins = "PA12";
+				function = "pwm5";
+			};
+
+			/* the AIC8800's Bluetooth UART, with flow control */
+			uart1_pins: uart1-pins {
+				pins = "PG6", "PG7", "PG8", "PG9";
+				function = "uart1";
+				bias-pull-up;
+			};
+
+			/* the vendor's rfkill raises Bluetooth's reset; its wake line stays high */
+			bt-reset-hog {
+				gpio-hog;
+				gpios = <6 19 GPIO_ACTIVE_HIGH>;
+				output-high;
+				line-name = "bt-reset";
+			};
+
+			bt-wake-hog {
+				gpio-hog;
+				gpios = <6 17 GPIO_ACTIVE_HIGH>;
+				output-high;
+				line-name = "bt-wake";
+			};
+
+			uart0_pins_a: uart0@0 {
+				linux,phandle = <0x18a>;
+				phandle = <0x18a>;
+				pins = "PH0", "PH1";
+				function = "uart0";
+				/* the vendor's 0xffffffff drive is its "leave as is": no drive-strength */
+				bias-pull-up;
+			};
+
+		};
+
+		/* mainline's sun6i-dma: its H616 entry, the bus and mbus clocks, the reset */
+		dma: dma-controller@3002000 {
+			compatible = "allwinner,sun50i-h616-dma", "allwinner,sun50i-a100-dma";
+			reg = <0x3002000 0x1000>;
+			interrupts = <GIC_SPI 42 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&ccu CLK_BUS_DMA>, <&ccu CLK_MBUS_DMA>;
+			clock-names = "bus", "mbus";
+			dma-channels = <16>;
+			dma-requests = <49>;
+			resets = <&ccu RST_BUS_DMA>;
+			#dma-cells = <1>;
+			linux,phandle = <0x113>;
+			phandle = <0x113>;
+		};
+
+		/* mainline's sunxi-ir. The vendor's wake codes, nine remotes' power keys, are read by its
+		   arisc firmware, which mainline does not run: they go */
+		s_cir0: ir@7040000 {
+			compatible = "allwinner,sun50i-h616-ir", "allwinner,sun6i-a31-ir";
+			reg = <0x7040000 0x400>;
+			interrupts = <GIC_SPI 106 IRQ_TYPE_LEVEL_HIGH>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&s_cir0_pins_a>;
+			clocks = <&r_ccu CLK_R_APB1_IR>, <&r_ccu CLK_IR>;
+			clock-names = "apb", "ir";
+			resets = <&r_ccu RST_R_APB1_IR>;
+			/* the bundled H96 Max remote, NEC address 0x04, its wake code in the vendor list */
+			linux,rc-map-name = "rc-h96max";
+			status = "okay";
+			wakeup-source;
+			linux,phandle = <0x117>;
+			phandle = <0x117>;
+		};
+
+		/* mainline's sun6i-rtc, which is also the 32 kHz clock provider; the vendor's general-purpose
+		   registers held its reboot flags */
+		rtc: rtc@7000000 {
+			compatible = "allwinner,sun50i-h616-rtc";
+			reg = <0x7000000 0x400>;
+			interrupts = <GIC_SPI 104 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&r_ccu CLK_R_APB1_RTC>, <&osc24M>, <&ccu CLK_PLL_SYSTEM_32K>;
+			clock-names = "bus", "hosc", "pll-32k";
+			#clock-cells = <1>;
+			wakeup-source;
+			linux,phandle = <0x119>;
+			phandle = <0x119>;
+		};
+
+		/* mainline's sunxi_wdt, on the 24 MHz crystal */
+		wdt: watchdog@30090a0 {
+			compatible = "allwinner,sun50i-h616-wdt", "allwinner,sun6i-a31-wdt";
+			reg = <0x30090a0 0x20>;
+			interrupts = <GIC_SPI 50 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&osc24M>;
+			linux,phandle = <0x11a>;
+			phandle = <0x11a>;
+		};
+
+		/* mainline's 8250_dw, the console on PH0/PH1 */
+		uart0: serial@5000000 {
+			compatible = "snps,dw-apb-uart";
+			reg = <0x5000000 0x400>;
+			interrupts = <GIC_SPI 0 IRQ_TYPE_LEVEL_HIGH>;
+			reg-shift = <2>;
+			reg-io-width = <4>;
+			clocks = <&ccu CLK_BUS_UART0>;
+			dmas = <&dma 14>, <&dma 14>;
+			dma-names = "tx", "rx";
+			resets = <&ccu RST_BUS_UART0>;
+			pinctrl-names = "default";
+			status = "okay";
+			linux,phandle = <0x11d>;
+			phandle = <0x11d>;
+			pinctrl-0 = <&uart0_pins_a>;
+		};
+
+		/* the AIC8800's Bluetooth, bound on the serdev bus by bluetooth-hci-h4-serdev */
+		uart1: serial@5000400 {
+			compatible = "snps,dw-apb-uart";
+			reg = <0x05000400 0x400>;
+			interrupts = <GIC_SPI 1 IRQ_TYPE_LEVEL_HIGH>;
+			reg-shift = <2>;
+			reg-io-width = <4>;
+			clocks = <&ccu CLK_BUS_UART1>;
+			dmas = <&dma 15>, <&dma 15>;
+			dma-names = "tx", "rx";
+			resets = <&ccu RST_BUS_UART1>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&uart1_pins>;
+			uart-has-rtscts;
+			status = "okay";
+
+			bt: bluetooth {
+				compatible = "aicsemi,aic8800-bt";
+				max-speed = <1500000>;
+			};
+		};
+
+		/* mainline's i2c-mv64xxx on the R bus, the factory's 200 kHz */
+		twi5: i2c@7081400 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			compatible = "allwinner,sun50i-h616-i2c", "allwinner,sun8i-v536-i2c",
+			             "allwinner,sun6i-a31-i2c";
+			reg = <0x7081400 0x400>;
+			interrupts = <GIC_SPI 105 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&r_ccu CLK_R_APB2_I2C>;
+			dmas = <&dma 48>, <&dma 48>;
+			dma-names = "rx", "tx";
+			resets = <&r_ccu RST_R_APB2_I2C>;
+			clock-frequency = <200000>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&s_twi0_pins_a>;
+			status = "okay";
+
+			/* the AXP1530 is mainline's AXP313A. The factory's ranges are the chip's whole span,
+			   for its vendor driver to set; mainline holds each rail: the GPU and CPU spans their OPPs
+			   need, LPDDR3's 1.2 V, and the factory's 1.8 V and 3.3 V */
+			pmu0: pmic@36 {
+				compatible = "x-powers,axp313a";
+				reg = <0x36>;
+				#interrupt-cells = <1>;
+				interrupt-controller;
+				vin1-supply = <&reg_vcc5v>;
+				vin2-supply = <&reg_vcc5v>;
+				vin3-supply = <&reg_vcc5v>;
+				wakeup-source;
+
+				regulators {
+
+					reg_dcdc1: dcdc1 {
+						regulator-name = "vdd-gpu-sys";
+						regulator-min-microvolt = <810000>;
+						regulator-max-microvolt = <990000>;
+						regulator-always-on;
+					};
+
+					reg_dcdc2: dcdc2 {
+						regulator-name = "vdd-cpu";
+						regulator-min-microvolt = <810000>;
+						regulator-max-microvolt = <1160000>;
+						regulator-ramp-delay = <200>;
+						regulator-always-on;
+					};
+
+					reg_dcdc3: dcdc3 {
+						regulator-name = "vdd-dram";
+						regulator-min-microvolt = <1200000>;
+						regulator-max-microvolt = <1200000>;
+						regulator-always-on;
+					};
+
+					reg_aldo1: aldo1 {
+						regulator-name = "vcc1v8";
+						regulator-min-microvolt = <1800000>;
+						regulator-max-microvolt = <1800000>;
+						regulator-always-on;
+					};
+
+					reg_dldo1: dldo1 {
+						regulator-name = "vcc3v3";
+						regulator-min-microvolt = <3300000>;
+						regulator-max-microvolt = <3300000>;
+						regulator-always-on;
+					};
+				};
+			};
+		};
+
+		/* mainline's phy-sun4i-usb takes over the vendor's otg-manager: port 0 a host, as the
+		   factory's usb_port_type sets it, and port 1's VBUS on PH8, the factory's usbc1 switch */
+		usbphy: phy@5100400 {
+			compatible = "allwinner,sun50i-h616-usb-phy";
+			reg = <0x5100400 0x24>,
+			      <0x5101800 0x14>,
+			      <0x5200800 0x14>,
+			      <0x5310800 0x14>,
+			      <0x5311800 0x14>;
+			reg-names = "phy_ctrl", "pmu0", "pmu1", "pmu2", "pmu3";
+			clocks = <&ccu CLK_USB_PHY0>,
+			         <&ccu CLK_USB_PHY1>,
+			         <&ccu CLK_USB_PHY2>,
+			         <&ccu CLK_USB_PHY3>,
+			         <&ccu CLK_BUS_EHCI2>;
+			clock-names = "usb0_phy", "usb1_phy", "usb2_phy", "usb3_phy", "pmu2_clk";
+			resets = <&ccu RST_USB_PHY0>,
+			         <&ccu RST_USB_PHY1>,
+			         <&ccu RST_USB_PHY2>,
+			         <&ccu RST_USB_PHY3>;
+			reset-names = "usb0_reset", "usb1_reset", "usb2_reset", "usb3_reset";
+			usb1_vbus-supply = <&reg_usb1_vbus>;
+			status = "okay";
+			#phy-cells = <1>;
+		};
+
+		/* mainline's musb in place of the vendor's udc; a host, as the factory sets port 0 */
+		usbotg: usb@5100000 {
+			compatible = "allwinner,sun50i-h616-musb", "allwinner,sun8i-h3-musb";
+			reg = <0x5100000 0x400>;
+			clocks = <&ccu CLK_BUS_OTG>;
+			resets = <&ccu RST_BUS_OTG>;
+			interrupts = <GIC_SPI 25 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "mc";
+			phys = <&usbphy 0>;
+			phy-names = "usb";
+			extcon = <&usbphy 0>;
+			dr_mode = "host";
+			status = "okay";
+		};
+
+		/* mainline's ehci-platform and ohci-platform; every port enabled, as the factory has them */
+		ehci0: usb@5101000 {
+			compatible = "allwinner,sun50i-h616-ehci", "generic-ehci";
+			reg = <0x5101000 0x100>;
+			interrupts = <GIC_SPI 26 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&ccu CLK_BUS_OHCI0>, <&ccu CLK_BUS_EHCI0>, <&ccu CLK_USB_OHCI0>;
+			resets = <&ccu RST_BUS_OHCI0>, <&ccu RST_BUS_EHCI0>;
+			phys = <&usbphy 0>;
+			phy-names = "usb";
+			status = "okay";
+		};
+
+		ohci0: usb@5101400 {
+			compatible = "allwinner,sun50i-h616-ohci", "generic-ohci";
+			reg = <0x5101400 0x100>;
+			interrupts = <GIC_SPI 27 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&ccu CLK_BUS_OHCI0>, <&ccu CLK_USB_OHCI0>;
+			resets = <&ccu RST_BUS_OHCI0>;
+			phys = <&usbphy 0>;
+			phy-names = "usb";
+			status = "okay";
+		};
+
+		ehci1: usb@5200000 {
+			compatible = "allwinner,sun50i-h616-ehci", "generic-ehci";
+			reg = <0x5200000 0x100>;
+			interrupts = <GIC_SPI 28 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&ccu CLK_BUS_OHCI1>, <&ccu CLK_BUS_EHCI1>, <&ccu CLK_USB_OHCI1>;
+			resets = <&ccu RST_BUS_OHCI1>, <&ccu RST_BUS_EHCI1>;
+			phys = <&usbphy 1>;
+			phy-names = "usb";
+			status = "okay";
+		};
+
+		ohci1: usb@5200400 {
+			compatible = "allwinner,sun50i-h616-ohci", "generic-ohci";
+			reg = <0x5200400 0x100>;
+			interrupts = <GIC_SPI 29 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&ccu CLK_BUS_OHCI1>, <&ccu CLK_USB_OHCI1>;
+			resets = <&ccu RST_BUS_OHCI1>;
+			phys = <&usbphy 1>;
+			phy-names = "usb";
+			status = "okay";
+		};
+
+		ehci2: usb@5310000 {
+			compatible = "allwinner,sun50i-h616-ehci", "generic-ehci";
+			reg = <0x5310000 0x100>;
+			interrupts = <GIC_SPI 30 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&ccu CLK_BUS_OHCI2>, <&ccu CLK_BUS_EHCI2>, <&ccu CLK_USB_OHCI2>;
+			resets = <&ccu RST_BUS_OHCI2>, <&ccu RST_BUS_EHCI2>;
+			phys = <&usbphy 2>;
+			phy-names = "usb";
+			status = "okay";
+		};
+
+		ohci2: usb@5310400 {
+			compatible = "allwinner,sun50i-h616-ohci", "generic-ohci";
+			reg = <0x5310400 0x100>;
+			interrupts = <GIC_SPI 31 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&ccu CLK_BUS_OHCI2>, <&ccu CLK_USB_OHCI2>;
+			resets = <&ccu RST_BUS_OHCI2>;
+			phys = <&usbphy 2>;
+			phy-names = "usb";
+			status = "okay";
+		};
+
+		ehci3: usb@5311000 {
+			compatible = "allwinner,sun50i-h616-ehci", "generic-ehci";
+			reg = <0x5311000 0x100>;
+			interrupts = <GIC_SPI 32 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&ccu CLK_BUS_OHCI3>, <&ccu CLK_BUS_EHCI3>, <&ccu CLK_USB_OHCI3>;
+			resets = <&ccu RST_BUS_OHCI3>, <&ccu RST_BUS_EHCI3>;
+			phys = <&usbphy 3>;
+			phy-names = "usb";
+			status = "okay";
+		};
+
+		ohci3: usb@5311400 {
+			compatible = "allwinner,sun50i-h616-ohci", "generic-ohci";
+			reg = <0x5311400 0x100>;
+			interrupts = <GIC_SPI 33 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&ccu CLK_BUS_OHCI3>, <&ccu CLK_USB_OHCI3>;
+			resets = <&ccu RST_BUS_OHCI3>;
+			phys = <&usbphy 3>;
+			phy-names = "usb";
+			status = "okay";
+		};
+
+		codec: codec@5096000 {
+			#sound-dai-cells = <0>;
+			compatible = "allwinner,sun50i-h616-codec";
+			reg = <0x05096000 0x31c>;
+			interrupts = <GIC_SPI 58 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&ccu CLK_BUS_AUDIO_CODEC>,
+				 <&ccu CLK_AUDIO_CODEC_1X>;
+			clock-names = "apb", "codec";
+			resets = <&ccu RST_BUS_AUDIO_CODEC>;
+			dmas = <&dma 6>;
+			dma-names = "tx";
+			/* the factory's: on, its line out on the AV jack */
+			status = "okay";
+			allwinner,audio-routing = "Line Out", "LINEOUT";
+		};
+
+		/* LibreELEC's audio hub, its DAI 1 the HDMI's; the factory's vendor AHUB nodes it replaces */
+		ahub: audio-hub@5097000 {
+			#sound-dai-cells = <1>;
+			compatible = "allwinner,sun50i-h616-ahub";
+			reg = <0x05097000 0xb00>;
+			clocks = <&ccu CLK_BUS_AUDIO_HUB>, <&ccu CLK_AUDIO_HUB>;
+			clock-names = "bus", "mod";
+			resets = <&ccu RST_BUS_AUDIO_HUB>;
+			dmas = <&dma 3>, <&dma 3>, <&dma 4>, <&dma 4>,
+			       <&dma 5>, <&dma 5>;
+			dma-names = "tx0", "rx0", "tx1", "rx1", "tx2", "rx2";
+			status = "okay";
+		};
+
+		/* The factory enables EMAC1 RMII, with RX/TX delay taps 31/7. The SID selects the
+		   co-packaged AC300 EPHY on this silicon, not the AC200. */
+		emac1: ethernet@5030000 {
+			compatible = "allwinner,sun50i-h616-emac1";
+			reg = <0x05030000 0x10000>;
+			syscon = <&syscon>;
+			interrupts = <GIC_SPI 15 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "macirq";
+			clocks = <&ccu CLK_BUS_EMAC1>;
+			clock-names = "stmmaceth";
+			resets = <&ccu RST_BUS_EMAC1>;
+			reset-names = "stmmaceth";
+			pinctrl-names = "default";
+			pinctrl-0 = <&rmii_pins>;
+			phy-mode = "rmii";
+			phy-handle = <&ac300_ephy>;
+			phy-supply = <&reg_dldo1>;
+			allwinner,rx-delay-ps = <3100>;
+			allwinner,tx-delay-ps = <700>;
+			status = "okay";
+
+			mdio1: mdio {
+				compatible = "snps,dwmac-mdio";
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				ethernet-phy-package@0 {
+					compatible = "x-powers,ac300-ephy-package";
+					reg = <0>;
+					#address-cells = <1>;
+					#size-cells = <0>;
+					clocks = <&ephy_clk>;
+					vcc-supply = <&reg_dldo1>;
+					nvmem-cells = <&ephy_config>;
+					nvmem-cell-names = "configuration";
+
+					ac300_ephy: ethernet-phy@0 {
+						compatible = "ethernet-phy-id0044.1400";
+						reg = <0>;
+					};
+				};
+			};
+		};
+
+		pwm: pwm@300a000 {
+			compatible = "allwinner,sun50i-h616-pwm";
+			reg = <0x0300a000 0x400>;
+			clocks = <&ccu CLK_BUS_PWM>, <&osc24M>, <&ccu CLK_APB1>;
+			clock-names = "bus", "hosc", "apb0";
+			resets = <&ccu RST_BUS_PWM>;
+			#pwm-cells = <3>;
+			status = "okay";
+		};
+
+		mmc2: mmc@4022000 {
+			compatible = "allwinner,sun50i-h616-emmc",
+				     "allwinner,sun50i-a100-emmc";
+			reg = <0x04022000 0x1000>;
+			clocks = <&ccu CLK_BUS_MMC2>, <&ccu CLK_MMC2>;
+			clock-names = "ahb", "mmc";
+			resets = <&ccu RST_BUS_MMC2>;
+			reset-names = "ahb";
+			interrupts = <GIC_SPI 37 IRQ_TYPE_LEVEL_HIGH>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&sdc2_pins_a>, <&sdc2_pins_c>;
+			status = "okay";
+			bus-width = <8>;
+			cap-mmc-highspeed;
+			max-frequency = <100000000>;
+			mmc-ddr-1_8v;
+			/* HS200 at stock's clock; mainline's sunxi-mmc has no HS400 */
+			mmc-hs200-1_8v;
+
+			non-removable;
+			vmmc-supply = <&reg_dldo1>;
+			vqmmc-supply = <&reg_aldo1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+		};
+
+		/* The factory SD slot, with card detect on PF6. */
+		mmc0: mmc@4020000 {
+			compatible = "allwinner,sun50i-h616-mmc",
+				     "allwinner,sun50i-a100-mmc";
+			reg = <0x04020000 0x1000>;
+			clocks = <&ccu CLK_BUS_MMC0>, <&ccu CLK_MMC0>;
+			clock-names = "ahb", "mmc";
+			resets = <&ccu RST_BUS_MMC0>;
+			reset-names = "ahb";
+			interrupts = <GIC_SPI 35 IRQ_TYPE_LEVEL_HIGH>;
+			status = "okay";
+			pinctrl-names = "default";
+			pinctrl-0 = <&sdc0_pins>;
+			cd-gpios = <&pio 5 6 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+			bus-width = <4>;
+			vmmc-supply = <&reg_dldo1>;
+			disable-wp;
+			max-frequency = <150000000>;
+			cap-sd-highspeed;
+			cap-mmc-highspeed;
+			mmc-ddr-3_3v;
+			cap-sdio-irq;
+			#address-cells = <1>;
+			#size-cells = <0>;
+		};
+
+		mmc1: mmc@4021000 {
+			compatible = "allwinner,sun50i-h616-mmc",
+				     "allwinner,sun50i-a100-mmc";
+			reg = <0x04021000 0x1000>;
+			clocks = <&ccu CLK_BUS_MMC1>, <&ccu CLK_MMC1>;
+			clock-names = "ahb", "mmc";
+			resets = <&ccu RST_BUS_MMC1>;
+			reset-names = "ahb";
+			interrupts = <GIC_SPI 36 IRQ_TYPE_LEVEL_HIGH>;
+			pinctrl-names = "default";
+			/* the factory's: its pin group, 150 MHz, 4 bits, kept powered in suspend. Its UHS
+			   modes need 1.8 V signalling, and port G is fixed at 3.3 V: they go */
+			pinctrl-0 = <&sdc1_pins_a>;
+			status = "okay";
+			max-frequency = <150000000>;
+			bus-width = <4>;
+			cap-sd-highspeed;
+			cap-sdio-irq;
+			keep-power-in-suspend;
+			non-removable;
+			vmmc-supply = <&reg_dldo1>;
+			vqmmc-supply = <&reg_dldo1>;
+			mmc-pwrseq = <&wifi_pwrseq>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			/* AIC8800; revision read from the SDIO device */
+			sdio_wifi: wifi@1 {
+				reg = <1>;
+			};
+		};
+
+		bus@1000000 {
+			compatible = "allwinner,sun50i-h616-de33",
+				     "allwinner,sun50i-a64-de2";
+			reg = <0x1000000 0x400000>;
+			allwinner,sram = <&de3_sram 1>;
+			#address-cells = <1>;
+			#size-cells = <1>;
+			ranges = <0 0x1000000 0x400000>;
+
+			display_clocks: clock@8000 {
+				compatible = "allwinner,sun50i-h616-de33-clk";
+				reg = <0x8000 0x100>;
+				clocks = <&ccu CLK_DE>, <&ccu CLK_BUS_DE>;
+				clock-names = "mod", "bus";
+				resets = <&ccu RST_BUS_DE>;
+				#clock-cells = <1>;
+				#reset-cells = <1>;
+			};
+
+			/* the real-time writeback: what the display engine composed, back in memory */
+			writeback: writeback@11000 {
+				compatible = "allwinner,sun50i-h616-de33-wb";
+				reg = <0x11000 0x1000>, <0x8200 0x20>;
+				reg-names = "writeback", "rcq";
+				clocks = <&display_clocks CLK_BUS_MIXER0>,
+					 <&display_clocks CLK_WB>;
+				clock-names = "bus", "mod";
+				resets = <&display_clocks RST_WB>;
+				interrupts = <GIC_SPI 88 IRQ_TYPE_LEVEL_HIGH>;
+				allwinner,top = <&display_clocks>;
+
+				ports {
+					#address-cells = <1>;
+					#size-cells = <0>;
+
+					writeback_in: port@0 {
+						#address-cells = <1>;
+						#size-cells = <0>;
+						reg = <0>;
+
+						writeback_in_mixer0: endpoint@0 {
+							reg = <0>;
+							remote-endpoint = <&mixer0_out_writeback>;
+						};
+
+						writeback_in_mixer1: endpoint@1 {
+							reg = <1>;
+							remote-endpoint = <&mixer1_out_writeback>;
+						};
+					};
+				};
+			};
+
+			planes: planes@100000 {
+				compatible = "allwinner,sun50i-h616-de33-planes";
+				reg = <0x100000 0x180000>;
+				/* 7.2 maps the buffers through the planes, 6.18 through mixer0: one group, both */
+				iommus = <&iommu 0>;
+				allwinner,plane-mapping = <&display_clocks>;
+			};
+
+			mixer0: mixer@280000 {
+				compatible = "allwinner,sun50i-h616-de33-mixer-0";
+				reg = <0x280000 0x20000>,
+				      <0x8100 0x40>;
+				reg-names = "display", "top";
+				clocks = <&display_clocks CLK_BUS_MIXER0>,
+					 <&display_clocks CLK_MIXER0>;
+				clock-names = "bus", "mod";
+				resets = <&display_clocks RST_MIXER0>;
+				iommus = <&iommu 0>;
+				allwinner,planes = <&planes>;
+
+				ports {
+					#address-cells = <1>;
+					#size-cells = <0>;
+
+					mixer0_out: port@1 {
+						#address-cells = <1>;
+						#size-cells = <0>;
+						reg = <1>;
+
+						mixer0_out_tcon_top_mixer0: endpoint@0 {
+							reg = <0>;
+							remote-endpoint = <&tcon_top_mixer0_in_mixer0>;
+						};
+
+						mixer0_out_writeback: endpoint@1 {
+							reg = <1>;
+							remote-endpoint = <&writeback_in_mixer0>;
+						};
+					};
+				};
+			};
+
+			mixer1: mixer@2a0000 {
+				compatible = "allwinner,sun50i-h616-de33-mixer-0";
+				reg = <0x2a0000 0x20000>,
+				      <0x8140 0x40>;
+				reg-names = "display", "top";
+				clocks = <&display_clocks CLK_BUS_MIXER1>,
+					 <&display_clocks CLK_MIXER1>;
+				clock-names = "bus", "mod";
+				resets = <&display_clocks RST_MIXER1>;
+				allwinner,planes = <&planes>;
+
+				ports {
+					#address-cells = <1>;
+					#size-cells = <0>;
+
+					mixer1_out: port@1 {
+						#address-cells = <1>;
+						#size-cells = <0>;
+						reg = <1>;
+
+						mixer1_out_tcon_top_mixer1: endpoint@0 {
+							reg = <0>;
+							remote-endpoint = <&tcon_top_mixer1_in_mixer1>;
+						};
+
+						mixer1_out_writeback: endpoint@1 {
+							reg = <1>;
+							remote-endpoint = <&writeback_in_mixer1>;
+						};
+					};
+				};
+			};
+		};
+
+		hdmi: hdmi@6000000 {
+			compatible = "allwinner,sun50i-h616-dw-hdmi",
+				     "allwinner,sun50i-h6-dw-hdmi";
+			#sound-dai-cells = <0>;
+			reg = <0x06000000 0x10000>;
+			reg-io-width = <1>;
+			interrupts = <GIC_SPI 63 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&ccu CLK_BUS_HDMI>, <&ccu CLK_HDMI_SLOW>,
+				 <&ccu CLK_HDMI>, <&ccu CLK_HDMI_CEC>,
+				 <&ccu CLK_HDCP>, <&ccu CLK_BUS_HDCP>;
+			clock-names = "iahb", "isfr", "tmds", "cec", "hdcp",
+				      "hdcp-bus";
+			resets = <&ccu RST_BUS_HDMI>, <&ccu RST_BUS_HDCP>;
+			reset-names = "ctrl", "hdcp";
+			phys = <&hdmi_phy>;
+			phy-names = "phy";
+			/* on, as the factory has it; its supply as the H616 display series wires the TX1 */
+			status = "okay";
+			hvcc-supply = <&reg_aldo1>;
+
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				hdmi_in: port@0 {
+					reg = <0>;
+
+					hdmi_in_tcon_top: endpoint {
+						remote-endpoint = <&tcon_top_hdmi_out_hdmi>;
+					};
+				};
+
+				hdmi_out: port@1 {
+					reg = <1>;
+
+					hdmi_out_con: endpoint {
+						remote-endpoint = <&hdmi_con_in>;
+					};
+				};
+			};
+		};
+
+		/* the rest of mainline's HDMI pipeline: the H616 display series' TCON TV and HDMI PHY,
+		   and tcon_lcd0, which tcon_top's ports name; no LCD is fitted, so it stays off */
+		hdmi_phy: hdmi-phy@6010000 {
+			compatible = "allwinner,sun50i-h616-hdmi-phy";
+			reg = <0x06010000 0x10000>;
+			clocks = <&ccu CLK_BUS_HDMI>, <&ccu CLK_HDMI_SLOW>;
+			clock-names = "bus", "mod";
+			resets = <&ccu RST_BUS_HDMI_SUB>;
+			reset-names = "phy";
+			#phy-cells = <0>;
+		};
+
+		tcon_top: tcon-top@6510000 {
+			compatible = "allwinner,sun50i-h616-tcon-top",
+				     "allwinner,sun50i-h6-tcon-top";
+			reg = <0x06510000 0x1000>;
+			clocks = <&ccu CLK_BUS_TCON_TOP>,
+				 <&ccu CLK_TCON_TV0>,
+				 <&ccu CLK_TVE0>,
+				 <&ccu CLK_TCON_TV1>;
+			clock-names = "bus",
+				      "tcon-tv0",
+				      "tve0",
+				      "tcon-tv1";
+			/* TV1 for the composite path; the driver reads its clock by name */
+			clock-output-names = "tcon-top-tv0",
+					     "tcon-top-tv1";
+			resets = <&ccu RST_BUS_TCON_TOP>;
+			#clock-cells = <1>;
+
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				tcon_top_mixer0_in: port@0 {
+					#address-cells = <1>;
+					#size-cells = <0>;
+					reg = <0>;
+
+					tcon_top_mixer0_in_mixer0: endpoint@0 {
+						reg = <0>;
+						remote-endpoint = <&mixer0_out_tcon_top_mixer0>;
+					};
+				};
+
+				tcon_top_mixer0_out: port@1 {
+					#address-cells = <1>;
+					#size-cells = <0>;
+					reg = <1>;
+
+					tcon_top_mixer0_out_tcon_lcd0: endpoint@0 {
+						reg = <0>;
+						remote-endpoint = <&tcon_lcd0_in_tcon_top_mixer0>;
+					};
+
+					tcon_top_mixer0_out_tcon_tv0: endpoint@2 {
+						reg = <2>;
+						remote-endpoint = <&tcon_tv0_in_tcon_top_mixer0>;
+					};
+
+					tcon_top_mixer0_out_tcon_tv1: endpoint@3 {
+						reg = <3>;
+						remote-endpoint = <&tcon_tv1_in_tcon_top_mixer0>;
+					};
+				};
+
+				tcon_top_mixer1_in: port@2 {
+					#address-cells = <1>;
+					#size-cells = <0>;
+					reg = <2>;
+
+					tcon_top_mixer1_in_mixer1: endpoint@1 {
+						reg = <1>;
+						remote-endpoint = <&mixer1_out_tcon_top_mixer1>;
+					};
+				};
+
+				tcon_top_mixer1_out: port@3 {
+					#address-cells = <1>;
+					#size-cells = <0>;
+					reg = <3>;
+
+					tcon_top_mixer1_out_tcon_lcd0: endpoint@0 {
+						reg = <0>;
+						remote-endpoint = <&tcon_lcd0_in_tcon_top_mixer1>;
+					};
+
+					tcon_top_mixer1_out_tcon_tv0: endpoint@2 {
+						reg = <2>;
+						remote-endpoint = <&tcon_tv0_in_tcon_top_mixer1>;
+					};
+
+					tcon_top_mixer1_out_tcon_tv1: endpoint@3 {
+						reg = <3>;
+						remote-endpoint = <&tcon_tv1_in_tcon_top_mixer1>;
+					};
+				};
+
+				tcon_top_hdmi_in: port@4 {
+					#address-cells = <1>;
+					#size-cells = <0>;
+					reg = <4>;
+
+					tcon_top_hdmi_in_tcon_tv0: endpoint@0 {
+						reg = <0>;
+						remote-endpoint = <&tcon_tv0_out_tcon_top>;
+					};
+
+					tcon_top_hdmi_in_tcon_tv1: endpoint@1 {
+						reg = <1>;
+						remote-endpoint = <&tcon_tv1_out_tcon_top>;
+					};
+				};
+
+				tcon_top_hdmi_out: port@5 {
+					reg = <5>;
+
+					tcon_top_hdmi_out_hdmi: endpoint {
+						remote-endpoint = <&hdmi_in_tcon_top>;
+					};
+				};
+			};
+		};
+
+		tcon_lcd0: lcd-controller@6511000 {
+			compatible = "allwinner,sun50i-h616-tcon-lcd",
+				     "allwinner,sun8i-r40-tcon-lcd";
+			reg = <0x06511000 0x1000>;
+			interrupts = <GIC_SPI 64 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&ccu CLK_BUS_TCON_LCD0>, <&ccu CLK_TCON_LCD0>;
+			clock-names = "ahb", "tcon-ch0";
+			clock-output-names = "tcon-data-clock";
+			#clock-cells = <0>;
+			resets = <&ccu RST_BUS_TCON_LCD0>, <&ccu RST_BUS_LVDS>;
+			reset-names = "lcd", "lvds";
+			status = "disabled";
+
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				tcon_lcd0_in: port@0 {
+					#address-cells = <1>;
+					#size-cells = <0>;
+					reg = <0>;
+
+					tcon_lcd0_in_tcon_top_mixer0: endpoint@0 {
+						reg = <0>;
+						remote-endpoint = <&tcon_top_mixer0_out_tcon_lcd0>;
+					};
+
+					tcon_lcd0_in_tcon_top_mixer1: endpoint@1 {
+						reg = <1>;
+						remote-endpoint = <&tcon_top_mixer1_out_tcon_lcd0>;
+					};
+				};
+
+				tcon_lcd0_out: port@1 {
+					reg = <1>;
+				};
+			};
+		};
+
+		/* the AV jack's composite: mixer1, TCON-TV1, the TV encoder */
+		tcon_tv1: lcd-controller@6516000 {
+			compatible = "allwinner,sun50i-h616-tcon-tv";
+			reg = <0x06516000 0x1000>;
+			interrupts = <GIC_SPI 67 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&ccu CLK_BUS_TCON_TV1>,
+				 <&tcon_top CLK_TCON_TOP_TV1>;
+			clock-names = "ahb",
+				      "tcon-ch1";
+			resets = <&ccu RST_BUS_TCON_TV1>;
+			reset-names = "lcd";
+
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				tcon_tv1_in: port@0 {
+					#address-cells = <1>;
+					#size-cells = <0>;
+					reg = <0>;
+
+					tcon_tv1_in_tcon_top_mixer0: endpoint@0 {
+						reg = <0>;
+						remote-endpoint = <&tcon_top_mixer0_out_tcon_tv1>;
+					};
+
+					tcon_tv1_in_tcon_top_mixer1: endpoint@1 {
+						reg = <1>;
+						remote-endpoint = <&tcon_top_mixer1_out_tcon_tv1>;
+					};
+				};
+
+				tcon_tv1_out: port@1 {
+					#address-cells = <1>;
+					#size-cells = <0>;
+					reg = <1>;
+
+					tcon_tv1_out_tcon_top: endpoint@1 {
+						reg = <1>;
+						remote-endpoint = <&tcon_top_hdmi_in_tcon_tv1>;
+					};
+
+					tcon_tv1_out_tve: endpoint@2 {
+						reg = <2>;
+						remote-endpoint = <&tve_in_tcon_tv1>;
+					};
+				};
+			};
+		};
+
+		tve: tv-encoder@6524000 {
+			compatible = "allwinner,sun50i-h616-tv-encoder";
+			/* the encoder, then the TVE top that routes and calibrates its DAC */
+			reg = <0x06524000 0x400>,
+			      <0x06520000 0x100>;
+			clocks = <&ccu CLK_BUS_TVE0>,
+				 <&ccu CLK_TVE0>,
+				 <&ccu CLK_BUS_TVE_TOP>;
+			resets = <&ccu RST_BUS_TVE0>,
+				 <&ccu RST_BUS_TVE_TOP>;
+			assigned-clocks = <&ccu CLK_TVE0>;
+			/* PLL-VIDEO1: 6.18's binding does not export its index */
+			assigned-clock-parents = <&ccu 11>;
+			/* the rate Allwinner's PAL and NTSC tables assume */
+			assigned-clock-rates = <216000000>;
+			nvmem-cells = <&tve_calibration>;
+			nvmem-cell-names = "calibration";
+
+			port {
+				tve_in_tcon_tv1: endpoint {
+					remote-endpoint = <&tcon_tv1_out_tve>;
+				};
+			};
+		};
+
+		tcon_tv0: lcd-controller@6515000 {
+			compatible = "allwinner,sun50i-h616-tcon-tv";
+			reg = <0x06515000 0x1000>;
+			interrupts = <GIC_SPI 66 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&ccu CLK_BUS_TCON_TV0>,
+				 <&tcon_top CLK_TCON_TOP_TV0>;
+			clock-names = "ahb",
+				      "tcon-ch1";
+			resets = <&ccu RST_BUS_TCON_TV0>;
+			reset-names = "lcd";
+
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				tcon_tv0_in: port@0 {
+					#address-cells = <1>;
+					#size-cells = <0>;
+					reg = <0>;
+
+					tcon_tv0_in_tcon_top_mixer0: endpoint@0 {
+						reg = <0>;
+						remote-endpoint = <&tcon_top_mixer0_out_tcon_tv0>;
+					};
+
+					tcon_tv0_in_tcon_top_mixer1: endpoint@1 {
+						reg = <1>;
+						remote-endpoint = <&tcon_top_mixer1_out_tcon_tv0>;
+					};
+				};
+
+				tcon_tv0_out: port@1 {
+					#address-cells = <1>;
+					#size-cells = <0>;
+					reg = <1>;
+
+					tcon_tv0_out_tcon_top: endpoint@1 {
+						reg = <1>;
+						remote-endpoint = <&tcon_top_hdmi_in_tcon_tv0>;
+					};
+				};
+			};
+		};
+
+		crypto: crypto@1904000 {
+			compatible = "allwinner,sun50i-h616-crypto";
+			reg = <0x01904000 0x800>;
+			interrupts = <GIC_SPI 91 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&ccu CLK_BUS_CE>, <&ccu CLK_CE>,
+				 <&ccu CLK_MBUS_CE>, <&rtc CLK_IOSC>;
+			clock-names = "bus", "mod", "ram", "trng";
+			resets = <&ccu RST_BUS_CE>;
+		};
+
+		ths: thermal-sensor@5070400 {
+			compatible = "allwinner,sun50i-h616-ths";
+			reg = <0x05070400 0x400>;
+			interrupts = <GIC_SPI 19 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&ccu CLK_BUS_THS>;
+			clock-names = "bus";
+			resets = <&ccu RST_BUS_THS>;
+			nvmem-cells = <&ths_calibration>;
+			nvmem-cell-names = "calibration";
+			allwinner,sram = <&syscon>;
+			#thermal-sensor-cells = <1>;
+		};
+
+	};
+
+	ephy_clk: ephy-clock {
+		compatible = "pwm-clock";
+		#clock-cells = <0>;
+		clock-frequency = <24000000>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&pwm5_pin>;
+		/* 42 ns requests the 24 MHz parent through the PWM driver's bypass mode. */
+		pwms = <&pwm 5 42 0>;
+	};
+
+	/* the vendor's aliases are path strings to nodes this tree no longer has; mainline's: the
+	   console, and an ethernet alias each, so U-Boot hands EMAC1 and the Wi-Fi stable addresses */
+	aliases {
+		serial0 = &uart0;
+		ethernet0 = &emac1;
+		ethernet1 = &sdio_wifi;
+		bluetooth0 = &bt;
+	};
+
+	/* the vendor's bootargs are Android's; extlinux.conf gives ours */
+	chosen {
+		stdout-path = "serial0:115200n8";
+	};
+
+	/* mainline's A53s on the ccu's CPUX clock, with the factory's supply and power coefficient.
+	   The factory's idle state is its BL31's; ours is TF-A without SCP firmware: it goes */
+	cpus {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		cpu0: cpu@0 {
+			compatible = "arm,cortex-a53";
+			device_type = "cpu";
+			reg = <0>;
+			enable-method = "psci";
+			clocks = <&ccu CLK_CPUX>;
+			operating-points-v2 = <&cpu_opp_table>;
+			dynamic-power-coefficient = <100>;
+			#cooling-cells = <2>;
+			cpu-supply = <&reg_dcdc2>;
+			i-cache-size = <0x8000>;
+			i-cache-line-size = <64>;
+			i-cache-sets = <256>;
+			d-cache-size = <0x8000>;
+			d-cache-line-size = <64>;
+			d-cache-sets = <128>;
+			next-level-cache = <&l2_cache>;
+		};
+
+		cpu1: cpu@1 {
+			compatible = "arm,cortex-a53";
+			device_type = "cpu";
+			reg = <1>;
+			enable-method = "psci";
+			clocks = <&ccu CLK_CPUX>;
+			operating-points-v2 = <&cpu_opp_table>;
+			#cooling-cells = <2>;
+			i-cache-size = <0x8000>;
+			i-cache-line-size = <64>;
+			i-cache-sets = <256>;
+			d-cache-size = <0x8000>;
+			d-cache-line-size = <64>;
+			d-cache-sets = <128>;
+			next-level-cache = <&l2_cache>;
+		};
+
+		cpu2: cpu@2 {
+			compatible = "arm,cortex-a53";
+			device_type = "cpu";
+			reg = <2>;
+			enable-method = "psci";
+			clocks = <&ccu CLK_CPUX>;
+			operating-points-v2 = <&cpu_opp_table>;
+			#cooling-cells = <2>;
+			i-cache-size = <0x8000>;
+			i-cache-line-size = <64>;
+			i-cache-sets = <256>;
+			d-cache-size = <0x8000>;
+			d-cache-line-size = <64>;
+			d-cache-sets = <128>;
+			next-level-cache = <&l2_cache>;
+		};
+
+		cpu3: cpu@3 {
+			compatible = "arm,cortex-a53";
+			device_type = "cpu";
+			reg = <3>;
+			enable-method = "psci";
+			clocks = <&ccu CLK_CPUX>;
+			operating-points-v2 = <&cpu_opp_table>;
+			#cooling-cells = <2>;
+			i-cache-size = <0x8000>;
+			i-cache-line-size = <64>;
+			i-cache-sets = <256>;
+			d-cache-size = <0x8000>;
+			d-cache-line-size = <64>;
+			d-cache-sets = <128>;
+			next-level-cache = <&l2_cache>;
+		};
+
+		l2_cache: l2-cache {
+			compatible = "cache";
+			cache-level = <2>;
+			cache-unified;
+			cache-size = <0x40000>;
+			cache-line-size = <64>;
+			cache-sets = <256>;
+		};
+	};
+
+	/* mainline's table, as sun50i-h616-cpu-opp.dtsi writes it: sun50i-cpufreq-nvmem reads its bins from
+	   cpu_speed_grade, the vendor's table encodes them for its own driver. The CPU rail tops at
+	   1.12 V, as stock runs it, which bounds the reachable points */
+	/* the factory table, every speed bin: the driver picks one by the SID's speed grade */
+	cpu_opp_table: opp-table-cpu {
+		compatible = "allwinner,sun50i-h616-operating-points";
+		nvmem-cells = <&cpu_speed_grade>;
+		opp-shared;
+
+		opp-480000000-0 {
+			opp-hz = /bits/ 64 <480000000>;
+			opp-microvolt = <900000>;
+			clock-latency-ns = <244144>; /* 8 32k periods */
+			opp-supported-hw = <0x33>;
+		};
+
+		opp-480000000-1 {
+			opp-hz = /bits/ 64 <480000000>;
+			opp-microvolt = <900000>;
+			clock-latency-ns = <244144>; /* 8 32k periods */
+			opp-supported-hw = <0x0c>;
+		};
+
+		opp-600000000-0 {
+			opp-hz = /bits/ 64 <600000000>;
+			opp-microvolt = <900000>;
+			clock-latency-ns = <244144>; /* 8 32k periods */
+			opp-supported-hw = <0x03>;
+		};
+
+		opp-600000000-1 {
+			opp-hz = /bits/ 64 <600000000>;
+			opp-microvolt = <900000>;
+			clock-latency-ns = <244144>; /* 8 32k periods */
+			opp-supported-hw = <0x0c>;
+		};
+
+		opp-720000000 {
+			opp-hz = /bits/ 64 <720000000>;
+			opp-microvolt = <900000>;
+			clock-latency-ns = <244144>; /* 8 32k periods */
+			opp-supported-hw = <0x30>;
+		};
+
+		opp-792000000-0 {
+			opp-hz = /bits/ 64 <792000000>;
+			opp-microvolt = <900000>;
+			clock-latency-ns = <244144>; /* 8 32k periods */
+			opp-supported-hw = <0x03>;
+		};
+
+		opp-792000000-1 {
+			opp-hz = /bits/ 64 <792000000>;
+			opp-microvolt = <940000>;
+			clock-latency-ns = <244144>; /* 8 32k periods */
+			opp-supported-hw = <0x0c>;
+		};
+
+		opp-936000000 {
+			opp-hz = /bits/ 64 <936000000>;
+			opp-microvolt = <900000>;
+			clock-latency-ns = <244144>; /* 8 32k periods */
+			opp-supported-hw = <0x30>;
+		};
+
+		opp-1008000000-0 {
+			opp-hz = /bits/ 64 <1008000000>;
+			opp-microvolt = <920000>;
+			clock-latency-ns = <244144>; /* 8 32k periods */
+			opp-supported-hw = <0x01>;
+		};
+
+		opp-1008000000-1 {
+			opp-hz = /bits/ 64 <1008000000>;
+			opp-microvolt = <900000>;
+			clock-latency-ns = <244144>; /* 8 32k periods */
+			opp-supported-hw = <0x02>;
+		};
+
+		opp-1008000000-2 {
+			opp-hz = /bits/ 64 <1008000000>;
+			opp-microvolt = <1020000>;
+			clock-latency-ns = <244144>; /* 8 32k periods */
+			opp-supported-hw = <0x0c>;
+		};
+
+		opp-1008000000-3 {
+			opp-hz = /bits/ 64 <1008000000>;
+			opp-microvolt = <950000>;
+			clock-latency-ns = <244144>; /* 8 32k periods */
+			opp-supported-hw = <0x30>;
+		};
+
+		opp-1104000000 {
+			opp-hz = /bits/ 64 <1104000000>;
+			opp-microvolt = <1000000>;
+			clock-latency-ns = <244144>; /* 8 32k periods */
+			opp-supported-hw = <0x30>;
+		};
+
+		opp-1200000000-0 {
+			opp-hz = /bits/ 64 <1200000000>;
+			opp-microvolt = <980000>;
+			clock-latency-ns = <244144>; /* 8 32k periods */
+			opp-supported-hw = <0x01>;
+		};
+
+		opp-1200000000-1 {
+			opp-hz = /bits/ 64 <1200000000>;
+			opp-microvolt = <960000>;
+			clock-latency-ns = <244144>; /* 8 32k periods */
+			opp-supported-hw = <0x02>;
+		};
+
+		opp-1200000000-2 {
+			opp-hz = /bits/ 64 <1200000000>;
+			opp-microvolt = <1100000>;
+			clock-latency-ns = <244144>; /* 8 32k periods */
+			opp-supported-hw = <0x0c>;
+		};
+
+		opp-1200000000-3 {
+			opp-hz = /bits/ 64 <1200000000>;
+			opp-microvolt = <1050000>;
+			clock-latency-ns = <244144>; /* 8 32k periods */
+			opp-supported-hw = <0x30>;
+		};
+
+		opp-1296000000-0 {
+			opp-hz = /bits/ 64 <1296000000>;
+			opp-microvolt = <1100000>;
+			clock-latency-ns = <244144>; /* 8 32k periods */
+			opp-supported-hw = <0x02>;
+		};
+
+		opp-1296000000-1 {
+			opp-hz = /bits/ 64 <1296000000>;
+			opp-microvolt = <1120000>;
+			clock-latency-ns = <244144>; /* 8 32k periods */
+			opp-supported-hw = <0x08>;
+		};
+
+		opp-1320000000 {
+			opp-hz = /bits/ 64 <1320000000>;
+			opp-microvolt = <1100000>;
+			clock-latency-ns = <244144>; /* 8 32k periods */
+			opp-supported-hw = <0x30>;
+		};
+
+		opp-1344000000 {
+			opp-hz = /bits/ 64 <1344000000>;
+			opp-microvolt = <1120000>;
+			clock-latency-ns = <244144>; /* 8 32k periods */
+			opp-supported-hw = <0x04>;
+		};
+
+		opp-1416000000-0 {
+			opp-hz = /bits/ 64 <1416000000>;
+			opp-microvolt = <1150000>;
+			clock-latency-ns = <244144>; /* 8 32k periods */
+			opp-supported-hw = <0x10>;
+		};
+
+		opp-1416000000-1 {
+			opp-hz = /bits/ 64 <1416000000>;
+			opp-microvolt = <1160000>;
+			clock-latency-ns = <244144>; /* 8 32k periods */
+			opp-supported-hw = <0x20>;
+		};
+
+		opp-1512000000 {
+			opp-hz = /bits/ 64 <1512000000>;
+			opp-microvolt = <1120000>;
+			clock-latency-ns = <244144>; /* 8 32k periods */
+			opp-supported-hw = <0x01>;
+		};
+	};
+
+	/* the factory's GPU points */
+	gpu_opp_table: opp-table-gpu {
+		compatible = "operating-points-v2";
+
+		opp-504000000 {
+			opp-hz = /bits/ 64 <504000000>;
+			opp-microvolt = <950000>;
+		};
+
+		opp-540000000 {
+			opp-hz = /bits/ 64 <540000000>;
+			opp-microvolt = <950000>;
+		};
+
+		opp-576000000 {
+			opp-hz = /bits/ 64 <576000000>;
+			opp-microvolt = <950000>;
+		};
+
+		opp-600000000 {
+			opp-hz = /bits/ 64 <600000000>;
+			opp-microvolt = <950000>;
+		};
+	};
+
+	/* mainline's display engine over both mixers, on as the factory's display is */
+	de: display-engine {
+		compatible = "allwinner,sun50i-h616-display-engine";
+		allwinner,pipelines = <&mixer0>, <&mixer1>;
+		status = "okay";
+	};
+
+	/* TF-A's own BL31, where the vendor's secure OS window was */
+	reserved-memory {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		secmon@40000000 {
+			reg = <0x0 0x40000000 0x0 0x40000>;
+			no-map;
+		};
+
+		/* the crash log, in the rank the DRAM fix made whole */
+		ramoops@7e000000 {
+			compatible = "ramoops";
+			reg = <0x0 0x7e000000 0x0 0x100000>;
+			record-size = <0x8000>;
+			console-size = <0x8000>;
+			ftrace-size = <0x40000>;
+		};
+	};
+
+	/* the 24 MHz crystal, a node of the vendor's clocks; mainline's ccu takes it as an input */
+	osc24M: osc24M-clk {
+		#clock-cells = <0>;
+		compatible = "fixed-clock";
+		clock-frequency = <24000000>;
+		clock-output-names = "osc24M";
+	};
+
+	/* the factory's zones, moved to the root, where the thermal core looks. Its CPU trips: 60 and
+	   70 °C passive, 115 °C critical, and its CPU cooling map; the GPU, as on mainline, has no
+	   cooling cells, so its map goes, as do the vendor's power-allocator gains. A zone needs a
+	   trip: the other three take mainline's 110 °C critical */
+	thermal-zones {
+		cpu-thermal {
+			polling-delay-passive = <500>;
+			polling-delay = <1000>;
+			thermal-sensors = <&ths 2>;
+			sustainable-power = <1000>;
+
+			trips {
+				cpu_threshold: cpu-trip-0 {
+					temperature = <60000>;
+					type = "passive";
+					hysteresis = <0>;
+				};
+				cpu_target: cpu-trip-1 {
+					temperature = <70000>;
+					type = "passive";
+					hysteresis = <0>;
+				};
+				cpu_critical: cpu-trip-2 {
+					temperature = <115000>;
+					type = "critical";
+					hysteresis = <0>;
+				};
+			};
+
+			cooling-maps {
+				map0 {
+					trip = <&cpu_target>;
+					cooling-device = <&cpu0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+					contribution = <1024>;
+				};
+			};
+		};
+
+		gpu-thermal {
+			polling-delay-passive = <500>;
+			polling-delay = <1000>;
+			thermal-sensors = <&ths 0>;
+			sustainable-power = <1100>;
+
+			trips {
+				gpu_temp_critical: gpu-trip-0 {
+					temperature = <110000>;
+					type = "critical";
+					hysteresis = <0>;
+				};
+			};
+		};
+
+		ve-thermal {
+			polling-delay-passive = <0>;
+			polling-delay = <0>;
+			thermal-sensors = <&ths 1>;
+
+			trips {
+				ve_temp_critical: ve-trip-0 {
+					temperature = <110000>;
+					type = "critical";
+					hysteresis = <0>;
+				};
+			};
+		};
+
+		ddr-thermal {
+			polling-delay-passive = <0>;
+			polling-delay = <0>;
+			thermal-sensors = <&ths 3>;
+
+			trips {
+				ddr_temp_critical: ddr-trip-0 {
+					temperature = <110000>;
+					type = "critical";
+					hysteresis = <0>;
+				};
+			};
+		};
+	};
+
+	/* the HDMI port, the display pipeline's end */
+	connector {
+		compatible = "hdmi-connector";
+		type = "a";
+
+		port {
+			hdmi_con_in: endpoint {
+				remote-endpoint = <&hdmi_out_con>;
+			};
+		};
+	};
+
+	/* Stock drives PH6 low while on and PH7 high in standby. */
+	leds {
+		compatible = "gpio-leds";
+
+		led-0 {
+			label = "power";
+			function = LED_FUNCTION_POWER;
+			gpios = <&pio 7 6 GPIO_ACTIVE_LOW>;
+			default-state = "on";
+		};
+
+		led-1 {
+			label = "standby";
+			function = LED_FUNCTION_STANDBY;
+			gpios = <&pio 7 7 GPIO_ACTIVE_HIGH>;
+			default-state = "off";
+		};
+	};
+
+	/* PG18 is Wi-Fi reset; PG19 belongs to Bluetooth. */
+	wifi_pwrseq: pwrseq {
+		compatible = "mmc-pwrseq-simple";
+		clocks = <&rtc CLK_OSC32K_FANOUT>;
+		clock-names = "ext_clock";
+		/* the vendor's source, the crystal through the PLL, not the RTC's RC oscillator */
+		assigned-clocks = <&rtc CLK_OSC32K_FANOUT>;
+		assigned-clock-parents = <&ccu CLK_PLL_SYSTEM_32K>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&clk_losc_pins_a>;
+		reset-gpios = <&pio 6 18 GPIO_ACTIVE_LOW>;
+		post-power-on-delay-ms = <200>;
+	};
+
+	/* the DC input, the PMIC's supply */
+	reg_vcc5v: vcc5v {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc-5v";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		regulator-always-on;
+	};
+
+	/* the factory's usbc1 VBUS switch, PH8, which stock drives high */
+	reg_usb1_vbus: usb1-vbus {
+		compatible = "regulator-fixed";
+		regulator-name = "usb1-vbus";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		vin-supply = <&reg_vcc5v>;
+		gpio = <&pio 7 8 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+	};
+
+	psci {
+		compatible = "arm,psci-1.0";
+		method = "smc";
+	};
+
+	/* the factory's placeholder; U-Boot writes the size it finds */
+	memory@40000000 {
+		device_type = "memory";
+		reg = <0x00 0x40000000 0x00 0x20000000>;
+	};
+
+	/* mainline's: its PPIs active high as its binding has them, the rate left to firmware */
+	timer {
+		compatible = "arm,armv8-timer";
+		arm,no-tick-in-suspend;
+		interrupts = <GIC_PPI 13
+			(GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_HIGH)>,
+			     <GIC_PPI 14
+			(GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_HIGH)>,
+			     <GIC_PPI 11
+			(GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_HIGH)>,
+			     <GIC_PPI 10
+			(GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_HIGH)>;
+	};
+
+	/* mainline's A53 PMU model and its affinity; the vendor's is the generic one */
+	pmu {
+		compatible = "arm,cortex-a53-pmu";
+		interrupts = <GIC_SPI 140 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 141 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 142 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 143 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-affinity = <&cpu0>, <&cpu1>, <&cpu2>, <&cpu3>;
+	};
+
+
+	hdmi_sound: sound-hdmi {
+		compatible = "allwinner,sun8i-a83t-hdmi-audio";
+		audio-cpu = <&ahub 1>;
+		audio-codec = <&hdmi>;
+		status = "okay";
+	};
+};

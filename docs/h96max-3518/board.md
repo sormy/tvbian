@@ -6,11 +6,12 @@ RK3518 inside. The LED tells the RK3518 models apart: in the middle on the 3518
 (`https://h5.h96max.com/products-details/h96-max-rk3518-4k-android-streaming-box`), on the left on
 the 3518B; this unit's is in the middle.
 
-Formerly `h96max-h313`. A box installed under that name upgrades from `tvb-h96max-h313` to
-`tvb-h96max-3518` and keeps its hostname; an image built now names the box `h96max-3518`.
+Formerly `h96max-h313`, a name the Allwinner H313 board now holds. A box still carrying
+`tvb-h96max-h313` swaps it on the box: `apt install tvb-h96max-3518 tvb-h96max-h313-`. A box that
+took the transition runs `apt full-upgrade` once, which drops it.
 
 Runs TVBian, migrated in place from Armbian: Debian trixie, kernel `6.1.172-tvb-rk35xx`, U-Boot
-`v2026.10`, NetworkManager, hostname `h96max-h313`. ✅ Wi-Fi, BT, IR, CEC, the VPU nodes, Ethernet
+`v2026.10`, NetworkManager, hostname `h96max-3518`. ✅ Wi-Fi, BT, IR, CEC, the VPU nodes, Ethernet
 on the label MAC, which our U-Boot reads from vendor storage; ❓ HDMI, suspend and IR wake on this
 kernel.
 

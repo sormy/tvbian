@@ -167,6 +167,7 @@ below.
 | `docs/todo/allwinner.md`        | Allwinner boards, every one                 |
 | `docs/todo/amlogic.md`          | Amlogic boards, every one                   |
 | `docs/todo/tanix-tx1-v2.md`     | the Tanix TX1 V2.0: what is left            |
+| `docs/todo/h96max-h313.md`      | the H96 Max H313: what is left              |
 | `docs/todo/h96max-m20.md`       | the H96 Max M20: what is left               |
 | `docs/todo/h96max-m2-plus.md`   | the H96 Max M2 Plus: what is left           |
 | `docs/todo/swt6621s.md`         | the SWT6621S Wi-Fi/BT: what is left         |

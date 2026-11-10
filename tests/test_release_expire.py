@@ -51,6 +51,7 @@ def versions(package: str, *each: str) -> Kept:
 
 DEFAULT, NEXT = "linux-image-tvb-rk35xx", "linux-image-tvb-rk35xx-next"
 R69 = "tvb-r69"
+H313 = "tvb-h96max-h313"
 CASES: list[tuple[str, list[Stanza], Kept]] = [
     ("a single version older than the window stays", [deb(R69, "1", OLD)], versions(R69, "1")),
     (
@@ -143,6 +144,16 @@ CASES: list[tuple[str, list[Stanza], Kept]] = [
         "an exact pin to an old version keeps it beside the newest",
         [deb("tvb-base", v, OLD) for v in ("1", "2", "3")] + [deb(R69, "5", OLD, "tvb-base (= 2)")],
         versions("tvb-base", "2", "3") | versions(R69, "5"),
+    ),
+    (
+        "a reused name's version in the transition's epoch replaces it, inside the window",
+        [deb(H313, v, OLD) for v in ("1", "2", "3", "1:1")] + [deb(H313, "1:2", RECENT)],
+        versions(H313, "1:1", "1:2"),
+    ),
+    (
+        "past the window, only the newest epoch's newest stays",
+        [deb(H313, v, OLD) for v in ("1", "2", "3", "1:1", "1:2")],
+        versions(H313, "1:2"),
     ),
 ]
 

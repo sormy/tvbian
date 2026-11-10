@@ -24,6 +24,12 @@ while read -r deb; do
   family=$(dpkg-deb -f "$deb" X-Tvb-Family 2>/dev/null || true)
   if [ -n "$family" ] && [ "$family" != "$box" ]; then
     echo "tvb-board-check: $(basename "$deb") is for $family boxes; this eMMC holds a $box loader." >&2
+    case $(dpkg-deb -f "$deb" Package)/$box in
+      tvb-h96max-h313/rk35xx)
+        echo "On Rockchip you likely meant tvb-h96max-3518: h96max-h313 was its mistaken name." >&2
+        echo "  sudo apt install tvb-h96max-3518 tvb-h96max-h313-" >&2
+        ;;
+    esac
     echo "To install anyway: sudo TVB_SKIP_BOARD_CHECK=1 apt install ..." >&2
     exit 1
   fi

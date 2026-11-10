@@ -88,6 +88,9 @@ new package `Replaces` and `Breaks: tvb-<old> (<< 1:0)`, and the release builds 
 installs the new board and drops the old. Unversioned, the `Breaks` would match that transition too
 and apt would keep the old package back.
 
+A board taking a retired name continues its versions in the newest epoch published, above the
+transition; the old board's `Breaks` turns unversioned, and no transition is built.
+
 Testing the served repo from a box, 🟡 run from a trixie container only:
 
 ```sh

@@ -186,7 +186,8 @@ case "$1" in
       b=$(basename "$(dirname "$c")")
       # shellcheck source=/dev/null
       old=$(. "boards/$b/board.conf"; echo "${BOARD_RENAMED_FROM:-}")
-      [ -n "$old" ] && run bash package/retire.sh "$b"
+      # a former name another board now holds gets no transition
+      [ -n "$old" ] && [ ! -d "boards/$old" ] && run bash package/retire.sh "$b"
     done
     run bash package/base.sh
     run bash package/keyring.sh
