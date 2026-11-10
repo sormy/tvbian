@@ -24,6 +24,7 @@ new() {
       firmware) echo "/out/debs/tvb-firmware-$(sed -n 's/^FIRMWARE_CHIP=//p' "/repo/firmware/$arg/firmware.conf")_${version}_all.deb" ;;
       base) echo "/out/debs/tvb-base_${version}_all.deb" ;;
       keyring) echo "/out/debs/tvb-archive-keyring_${version}_all.deb" ;;
+      extra) find /out/debs -name "*_${version}_*.deb" ;;
     esac
   done <"$REL/plan"
 }
