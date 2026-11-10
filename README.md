@@ -70,6 +70,11 @@ Adding one is a pull request, and an agent does most of the work. You bring a se
 cable and the patience to press a toothpick into a hole on command:
 [docs/bring-up/README.md](docs/bring-up/README.md).
 
+> **Which model, as of 2026-11-09.** Not an advert, what we saw. A new family, a new chip, or a
+> vendor tree translated to mainline: Anthropic's Opus, even at low effort. OpenAI's Codex (Sol)
+> copied other boards' translated trees wholesale instead of translating this one's. Grok's results
+> could not be trusted.
+
 ## Contributing
 
 All welcome, by pull request:
