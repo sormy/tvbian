@@ -97,8 +97,9 @@ signed checksums. Build it yourself instead with `./build.sh`: [docs/build.md](d
 
 ## Back up first
 
-Over FEL, the whole eMMC to a file on the host, as `docs/allwinner-fel.md` describes: only the
-backup brings Android back. The Tanix TX1 V2.0 has no microSD slot, so FEL is its only way in.
+Before anything is written to the eMMC; running from an SD card needs none. Over FEL, the whole eMMC
+to a file on the host, as `docs/allwinner-fel.md` describes: only the backup brings Android back.
+The Tanix TX1 V2.0 has no microSD slot, so FEL is its only way in.
 
 ## Install
 

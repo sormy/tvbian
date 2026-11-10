@@ -50,7 +50,8 @@ users: we believe in you, from a distance.
 
 ## Will it brick my box?
 
-We try hard not to: the installer leaves alone what recovery needs. Still, **back up first**; each
+We try hard not to: the installer leaves alone what recovery needs. Running from an SD card writes
+nothing to the eMMC and needs no backup; before anything is written there, **back up first**. Each
 family's guide says how.
 
 Worst case, the box is not dead, just expensive: short the eMMC's
@@ -66,8 +67,9 @@ Box names lie. "H96 Max" is not a box, it is a lifestyle: hundreds of boards, se
 case. Ours had "H313" on the label and a Rockchip inside. A box is the board, and a board is its
 chips and layout, whatever its silkscreen says, so open it.
 
-Adding one is a pull request, and an agent does most of the work. You bring a serial adapter, an OTG
-cable and the patience to press a toothpick into a hole on command:
+Adding one is a pull request, and an agent does most of the work. You bring an OTG cable and the
+patience to press a toothpick into a hole on command; a serial adapter helps on a new family, and
+when a box will not boot, so the failure is not blind:
 [docs/bring-up/README.md](docs/bring-up/README.md).
 
 > **Which model, as of 2026-11-09.** Not an advert, what we saw. A new family, a new chip, or a
@@ -77,15 +79,28 @@ cable and the patience to press a toothpick into a hole on command:
 
 ## Contributing
 
-All welcome, by pull request:
+All welcome:
 
-- a new family, or a new board of one we have;
-- a fix to a kernel, a driver, or a board's device tree wiring;
-- a box measured: what works, what does not, with the numbers.
+- a new family, or a new board of one we have, by pull request;
+- a fix to a kernel, a driver, or a board's device tree wiring, by pull request;
+- a box measured: what works, what does not, with the numbers;
+- photos of a box, its label and both sides of its board, its stock dump or the vendor's firmware
+  where there is one: enough for a blind bring-up, and you test the image when it is ready.
 
 One fix a patch, written as if Linus himself will review it: ask your AI to write it that way. A
 separate place in heaven is kept for whoever has the patience to walk one through upstream review
 until it merges.
+
+## Built on and inspired by
+
+- [Debian](https://www.debian.org/): the system every box runs, and the base of hundreds of
+  distributions: the gold standard.
+- [Armbian](https://www.armbian.com/): a distribution for boards, run by its community; its process
+  does not scale to the hundreds of TV boxes.
+- [ophub](https://github.com/ophub/amlogic-s9xxx-armbian): Armbian for hundreds of TV boxes, proof
+  they are worth running Linux on.
+- [juliovendramini/rk3518_armbian](https://github.com/juliovendramini/rk3518_armbian): a small
+  README that brought up the first RK3518 box, and where this project started.
 
 ## License
 

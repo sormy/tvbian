@@ -1,14 +1,16 @@
 # Stock dump
 
-The factory firmware is the board's specification, and the only reference once the box is gone.
+The factory firmware is the board's specification, and the only reference once the box is gone. Its
+image in `backup/` is required; a capture from running Android is optional, worth taking where a
+shell on stock is at hand.
 
 ## Do
 
-1. **A new family or chip only: from a shell on stock**, serial, `adb` or `ssh`: a dump carved from
-   the image has no `dmesg` or `getprop`. Text files and small binaries fit serial, each
-   `gzip | base64` on the console and its SHA-256 checked on the host, a 1 MiB file in about two
-   minutes at 115200.
-2. **`stock/<board>/`**, a new family or chip only; a known one's is its factory image in `backup/`:
+1. **Optional: from a shell on stock**, serial, `adb` or `ssh`, most useful for a new family or
+   chip: a dump carved from the image has no `dmesg` or `getprop`. Text files and small binaries fit
+   serial, each `gzip | base64` on the console and its SHA-256 checked on the host, a 1 MiB file in
+   about two minutes at 115200.
+2. **`stock/<board>/`**, what that shell gave; the rest comes from the factory image in `backup/`:
 
    | File                                                     | What                                  |
    | -------------------------------------------------------- | ------------------------------------- |
@@ -53,7 +55,8 @@ The factory firmware is the board's specification, and the only reference once t
 
 ## Check
 
-- [ ] **D1** For a new family or chip, `stock/<board>/` has every file above
+- [ ] **D1** If stock Android gave a shell, its captured files (`dmesg`, `getprop` and the rest) are
+      in `stock/<board>/`
 - [ ] **D2** For a new family or chip, its README's identity table is filled
 - [ ] **D3** The factory trees are carved from the image
 - [ ] **D4** Nothing kept out is in the repo

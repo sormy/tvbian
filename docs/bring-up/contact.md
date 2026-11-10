@@ -8,13 +8,13 @@ can show, the agent reads off it. Say what each action is for.
 1. 👤 Ask for the product listing URL first. Read its model, selected variant where visible, ports
    and accessories. Ask only for photos that resolve what the listing cannot show: the delivered
    unit, its label or accessories. Keep the URL and photos in `docs/<board>/` once the ID is agreed.
-2. **Ask: a serial adapter, and the pins found?** `identity.md`'s serial steps, then stock Android
-   booted with the console attached: often a root shell. Take `dump.md`'s small files there and
-   then.
-3. **Else ask: an OTG cable?** A USB-A male-to-male cable from the OTG port to the host, the
-   recovery button held while the box powers up: the USB service mode. Its vendor ID, in `lsusb` or
-   `system_profiler SPUSBDataType`, names the family: `2207` Rockchip, `1b8e` Amlogic, `1f3a`
-   Allwinner.
+2. **Ask: an OTG cable?** A USB-A male-to-male cable from the OTG port to the host, the recovery
+   button held while the box powers up: the USB service mode, enough for a family we have. Its
+   vendor ID, in `lsusb` or `system_profiler SPUSBDataType`, names the family: `2207` Rockchip,
+   `1b8e` Amlogic, `1f3a` Allwinner.
+3. **A new family, or a box that will not boot: a serial adapter, and the pins found?** Without it a
+   failure is blind. `identity.md`'s serial steps, then stock Android booted with the console
+   attached: often a root shell. Take `dump.md`'s small files there and then.
 4. **No cable to hand: the network**, on the few boxes whose stock listens for `adb` on TCP: try
    `adb connect <ip>:5555`, then `adb root`. A `userdebug` build with `ro.adb.secure` 0 gives a root
    shell, and `dump.md`'s files come over it.

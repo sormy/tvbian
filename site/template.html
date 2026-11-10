@@ -900,6 +900,11 @@
       .footer-row p {
         margin: 0;
       }
+      .footer-end {
+        display: flex;
+        gap: 20px;
+        align-items: center;
+      }
       .sr-only {
         position: absolute;
         width: 1px;
@@ -1097,7 +1102,7 @@
           ><span aria-hidden="true">↗</span>
         </a>
         <nav aria-label="Main navigation">
-          <a href="#boxes">Hardware</a><a href="#why">The system</a><a href="#help">Contribute</a>
+          <a href="#boxes">Hardware</a><a href="#why">The system</a><a href="#help">Contribute</a><a href="#contact">Contact</a>
         </nav>
         <div class="tools">
           <a href="@@REPO@@">GitHub @@STARS@@ ↗</a
@@ -1251,22 +1256,14 @@
         </section>
       </section>
       <section id="help" aria-labelledby="help-title">
-        <div class="section-head">
-          <div>
-            <p class="section-label">03 / Make it better</p>
-            <h2 id="help-title">One box is enough.</h2>
-          </div>
-          <p>
-            Bring the odd box on your desk. AI handles bring-up and review; you handle the steps
-            that need hands.
-          </p>
-        </div>
+        <p class="section-label">03 / Make it better</p>
+        <h2 id="help-title">Bring a box.<br />The AI brings the patience.</h2>
         <div class="features">
           <div class="feature">
             <span class="n">01 — YOUR HANDS</span>
             <h3>You have opposable thumbs.</h3>
             <p>
-              Connect serial, plug in cables, press buttons, and check the screen. The procedure
+              Plug in cables, press buttons, and check the screen. The procedure
               tells you what to do. Your ability to hold a toothpick is finally a project
               dependency.
             </p>
@@ -1293,7 +1290,17 @@
         <p class="note">
           Known families and chips reuse shared support. New chips can need driver work.
         </p>
-        <ul class="help">
+        <section class="validation" aria-labelledby="ways-title">
+          <div class="validation-intro">
+            <div>
+              <p class="section-label">Ways to help</p>
+              <h3 id="ways-title">Pick your level of commitment.</h3>
+            </div>
+            <p>
+              From “I own a toothpick” to “I read datasheets for fun”. Every level ships boxes.
+            </p>
+          </div>
+          <ul class="help">
           <li>
             <h3>Start with the factory's device tree.</h3>
             <p>
@@ -1319,11 +1326,24 @@
           <li>
             <h3>Give a box a purpose.</h3>
             <p>
-              Got an unsupported box in a drawer? Give it a second career in development. Send the
-              model and board details. The drawer will manage without it.
+              Got an unsupported box in a drawer, still on its stock Android? Give it a second
+              career in development. Send the model and board details. The drawer will manage
+              without it.
             </p>
             <a class="text-link" href="mailto:admin@tvbian.com?subject=Hardware%20donation"
               >Offer hardware <span class="link-arrow" aria-hidden="true">↗</span></a
+            >
+          </li>
+          <li>
+            <h3>Keep the box. Send its data.</h3>
+            <p>
+              Photograph the box, its label and both sides of the board, and send them with the
+              model; a stock dump or the vendor's firmware helps where there is one. That is
+              enough for a blind bring-up; when the image arrives, you are the one who tests it.
+              Your box stays home; its secrets travel.
+            </p>
+            <a class="text-link" href="@@REPO@@/issues/new?title=Board%20data"
+              >Share board data <span class="link-arrow" aria-hidden="true">↗</span></a
             >
           </li>
           <li>
@@ -1337,6 +1357,7 @@
             >
           </li>
         </ul>
+        </section>
       </section>
       <section id="contact" class="contact-section" aria-labelledby="contact-title">
         <div class="section-head">
@@ -1356,7 +1377,9 @@
             <h3>Have a spare box?</h3>
             <p>
               For hardware donations, email the model and board details. We can arrange its second
-              career from there.
+              career from there. Keeping it? Its stock dump and board photos, in
+              <a href="@@REPO@@/issues/new?title=Board%20data">an issue</a> naming the board, help
+              almost as much.
             </p>
             <a class="contact-email" href="mailto:admin@tvbian.com?subject=Hardware%20donation"
               >admin@tvbian.com <span aria-hidden="true">↗</span></a
@@ -1374,17 +1397,65 @@
           </div>
         </div>
       </section>
+      <section id="credits" aria-labelledby="credits-title">
+        <div class="section-head">
+          <div>
+            <p class="section-label">05 / Credits</p>
+            <h2 id="credits-title">Built on and inspired by.</h2>
+          </div>
+          <p>Where this project comes from.</p>
+        </div>
+        <ul class="help">
+          <li>
+            <h3>Debian</h3>
+            <p>
+              The system every box runs, and the base of hundreds of distributions: the gold
+              standard.
+            </p>
+            <a class="text-link" href="https://www.debian.org/"
+              >debian.org <span class="link-arrow" aria-hidden="true">↗</span></a
+            >
+          </li>
+          <li>
+            <h3>Armbian</h3>
+            <p>
+              A distribution for boards, run by its community; its process does not scale to the
+              hundreds of TV boxes.
+            </p>
+            <a class="text-link" href="https://www.armbian.com/"
+              >armbian.com <span class="link-arrow" aria-hidden="true">↗</span></a
+            >
+          </li>
+          <li>
+            <h3>ophub</h3>
+            <p>Armbian for hundreds of TV boxes, proof they are worth running Linux on.</p>
+            <a class="text-link" href="https://github.com/ophub/amlogic-s9xxx-armbian"
+              >ophub/amlogic-s9xxx-armbian <span class="link-arrow" aria-hidden="true">↗</span></a
+            >
+          </li>
+          <li>
+            <h3>juliovendramini</h3>
+            <p>A small README that brought up the first RK3518 box, and where this project started.</p>
+            <a class="text-link" href="https://github.com/juliovendramini/rk3518_armbian"
+              >juliovendramini/rk3518_armbian <span class="link-arrow" aria-hidden="true">↗</span></a
+            >
+          </li>
+        </ul>
+      </section>
     </main>
     <footer>
       <div class="wrap footer-row">
         <p>
           Not affiliated with or endorsed by <a href="https://www.debian.org/">Debian</a>, a
           registered trademark of
-          <abbr title="Software in the Public Interest, Inc.">SPI, Inc.</abbr> ·
-          <a href="@@REPO@@">GitHub</a> · <a href="#contact">Contact</a> ·
-          <a href="@@REPO@@/blob/main/LICENSE">MIT</a>
+          <abbr title="Software in the Public Interest, Inc.">SPI, Inc.</abbr>
         </p>
-        @@COFFEE@@
+        <div class="footer-end">
+          <p>
+            <a href="@@REPO@@">GitHub</a> · <a href="@@REPO@@/blob/main/LICENSE">MIT</a>
+          </p>
+          @@COFFEE@@
+        </div>
       </div>
     </footer>
     <script>
