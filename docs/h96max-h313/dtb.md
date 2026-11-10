@@ -13,7 +13,7 @@ Boots from SD on 6.18.62, and on 7.3.3, the `-next` kernel.
 | Ethernet     | EMAC1 RMII, PA0–PA9                                |
 | EPHY         | AC300 package on EMAC1 MDIO, address 0             |
 | EPHY clock   | PWM5 PA12, 24 MHz bypass                           |
-| LEDs         | PH6 power, blue, active-low; PH7 standby, red      |
+| LEDs         | PH6 power, blue; PH7 standby, red; states retained |
 | Recovery     | None; FEL in the AV jack, the boot ROM's           |
 | IR           | PH10, `rc-h96max`                                  |
 | USB          | Factory host mode; FEL loader uses peripheral mode |

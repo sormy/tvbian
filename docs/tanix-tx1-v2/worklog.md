@@ -1767,3 +1767,8 @@ gain, the unit's own DRAM init on the eMMC, is not worth it; the install keeps w
 
 - `stress-ng --stream`, 15 s, read / write MB/s: 861 / 574 on one core, 841 / 560 on four: flat, as
   on the H96 Max H313. Both run our U-Boot with their boot0's LPDDR3 at 600 MHz.
+
+## 2026-11-09 — LEDs keep their state
+
+- `retain-state-suspended` and `retain-state-shutdown` on both LED nodes, as the trees phase's graft
+  asks: the sleep and shutdown hooks set the colour, and the LED core no longer turns it off after.

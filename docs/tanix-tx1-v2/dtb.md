@@ -17,7 +17,7 @@
 | PMIC rails  | DCDC1 GPU, DCDC2 CPU, DCDC3 DRAM, ALDO1 1.8 V, DLDO1 3.3 V   |
 | Thermal     | CPU trips 60, 70 °C passive, 115 °C critical; its CPU map    |
 | GPU points  | 504, 540, 576, 600 MHz, all at 950 mV                        |
-| LEDs        | PH6 `power` blue, on; PH7 `standby`, off                     |
+| LEDs        | PH6 `power` blue, on; PH7 `standby`, off; states retained    |
 | Button      | PH9, stock's `recovery_key`, as `gpio-keys` `KEY_VENDOR`     |
 | USB1 VBUS   | PH8, driven high                                             |
 | IR          | `ir@7040000` on PH10                                         |

@@ -1490,7 +1490,7 @@
  			interrupts = <GIC_SPI 51 IRQ_TYPE_LEVEL_HIGH>,
  			             <GIC_SPI 52 IRQ_TYPE_LEVEL_HIGH>,
  			             <GIC_SPI 53 IRQ_TYPE_LEVEL_HIGH>,
-@@ -1314,3947 +227,1328 @@
+@@ -1314,3947 +227,1332 @@
  			             <GIC_SPI 55 IRQ_TYPE_LEVEL_HIGH>,
  			             <GIC_SPI 56 IRQ_TYPE_LEVEL_HIGH>,
  			             <GIC_SPI 57 IRQ_TYPE_LEVEL_HIGH>;
@@ -6389,6 +6389,8 @@
 +			color = <LED_COLOR_ID_BLUE>;
 +			gpios = <&pio 7 6 GPIO_ACTIVE_HIGH>;
 +			default-state = "on";
++			retain-state-suspended;
++			retain-state-shutdown;
 +		};
 +
 +		led-1 {
@@ -6396,6 +6398,8 @@
 +			function = LED_FUNCTION_STANDBY;
 +			gpios = <&pio 7 7 GPIO_ACTIVE_HIGH>;
 +			default-state = "off";
++			retain-state-suspended;
++			retain-state-shutdown;
 +		};
 +	};
 +
@@ -6435,7 +6439,7 @@
  	};
  
  	psci {
-@@ -5262,280 +1556,41 @@
+@@ -5262,280 +1560,41 @@
  		method = "smc";
  	};
  

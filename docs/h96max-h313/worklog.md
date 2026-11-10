@@ -513,3 +513,10 @@ Log paths in this table are under `build/logs/new-board/`.
 
 - The owner: blue while running, red asleep, off and booting. `power` (PH6) is blue, `standby` (PH7)
   red: `color` added to both nodes.
+
+## 2026-11-09 — LEDs keep their state
+
+- `retain-state-suspended` and `retain-state-shutdown` on both LED nodes, as the trees phase's graft
+  asks: the sleep and shutdown hooks set the colour, and the LED core no longer turns it off after.
+- `systemctl suspend`, 21 s of s2idle with an RTC wake: red asleep, blue on resume, watched by the
+  owner. `rtcwake -m freeze` alone bypasses systemd's sleep hooks and leaves it blue.

@@ -1741,6 +1741,8 @@
 			color = <LED_COLOR_ID_BLUE>;
 			gpios = <&pio 7 6 GPIO_ACTIVE_LOW>;
 			default-state = "on";
+			retain-state-suspended;
+			retain-state-shutdown;
 		};
 
 		led-1 {
@@ -1749,6 +1751,8 @@
 			color = <LED_COLOR_ID_RED>;
 			gpios = <&pio 7 7 GPIO_ACTIVE_HIGH>;
 			default-state = "off";
+			retain-state-suspended;
+			retain-state-shutdown;
 		};
 	};
 
