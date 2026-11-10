@@ -47,6 +47,7 @@ do the tools they need: `./build.sh tool <name>` builds one from `tools/<name>/`
 ./build.sh keyring                      # host: tvb-archive-keyring
 ./build.sh extra mesa                   # host: Debian's mesa, rebuilt with patches/mesa/
 ./build.sh extra ffmpeg9                # host: ffmpeg9, FFmpeg 9 with patches/ffmpeg/, beside Debian's
+./build.sh extra deqp                   # host: deqp, Mesa CI's GLES conformance tests, for gpu.py
 ./build.sh debs                         # host: all of the above, every kernel and board
 ./build.sh image h96max-m20             # host: build/out/images/, from build/out/debs/
 ./build.sh test                         # host: tests/, in the build container
