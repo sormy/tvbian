@@ -1,12 +1,14 @@
 #!/bin/bash
 # Build an extra: Debian's own source package with our patches over it, every binary it makes,
-# versioned <Debian's version>+tvb<revision> so apt prefers it over the version it rebuilds.
+# versioned <Debian's version>+tvb<revision> so apt prefers it over the version it rebuilds; or an
+# upstream release beside Debian's, by the extra's own build.sh, at <VERSION>+tvb<revision>.
 #   build.sh <name>, from extras/<name>/extra.conf
 set -euo pipefail
 # shellcheck source=/dev/null
 . "/repo/extras/$1/extra.conf"
 debian=$(bash /repo/extras/version.sh "$1")
 version=$debian+tvb$TVB_BUILD_REVISION
+[ ! -f "/repo/extras/$1/build.sh" ] || exec bash "/repo/extras/$1/build.sh" "$version"
 src=/work/extras/$SOURCE
 rm -rf "$src" && mkdir -p "$src" && cd "$src"
 apt-get source -qq --only-source "$SOURCE=$debian" >/dev/null

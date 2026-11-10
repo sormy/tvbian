@@ -6,7 +6,7 @@
 #          ./build.sh firmware <dir>          tvb-firmware-<chip>, from firmware/<dir>/
 #          ./build.sh base                    tvb-base, what every box gets, from base/
 #          ./build.sh keyring                 tvb-archive-keyring
-#          ./build.sh extra <name>            Debian's package rebuilt with our patches, from extras/
+#          ./build.sh extra <name>            extras/<name>: Debian's or upstream's, our patches
 #          ./build.sh debs                    all of the above
 #          ./build.sh image <board>           its image, from build/out/debs/
 #          ./build.sh images                  every board's image

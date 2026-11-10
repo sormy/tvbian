@@ -113,7 +113,7 @@ for c in extras/*/extra.conf; do
   fi
   # shellcheck source=/dev/null
   plan extra "$e" "$(. "$c"; echo "$PACKAGE")" "$(bash release/inputs.sh extra "$e" "$debian")" \
-    "$debian" +tvb "$(. "$c"; echo "$SOURCE")"
+    "$debian" +tvb "$(. "$c"; echo "${SOURCE:-$PACKAGE}")"
 done
 plan base - tvb-base "$(bash release/inputs.sh base)"
 plan keyring - tvb-archive-keyring "$(bash release/inputs.sh keyring)"

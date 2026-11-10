@@ -3,7 +3,8 @@
 FFmpeg has no hwaccel for stateless V4L2 decoders such as Cedrus, and its `v4l2_m2m` wrappers for
 stateful ones such as the Amlogic decoder stumble on raw streams, resolution changes and draining;
 its `rkmpp` codecs for Rockchip's MPP lack 10-bit, scaling and AFBC. One set on FFmpeg 9.0.2, the
-newest release, carries all three; `0001`–`0038` apply in order with `patch -p1`.
+newest release, carries all three; `0001`–`0038` apply in order with `patch -p1`. They ship as the
+`ffmpeg9` package, `ffmpeg9` and `ffprobe9` beside Debian's FFmpeg: `./build.sh extra ffmpeg9`.
 
 | Patch  | Adds                                                                | From      |
 | ------ | ------------------------------------------------------------------- | --------- |

@@ -53,6 +53,7 @@ files() {
     keyring) echo keyring/tvb-archive-keyring.gpg package/keyring.sh ;;
     extra)
       echo "extras/$2/extra.conf" extras/build.sh extras/version.sh extras/carried.sh
+      [ ! -f "extras/$2/build.sh" ] || echo "extras/$2/build.sh"
       # shellcheck source=/dev/null
       (. "extras/$2/extra.conf"; echo $PATCHES) ;;
   esac

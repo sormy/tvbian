@@ -30,6 +30,8 @@ below.
 
 - [ ] **Front clock displays show the time**: the FD655 on the H96 Max RK3528, the TM1628 and kin on
       other boxes, which no board drives today.
+- [ ] **`ffmpeg9` quiet off Rockchip**: Rockchip's MPP library prints `can not found match soc name`
+      at every start on an Allwinner or Amlogic box.
 
 - [ ] **A `tools/validate/` test shows decoded AFBC and scaled frames on a plane**, unattended.
 

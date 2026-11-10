@@ -4,6 +4,8 @@
 set -euo pipefail
 # shellcheck source=/dev/null
 . "/repo/extras/$1/extra.conf"
+# Debian carries nothing of an extra from upstream
+[ -n "${SOURCE:-}" ] || exit 1
 cd "$(mktemp -d)"
 apt-get source -qq --only-source "$SOURCE=$2" >/dev/null
 cd "$SOURCE"-*/

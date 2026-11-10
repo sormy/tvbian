@@ -37,7 +37,7 @@ our boxes. A board's key names its model (`h96max-m20`), never its SoC.
 | `modules/`          | each out-of-tree driver: its pin, our patches, the step packaging it per kernel                |
 | `uboot/`            | each U-Boot a board package ships, and each FEL loader: pin, defconfig, the step building it   |
 | `package/`          | the steps building `tvb-<board>`, `tvb-firmware-<chip>`, `tvb-base` and `tvb-archive-keyring`  |
-| `extras/<package>/` | a Debian package we shadow, rebuilt with our patches until Debian ships the fix                |
+| `extras/<package>/` | a Debian package we shadow until Debian ships the fix, or an upstream one beside Debian's      |
 | `image/`            | the image step, its package list, and the image's own state: locale, root's first SSH login    |
 | `release/`          | the release plan, the signed `apt` repo, and the upload to GitHub                              |
 | `site/`             | the public page and the script that builds it                                                  |
