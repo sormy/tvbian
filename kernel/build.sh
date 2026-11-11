@@ -10,13 +10,8 @@ echo "  building $COMMIT"
 
 # TVB_BUILD_CACHE=0: a clean-room build, no reused download, no compiler cache
 CACHE=${TVB_BUILD_CACHE:-1}
-CC=gcc
-if [ "$CACHE" = 1 ]; then
-  CC="ccache gcc"
-  export CCACHE_DIR=${CCACHE_DIR:-/work/ccache} CCACHE_MAXSIZE=${TVB_BUILD_CCACHE_SIZE:-5G}
-  # the tree is extracted fresh each run: its files are new, their contents are not
-  export CCACHE_SLOPPINESS=include_file_mtime,include_file_ctime
-fi
+# shellcheck source=/dev/null
+. /repo/build-env/ccache.sh
 # per kernel, so kernels built at once never write the same step log
 LOGS=/out/logs/$FAMILY
 mkdir -p "$LOGS" /out/debs
@@ -66,7 +61,7 @@ done
 cp "/repo/$CONFIG" .config
 # shellcheck disable=SC2086  # FRAGMENT lists its files
 step merge-config scripts/kconfig/merge_config.sh -m .config $(printf "/repo/%s " $FRAGMENT)
-step olddefconfig make CC="$CC" olddefconfig
+step olddefconfig make olddefconfig
 while read -r want; do  # olddefconfig silently drops what a dependency forbids; a later fragment wins
   case $want in
     "# CONFIG_"*" is not set") opt=${want#\# } && ! grep -q "^${opt%% *}=" .config ;;
@@ -83,7 +78,7 @@ KDEB_PKGVERSION=$(make -s kernelversion)-${TVB_BUILD_REVISION:-0~local}
 export KBUILD_BUILD_TIMESTAMP KDEB_PKGVERSION KDEB_CHANGELOG_DIST
 rm -f ../*.deb
 # the plain Image: U-Boot's booti takes it as is, not the Image.gz arm64 installs by default
-step bindeb-pkg make -j"${TVB_BUILD_CPUS:-$(nproc)}" CC="$CC" KBUILD_IMAGE=arch/arm64/boot/Image bindeb-pkg
+step bindeb-pkg make -j"${TVB_BUILD_CPUS:-$(nproc)}" KBUILD_IMAGE=arch/arm64/boot/Image bindeb-pkg
 rm ../linux-libc-dev_*.deb   # Debian ships it
 cp ../*.deb /out/debs/
 

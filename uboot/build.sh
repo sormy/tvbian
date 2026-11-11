@@ -7,6 +7,8 @@
 set -euo pipefail
 BOARD=$1 VARIANT=${2:-boot}
 # shellcheck source=/dev/null
+. /repo/build-env/ccache.sh
+# shellcheck source=/dev/null
 . "/repo/boards/$BOARD/board.conf"
 # shellcheck source=/dev/null  # the conf: REPO, TAG, DEFCONFIG; CONFIGS, PATCHES, SOC, RKBIN, TFA_*, LOADER_*...
 . "/repo/uboot/${BOARD_UBOOT:?boards/$BOARD/board.conf names no BOARD_UBOOT}.conf"

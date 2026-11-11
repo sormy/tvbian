@@ -22,6 +22,7 @@ on:
       - build-env/**
       - kernel/**
       - modules/**
+      - extras/**
       - uboot/**
       - patches/**
       - package/**
@@ -40,6 +41,7 @@ on:
       - build-env/**
       - kernel/**
       - modules/**
+      - extras/**
       - uboot/**
       - patches/**
       - package/**
@@ -63,6 +65,8 @@ concurrency:
 
 env:
   TVB_BUILD_CACHE: ${{ inputs.clean && '0' || '1' }}
+  # each of the 7 caches, 6 kernels and the release job's, stays under GitHub's 10 GB per repo
+  TVB_BUILD_CCACHE_SIZE: 1.25G
   TVB_RELEASE_GUARD: ${{ inputs.unguarded && '0' || '1' }}
   # only these two events publish, so only they sign
   PUBLISH: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
@@ -171,6 +175,13 @@ jobs:
           pattern: debs-*
           path: build/out/debs
           merge-multiple: true
+      # U-Boot, the extras and the driver modules compile through ccache, as the kernels do
+      - uses: actions/cache@v6
+        if: env.TVB_BUILD_CACHE == '1'
+        with:
+          path: ${{ runner.temp }}/ccache
+          key: ccache/release/${{ github.run_id }}
+          restore-keys: ccache/release/
       # rootful podman: mmdebstrap creates device nodes, which a rootless user namespace cannot
       - name: Assemble
         env:
@@ -181,7 +192,9 @@ jobs:
             printf '%s\n' "$ARCHIVE_SIGNING_KEY" >"$RUNNER_TEMP/signing.key"
             key=(--key "$RUNNER_TEMP/signing.key")
           fi
-          sudo -E env "PATH=$PATH" ./build.sh assemble "${key[@]}"
+          sudo -E env "PATH=$PATH" TVB_BUILD_CCACHE_DIR="$RUNNER_TEMP/ccache" \
+            ./build.sh assemble "${key[@]}"
+          sudo chown -R "$USER" "$RUNNER_TEMP/ccache"
           rm -f "$RUNNER_TEMP/signing.key"
           df -h / | tail -1
       - name: Publish
@@ -190,6 +203,24 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: ./build.sh publish
+
+  # each run saves its caches anew; past ones only fill the repo's 10 GB, evicting a cache still
+  # needed: keep each cache's newest, per branch
+  caches:
+    needs: [kernel, release]
+    if: always()
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      actions: write
+    steps:
+      - name: Drop superseded caches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh cache list --key ccache/ --limit 1000 --json id,key,ref,createdAt --jq '
+            group_by([.ref, (.key | sub("/[^/]*$"; ""))])[] | sort_by(.createdAt) | .[:-1][] | .id' |
+            xargs -r -n1 gh cache delete
 
   pages:
     needs: release

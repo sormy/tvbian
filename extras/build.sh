@@ -13,6 +13,8 @@ EXTRA=/repo/extras/$NAME
 UPSTREAM_VERSION=$(bash /repo/extras/version.sh "$NAME")
 PACKAGE_VERSION=$UPSTREAM_VERSION+tvb$TVB_BUILD_REVISION
 OUT=/out/debs
+# shellcheck source=/dev/null
+. /repo/build-env/ccache.sh
 
 [ ! -f "$EXTRA/build.sh" ] || exec bash "$EXTRA/build.sh" "$PACKAGE_VERSION"
 
