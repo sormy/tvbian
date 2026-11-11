@@ -61,5 +61,7 @@ chmod 0755 "$ROOT/DEBIAN/postinst"
   printf 'Description: TVBian board support for the %s\n' "$BOARD_NAME"
   printf ' The board'\''s device tree, its firmware and settings, and its loader files.\n'
 } >"$ROOT/DEBIAN/control"
-dpkg-deb --root-owner-group -Zxz -b "$ROOT" "/out/debs/tvb-${BOARD}_${VERSION}_arm64.deb" >/dev/null
-echo "✓ tvb-${BOARD}_${VERSION}_arm64.deb"
+# a file name never carries the epoch: apt reads a colon in an argument as an architecture
+FILE=tvb-${BOARD}_${VERSION#*:}_arm64.deb
+dpkg-deb --root-owner-group -Zxz -b "$ROOT" "/out/debs/$FILE" >/dev/null
+echo "✓ $FILE"

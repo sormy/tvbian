@@ -16,7 +16,7 @@ new() {
     [ "$state" = new ] || continue
     case $step in
       kernel) find /out/debs -name "*_${version}_arm64.deb" ;;
-      board) echo "/out/debs/tvb-${arg}_${version}_arm64.deb" ;;
+      board) echo "/out/debs/tvb-${arg}_${version#*:}_arm64.deb" ;;
       retire)
         # shellcheck source=/dev/null
         old=$(. "/repo/boards/$arg/board.conf"; echo "${BOARD_RENAMED_FROM:-}")
