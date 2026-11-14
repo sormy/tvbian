@@ -168,7 +168,15 @@
  			press-threshold-microvolt = <1750>;
  		};
  	};
-@@ -4469,27 +4503,29 @@
+@@ -4463,33 +4497,36 @@
+ 		compatible = "fdhisi,fd650";
+ 		sda-gpio = <&gpio4 RK_PB0 GPIO_ACTIVE_HIGH>;
+ 		scl-gpio = <&gpio4 RK_PB1 GPIO_ACTIVE_HIGH>;
+-		status = "okay";
++		/* no front panel on this box */
++		status = "disabled";
+ 	};
+ 
  	leds {
  		compatible = "gpio-leds";
  

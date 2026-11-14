@@ -47,13 +47,6 @@
 		#size-cells = <0>;
 	};
 
-	fd650 {
-		compatible = "fdhisi,fd650";
-		sda-gpio = <&gpio4 RK_PB0 GPIO_ACTIVE_HIGH>;
-		scl-gpio = <&gpio4 RK_PB1 GPIO_ACTIVE_HIGH>;
-		status = "okay";
-	};
-
 	leds {
 		compatible = "gpio-leds";
 

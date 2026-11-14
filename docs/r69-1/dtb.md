@@ -23,6 +23,7 @@ consumer needs otherwise; `compatible` and `model` are the two that do.
 | `vop@ff840000`            | `support-multi-area` dropped                                                                                          | an Esmart sub-window (`win1`-`win3`) reaches writeback but never HDMI                        |
 | `leds`                    | `normal` → `power` (label and node), active-low, `default-state`, `retain-state-*`; `standby` loses its timer trigger | family-uniform `/sys/class/leds` names; correct polarity; LEDs survive poweroff/suspend      |
 | `watchdog@ffac0000`       | `status` → `okay`                                                                                                     | `/dev/watchdog` for systemd's `RuntimeWatchdogSec`                                           |
+| `fd650`                   | `status` → `disabled`                                                                                                 | the vendor's front-panel display; this box has none                                          |
 | `chosen`                  | **removed**                                                                                                           | U-Boot overwrites `bootargs` from `extlinux.conf`                                            |
 
 > **uart0 and `fiq-debugger` stay stock**, console `ttyFIQ0`: the debugger half never initialises
