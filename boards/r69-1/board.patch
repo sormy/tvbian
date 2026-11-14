@@ -158,7 +158,17 @@
  	adc_keys: adc-keys {
  		status = "okay";
  		compatible = "adc-keys";
-@@ -4469,27 +4502,29 @@
+@@ -4196,7 +4229,8 @@
+ 
+ 		vol-up-key {
+ 			label = "volume up";
+-			linux,code = <KEY_VOLUMEUP>;
++			/* The recovery button, not a volume key: mainline's code for one. */
++			linux,code = <KEY_VENDOR>;
+ 			press-threshold-microvolt = <1750>;
+ 		};
+ 	};
+@@ -4469,27 +4503,29 @@
  	leds {
  		compatible = "gpio-leds";
  

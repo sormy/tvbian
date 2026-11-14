@@ -3742,7 +3742,8 @@
 
 		vol-up-key {
 			label = "volume up";
-			linux,code = <KEY_F11>;
+			/* The recovery button, not a volume key: mainline's code for one. */
+			linux,code = <KEY_VENDOR>;
 			press-threshold-microvolt = <1750>;
 		};
 	};

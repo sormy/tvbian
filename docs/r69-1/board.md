@@ -149,7 +149,7 @@ echo heartbeat > /sys/class/leds/standby/trigger    # pulse (none = back to manu
 
 ## Toothpick button
 
-An `adc-keys` input: `KEY_VOLUMEUP` on `/dev/input/recovery-button`, free to remap. Held at power-on
+An `adc-keys` input: `KEY_VENDOR` on `/dev/input/recovery-button`, free to remap. Held at power-on
 it is the BootROM's **maskrom trigger**.
 
 ## AV jack

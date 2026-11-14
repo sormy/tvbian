@@ -93,7 +93,8 @@
 
 &adc_keys {
 	vol-up-key {
-		linux,code = <KEY_F11>;
+		/* The recovery button, not a volume key: mainline's code for one. */
+		linux,code = <KEY_VENDOR>;
 	};
 };
 

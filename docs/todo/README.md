@@ -60,12 +60,6 @@ below.
 - [ ] **A new kernel or driver is shown not to regress, unattended, on every board it ships to**,
       before it ships.
 
-- [ ] **Every board: the recovery button sends `KEY_VENDOR`.** Mainline's code for a "recovery",
-      "update" or "maskrom" button; the Tanix TX1 V2.0 and the H96 Max M2 Plus have it. The others
-      keep their factory trees' codes: the R69 and H96 Max 3518 `KEY_VOLUMEUP`, the H96 Max 3518D
-      `KEY_F11`. Each change says why in its `board.patch`, and a press under
-      `evtest /dev/input/recovery-button` checks it.
-
 - [ ] **Consider: the console fits each screen plugged after the first.** The kernel's console is
       one framebuffer, sized by the first screen and cloned to every output, so a larger screen
       plugged later shows it small. A userspace console (kmscon) redraws per screen on hot-plug.

@@ -45,6 +45,7 @@ is **byte-identical** in this board's tree, so it should apply essentially verba
 | `compatible` + `model`                                       | **board's own strings** — see below                           |
 | `sdmmc` → drop `sd-uhs-*`                                    | **skip** — no SD slot is fitted, so the graft has no consumer |
 | HDMI DDC → `i2c-gpio`, `ddc-i2c-bus`                         | verbatim; DDC/CI ✅, no `ddc read failed` at boot             |
+| Recovery button → `KEY_VENDOR`                               | verbatim; the factory's `KEY_F11` ✅                          |
 
 ### IR is disabled, not grafted around
 

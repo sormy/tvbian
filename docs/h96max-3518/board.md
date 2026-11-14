@@ -219,7 +219,7 @@ box.
 ## Toothpick button
 
 Recessed **inside the AV jack** — a toothpick reaches it through the socket. An `adc-keys` input:
-`KEY_VOLUMEUP` on its own event node, free to remap. Held at power-on it is the BootROM's maskrom
+`KEY_VENDOR` on its own event node, free to remap. Held at power-on it is the BootROM's maskrom
 trigger.
 
 ## AV jack

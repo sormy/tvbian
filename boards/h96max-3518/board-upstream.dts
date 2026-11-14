@@ -76,6 +76,13 @@
 	};
 };
 
+&adc_keys {
+	vol-up-key {
+		/* The recovery button, not a volume key: mainline's code for one. */
+		linux,code = <KEY_VENDOR>;
+	};
+};
+
 &cpu0_opp_table {
 	mbist-vmin = <825000 925000 925000>;
 	rockchip,pvtm-voltage-sel = <0 1420 0>, <1410 1444 1>, <1445 1474 2>, <1475 1509 3>,

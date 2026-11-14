@@ -49,7 +49,7 @@ tested and broken · ➖ not on this board. Nothing is inherited from the siblin
 | Remote over BLE, keys      |  ✅   | `/dev/input/bt-remote` — must be **trusted**, see quirks                         |
 | Remote over BLE, air-mouse |  ✅   | paired and working — `/dev/input/bt-remote-mouse`                                |
 | Remote over IR             |  ➖   | **no receiver fitted** — see below                                               |
-| Recovery button            |  ✅   | `adc-keys`, reports `KEY_F11` (`0x57`) despite its `vol-up-key` label            |
+| Recovery button            |  ✅   | `adc-keys`, reports `KEY_VENDOR`; the factory's `KEY_F11` (`0x57`)              |
 | **Display and video**      |       |                                                                                  |
 | HDMI picture, 1080p        |  ✅   | correct full-screen console on a 4K LG TV at 1920x1080p60                        |
 | HDMI EDID and mode list    |  ✅   | 256 B read, LG TV, 40 modes incl. 3840x2160, 4096x2160, 2560x1440                |

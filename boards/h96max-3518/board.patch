@@ -143,7 +143,17 @@
  	adc_keys: adc-keys {
  		status = "okay";
  		compatible = "adc-keys";
-@@ -4373,6 +4399,8 @@
+@@ -4138,7 +4164,8 @@
+ 
+ 		vol-up-key {
+ 			label = "volume up";
+-			linux,code = <KEY_VOLUMEUP>;
++			/* The recovery button, not a volume key: mainline's code for one. */
++			linux,code = <KEY_VENDOR>;
+ 			press-threshold-microvolt = <1750>;
+ 		};
+ 	};
+@@ -4373,6 +4400,8 @@
  		pinctrl-names = "default";
  		pinctrl-0 = <&wifi_enable_h>, <&clkm1_32k_out>;
  		post-power-on-delay-ms = <200>;
@@ -152,7 +162,7 @@
  		reset-gpios = <&gpio3 RK_PB2 GPIO_ACTIVE_LOW>;
  		status = "okay";
  		phandle = <0x79>;
-@@ -4417,7 +4445,9 @@
+@@ -4417,7 +4446,9 @@
  		compatible = "gpio-leds";
  		phandle = <0x1c7>;
  
@@ -163,7 +173,7 @@
  			gpios = <&gpio4 RK_PC1 GPIO_ACTIVE_LOW>;
  			linux,default-trigger = "none";
  			default-state = "on";
-@@ -4425,7 +4455,8 @@
+@@ -4425,7 +4456,8 @@
  			retain-state-shutdown;
  		};
  
@@ -173,7 +183,7 @@
  			gpios = <&gpio4 RK_PB3 GPIO_ACTIVE_LOW>;
  			linux,default-trigger = "none";
  			default-state = "off";
-@@ -4434,10 +4465,8 @@
+@@ -4434,10 +4466,8 @@
  		};
  	};
  
