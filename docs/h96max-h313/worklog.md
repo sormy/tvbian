@@ -520,3 +520,18 @@ Log paths in this table are under `build/logs/new-board/`.
   asks: the sleep and shutdown hooks set the colour, and the LED core no longer turns it off after.
 - `systemctl suspend`, 21 s of s2idle with an RTC wake: red asleep, blue on resume, watched by the
   owner. `rtcwake -m freeze` alone bypasses systemd's sleep hooks and leaves it blue.
+
+## 2026-11-14 — s2idle: devices resuming in parallel hang the box
+
+- Since the tree changes after `d3bb7be`, an RTC-timed s2idle on 6.18.63 sleeps and never comes
+  back: resume runs through the USB devices, then nothing, the box hung until power-cycled. The
+  11-09 tree wakes on the same kernel, so the cause is a tree change. Ruled out one at a time: the
+  0092 watchdog patch, `timer@3009000`, Ethernet, Bluetooth and the whole SDIO host, the old
+  Bluetooth hogs, the CPU pinned at 480 MHz, the RTC; debug printing makes it wake 2 of 3.
+- `pm_async=0` wakes 8 of 8; back to `1` on the same boot, the first sleep hangs. A resume ordering
+  race: some device resumes before one it needs, a dependency the tree no longer gives.
+- Unbinding to find it: `i2c@5002c00` alone, then sound, Cedrus, the deinterlacer, Panfrost and the
+  EHCI/OHCI hosts together, still hang. Per-device `power/async` needs `PM_ADVANCED_DEBUG`, not set.
+  Left: display, eMMC, the timers. Unbinding the display engine deadlocks in
+  `drm_connector_free_work_fn`, `musb-sunxi` oopses, `sun8i-ce` warns in `crypto_unregister_alg`.
+- `pm_async=off` on the board's command line: 5 of 5 wake on the installed package.
