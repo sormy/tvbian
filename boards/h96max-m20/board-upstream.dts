@@ -1,0 +1,401 @@
+/dts-v1/;
+
+/*
+ * Written by tools/dtcx/upstream.py from board.dts: a view, not edited.
+ * Over gregkh/linux at v7.3.4.
+ * Needs, beyond it, found by name and so best-effort: each
+ * patch adding a name the tree uses or a dtsi change it keeps, which may in
+ * turn need others before it:
+ *   patches/linux-meson/0009-dt-bindings-display-meson-dw-hdmi-Add-GXLX2-and-ddc-i2c-bus.patch:
+ *     "amlogic,meson-gxlx2-dw-hdmi"
+ *   patches/linux-meson/0010-dt-bindings-media-amlogic-gx-vdec-Add-the-GXLX-mailbox-interrupt.patch:
+ *     "amlogic,gxlx-vdec"
+ *   patches/meson-dw-hdmi/0001-drm-meson-dw-hdmi-add-GXLX2-support.patch:
+ *     "amlogic,meson-gxlx2-dw-hdmi"
+ *   patches/linux-meson/0008-arm64-dts-amlogic-Add-the-GXLX2-S905L3-SoC.patch:
+ *     the dtsi, which it creates
+ *   patches/meson-codecs/0004-venc-h264-gxlx2.patch:
+ *     "amlogic,amvenc_avc", "amlogic,gxlx-vdec"
+ *   patches/meson-codecs/0005-venc-hevc-gxlx2.patch:
+ *     "amlogic,gxl-clkc", "amlogic,gxlx-vdec", "cnm,HevcEnc"
+ * Left out, the distribution's, not the board's:
+ *   /reserved-memory/ramoops@7400000
+ */
+
+#include "meson-gxlx2-s905l3.dtsi"
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/gpio/meson-gxl-gpio.h>
+#include <dt-bindings/interrupt-controller/arm-gic.h>
+#include <dt-bindings/interrupt-controller/irq.h>
+
+/ {
+	/* board first; the GXLX family last, which mainline's drivers match */
+	compatible = "h96max-m20,gxlx2-tvbox", "amlogic,p291", "amlogic,s905l", "amlogic,meson-gxlx";
+	/* the factory's model is only "Amlogic" */
+	model = "H96 Max M20 (905_DG_ZX01_V01)";
+
+	aliases {
+		serial0 = &uart_AO;
+		serial1 = &uart_A;
+		serial2 = &uart_B;
+		serial3 = &uart_C;
+		serial4 = &uart_AO_B;
+	};
+
+	chosen {
+		/* earlycon, in BOARD_CMDLINE, takes its console from here */
+		stdout-path = "serial0:115200n8";
+	};
+
+	cpus {
+		cpu-map {
+			cluster0: cluster0 {
+				core0 {
+					cpu = <&cpu0>;
+				};
+
+				core1 {
+					cpu = <&cpu1>;
+				};
+
+				core2 {
+					cpu = <&cpu2>;
+				};
+
+				core3 {
+					cpu = <&cpu3>;
+				};
+			};
+		};
+	};
+
+	thermal-zones {
+		cpu-thermal {
+			polling-delay-passive = <100>;
+			sustainable-power = <2150>;
+
+			trips {
+				switch_on: trip-0 {
+					temperature = <75000>;
+					hysteresis = <1000>;
+					type = "passive";
+				};
+			};
+		};
+	};
+
+	/* 2 GiB, where stock's linux,usable-memory ends; U-Boot writes what it finds at boot */
+	memory@0 {
+		device_type = "memory";
+		reg = <0x0 0x0 0x0 0x80000000>;
+	};
+
+	gpioleds {
+		compatible = "gpio-leds";
+		status = "okay";
+
+		/* the board's one LED, blue: the factory's sys_red, which its disabled sysled node
+		   drives active low; power is the name the shared LED hooks drive */
+		led-power {
+			label = "power";
+			gpios = <&gpio GPIODV_24 GPIO_ACTIVE_LOW>;
+			default-state = "on";
+		};
+	};
+
+	amvenc_avc {
+		compatible = "amlogic,amvenc_avc";
+		interrupts = <GIC_SPI 45 IRQ_TYPE_EDGE_RISING>;
+		interrupt-names = "mailbox_2";
+		status = "okay";
+	};
+
+	hevc_enc {
+		compatible = "cnm,HevcEnc";
+		interrupts = <GIC_SPI 187 IRQ_TYPE_EDGE_RISING>;
+		interrupt-names = "wave420l_irq";
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+		status = "okay";
+
+		io_reg_base@c8810000 {
+			reg = <0xc8810000 0x4000>;
+		};
+	};
+
+	wifi_pwrseq: sdio-pwrseq {
+		compatible = "mmc-pwrseq-simple";
+		/* the combo chip's Bluetooth enable too, the factory's bt-dev gpio_en: both halves
+		   power up together, before the SDIO bus probes */
+		reset-gpios = <&gpio GPIOX_6 GPIO_ACTIVE_LOW>, <&gpio GPIOX_17 GPIO_ACTIVE_LOW>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&wifi_32k_pins>;
+		clocks = <&wifi32k>;
+		clock-names = "ext_clock";
+	};
+
+	wifi32k: wifi32k {
+		compatible = "pwm-clock";
+		#clock-cells = <0>;
+		clock-frequency = <32770>;
+		pwms = <&pwm_ef 0 30516 0>;
+	};
+
+	vcc_3v3: regulator-vcc-3v3 {
+		compatible = "regulator-fixed";
+		regulator-name = "VCC_3V3";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		regulator-always-on;
+	};
+
+	connector {
+		compatible = "hdmi-connector";
+		type = "a";
+
+		port {
+			hdmi_con_in: endpoint {
+				remote-endpoint = <&hdmi_out_con>;
+			};
+		};
+	};
+
+	/* the HDMI DDC lines as a full I2C bus: dw-hdmi's own master reads the EDID but
+	   refuses DDC/CI */
+	hdmi_ddc: i2c-ddc {
+		compatible = "i2c-gpio";
+		sda-gpios = <&gpio GPIOH_1 GPIO_OPEN_DRAIN>;
+		scl-gpios = <&gpio GPIOH_2 GPIO_OPEN_DRAIN>;
+		i2c-gpio,delay-us = <5>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&hdmitx_ddc_gpio>;
+	};
+};
+
+&aiu {
+	status = "okay";
+};
+
+&aobus {
+	cpu_version@220 {
+		reg = <0 0x220 0 0x04>;
+	};
+};
+
+&cec_AO {
+	pinctrl-names = "default";
+	pinctrl-0 = <&hdmitx_aocec>;
+	hdmi-phandle = <&hdmi_tx>;
+	status = "okay";
+};
+
+&cpu_cooling_maps {
+	map-gpu {
+		trip = <&cpu_passive>;
+		cooling-device = <&mali 0 4>;
+		contribution = <1024>;
+	};
+};
+
+&cpu_critical {
+	hysteresis = <1000>;
+};
+
+&cpu_hot {
+	temperature = <95000>;
+	hysteresis = <5000>;
+};
+
+&cpu_passive {
+	temperature = <85000>;
+	hysteresis = <1000>;
+};
+
+&eth_phy_mux {
+	/* NOT FITTED: the Ethernet PHY's MDIO, with no Ethernet */
+	status = "disabled";
+};
+
+/* HDMI audio: the AIU's I2S into the HDMI transmitter, inside the SoC */
+&hdmi_sound {
+	/* the ALSA id the board's hdmi-audio files key on */
+	model = "H96-MAX-M20";
+	status = "okay";
+};
+
+/* DWC registers byte-addressed from here, TOP registers 0x8000 on */
+&hdmi_tx {
+	pinctrl-names = "default";
+	/* hot-plug only: the DDC pins are i2c-hdmi-ddc's */
+	pinctrl-0 = <&hdmitx_hpd>;
+	ddc-i2c-bus = <&hdmi_ddc>;
+	status = "okay";
+};
+
+/* TMDS Output */
+&hdmi_tx_tmds_port {
+	hdmi_out_con: endpoint {
+		remote-endpoint = <&hdmi_con_in>;
+	};
+};
+
+&mali {
+	#cooling-cells = <2>;
+};
+
+&pinctrl_aobus {
+	hdmitx_aocec: hdmitx_aocec {
+		mux {
+			groups = "ao_cec";
+			function = "cec_ao";
+		};
+	};
+};
+
+&pinctrl_periphs {
+	a_uart_pins: a_uart {
+		mux {
+			groups = "uart_tx_a", "uart_rx_a", "uart_rts_a";
+			function = "uart_a";
+		};
+
+		mux1 {
+			groups = "uart_cts_a";
+			function = "uart_a";
+			bias-pull-down;
+		};
+	};
+
+	wifi_32k_pins: wifi_32k_pins {
+		mux {
+			groups = "pwm_e";
+			function = "pwm_e";
+		};
+	};
+
+	emmc_conf_pull_up: emmc_conf_pull_up {
+		mux {
+			groups = "emmc_nand_d07", "emmc_clk", "emmc_cmd";
+			function = "emmc";
+			input-enable;
+			bias-pull-up;
+		};
+	};
+
+	emmc_conf_pull_done: emmc_conf_pull_done {
+		mux {
+			groups = "emmc_ds";
+			function = "emmc";
+			input-enable;
+			bias-pull-down;
+		};
+	};
+
+	sd_all_pins: sd_all_pins {
+		mux {
+			groups = "sdcard_d0", "sdcard_d1", "sdcard_d2", "sdcard_d3", "sdcard_cmd", "sdcard_clk";
+			function = "sdcard";
+			input-enable;
+			bias-pull-up;
+		};
+	};
+
+	sdio_all_pins: sdio_all_pins {
+		mux {
+			groups = "sdio_d0", "sdio_d1", "sdio_d2", "sdio_d3", "sdio_clk", "sdio_cmd";
+			function = "sdio";
+			input-enable;
+			bias-pull-up;
+		};
+	};
+
+	hdmitx_hpd: hdmitx_hpd {
+		mux {
+			groups = "hdmi_hpd";
+			function = "hdmi_hpd";
+		};
+	};
+
+	/* the DDC pins as GPIOs, for i2c-hdmi-ddc; U-Boot leaves them on hdmi_i2c */
+	hdmitx_ddc_gpio: hdmitx-ddc-pins {
+		mux {
+			groups = "GPIOH_1", "GPIOH_2";
+			function = "gpio_periphs";
+		};
+	};
+};
+
+&pwm_ab {
+	status = "okay";
+};
+
+&pwm_ef {
+	status = "okay";
+};
+
+&saradc {
+	status = "okay";
+};
+
+&sd_emmc_a {
+	pinctrl-names = "default";
+	pinctrl-0 = <&sdio_all_pins>;
+	bus-width = <4>;
+	cap-sd-highspeed;
+	cap-mmc-highspeed;
+	non-removable;
+	disable-wp;
+	mmc-pwrseq = <&wifi_pwrseq>;
+	vmmc-supply = <&vcc_3v3>;
+	vqmmc-supply = <&vcc_3v3>;
+	max-frequency = <50000000>;
+	/* no cap-sdio-irq, which the factory's caps ask for: with it the MT7668's events arrive
+	   late or not at all; ksdioirqd's polling associates in 3 s (dtb.md) */
+	keep-power-in-suspend;
+	status = "okay";
+};
+
+&sd_emmc_b {
+	pinctrl-names = "default";
+	pinctrl-0 = <&sd_all_pins>;
+	bus-width = <4>;
+	cap-sd-highspeed;
+	max-frequency = <100000000>;
+	disable-wp;
+	vmmc-supply = <&vcc_3v3>;
+	vqmmc-supply = <&vcc_3v3>;
+	cap-mmc-highspeed;
+	status = "okay";
+};
+
+&sd_emmc_c {
+	pinctrl-names = "default";
+	pinctrl-0 = <&emmc_conf_pull_up>, <&emmc_conf_pull_done>;
+	bus-width = <8>;
+	cap-sd-highspeed;
+	cap-mmc-highspeed;
+	non-removable;
+	disable-wp;
+	vmmc-supply = <&vcc_3v3>;
+	vqmmc-supply = <&vcc_3v3>;
+	max-frequency = <50000000>;
+	cap-mmc-hw-reset;
+	status = "okay";
+};
+
+&uart_A {
+	pinctrl-names = "default";
+	pinctrl-0 = <&a_uart_pins>;
+	status = "okay";
+};
+
+&uart_AO {
+	status = "okay";
+};
+
+&usb {
+	/* port 0 is the USB-C, OTG by the factory's dwc2 node; Android runs it as host, a gadget
+	   appearing only in U-Boot's burning window (worklog.md), which drives the port itself */
+	dr_mode = "host";
+};

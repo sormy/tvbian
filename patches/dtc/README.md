@@ -1,7 +1,7 @@
-# dtc — patches to round-trip a vendor DTB
+# dtc: patches to round-trip a vendor DTB
 
-Vanilla `dtc` v1.8.1 plus six patches, built by `./build.sh tool dtc` into `build/tools/dtc/`.
-Decompiling a blob normally gives raw numbers; this gives references:
+Vanilla `dtc` v1.8.1 plus six patches, built by `./build.sh tool dtc` into `build/bin/dtc`. Plain
+dtc decompiles references as raw numbers; the patched one prints labels:
 
 ```
 dtc  :  clocks = <0x02 0xaf>;
@@ -9,46 +9,49 @@ dtc  :  clocks = <&cru 0xaf>;          # -P
 ```
 
 ```sh
-./build.sh tool dtc          # fetch, patch, build -> build/bin/dtc, then gate
-./build.sh tool dtc --test   # re-run the gate on boards/*/board.dtb
+./build.sh tool dtc          # fetch, patch, build, then run the gate
+./build.sh tool dtc --test   # rerun the gate on boards/*/board.dtb
 ```
 
-| Flag | Does                                                                  |
-| ---- | --------------------------------------------------------------------- |
-| `-P` | phandle values -> `&label` (or `&{/path}` if the blob has no symbols) |
-| `-n` | drop the generated `__symbols__` node; `-@` rebuilds it identically   |
-| `-s` | also sorts a node's labels, so `-P -s` output is a fixed point        |
+| Flag | Does                                                                 |
+| ---- | -------------------------------------------------------------------- |
+| `-P` | print phandles as `&label` (`&{/path}` when the blob has no symbols) |
+| `-n` | drop the generated `__symbols__` node; `-@` rebuilds it identically  |
+| `-s` | also sort each node's labels, so `-P -s` output is stable            |
 
-## How
+## How it works
 
-Everything needed is in the blob: `__symbols__` gives label names, `#<specifier>-cells` on each
-target gives the group width. The patch adds the `REF_PHANDLE` markers dtc's writer already prints,
-for the known phandle-bearing properties — `clocks`, `*-gpios`, `pinctrl-N`, `*-supply`, `resets`,
-`power-domains`, `rockchip,pins` and friends.
+The blob has what is needed: `__symbols__` gives the label names, and each target's
+`#<specifier>-cells` gives the argument count. The patch marks references in a fixed list of
+properties (`clocks`, `*-gpios`, `pinctrl-N`, `*-supply`, `resets`, `power-domains`,
+`rockchip,pins` and others), and dtc's writer prints the marks as labels.
 
-A property is marked **only if the walk consumes its value exactly**; anything that does not line up
-(`interrupt-map`, a target missing its `#*-cells`) stays numeric. Which properties hold phandles is
-binding knowledge and must be declared: values alone cannot tell you, since phandles are small
-integers and would match `bus-width = <4>`.
+A property is marked only if its whole value decodes; otherwise (`interrupt-map`, a target without
+its `#*-cells`) it stays numeric. The list must be declared, because a value alone cannot tell a
+phandle from a number like `bus-width = <4>`. Every name in it is also in
+`tools/dtcx/references.py`; `tests/test_tools_dtcx_references.py` fails if they disagree, so add a
+new name to both.
 
-**The table is wrong in both directions, silently.** A missing name leaves a reference as a number,
-valid only for the allocation it was dumped from — `snps,mtl-rx-config` sat that way and re-pointed
-at the PHY when the tree was rebuilt. A name that does not hold a phandle gets one invented:
-`rockchip,taskqueue-node = <2>` is an MPP queue **index**, and reading it as a phandle printed
-`&cru`. Neither shows up in a round trip, since the value recompiles to the same number in the same
-tree, so check a new name against the vendor dtsi, not `make test`.
+Mistakes in the list are silent either way:
+
+- A missing name leaves a reference as a number that is only right for the blob it came from.
+  `snps,mtl-rx-config` did this and pointed at the PHY after a rebuild.
+- An extra name turns a number into a reference. `rockchip,taskqueue-node = <2>` is a queue index,
+  not a phandle, and printed as `&cru`.
+
+A round trip catches neither, so check a new name against the vendor dtsi.
 
 ## The guarantee
 
-Explicit `phandle = <N>;` properties are preserved, so **the output recompiles byte-identical**,
-with or without `__symbols__` in the source. `make test` enforces it, keeping a cell-arithmetic
-mistake out of a shipped tree and a labelled tree diffable against the factory blob.
+Explicit `phandle = <N>;` properties are kept, so the output recompiles byte-identical, with or
+without `__symbols__`. `make test` enforces it. The factory trees keep these lines; a board's
+`board.dts` drops them, proven equal except for numbering by `tools/dtcx/canonical.py`.
 
-Do not ship a sorted tree — `-s` reorders the blob and breaks that. It is for comparing two trees.
+Never ship a sorted (`-s`) tree: sorting reorders the blob. It is only for comparing trees.
 
 ## Upstream
 
-None of this is in dtc (checked against master, 2026-08): `add_phandle_marker()` exists but is wired
-only to overlay `__local_fixups__`, which a board DTB has none of. Each patch is formatted to send.
-0003 stands alone as a plain round-trip bug — `add_label()` prepends, so a blob decompiled and
-recompiled with `-@` comes back with its labels reversed.
+None of this is in dtc (checked against master, 2026-08): `add_phandle_marker()` exists but is used
+only for overlay `__local_fixups__`, which board DTBs do not have. Each patch is formatted to send.
+0003 is a standalone round-trip bug fix: `add_label()` prepends, so a blob decompiled and recompiled
+with `-@` gets its labels in reverse order.

@@ -1,0 +1,146 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Wed, 11 Nov 2026 22:00:00 -0500
+Subject: [PATCH] arm64: dts: amlogic: Add the GXLX2 (S905L3) SoC
+
+GXLX2 keeps the S905X's blocks with three differences, each the node a
+driver change we carry reads:
+
+- the HDMI controller is mapped directly from 0xda800000, DWC and TOP
+  registers alike, not through GXL's address/data port at 0xc883a000;
+  meson-dw-hdmi/0001 matches amlogic,meson-gxlx2-dw-hdmi, in meson-drm's
+  component match too, beside the binding's amlogic,meson-gx-dw-hdmi;
+- the video decoder runs as GXLX's (meson-codecs/0001 serves GXLX2 from
+  the gxlx platform), as mainline's S905L P271 board writes it, with DOS
+  mailbox 0, which linux-meson/0002's decoder takes for multi-instance
+  HEVC firmware as mbox0;
+- the Mali-450 has two pixel processors, as on P271: the factory tree's
+  eight interrupts, PP0 and PP1.
+
+It also describes the SoC's own HDMI audio, the AIU's I2S into the HDMI
+transmitter, as a gx-sound-card a board enables with the AIU.
+
+No in-tree board includes it yet; it is the SoC our GXLX2 boxes' trees are
+written against.
+---
+diff --git a/arch/arm64/boot/dts/amlogic/meson-gxlx2-s905l3.dtsi b/arch/arm64/boot/dts/amlogic/meson-gxlx2-s905l3.dtsi
+new file mode 100644
+index 0000000..a6e55c7
+--- /dev/null
++++ b/arch/arm64/boot/dts/amlogic/meson-gxlx2-s905l3.dtsi
+@@ -0,0 +1,115 @@
++// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
++/*
++ * GXLX2 (S905L3): the S905X's blocks, with a two-core Mali-450, the GXLX
++ * video decoder, and the HDMI controller mapped directly, as on G12A.
++ */
++
++#include <dt-bindings/sound/meson-aiu.h>
++#include "meson-gxl-s905x.dtsi"
++
++/delete-node/ &hdmi_tx;
++
++/ {
++	soc {
++		/* DWC registers byte-addressed from here, TOP registers 0x8000 on */
++		hdmi_tx: hdmi-tx@da800000 {
++			compatible = "amlogic,meson-gxlx2-dw-hdmi", "amlogic,meson-gx-dw-hdmi";
++			reg = <0x0 0xda800000 0x0 0x10000>;
++			interrupts = <GIC_SPI 57 IRQ_TYPE_EDGE_RISING>;
++			resets = <&reset RESET_HDMITX_CAPB3>,
++				 <&reset RESET_HDMI_SYSTEM_RESET>,
++				 <&reset RESET_HDMI_TX>;
++			reset-names = "hdmitx_apb", "hdmitx", "hdmitx_phy";
++			clocks = <&clkc CLKID_HDMI>,
++				 <&clkc CLKID_HDMI_PCLK>,
++				 <&clkc CLKID_GCLK_VENCI_INT0>;
++			clock-names = "isfr", "iahb", "venci";
++			power-domains = <&pwrc PWRC_GXBB_VPU_ID>;
++			assigned-clocks = <&clkc CLKID_HDMI_SEL>,
++					  <&clkc CLKID_HDMI>;
++			assigned-clock-parents = <&xtal>, <0>;
++			assigned-clock-rates = <0>, <24000000>;
++			#address-cells = <1>;
++			#size-cells = <0>;
++			#sound-dai-cells = <0>;
++			sound-name-prefix = "HDMITX";
++			status = "disabled";
++
++			/* VPU VENC Input */
++			hdmi_tx_venc_port: port@0 {
++				reg = <0>;
++
++				hdmi_tx_in: endpoint {
++					remote-endpoint = <&hdmi_tx_out>;
++				};
++			};
++
++			/* TMDS Output */
++			hdmi_tx_tmds_port: port@1 {
++				reg = <1>;
++			};
++		};
++	};
++
++	/* HDMI audio: the AIU's I2S into the HDMI transmitter, inside the SoC */
++	hdmi_sound: sound {
++		compatible = "amlogic,gx-sound-card";
++		model = "GXLX2-HDMI";
++		clocks = <&clkc CLKID_MPLL0>,
++			 <&clkc CLKID_MPLL1>,
++			 <&clkc CLKID_MPLL2>;
++		assigned-clocks = <&clkc CLKID_MPLL0>,
++				  <&clkc CLKID_MPLL1>,
++				  <&clkc CLKID_MPLL2>;
++		assigned-clock-parents = <0>, <0>, <0>;
++		assigned-clock-rates = <294912000>,
++				       <270950400>,
++				       <393216000>;
++		status = "disabled";
++
++		dai-link-0 {
++			sound-dai = <&aiu AIU_CPU CPU_I2S_FIFO>;
++		};
++
++		dai-link-1 {
++			sound-dai = <&aiu AIU_CPU CPU_I2S_ENCODER>;
++			dai-format = "i2s";
++			mclk-fs = <256>;
++
++			codec-0 {
++				sound-dai = <&aiu AIU_HDMI CTRL_I2S>;
++			};
++		};
++
++		dai-link-2 {
++			sound-dai = <&aiu AIU_HDMI CTRL_OUT>;
++
++			codec-0 {
++				sound-dai = <&hdmi_tx>;
++			};
++		};
++	};
++};
++
++&mali {
++	/* Mali-450 MP2 */
++	interrupts = <GIC_SPI 160 IRQ_TYPE_LEVEL_HIGH>,
++		<GIC_SPI 161 IRQ_TYPE_LEVEL_HIGH>,
++		<GIC_SPI 162 IRQ_TYPE_LEVEL_HIGH>,
++		<GIC_SPI 163 IRQ_TYPE_LEVEL_HIGH>,
++		<GIC_SPI 164 IRQ_TYPE_LEVEL_HIGH>,
++		<GIC_SPI 165 IRQ_TYPE_LEVEL_HIGH>,
++		<GIC_SPI 166 IRQ_TYPE_LEVEL_HIGH>,
++		<GIC_SPI 167 IRQ_TYPE_LEVEL_HIGH>;
++	interrupt-names = "gp", "gpmmu", "pp", "pmu",
++		"pp0", "ppmmu0", "pp1", "ppmmu1";
++};
++
++&vdec {
++	compatible = "amlogic,gxlx-vdec", "amlogic,gx-vdec";
++	/* DOS mailbox 0, which multi-instance HEVC firmware signals */
++	interrupts = <GIC_SPI 44 IRQ_TYPE_EDGE_RISING>,
++		     <GIC_SPI 32 IRQ_TYPE_EDGE_RISING>,
++		     <GIC_SPI 43 IRQ_TYPE_EDGE_RISING>;
++	interrupt-names = "vdec", "esparser", "mbox0";
++};

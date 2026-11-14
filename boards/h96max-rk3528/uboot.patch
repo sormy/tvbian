@@ -17,7 +17,7 @@
  	#size-cells = <2>;
 -	model = "Rockchip RK3528 Evaluation Board";
 +	/* Identify this PCB in the U-Boot banner. */
-+	model = "H96 Max RK3528 RK3528_DDR3_8X4_V12";
++	model = "H96 Max RK3528 (RK3528_DDR3_8X4_V12)";
  
  	aliases {
  		gpio0 = "/pinctrl/gpio@ff610000";

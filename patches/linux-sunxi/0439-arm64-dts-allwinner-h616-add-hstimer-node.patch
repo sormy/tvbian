@@ -1,0 +1,41 @@
+From 2d2c7e532ec325240068ac8d53d94cc0133c06f6 Mon Sep 17 00:00:00 2001
+From: Michal Piekos <michal.piekos@mmpsystems.pl>
+Date: Wed, 6 May 2026 17:10:29 +0200
+Subject: [PATCH] arm64: dts: allwinner: h616: add hstimer node
+
+Describe high speed timer block on Allwinner H616.
+
+Tested on Orange Pi Zero 3:
+- hstimer is registered as clocksource
+- switching clocksource at runtime works
+- after rating increase hstimer operates as a broadcast clockevent device
+
+Signed-off-by: Michal Piekos <michal.piekos@mmpsystems.pl>
+Reviewed-by: Chen-Yu Tsai <wens@kernel.org>
+Link: https://patch.msgid.link/20260506-h616-t113s-hstimer-v4-4-591d425863d6@mmpsystems.pl
+Signed-off-by: Chen-Yu Tsai <wens@kernel.org>
+---
+ arch/arm64/boot/dts/allwinner/sun50i-h616.dtsi | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/allwinner/sun50i-h616.dtsi b/arch/arm64/boot/dts/allwinner/sun50i-h616.dtsi
+index b116d3c12881e4..1598e86259ab57 100644
+--- a/arch/arm64/boot/dts/allwinner/sun50i-h616.dtsi
++++ b/arch/arm64/boot/dts/allwinner/sun50i-h616.dtsi
+@@ -263,6 +263,16 @@
+ 			clocks = <&osc24M>;
+ 		};
+ 
++		hstimer@3005000 {
++			compatible = "allwinner,sun50i-h616-hstimer",
++				     "allwinner,sun20i-d1-hstimer";
++			reg = <0x03005000 0x1000>;
++			interrupts = <GIC_SPI 45 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 46 IRQ_TYPE_LEVEL_HIGH>;
++			clocks = <&ccu CLK_BUS_HSTIMER>;
++			resets = <&ccu RST_BUS_HSTIMER>;
++		};
++
+ 		watchdog: watchdog@30090a0 {
+ 			compatible = "allwinner,sun50i-h616-wdt",
+ 				     "allwinner,sun6i-a31-wdt";

@@ -3,6 +3,7 @@
 /* dt-bindings from khadas/linux khadas-vims-4.9.y (bd9460728746cc080acbaa084e53460437f43211), include/ */
 #include <dt-bindings/clock/amlogic,gxl-clkc.h>
 #include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/gpio/gxlx.h>
 #include <dt-bindings/interrupt-controller/arm-gic.h>
 #include <dt-bindings/interrupt-controller/irq.h>
 #include <dt-bindings/input/linux-event-codes.h>
@@ -374,7 +375,7 @@
 		phandle = <0x8d>;
 
 		spi-nor@0 {
-			cs_gpios = <&gpio 44 GPIO_ACTIVE_HIGH>;
+			cs_gpios = <&gpio BOOT_15 GPIO_ACTIVE_HIGH>;
 			spifc-frequency = <16000000>;
 			read-capability = <0x01>;
 			spifc-io-width = <0x01>;
@@ -1724,11 +1725,11 @@
 	};
 
 	aliases {
-		serial0 = "/soc/aobus@c8100000/serial@4c0";
-		serial1 = "/soc/cbus@c1100000/serial@84c0";
-		serial2 = "/soc/cbus@c1100000/serial@84dc";
-		serial3 = "/soc/cbus@c1100000/serial@8700";
-		serial4 = "/soc/aobus@c8100000/serial@4e0";
+		serial0 = &uart_AO;
+		serial1 = &uart_A;
+		serial2 = &uart_B;
+		serial3 = &uart_C;
+		serial4 = &uart_AO_B;
 	};
 
 	memory@00000000 {
@@ -1836,7 +1837,7 @@
 		compatible = "amlogic, sysled";
 		dev_name = "sysled";
 		status = "disabled";
-		led_gpio = <&gpio 76 GPIO_ACTIVE_HIGH>;
+		led_gpio = <&gpio GPIODV_24 GPIO_ACTIVE_HIGH>;
 		led_active_low = <0x01>;
 	};
 
@@ -1846,13 +1847,13 @@
 
 		sys_red {
 			label = "sys_red";
-			gpios = <&gpio 76 GPIO_ACTIVE_HIGH>;
+			gpios = <&gpio GPIODV_24 GPIO_ACTIVE_HIGH>;
 			default-state = "off";
 		};
 
 		sys_green {
 			label = "sys_green";
-			gpios = <&gpio 14 GPIO_ACTIVE_HIGH>;
+			gpios = <&gpio GPIOZ_14 GPIO_ACTIVE_HIGH>;
 			default-state = "on";
 		};
 	};
@@ -1864,7 +1865,7 @@
 		key_num = <1>;
 		key_name = "f11";
 		key_code = <0x45>;
-		key-gpios = <&gpio_ao 2 GPIO_ACTIVE_LOW>;
+		key-gpios = <&gpio_ao GPIOAO_2 GPIO_ACTIVE_LOW>;
 		detect_mode = <0x00>;
 	};
 
@@ -2161,18 +2162,18 @@
 		compatible = "amlogic, bt-dev";
 		dev_name = "bt-dev";
 		status = "okay";
-		gpio_en = <&gpio 99 GPIO_ACTIVE_HIGH>;
-		gpio_reset = <&gpio 99 GPIO_ACTIVE_HIGH>;
+		gpio_en = <&gpio GPIOX_17 GPIO_ACTIVE_HIGH>;
+		gpio_reset = <&gpio GPIOX_17 GPIO_ACTIVE_HIGH>;
 	};
 
 	wifi {
 		compatible = "amlogic, aml_wifi";
 		dev_name = "aml_wifi";
 		status = "okay";
-		interrupt_pin = <&gpio 100 GPIO_ACTIVE_HIGH>;
+		interrupt_pin = <&gpio GPIOX_18 GPIO_ACTIVE_HIGH>;
 		interrupts = <GIC_SPI 68 IRQ_TYPE_LEVEL_HIGH>;
 		irq_trigger_type = "GPIO_IRQ_HIGH";
-		power_on_pin = <&gpio 88 GPIO_ACTIVE_HIGH>;
+		power_on_pin = <&gpio GPIOX_6 GPIO_ACTIVE_HIGH>;
 		dhd_static_buf;
 		pinctrl-names = "wifi_32k_pins";
 		pinctrl-0 = <&wifi_32k_pins>;
@@ -2221,8 +2222,8 @@
 			f_min = <400000>;
 			f_max = <50000000>;
 			max_req_size = <0x20000>;
-			gpio_dat3 = <&gpio 32 GPIO_ACTIVE_HIGH>;
-			hw_reset = <&gpio 38 GPIO_ACTIVE_HIGH>;
+			gpio_dat3 = <&gpio BOOT_3 GPIO_ACTIVE_HIGH>;
+			hw_reset = <&gpio BOOT_9 GPIO_ACTIVE_HIGH>;
 			card_type = <0x01>;
 		};
 	};
@@ -2259,9 +2260,9 @@
 			f_min = <400000>;
 			f_max = <100000000>;
 			max_req_size = <0x20000>;
-			gpio_dat3 = <&gpio 49 GPIO_ACTIVE_HIGH>;
-			jtag_pin = <&gpio 45 GPIO_ACTIVE_HIGH>;
-			gpio_cd = <&gpio 51 GPIO_ACTIVE_HIGH>;
+			gpio_dat3 = <&gpio CARD_4 GPIO_ACTIVE_HIGH>;
+			jtag_pin = <&gpio CARD_0 GPIO_ACTIVE_HIGH>;
+			gpio_cd = <&gpio CARD_6 GPIO_ACTIVE_HIGH>;
 			card_type = <0x05>;
 		};
 	};
@@ -2378,9 +2379,9 @@
 		interrupts = <GIC_SPI 8 IRQ_TYPE_EDGE_RISING>;
 		pinctrl-names = "external_eth_pins";
 		pinctrl-0 = <&external_eth_pins>;
-		rst_pin-gpios = <&gpio 14 GPIO_ACTIVE_HIGH>;
-		GPIOZ4_pin-gpios = <&gpio 4 GPIO_ACTIVE_HIGH>;
-		GPIOZ5_pin-gpios = <&gpio 5 GPIO_ACTIVE_HIGH>;
+		rst_pin-gpios = <&gpio GPIOZ_14 GPIO_ACTIVE_HIGH>;
+		GPIOZ4_pin-gpios = <&gpio GPIOZ_4 GPIO_ACTIVE_HIGH>;
+		GPIOZ5_pin-gpios = <&gpio GPIOZ_5 GPIO_ACTIVE_HIGH>;
 		mc_val_internal_phy = <0x1800>;
 		mc_val_external_phy = <0x1621>;
 		cali_val = <0x20000>;
@@ -2750,7 +2751,7 @@
 		aml-sound-card,format = "i2s";
 		aml_sound_card,name = "AML-MESONAUDIO";
 		aml,audio-routing = "Ext Spk", "LOUTL", "Ext Spk", "LOUTR";
-		mute_gpio-gpios = <&gpio 21 GPIO_ACTIVE_HIGH>;
+		mute_gpio-gpios = <&gpio GPIOH_5 GPIO_ACTIVE_HIGH>;
 		mute_inv;
 		hp_disable;
 		hp_paraments = <0x320 0x12c 0x00 0x05 0x01>;

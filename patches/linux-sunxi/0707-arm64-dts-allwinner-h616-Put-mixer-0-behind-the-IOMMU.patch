@@ -1,0 +1,24 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Wed, 11 Nov 2026 02:30:00 -0500
+Subject: [PATCH] arm64: dts: allwinner: h616: Put mixer 0 behind the IOMMU
+
+Mixer 0 is the DRM device's DMA device (sun8i_mixer_bind), so it needs
+the IOMMU the planes fetch through, or every buffer is mapped where the
+planes cannot read it.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/arch/arm64/boot/dts/allwinner/sun50i-h616.dtsi b/arch/arm64/boot/dts/allwinner/sun50i-h616.dtsi
+--- a/arch/arm64/boot/dts/allwinner/sun50i-h616.dtsi
++++ b/arch/arm64/boot/dts/allwinner/sun50i-h616.dtsi
+@@ -245,6 +245,7 @@
+ 					 <&display_clocks CLK_MIXER0>;
+ 				clock-names = "bus", "mod";
+ 				resets = <&display_clocks RST_MIXER0>;
++				iommus = <&iommu 0>;
+ 				allwinner,planes = <&planes>;
+ 
+ 				ports {
+-- 
+2.47.3

@@ -1,0 +1,625 @@
+/dts-v1/;
+
+/*
+ * Written by tools/dtcx/upstream.py from board.dts: a view, not edited.
+ * Over gregkh/linux at v7.3.4.
+ * Needs, beyond it, found by name and so best-effort: each
+ * patch adding a name the tree uses or a dtsi change it keeps, which may in
+ * turn need others before it:
+ *   patches/linux-rockchip/6.12/bluetooth-hci-h4-serdev.patch:
+ *     "aicsemi,aic8800-bt"
+ *   patches/linux-sunxi/0204-dt-bindings-display-allwinner-Add-DE33-planes.patch:
+ *     "allwinner,sun50i-h616-de33-planes", allwinner,plane-mapping
+ *   patches/linux-sunxi/0205-drm-sun4i-Add-DE33-shared-plane-driver.patch:
+ *     "allwinner,sun50i-h616-de33-planes", allwinner,plane-mapping
+ *   patches/linux-sunxi/0206-dt-bindings-display-allwinner-Split-H616-DE33-layer-.patch:
+ *     allwinner,planes
+ *   patches/linux-sunxi/0207-drm-sun4i-Switch-DE33-to-split-plane-bindings.patch:
+ *     allwinner,planes
+ *   patches/linux-sunxi/0208-dt-bindings-display-Add-H616-display-engine-compatib.patch:
+ *     "allwinner,sun50i-a64-de2", "allwinner,sun50i-h616-de33",
+ *     "allwinner,sun50i-h616-display-engine", "allwinner,sun50i-h616-tcon-tv",
+ *     "allwinner,sun50i-h6-dw-hdmi", "allwinner,sun50i-h616-dw-hdmi",
+ *     "allwinner,sun50i-h616-hdmi-phy", "allwinner,sun50i-h616-tcon-top"
+ *   patches/linux-sunxi/0209-drm-sun4i-Add-support-for-H616-TCON-TOP.patch:
+ *     "allwinner,sun50i-h616-tcon-top"
+ *   patches/linux-sunxi/0211-drm-sun4i-Add-H616-TCON-TV-support.patch:
+ *     "allwinner,sun50i-h616-tcon-tv"
+ *   patches/linux-sunxi/0212-drm-sun4i-Add-support-for-H616-HDMI-PHY.patch:
+ *     "allwinner,sun50i-h616-hdmi-phy"
+ *   patches/linux-sunxi/0213-drm-sun4i-Add-compatible-for-H616-display-engine.patch:
+ *     "allwinner,sun50i-h616-display-engine"
+ *   patches/linux-sunxi/0237-dt-bindings-display-allwinner-Add-the-DE3-and-DE33-writeback.patch:
+ *     "allwinner,sun50i-h616-de33-wb", allwinner,top
+ *   patches/linux-sunxi/0238-clk-sunxi-ng-de2-Allow-H616-writeback-routing-regist.patch:
+ *     "allwinner,sun50i-h616-de33-wb", allwinner,top
+ *   patches/linux-sunxi/0406-drivers-staging-media-sunxi-cedrus-add-H616-variant.patch:
+ *     "allwinner,sun50i-h616-video-engine"
+ *   patches/linux-sunxi/0424-arm64-dts-allwinner-sun50i-h616-Add-video-engine.patch:
+ *     /soc/video-codec@1c0e000
+ *   patches/linux-sunxi/0426-media-sunxi-Add-Allwinner-DI300-deinterlace-driver.patch:
+ *     "allwinner,sun50i-h616-deinterlace"
+ *   patches/linux-sunxi/0435-arm64-dts-allwinner-h616-Add-deinterlace-node.patch:
+ *     &deinterlace
+ *   patches/linux-sunxi/0503-ASoC-sunxi-add-HDMI-audio-machine-driver.patch:
+ *     "allwinner,sun8i-a83t-hdmi-audio"
+ *   patches/linux-sunxi/0520-ASoC-sunxi-add-H616-audio-hub-driver.patch:
+ *     "allwinner,sun50i-h616-ahub"
+ *   patches/linux-sunxi/0700-arm64-dts-allwinner-h616-Add-display-pipeline.patch:
+ *     &de, /soc/bus@1000000, &hdmi, &hdmi_out, &hdmi_phy, &tcon_top, &tcon_tv0, &tcon_tv1
+ *   patches/linux-sunxi/0702-arm64-dts-allwinner-h616-Add-display-writeback.patch:
+ *     &writeback, &planes iommus, &mixer0_out #address-cells, &mixer0_out #size-cells,
+ *     &mixer0_out_tcon_top_mixer0, &mixer0_out_writeback, &mixer1_out #address-cells, &mixer1_out
+ *     #size-cells, &mixer1_out_tcon_top_mixer1, &mixer1_out_writeback
+ *   patches/linux-sunxi/0704-arm64-dts-allwinner-h616-add-audio-hub.patch:
+ *     &ahub
+ *   patches/linux-sunxi/0705-arm64-dts-allwinner-h616-add-HDMI-audio-topology.patch:
+ *     &hdmi_sound, &hdmi #sound-dai-cells
+ *   patches/linux-sunxi/0707-arm64-dts-allwinner-h616-Put-mixer-0-behind-the-IOMMU.patch:
+ *     &mixer0 iommus
+ *   patches/linux-sunxi/0708-net-stmmac-dwmac-sun8i-Add-support-for-H616-EMAC1.patch:
+ *     "allwinner,sun50i-h616-emac1"
+ *   patches/linux-sunxi/0709-arm64-dts-allwinner-h616-Add-second-Ethernet-MAC.patch:
+ *     &emac1
+ *   patches/linux-sunxi/0713-pwm-sun20i-modify-for-h616-support.patch:
+ *     "allwinner,sun50i-h616-pwm"
+ *   patches/linux-sunxi/0714-arm64-dts-allwinner-h616-add-PWM-node.patch:
+ *     &pwm
+ *   patches/linux-sunxi/0716-arm64-dts-allwinner-h616-Add-the-AC200-companion.patch:
+ *     &ac200_pwm_clk, &pwm5_pin
+ *   patches/linux-sunxi/0720-dt-bindings-net-x-powers-add-AC200-AC300-EPHY-packag.patch:
+ *     "x-powers,ac300-ephy-package"
+ *   patches/linux-sunxi/next/0721-net-phy-add-X-Powers-AC200-AC300-EPHY-driver.patch:
+ *     "x-powers,ac300-ephy-package"
+ *   patches/linux-sunxi/0723-arm64-dts-allwinner-h616-Describe-the-AC300-EPHY.patch:
+ *     &ephy_config, &ac300_ephy_package, &ac300_ephy
+ *   patches/linux-sunxi/0725-arm64-dts-allwinner-h616-Add-the-TV-encoder.patch:
+ *     &tve_calibration, &tcon_tv1_out_tve, &tve
+ *   patches/linux-sunxi/0092-watchdog-sunxi_wdt-Keep-the-watchdog-armed-through-system-sleep.patch:
+ *     "allwinner,sun8i-a23-timer"
+ *   patches/linux-sunxi/0049-dt-bindings-media-rc-Add-the-H96-Max-H313-keymap.patch:
+ *     "rc-h96max-h313"
+ *   patches/linux-sunxi/0050-media-rc-keymaps-Add-the-H96-Max-H313-remote.patch:
+ *     "rc-h96max-h313"
+ *   patches/linux-sunxi/0089-drm-sun4i-tv-Add-the-H616-TV-encoder.patch:
+ *     "allwinner,sun50i-h616-tv-encoder"
+ *   patches/linux-sunxi/next/0072-media-cedrus-Rework-the-driver-in-preparation-for-en.patch:
+ *     "allwinner,sun50i-h616-video-engine"
+ * Left out, the distribution's, not the board's:
+ *   /reserved-memory/ramoops@7e000000
+ */
+
+#include "sun50i-h616.dtsi"
+#include <dt-bindings/clock/sun50i-h616-ccu.h>
+#include <dt-bindings/clock/sun6i-rtc.h>
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/leds/common.h>
+#include <dt-bindings/thermal/thermal.h>
+
+/ {
+	model = "H96 Max H313 (BA979_627_V1.0)";
+	/* board first; the SoC last, which sun50i-cpufreq-nvmem keys on */
+	compatible = "h96max-h313,h313-tvbox", "allwinner,sun50i-h616";
+
+	thermal-zones {
+		cpu-thermal {
+			cooling-maps {
+				map0 {
+					trip = <&cpu_target>;
+					cooling-device = <&cpu0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+					contribution = <1024>;
+				};
+
+				map1 {
+					trip = <&cpu_target>;
+					cooling-device = <&gpu THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+					contribution = <1024>;
+				};
+			};
+		};
+	};
+
+	/* ethernet aliases: U-Boot's stable MACs for EMAC1 and the Wi-Fi */
+	aliases {
+		serial0 = &uart0;
+		ethernet0 = &emac1;
+		ethernet1 = &sdio_wifi;
+		bluetooth0 = &bt;
+		serial1 = &uart1;
+		serial2 = &uart2;
+		serial3 = &uart3;
+		serial4 = &uart4;
+		serial5 = &uart5;
+		spi0 = &spi0;
+		spi1 = &spi1;
+		mmc0 = &mmc0;
+		mmc2 = &mmc2;
+	};
+
+	chosen {
+		stdout-path = "serial0:115200n8";
+	};
+
+	cpu_opp_table: opp-table-cpu {
+		compatible = "allwinner,sun50i-h616-operating-points";
+		nvmem-cells = <&cpu_speed_grade>;
+		opp-shared;
+
+		opp-480000000 {
+			opp-hz = /bits/ 64 <480000000>;
+			opp-microvolt-speed4 = <900000>;
+			clock-latency-ns = <244144>;
+			opp-supported-hw = <0x10>;
+		};
+
+		opp-600000000 {
+			opp-hz = /bits/ 64 <600000000>;
+			opp-microvolt-speed4 = <900000>;
+			clock-latency-ns = <244144>;
+			opp-supported-hw = <0x10>;
+		};
+
+		opp-792000000 {
+			opp-hz = /bits/ 64 <792000000>;
+			opp-microvolt-speed4 = <940000>;
+			clock-latency-ns = <244144>;
+			opp-supported-hw = <0x10>;
+		};
+
+		opp-1008000000 {
+			opp-hz = /bits/ 64 <1008000000>;
+			opp-microvolt-speed4 = <1020000>;
+			clock-latency-ns = <244144>;
+			opp-supported-hw = <0x10>;
+		};
+
+		opp-1200000000 {
+			opp-hz = /bits/ 64 <1200000000>;
+			opp-microvolt-speed4 = <1100000>;
+			clock-latency-ns = <244144>;
+			opp-supported-hw = <0x10>;
+		};
+
+		opp-1344000000 {
+			opp-hz = /bits/ 64 <1344000000>;
+			opp-microvolt-speed4 = <1120000>;
+			clock-latency-ns = <244144>;
+			opp-supported-hw = <0x10>;
+		};
+	};
+
+	memory@40000000 {
+		device_type = "memory";
+		reg = <0x00 0x40000000 0x00 0x20000000>;
+	};
+
+	gpu_opp_table: opp-table-gpu {
+		compatible = "operating-points-v2";
+
+		opp-504000000 {
+			opp-hz = /bits/ 64 <504000000>;
+			opp-microvolt = <950000>;
+		};
+
+		opp-540000000 {
+			opp-hz = /bits/ 64 <540000000>;
+			opp-microvolt = <950000>;
+		};
+
+		opp-576000000 {
+			opp-hz = /bits/ 64 <576000000>;
+			opp-microvolt = <950000>;
+		};
+
+		opp-600000000 {
+			opp-hz = /bits/ 64 <600000000>;
+			opp-microvolt = <950000>;
+		};
+	};
+
+	reg_usb1_vbus: usb1-vbus {
+		compatible = "regulator-fixed";
+		regulator-name = "usb1-vbus";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		gpio = <&pio 7 8 GPIO_ACTIVE_HIGH>; /* PH8 */
+		enable-active-high;
+	};
+
+	connector {
+		compatible = "hdmi-connector";
+		type = "a";
+
+		port {
+			hdmi_con_in: endpoint {
+				remote-endpoint = <&hdmi_out_con>;
+			};
+		};
+	};
+
+	/* PG18 is Wi-Fi reset; PG19 belongs to Bluetooth. */
+	wifi_pwrseq: pwrseq {
+		compatible = "mmc-pwrseq-simple";
+		clocks = <&rtc CLK_OSC32K_FANOUT>;
+		clock-names = "ext_clock";
+		pinctrl-names = "default";
+		pinctrl-0 = <&clk_losc_pins_a>;
+		assigned-clocks = <&rtc CLK_OSC32K_FANOUT>;
+		assigned-clock-parents = <&ccu CLK_PLL_SYSTEM_32K>;
+		reset-gpios = <&pio 6 18 GPIO_ACTIVE_LOW>; /* PG18 */
+		post-power-on-delay-ms = <200>;
+	};
+
+	leds {
+		compatible = "gpio-leds";
+
+		led-0 {
+			label = "power";
+			function = LED_FUNCTION_POWER;
+			color = <LED_COLOR_ID_BLUE>;
+			gpios = <&pio 7 6 GPIO_ACTIVE_LOW>; /* PH6 */
+			default-state = "on";
+			retain-state-suspended;
+			retain-state-shutdown;
+		};
+
+		led-1 {
+			label = "standby";
+			function = LED_FUNCTION_STANDBY;
+			color = <LED_COLOR_ID_RED>;
+			gpios = <&pio 7 7 GPIO_ACTIVE_HIGH>; /* PH7 */
+			default-state = "off";
+			retain-state-suspended;
+			retain-state-shutdown;
+		};
+	};
+};
+
+/* the AC300 EPHY's 24 MHz clock */
+&ac200_pwm_clk {
+	status = "okay";
+};
+
+/*
+ * Some SoCs have an AC300 EPHY instead of the
+ * AC200 one. The bootloader enables this node
+ * on those, based on the SID.
+ */
+&ac300_ephy_package {
+	vcc-supply = <&reg_dldo1>;
+	status = "okay";
+};
+
+&ahub {
+	status = "okay";
+};
+
+&codec {
+	allwinner,audio-routing = "Line Out", "LINEOUT";
+	status = "okay";
+};
+
+&cpu0 {
+	operating-points-v2 = <&cpu_opp_table>;
+	dynamic-power-coefficient = <100>;
+	cpu-supply = <&reg_dcdc2>;
+};
+
+&cpu1 {
+	operating-points-v2 = <&cpu_opp_table>;
+};
+
+&cpu2 {
+	operating-points-v2 = <&cpu_opp_table>;
+};
+
+&cpu3 {
+	operating-points-v2 = <&cpu_opp_table>;
+};
+
+&cpu_critical {
+	temperature = <115000>;
+};
+
+&de {
+	status = "okay";
+};
+
+&ehci0 {
+	status = "okay";
+};
+
+&ehci1 {
+	status = "okay";
+};
+
+&ehci2 {
+	status = "okay";
+};
+
+&ehci3 {
+	status = "okay";
+};
+
+/* the SID selects the AC300 EPHY, not the AC200 */
+&emac1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&gmac1_pins_a>;
+	phy-mode = "rmii";
+	phy-handle = <&ac300_ephy>;
+	allwinner,tx-delay-ps = <700>;
+	allwinner,rx-delay-ps = <3100>;
+	status = "okay";
+};
+
+&gpu {
+	#cooling-cells = <2>;
+	operating-points-v2 = <&gpu_opp_table>;
+	mali-supply = <&reg_dcdc1>;
+	status = "okay";
+};
+
+&hdmi {
+	status = "okay";
+};
+
+&hdmi_out {
+	hdmi_out_con: endpoint {
+		remote-endpoint = <&hdmi_con_in>;
+	};
+};
+
+&hdmi_sound {
+	status = "okay";
+};
+
+&i2c3 {
+	clock-frequency = <200000>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&twi3_pins_a>;
+	status = "okay";
+};
+
+&ir {
+	pinctrl-0 = <&s_cir0_pins_a>;
+	/* the bundled H96 Max remote, NEC address 0x04, its wake code in the vendor list */
+	linux,rc-map-name = "rc-h96max-h313";
+	status = "okay";
+};
+
+&mmc0 {
+	pinctrl-0 = <&sdc0_pins_a>;
+	bus-width = <4>;
+	cd-gpios = <&pio 5 6 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>; /* PF6 */
+	no-sdio;
+	no-mmc;
+	vmmc-supply = <&reg_dldo1>;
+	status = "okay";
+};
+
+&mmc1 {
+	pinctrl-0 = <&sdc1_pins_a>;
+	bus-width = <4>;
+	keep-power-in-suspend;
+	no-mmc;
+	no-sd;
+	mmc-pwrseq = <&wifi_pwrseq>;
+	non-removable;
+	vmmc-supply = <&reg_dldo1>;
+	vqmmc-supply = <&reg_aldo1>;
+	status = "okay";
+
+	sdio_wifi: wifi@1 {
+		reg = <1>;
+	};
+};
+
+/* the eMMC, which the vendor's U-Boot enables at boot */
+&mmc2 {
+	pinctrl-0 = <&sdc2_pins_a>, <&sdc2_pins_c>;
+	max-frequency = <100000000>;
+	bus-width = <8>;
+	non-removable;
+	no-sdio;
+	no-sd;
+	mmc-ddr-1_8v;
+	mmc-hs200-1_8v;
+	vmmc-supply = <&reg_dldo1>;
+	vqmmc-supply = <&reg_aldo1>;
+	status = "okay";
+};
+
+&ohci0 {
+	status = "okay";
+};
+
+&ohci1 {
+	status = "okay";
+};
+
+&ohci2 {
+	status = "okay";
+};
+
+&ohci3 {
+	status = "okay";
+};
+
+&pio {
+	input-debounce = <0 0 0 0 0 0 0>;
+	/* each bank's rail at the voltage PIO_POW_VAL measures on the box */
+	vcc-pc-supply = <&reg_aldo1>;
+	vcc-pf-supply = <&reg_dldo1>;
+	vcc-pg-supply = <&reg_aldo1>;
+	vcc-ph-supply = <&reg_dldo1>;
+	vcc-pi-supply = <&reg_dldo1>;
+
+	clk_losc_pins_a: clk-losc-a-pins {
+		pins = "PG10";
+		function = "clock";
+		drive-strength = <30>;
+		bias-pull-up;
+	};
+
+	s_cir0_pins_a: s-cir0-a-pins {
+		pins = "PH10";
+		function = "ir_rx";
+		drive-strength = <30>;
+		bias-pull-up;
+	};
+
+	uart1_pins_a: uart1-a-pins {
+		pins = "PG6", "PG7", "PG8", "PG9";
+		function = "uart1";
+		drive-strength = <20>;
+		bias-pull-up;
+	};
+
+	twi3_pins_a: twi3-a-pins {
+		pins = "PA10", "PA11";
+		function = "i2c3";
+		drive-strength = <20>;
+		bias-pull-up;
+	};
+
+	sdc0_pins_a: sdc0-a-pins {
+		pins = "PF0", "PF1", "PF2", "PF3", "PF4", "PF5";
+		function = "mmc0";
+		drive-strength = <40>;
+		bias-pull-up;
+	};
+
+	sdc1_pins_a: sdc1-a-pins {
+		pins = "PG0", "PG1", "PG2", "PG3", "PG4", "PG5";
+		function = "mmc1";
+		drive-strength = <40>;
+		bias-pull-up;
+	};
+
+	sdc2_pins_a: sdc2-a-pins {
+		pins = "PC1", "PC5", "PC6", "PC8", "PC9", "PC10", "PC11", "PC13", "PC14", "PC15", "PC16";
+		function = "mmc2";
+		drive-strength = <30>;
+		bias-pull-up;
+	};
+
+	sdc2_pins_c: sdc2-c-pins {
+		pins = "PC0";
+		function = "mmc2";
+		drive-strength = <30>;
+		bias-pull-down;
+	};
+
+	gmac1_pins_a: gmac1-a-pins {
+		pins = "PA0", "PA1", "PA2", "PA3", "PA4", "PA5", "PA6", "PA7", "PA8", "PA9";
+		function = "emac1";
+		drive-strength = <40>;
+		bias-disable;
+	};
+
+	uart0_pins_a: uart0-a-pins {
+		pins = "PH0", "PH1";
+		function = "uart0";
+		bias-pull-up;
+	};
+};
+
+&pwm {
+	status = "okay";
+};
+
+&r_i2c {
+	pinctrl-0 = <&s_twi0_pins_a>;
+	clock-frequency = <200000>;
+	status = "okay";
+
+	pmu0: pmic@36 {
+		compatible = "x-powers,axp313a";
+		reg = <0x36>;
+		#interrupt-cells = <1>;
+		interrupt-controller;
+
+		regulators {
+			reg_dcdc1: dcdc1 {
+				regulator-name = "axp1530-dcdc1";
+				regulator-always-on;
+				regulator-min-microvolt = <950000>;
+				regulator-max-microvolt = <950000>;
+			};
+
+			reg_dcdc2: dcdc2 {
+				regulator-name = "axp1530-dcdc2";
+				regulator-ramp-delay = <200>;
+				regulator-always-on;
+				regulator-min-microvolt = <900000>;
+				regulator-max-microvolt = <1120000>;
+			};
+
+			reg_dcdc3: dcdc3 {
+				regulator-name = "axp1530-dcdc3";
+				regulator-min-microvolt = <500000>;
+				regulator-max-microvolt = <1840000>;
+				regulator-always-on;
+			};
+
+			reg_aldo1: aldo1 {
+				regulator-name = "axp1530-aldo1";
+				regulator-always-on;
+				regulator-min-microvolt = <1800000>;
+				regulator-max-microvolt = <1800000>;
+			};
+
+			reg_dldo1: dldo1 {
+				regulator-name = "axp1530-dldo1";
+				regulator-always-on;
+				regulator-min-microvolt = <3300000>;
+				regulator-max-microvolt = <3300000>;
+			};
+		};
+	};
+};
+
+&r_pio {
+	s_twi0_pins_a: s-twi0-a-pins {
+		pins = "PL0", "PL1";
+		function = "s_i2c";
+		drive-strength = <20>;
+		bias-pull-up;
+	};
+};
+
+/* the AV jack's composite output */
+&tve {
+	status = "okay";
+};
+
+&uart0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart0_pins_a>;
+	status = "okay";
+};
+
+/* the AIC8800's Bluetooth, bound on the serdev bus by bluetooth-hci-h4-serdev */
+&uart1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart1_pins_a>;
+	uart-has-rtscts;
+	status = "okay";
+
+	bt: bluetooth {
+		compatible = "aicsemi,aic8800-bt";
+		max-speed = <1500000>;
+		reset-gpios = <&pio 6 19 GPIO_ACTIVE_LOW>; /* PG19 */
+		device-wakeup-gpios = <&pio 6 17 GPIO_ACTIVE_HIGH>; /* PG17 */
+	};
+};
+
+&usbotg {
+	dr_mode = "host";
+	status = "okay";
+};
+
+&usbphy {
+	usb1_vbus-supply = <&reg_usb1_vbus>;
+	status = "okay";
+};

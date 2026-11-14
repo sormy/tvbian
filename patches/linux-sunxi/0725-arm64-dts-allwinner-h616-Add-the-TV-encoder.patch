@@ -1,0 +1,60 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Wed, 11 Nov 2026 03:00:00 -0500
+Subject: [PATCH] arm64: dts: allwinner: h616: Add the TV encoder
+
+The H616's composite output: the TV encoder behind TCON TV1, at 216 MHz
+from PLL-VIDEO1, calibrated from the SID. Disabled; a board with an AV
+jack enables it.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/arch/arm64/boot/dts/allwinner/sun50i-h616.dtsi b/arch/arm64/boot/dts/allwinner/sun50i-h616.dtsi
+--- a/arch/arm64/boot/dts/allwinner/sun50i-h616.dtsi
++++ b/arch/arm64/boot/dts/allwinner/sun50i-h616.dtsi
+@@ -434,6 +434,10 @@
+ 			ephy_config: ephy-config@2c {
+ 				reg = <0x2c 0x2>;
+ 			};
++
++			tve_calibration: tve-calibration@2c {
++				reg = <0x2c 0x4>;
++			};
+ 		};
+ 
+ 		timer0: timer@3009000 {
+@@ -1587,6 +1591,32 @@
+ 						reg = <1>;
+ 						remote-endpoint = <&tcon_top_hdmi_in_tcon_tv1>;
+ 					};
++
++					tcon_tv1_out_tve: endpoint@2 {
++						reg = <2>;
++						remote-endpoint = <&tve_in_tcon_tv1>;
++					};
++				};
++			};
++		};
++
++		tve: tv-encoder@6524000 {
++			compatible = "allwinner,sun50i-h616-tv-encoder";
++			reg = <0x06524000 0x400>, <0x06520000 0x100>;
++			clocks = <&ccu CLK_BUS_TVE0>, <&ccu CLK_TVE0>,
++				 <&ccu CLK_BUS_TVE_TOP>;
++			resets = <&ccu RST_BUS_TVE0>, <&ccu RST_BUS_TVE_TOP>;
++			assigned-clocks = <&ccu CLK_TVE0>;
++			/* PLL-VIDEO1, which the binding header does not export */
++			assigned-clock-parents = <&ccu 11>;
++			assigned-clock-rates = <216000000>;
++			nvmem-cells = <&tve_calibration>;
++			nvmem-cell-names = "calibration";
++			status = "disabled";
++
++			port {
++				tve_in_tcon_tv1: endpoint {
++					remote-endpoint = <&tcon_tv1_out_tve>;
+ 				};
+ 			};
+ 		};
+-- 
+2.47.3

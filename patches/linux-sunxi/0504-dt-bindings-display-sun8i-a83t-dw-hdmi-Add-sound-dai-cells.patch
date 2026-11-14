@@ -1,0 +1,23 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Thu, 12 Nov 2026 00:00:00 +0000
+Subject: [PATCH] dt-bindings: display: sun8i-a83t-dw-hdmi: Add #sound-dai-cells
+
+The HDMI controller is the codec of the HDMI audio card, which names it
+as a sound DAI. Allow #sound-dai-cells.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/Documentation/devicetree/bindings/display/allwinner,sun8i-a83t-dw-hdmi.yaml b/Documentation/devicetree/bindings/display/allwinner,sun8i-a83t-dw-hdmi.yaml
+--- a/Documentation/devicetree/bindings/display/allwinner,sun8i-a83t-dw-hdmi.yaml
++++ b/Documentation/devicetree/bindings/display/allwinner,sun8i-a83t-dw-hdmi.yaml
+@@ -88,6 +88,9 @@
+   phy-names:
+     const: phy
+ 
++  "#sound-dai-cells":
++    const: 0
++
+   hvcc-supply:
+     description:
+       The VCC power supply of the controller

@@ -1,0 +1,535 @@
+/dts-v1/;
+
+/*
+ * Written by tools/dtcx/upstream.py from board.dts: a view, not edited.
+ * Over rockchip-linux/kernel at 77168c8d5ab8.
+ * Needs, beyond it, found by name and so best-effort: each
+ * patch adding a name the tree uses or a dtsi change it keeps, which may in
+ * turn need others before it:
+ *   patches/linux-rockchip/bluetooth-hci-h4-serdev.patch:
+ *     "aicsemi,aic8800-bt"
+ */
+
+#include "rk3528-evb1-ddr4-v10.dts"
+#include <dt-bindings/clock/rk3528-cru.h>
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/pinctrl/rockchip.h>
+#include <dt-bindings/input/linux-event-codes.h>
+#include <dt-bindings/suspend/rockchip-rk3528.h>
+
+/ {
+	/* board name first; rk3528a last, because rkmpp has no rk3518 entry and cannot
+	 * otherwise find the VPU */
+	compatible = "r69-1,rk3518-tvbox", "rockchip,rk3518-evb1-ddr4-v10", "rockchip,rk3518", "rockchip,rk3528a";
+	model = "R69-1 (XR821_V1.1)";
+	/delete-node/ vdd-logic;
+	/delete-node/ vdd-gpu;
+	/delete-node/ chosen;
+
+	aliases {
+		/delete-property/ ethernet1;
+	};
+
+	cpuinfo {
+		nvmem-cells = <&otp_id>, <&otp_cpu_version>, <&cpu_code>, <&cpu_code1>;
+		nvmem-cell-names = "id", "cpu-version", "cpu-code", "cpu-code1";
+	};
+
+	/* the HDMI DDC lines as a full I2C bus: dw-hdmi's own master reads the EDID but refuses DDC/CI */
+	hdmi_ddc: i2c-hdmi-ddc {
+		compatible = "i2c-gpio";
+		sda-gpios = <&gpio0 RK_PA5 GPIO_OPEN_DRAIN>;
+		scl-gpios = <&gpio0 RK_PA4 GPIO_OPEN_DRAIN>;
+		i2c-gpio,delay-us = <5>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&hdmi_ddc_gpio>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+	};
+
+	fd650 {
+		compatible = "fdhisi,fd650";
+		sda-gpio = <&gpio4 RK_PB0 GPIO_ACTIVE_HIGH>;
+		scl-gpio = <&gpio4 RK_PB1 GPIO_ACTIVE_HIGH>;
+		status = "okay";
+	};
+
+	leds {
+		compatible = "gpio-leds";
+
+		/* power/standby are the names the shared LED hooks drive; retain-state-*
+		 * stops the LED core clearing them at shutdown and suspend */
+		power_led: power {
+			label = "power";
+			gpios = <&gpio4 RK_PC1 GPIO_ACTIVE_LOW>;
+			default-state = "on";
+			retain-state-shutdown;
+			retain-state-suspended;
+		};
+
+		standby_led: standby {
+			label = "standby";
+			gpios = <&gpio4 RK_PB3 GPIO_ACTIVE_LOW>;
+			default-state = "off";
+			retain-state-shutdown;
+			retain-state-suspended;
+		};
+	};
+};
+
+&cpu0_opp_table {
+	rockchip,pvtm-voltage-sel = <0 1420 0>, <1410 1444 1>, <1445 1474 2>, <1475 1509 3>,
+	                            <1510 1544 4>, <1545 1579 5>, <1580 1619 6>,
+	                            <1620 1689 7>, <1690 1744 8>, <1745 1799 9>,
+	                            <1800 9999 10>;
+	rockchip,pvtm-freq = <1416000>;
+	rockchip,pvtm-volt = <950000>;
+	rockchip,video-1080p-freq = <1200000>;
+	/delete-node/ opp-408000000;
+	/delete-node/ opp-600000000;
+	/delete-node/ opp-816000000;
+	/delete-node/ opp-1008000000;
+	/delete-node/ opp-1608000000;
+	/delete-node/ opp-1800000000;
+	/delete-node/ opp-2016000000;
+
+	opp-1200000000 {
+		/delete-property/ opp-microvolt-L0;
+		/delete-property/ opp-microvolt-L1;
+		/delete-property/ opp-microvolt-L2;
+		/delete-property/ opp-microvolt-L3;
+		/delete-property/ opp-microvolt-L4;
+		/delete-property/ opp-microvolt-L5;
+		/delete-property/ opp-microvolt-L6;
+		opp-microvolt = <900000 900000 1000000>;
+	};
+
+	opp-1416000000 {
+		/delete-property/ opp-microvolt-L5;
+		/delete-property/ opp-microvolt-L6;
+		/delete-property/ opp-microvolt-L7;
+		/delete-property/ opp-microvolt-L8;
+		/delete-property/ opp-microvolt-L9;
+		/delete-property/ opp-microvolt-L10;
+		/delete-property/ opp-microvolt-L11;
+		opp-microvolt = <900000 900000 1000000>;
+		opp-microvolt-L1 = <950000 950000 1000000>;
+		opp-microvolt-L2 = <937500 937500 1000000>;
+		opp-microvolt-L3 = <925000 925000 1000000>;
+		opp-microvolt-L4 = <912500 912500 1000000>;
+		opp-microvolt-L0 = <962500 962500 1000000>;
+	};
+};
+
+&dmc {
+	system-status-level = <1 8>;
+	center-supply = <&vdd_cpu>;
+};
+
+&dmc_opp_table {
+	rockchip,leakage-voltage-sel = <1 10 0>, <11 14 1>, <15 22 2>, <23 28 3>,
+	                               <29 254 4>;
+	/delete-node/ opp-920000000;
+
+	opp-324000000 {
+		opp-microvolt = <900000 900000 1000000>;
+	};
+
+	opp-666000000 {
+		opp-microvolt = <900000 900000 1000000>;
+	};
+
+	opp-1056000000 {
+		/delete-property/ opp-microvolt-L0;
+		/delete-property/ opp-microvolt-L1;
+		/delete-property/ opp-microvolt-L2;
+		/delete-property/ opp-microvolt-L3;
+		/delete-property/ opp-microvolt-L4;
+		opp-microvolt = <900000 900000 1000000>;
+	};
+
+	opp-780000000 {
+		opp-hz = /bits/ 64 <780000000>;
+		opp-microvolt = <900000 900000 1000000>;
+	};
+};
+
+&gmac1 {
+	status = "disabled";
+};
+
+&gpu {
+	/* names mainline lima expects; the vendor Mali blob used its own */
+	interrupt-names = "gp", "gpmmu", "pp", "pp0", "ppmmu0", "pp1", "ppmmu1";
+	clocks = <&cru ACLK_GPU_MALI>, <&cru ACLK_GPU_MALI>;
+	clock-names = "bus", "core";
+	mali-supply = <&vdd_cpu>;
+};
+
+&gpu_bus {
+	status = "disabled";
+};
+
+&gpu_bus_opp_table {
+	rockchip,leakage-voltage-sel = <1 22 0>, <23 254 1>;
+};
+
+&gpu_opp_table {
+	rockchip,pvtm-voltage-sel = <0 809 0>, <810 830 1>, <831 850 2>, <851 880 3>,
+	                            <881 890 4>, <891 910 5>, <911 930 6>, <931 950 7>,
+	                            <951 970 8>, <971 995 9>, <1000 9999 10>;
+	rockchip,pvtm-volt = <950000>;
+	/delete-node/ opp-300000000;
+	/delete-node/ opp-500000000;
+	/delete-node/ opp-600000000;
+
+	opp-700000000 {
+		/delete-property/ opp-microvolt-L1;
+		/delete-property/ opp-microvolt-L2;
+		/delete-property/ opp-microvolt-L3;
+		/delete-property/ opp-microvolt-L4;
+		/delete-property/ opp-microvolt-L5;
+		/delete-property/ opp-microvolt-L6;
+		/delete-property/ opp-microvolt-L7;
+		/delete-property/ opp-microvolt-L8;
+		/delete-property/ clock-latency-ns;
+	};
+
+	opp-800000000 {
+		/delete-property/ opp-microvolt-L6;
+		/delete-property/ opp-microvolt-L7;
+		/delete-property/ opp-microvolt-L8;
+		/delete-property/ clock-latency-ns;
+		opp-microvolt = <900000 900000 1000000>;
+		opp-microvolt-L1 = <950000 950000 1000000>;
+		opp-microvolt-L2 = <937500 937500 1000000>;
+		opp-microvolt-L3 = <925000 925000 1000000>;
+		opp-microvolt-L4 = <912500 912500 1000000>;
+		opp-microvolt-L5 = <900000 900000 1000000>;
+		opp-microvolt-L0 = <962500 962500 1000000>;
+	};
+};
+
+&gpu_power_model {
+	ls = <0xffffc2d6 0x1071a 0x00>;
+	ts = <0x302a42 0x1d55a 0xfffff636 0x27>;
+};
+
+&hdmi {
+	ddc-i2c-bus = <&hdmi_ddc>;
+};
+
+&hdmi_pins {
+	rockchip,pins = <0 RK_PA3 1 &pcfg_pull_none>;
+};
+
+&i2c6 {
+	status = "disabled";
+};
+
+&otp {
+	cpu_code1: cpu-code1@52 {
+		reg = <0x52 0x02>;
+	};
+};
+
+&pinctrl {
+	hdmi {
+		hdmi_ddc_gpio: hdmi-ddc-gpio {
+			rockchip,pins = <0 RK_PA4 RK_FUNC_GPIO &pcfg_pull_none>,
+			                <0 RK_PA5 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+
+	wireless-bluetooth {
+		uart2m0_gpios: uart2m0-gpios {
+			rockchip,pins = <3 RK_PA2 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+};
+
+&pwm3 {
+	/* IR as an ATF wake source, so the remote can power the box on */
+	remote_support_psci = <0x01>;
+
+	ir_key1 {
+		rockchip,usercode = <0xfb05>;
+		/* The bundled remote, onto the canonical keymap: cog, voice, mouse, OK, home, P and the app keys. */
+		rockchip,key_table = <0xbb KEY_OK>, <0xe5 KEY_BACK>, <0x5b KEY_SEARCH>,
+		                     <0x4d KEY_CONFIG>, <0xba KEY_UP>, <0xb9 KEY_DOWN>,
+		                     <0xb8 KEY_LEFT>, <0xb7 KEY_RIGHT>, <0xd2 KEY_HOMEPAGE>,
+		                     <0xfd KEY_VOLUMEUP>, <0xfc KEY_VOLUMEDOWN>,
+		                     <0xf7 KEY_POWER>, <0xf6 0x71>, <0xb5 KEY_MENU>,
+		                     <0xe4 KEY_BACKSPACE>, <0xff KEY_CHANNELUP>,
+		                     <0xfe KEY_CHANNELDOWN>, <0xd0 KEY_TOUCHPAD_TOGGLE>,
+		                     <0x04 KEY_RED>, <0x14 KEY_YELLOW>, <0x4c KEY_BLUE>,
+		                     <0x4b KEY_GREEN>;
+	};
+
+	ir_key2 {
+		rockchip,usercode = <0xfe02>;
+		rockchip,key_table = <0xec KEY_ENTER>, <0xe6 KEY_BACK>, <0xe9 KEY_UP>,
+		                     <0xe5 KEY_DOWN>, <0xae KEY_LEFT>, <0xaf KEY_RIGHT>,
+		                     <0xee KEY_HOME>, <0xe7 KEY_VOLUMEUP>,
+		                     <0xef KEY_VOLUMEDOWN>, <0xbf KEY_POWER>,
+		                     <0xbe KEY_F10>, <0xff KEY_MENU>, <0xbd KEY_BACKSPACE>,
+		                     <0xbc KEY_CONNECT>, <0xf0 KEY_CALC>, <0xb3 KEY_TEXT>,
+		                     <0xb1 KEY_1>, <0xf2 KEY_2>, <0xf3 KEY_3>, <0xb5 KEY_4>,
+		                     <0xf6 KEY_5>, <0xf7 KEY_6>, <0xb9 KEY_7>, <0xfa KEY_8>,
+		                     <0xfb KEY_9>, <0xb4 KEY_PREVIOUSSONG>,
+		                     <0xb0 KEY_NEXTSONG>, <0xfd KEY_F13>,
+		                     <0xdb KEY_KPRIGHTPAREN>, <0xd9 KEY_NEW>,
+		                     <0xf8 KEY_REDO>, <0xfe KEY_0>;
+	};
+
+	ir_key3 {
+		rockchip,usercode = <0xfe01>;
+		rockchip,key_table = <0xfd KEY_F13>, <0xf8 KEY_REDO>,
+		                     <0xde KEY_KPRIGHTPAREN>, <0xda KEY_ESC>, <0xfa KEY_3>;
+	};
+
+	ir_key4 {
+		rockchip,key_table = <0x31 KEY_REPLY>, <0x3a KEY_BACK>, <0x35 KEY_UP>,
+		                     <0x2d KEY_DOWN>, <0x66 KEY_LEFT>, <0x3e KEY_RIGHT>,
+		                     <0x7f KEY_VOLUMEUP>, <0xfe KEY_VOLUMEDOWN>,
+		                     <0x23 KEY_POWER>, <0x63 KEY_MUTE>, <0x6d KEY_1>,
+		                     <0x6c KEY_2>, <0x33 KEY_3>, <0x71 KEY_4>, <0x70 KEY_5>,
+		                     <0x37 KEY_6>, <0x75 KEY_7>, <0x74 KEY_8>, <0x3b KEY_9>,
+		                     <0x78 KEY_0>, <0x73 KEY_PAGEDOWN>, <0x22 KEY_PAGEUP>,
+		                     <0x72 KEY_SETUP>, <0x7a 0xf9>, <0x79 0xfa>,
+		                     <0x77 0xfb>, <0x29 0xfc>, <0x32 0xfd>, <0x6e 0xfe>,
+		                     <0x7c 0xff>, <0x3c BTN_0>, <0x67 BTN_1>, <0x25 BTN_2>,
+		                     <0x2f BTN_3>, <0x7d BTN_4>, <0x6a KEY_PLAYPAUSE>,
+		                     <0x0b KEY_EQUAL>;
+	};
+
+	ir_key5 {
+		rockchip,key_table = <0x4c KEY_REPLY>, <0x4d KEY_BACK>, <0x4b KEY_UP>,
+		                     <0x4a KEY_DOWN>, <0x49 KEY_LEFT>, <0x48 KEY_RIGHT>,
+		                     <0x4e KEY_HOME>, <0x0b KEY_VOLUMEUP>,
+		                     <0x0c KEY_VOLUMEDOWN>, <0x23 KEY_POWER>,
+		                     <0x45 KEY_MUTE>, <0x44 KEY_MENU>, <0x78 KEY_1>,
+		                     <0x77 KEY_2>, <0x76 KEY_3>, <0x75 KEY_4>, <0x74 KEY_5>,
+		                     <0x73 KEY_6>, <0x72 KEY_7>, <0x71 KEY_8>, <0x70 KEY_9>,
+		                     <0x79 KEY_0>, <0x43 KEY_EQUAL>, <0x72 BTN_2>,
+		                     <0x5f KEY_SETUP>, <0x25 0xfd>, <0x24 0xfe>,
+		                     <0x21 0xff>, <0x20 BTN_0>;
+	};
+
+	ir_key6 {
+		rockchip,key_table = <0xec KEY_REPLY>, <0xe6 KEY_BACK>, <0xe9 KEY_UP>,
+		                     <0xe5 KEY_DOWN>, <0xae KEY_LEFT>, <0xaf KEY_RIGHT>,
+		                     <0xee KEY_HOME>, <0xe7 KEY_VOLUMEUP>,
+		                     <0xef KEY_VOLUMEDOWN>, <0xbf KEY_POWER>,
+		                     <0xbe KEY_MUTE>, <0xb3 KEY_MENU>, <0xff KEY_TEXT>,
+		                     <0xb1 KEY_1>, <0xf2 KEY_2>, <0xf3 KEY_3>, <0xb5 KEY_4>,
+		                     <0xf6 KEY_5>, <0xf7 KEY_6>, <0xb9 KEY_7>, <0xfa KEY_8>,
+		                     <0xfb KEY_9>, <0xfe KEY_0>, <0xbd KEY_EQUAL>,
+		                     <0xbc KEY_SETUP>, <0xf0 BTN_4>, <0x0d 0xfd>,
+		                     <0x0c 0xfe>, <0x0b 0xff>, <0x0a BTN_0>, <0x0e 0xfc>;
+	};
+
+	ir_key7 {
+		rockchip,key_table = <0x31 KEY_REPLY>, <0x3a KEY_BACK>, <0x35 KEY_UP>,
+		                     <0x2d KEY_DOWN>, <0x66 KEY_LEFT>, <0x3e KEY_RIGHT>,
+		                     <0x7f KEY_VOLUMEUP>, <0x7e KEY_VOLUMEDOWN>,
+		                     <0x23 KEY_POWER>, <0x63 KEY_MUTE>, <0x6d KEY_1>,
+		                     <0x6c KEY_2>, <0x33 KEY_3>, <0x71 KEY_4>, <0x70 KEY_5>,
+		                     <0x37 KEY_6>, <0x75 KEY_7>, <0x74 KEY_8>, <0x3b KEY_9>,
+		                     <0x78 KEY_0>, <0x73 KEY_PAGEDOWN>, <0x22 KEY_PAGEUP>,
+		                     <0x72 KEY_SETUP>, <0x7a 0xf9>, <0x79 0xfa>,
+		                     <0x77 0xfb>, <0x29 0xfc>, <0x32 0xfd>, <0x6e 0xfe>,
+		                     <0x7c 0xff>, <0x3c BTN_0>, <0x67 BTN_1>, <0x25 BTN_2>,
+		                     <0x2f BTN_3>, <0x7d BTN_4>, <0x6a KEY_PLAYPAUSE>,
+		                     <0x0b KEY_EQUAL>;
+	};
+
+	ir_key8 {
+		rockchip,key_table = <0x31 KEY_REPLY>, <0x6a KEY_BACK>, <0x35 KEY_UP>,
+		                     <0x2d KEY_DOWN>, <0x66 KEY_LEFT>, <0x3e KEY_RIGHT>,
+		                     <0x7f KEY_VOLUMEUP>, <0x7e KEY_VOLUMEDOWN>,
+		                     <0x23 KEY_POWER>, <0x63 KEY_MUTE>, <0x6d KEY_1>,
+		                     <0x6c KEY_2>, <0x33 KEY_3>, <0x71 KEY_4>, <0x70 KEY_5>,
+		                     <0x37 KEY_6>, <0x75 KEY_7>, <0x74 KEY_8>, <0x3b KEY_9>,
+		                     <0x78 KEY_0>, <0x73 KEY_PAGEDOWN>, <0x22 KEY_PAGEUP>,
+		                     <0x72 KEY_SETUP>, <0x7a 0xf9>, <0x79 0xfa>,
+		                     <0x77 0xfb>, <0x2f 0xfc>, <0x32 0xfd>, <0x6e 0xfe>,
+		                     <0x7c 0xff>, <0x3c BTN_0>, <0x3a KEY_HELP>,
+		                     <0x67 BTN_1>, <0x25 BTN_3>, <0x7d KEY_MENU>,
+		                     <0x3f KEY_EQUAL>, <0x29 KEY_TEXT>,
+		                     <0x26 KEY_PLAYPAUSE>, <0x76 KEY_BLUE>,
+		                     <0x7b KEY_YELLOW>, <0x69 KEY_F8>;
+	};
+
+	ir_key9 {
+		rockchip,key_table = <0x81 KEY_REPLY>, <0x80 KEY_BACK>, <0x85 KEY_UP>,
+		                     <0x87 KEY_DOWN>, <0x84 KEY_LEFT>, <0x86 KEY_RIGHT>,
+		                     <0x99 KEY_VOLUMEUP>, <0x9a KEY_VOLUMEDOWN>,
+		                     <0x96 KEY_POWER>, <0x9b KEY_MUTE>, <0x89 KEY_1>,
+		                     <0x8a KEY_2>, <0x8b KEY_3>, <0x8c KEY_4>, <0x8d KEY_5>,
+		                     <0x8e KEY_6>, <0x8f KEY_7>, <0x90 KEY_8>, <0x91 KEY_9>,
+		                     <0x88 KEY_0>, <0x83 KEY_PAGEDOWN>, <0x82 KEY_PAGEUP>,
+		                     <0x95 KEY_SETUP>, <0x97 0xf9>, <0x98 0xfa>,
+		                     <0xc6 BTN_4>, <0xd6 0xfb>, <0xd7 0x10e>, <0xcc 0xfc>,
+		                     <0xc3 BTN_8>, <0xd1 0xfd>, <0xd2 0xfe>, <0xd3 0xff>,
+		                     <0xd4 BTN_0>, <0xc7 0xfd>, <0xc8 0xfe>, <0xc9 0xff>,
+		                     <0xca BTN_0>, <0xcd BTN_9>, <0xce 0x10a>,
+		                     <0xcf KEY_HELP>, <0xd0 0x10b>, <0x9c BTN_1>,
+		                     <0x93 BTN_2>, <0x92 BTN_3>, <0xc0 KEY_END>,
+		                     <0xc1 BTN_7>, <0x9d KEY_PLAYPAUSE>, <0xc4 KEY_STOP>,
+		                     <0x94 KEY_EQUAL>, <0x9e KEY_YELLOW>, <0x9f KEY_BLUE>,
+		                     <0xcb BTN_5>, <0xc5 BTN_6>;
+	};
+};
+
+&pwm4 {
+	status = "okay";
+};
+
+&pwm5 {
+	status = "okay";
+};
+
+&pwm7 {
+	status = "okay";
+};
+
+&reboot_mode {
+	mode-bootloader = <0x5242c301>;
+	mode-charge = <0x5242c30b>;
+	mode-fastboot = <0x5242c309>;
+	mode-loader = <0x5242c301>;
+	mode-normal = <0x5242c300>;
+	mode-recovery = <0x5242c303>;
+	mode-ums = <0x5242c30c>;
+	mode-panic = <0x5242c307>;
+	mode-watchdog = <0x5242c308>;
+	/* `reboot maskrom` from the OS: the factory SPL reads this register
+	 * on the way up and hands to the BootROM — no button, no serial */
+	mode-maskrom = <0xef08a53c>;
+};
+
+&rockchip_suspend {
+	rockchip,sleep-mode-config = <RKPM_SLP_ARMPD>;
+	rockchip,wakeup-config = <(RKPM_CPU0_WKUP_EN | RKPM_GPIO_WKUP_EN)>;
+	rockchip,pwm-regulator-config = <(RKPM_PWM0_M0_REGULATOR_EN | RKPM_PWM1_M0_REGULATOR_EN)>;
+};
+
+&route_hdmi {
+	logo,mode = "fullscreen";
+	charge_logo,mode = "fullscreen";
+};
+
+&route_tve {
+	logo,mode = "fullscreen";
+	charge_logo,mode = "fullscreen";
+};
+
+&sai1 {
+	status = "disabled";
+};
+
+&sdhci {
+	/delete-property/ mmc-hs400-1_8v;
+	/delete-property/ mmc-hs400-enhanced-strobe;
+	max-frequency = <100000000>;
+	mmc-hs200-1_8v;
+	mmc-hs200-enhanced-strobe;
+};
+
+&sdio0 {
+	status = "disabled";
+};
+
+&sdio1 {
+	max-frequency = <100000000>;
+	rockchip,use-v2-tuning;
+	no-sd;
+	no-mmc;
+	supports-sdio;
+	bus-width = <4>;
+	disable-wp;
+	cap-sd-highspeed;
+	cap-sdio-irq;
+	keep-power-in-suspend;
+	non-removable;
+	mmc-pwrseq = <&sdio_pwrseq>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&sdio1_bus4>, <&sdio1_cmd>, <&sdio1_clk>;
+	sd-uhs-sdr104;
+	status = "okay";
+};
+
+&sdio_pwrseq {
+	reset-gpios = <&gpio3 RK_PB2 GPIO_ACTIVE_LOW>;
+};
+
+&sdmmc {
+	/delete-property/ rockchip,default-sample-phase;
+	/delete-property/ sd-uhs-sdr12;
+	/delete-property/ sd-uhs-sdr25;
+	/delete-property/ sd-uhs-sdr50;
+	/delete-property/ sd-uhs-sdr104;
+	/delete-property/ vqmmc-supply;
+};
+
+&tve {
+	rockchip,tve-upsample = <0x02>;
+};
+
+&uart2 {
+	/delete-property/ dmas;
+	pinctrl-0 = <&uart2m0_xfer>, <&uart2m0_ctsn>;
+
+	/* the AIC8800's Bluetooth, bound on the serdev bus by bluetooth-hci-h4-serdev */
+	bluetooth {
+		compatible = "aicsemi,aic8800-bt";
+		max-speed = <1500000>;
+	};
+};
+
+&usbdrd_dwc3 {
+	dr_mode = "host";
+};
+
+&vcc5v0_otg {
+	gpio = <&gpio4 RK_PC2 GPIO_ACTIVE_HIGH>;
+};
+
+/* on this board vdd_cpu is also vdd_gpu and vdd_logic */
+vdd_gpu: &vdd_cpu { };
+vdd_logic: &vdd_cpu { };
+
+&vop {
+	/delete-property/ support-multi-area;
+	/* factory 03 caps every Esmart window at 2K; 02 gives Esmart0 a 4K line buffer */
+	esmart_lb_mode = [02];
+};
+
+&wdt {
+	/* /dev/watchdog for systemd RuntimeWatchdogSec - also the only hang recorder */
+	status = "okay";
+};
+
+&wifi_enable_h {
+	rockchip,pins = <3 RK_PB2 RK_FUNC_GPIO &pcfg_pull_none>;
+};
+
+&wifi_host_wake_irq {
+	rockchip,pins = <3 RK_PB3 RK_FUNC_GPIO &pcfg_pull_down>;
+};
+
+&wireless_bluetooth {
+	/delete-property/ bt_port;
+	/delete-property/ BT,wake_host_irq;
+	uart_rts_gpios = <&gpio3 RK_PA2 GPIO_ACTIVE_LOW>;
+	pinctrl-0 = <&uart2m0_rtsn>;
+	pinctrl-1 = <&uart2m0_gpios>;
+	BT,reset_gpio = <&gpio3 RK_PC1 GPIO_ACTIVE_HIGH>;
+	BT,wake_gpio = <&gpio3 RK_PB4 GPIO_ACTIVE_HIGH>;
+};
+
+&wireless_wlan {
+	wifi_chip_type = "AIC8800";
+	WIFI,host_wake_irq = <&gpio3 RK_PB3 GPIO_ACTIVE_HIGH>;
+};

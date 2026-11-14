@@ -6,7 +6,9 @@ Subject: [PATCH] Bluetooth: hci_h4: bind plain H:4 controllers from the device t
 hci_h4 already implements the protocol but is reachable only through the
 tty line discipline, so a controller that needs no vendor setup still
 requires userspace to run hciattach. Add a serdev driver over the same
-callbacks, starting with the AICSemi AIC8800.
+callbacks, starting with the AICSemi AIC8800. The node's optional reset and
+device-wakeup lines are held out of reset and awake while it is bound, so a
+board needs no GPIO hogs for them.
 
 Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 
@@ -14,7 +16,7 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 diff --git a/drivers/bluetooth/hci_h4.c b/drivers/bluetooth/hci_h4.c
 --- a/drivers/bluetooth/hci_h4.c
 +++ b/drivers/bluetooth/hci_h4.c
-@@ -25,6 +25,10 @@
+@@ -25,6 +25,11 @@
  #include <linux/signal.h>
  #include <linux/ioctl.h>
  #include <linux/skbuff.h>
@@ -22,10 +24,11 @@ diff --git a/drivers/bluetooth/hci_h4.c b/drivers/bluetooth/hci_h4.c
 +#include <linux/property.h>
 +#include <linux/serdev.h>
 +#include <linux/delay.h>
++#include <linux/gpio/consumer.h>
  #include <asm/unaligned.h>
  
  #include <net/bluetooth/bluetooth.h>
-@@ -51,6 +55,11 @@ static int h4_open(struct hci_uart *hu)
+@@ -51,6 +56,11 @@
  	skb_queue_head_init(&h4->txq);
  
  	hu->priv = h4;
@@ -37,7 +40,7 @@ diff --git a/drivers/bluetooth/hci_h4.c b/drivers/bluetooth/hci_h4.c
  	return 0;
  }
  
-@@ -141,13 +150,134 @@ static const struct hci_uart_proto h4p =
+@@ -138,13 +148,143 @@
  	.flush		= h4_flush,
  };
  
@@ -101,8 +104,17 @@ diff --git a/drivers/bluetooth/hci_h4.c b/drivers/bluetooth/hci_h4.c
 +
 +static int h4_serdev_probe(struct serdev_device *serdev)
 +{
++	struct gpio_desc *line;
 +	struct h4_serdev *h4;
 +	u32 speed = 0;
++
++	/* the chip out of reset and awake, held so for as long as it is bound */
++	line = devm_gpiod_get_optional(&serdev->dev, "reset", GPIOD_OUT_LOW);
++	if (IS_ERR(line))
++		return PTR_ERR(line);
++	line = devm_gpiod_get_optional(&serdev->dev, "device-wakeup", GPIOD_OUT_HIGH);
++	if (IS_ERR(line))
++		return PTR_ERR(line);
 +
 +	h4 = devm_kzalloc(&serdev->dev, sizeof(*h4), GFP_KERNEL);
 +	if (!h4)

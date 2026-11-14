@@ -1,0 +1,29 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Thu, 12 Nov 2026 00:00:00 +0000
+Subject: [PATCH] dt-bindings: mmc: sunxi: Add allwinner,sample-delay
+
+A board whose routing needs another sample delay than the calibrated
+one gives it as allwinner,sample-delay, in the host's delay-line steps,
+which take six bits.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/Documentation/devicetree/bindings/mmc/allwinner,sun4i-a10-mmc.yaml b/Documentation/devicetree/bindings/mmc/allwinner,sun4i-a10-mmc.yaml
+--- a/Documentation/devicetree/bindings/mmc/allwinner,sun4i-a10-mmc.yaml
++++ b/Documentation/devicetree/bindings/mmc/allwinner,sun4i-a10-mmc.yaml
+@@ -83,6 +83,14 @@
+       - const: output
+       - const: sample
+ 
++  allwinner,sample-delay:
++    $ref: /schemas/types.yaml#/definitions/uint32
++    maximum: 63
++    description:
++      The fixed sample delay, in the host's delay-line steps, at which the
++      controller samples a high-speed card's data, where the board's routing
++      needs other than the calibrated one.
++
+   resets:
+     maxItems: 1
+ 

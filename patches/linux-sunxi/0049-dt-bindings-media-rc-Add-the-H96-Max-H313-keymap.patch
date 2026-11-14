@@ -1,9 +1,9 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Artem Butusov <art.sormy@gmail.com>
 Date: Sun, 8 Nov 2026 18:00:00 -0500
-Subject: [PATCH] dt-bindings: media: rc: Add the H96 Max remote's keymap
+Subject: [PATCH] dt-bindings: media: rc: Add the H96 Max H313's keymap
 
-H96 Max TV boxes ship one remote; list its keymap, rc-h96max.
+The H96 Max H313's stock remote; list its keymap, rc-h96max-h313.
 
 Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
@@ -13,7 +13,7 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
        - rc-geekbox
        - rc-genius-tvgo-a11mce
        - rc-gotview7135
-+      - rc-h96max
++      - rc-h96max-h313
        - rc-hauppauge
        - rc-hisi-poplar
        - rc-hisi-tv-demo

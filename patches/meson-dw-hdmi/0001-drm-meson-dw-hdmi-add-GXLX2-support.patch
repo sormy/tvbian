@@ -15,15 +15,26 @@ setup, its own 2.97 Gbps PHY value, and skip the APB3 fail-on-error
 bits, which exist only behind the indirect port.
 
 This is the driver half of "[RFC PATCH 0/2] drm/meson: add HDMI support
-for GXLX2" (linux-amlogic, 2026-07), rebased onto 6.18.44 without its
-meson_drv.c hunk: a GXL fallback compatible lets meson-drm find the
-component without it.
+for GXLX2" (linux-amlogic, 2026-07), rebased onto 6.18.44, with its
+meson_drv.c hunk: meson-drm finds the component by its own compatible,
+beside the binding's amlogic,meson-gx-dw-hdmi fallback.
 
 Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
+  drivers/gpu/drm/meson/meson_drv.c     |    1 +
   drivers/gpu/drm/meson/meson_dw_hdmi.c |   33 ++++++++++++++++++++++++++++-----
-  1 file changed, 28 insertions(+), 5 deletions(-)
+  2 files changed, 29 insertions(+), 5 deletions(-)
 
+--- a/drivers/gpu/drm/meson/meson_drv.c
++++ b/drivers/gpu/drm/meson/meson_drv.c
+@@ -469,6 +469,7 @@
+ static const struct of_device_id components_dev_match[] = {
+ 	{ .compatible = "amlogic,meson-gxbb-dw-hdmi" },
+ 	{ .compatible = "amlogic,meson-gxl-dw-hdmi" },
++	{ .compatible = "amlogic,meson-gxlx2-dw-hdmi" },
+ 	{ .compatible = "amlogic,meson-gxm-dw-hdmi" },
+ 	{ .compatible = "amlogic,meson-g12a-dw-hdmi" },
+ 	{}
 --- a/drivers/gpu/drm/meson/meson_dw_hdmi.c
 +++ b/drivers/gpu/drm/meson/meson_dw_hdmi.c
 @@ -134,6 +134,8 @@

@@ -15,7 +15,7 @@
 	#address-cells = <2>;
 	#size-cells = <2>;
 	/* Identify this PCB in the U-Boot banner. */
-	model = "H96 Max M2 Plus M2_P_ZX_20250328";
+	model = "H96 Max M2 Plus (M2_P_ZX_20250328)";
 
 	aliases {
 		gpio0 = "/pinctrl/gpio@ff610000";

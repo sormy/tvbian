@@ -1,0 +1,389 @@
+/dts-v1/;
+
+/*
+ * Written by tools/dtcx/upstream.py from board.dts: a view, not edited.
+ * Over rockchip-linux/kernel at 77168c8d5ab8.
+ * Needs, beyond it, found by name and so best-effort: each
+ * patch adding a name the tree uses or a dtsi change it keeps, which may in
+ * turn need others before it:
+ *   patches/linux-rockchip/bluetooth-hci-h4-serdev.patch:
+ *     "aicsemi,aic8800-bt"
+ */
+
+#include "rk3528-evb2-ddr3-v10.dts"
+#include <dt-bindings/clock/rk3528-cru.h>
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/pinctrl/rockchip.h>
+#include <dt-bindings/input/linux-event-codes.h>
+#include <dt-bindings/suspend/rockchip-rk3528.h>
+
+/ {
+	/* board name first, as on the other boards */
+	compatible = "h96max-rk3528,rk3528-tvbox", "rockchip,rk3528-evb2-ddr3-v10", "rockchip,rk3528";
+	model = "H96 Max RK3528 (RK3528_DDR3_8X4_V12)";
+	/delete-node/ chosen;
+
+	fd655_dev {
+		compatible = "rockchip,fd655_dev";
+		clk_pin = <&gpio4 RK_PC3 GPIO_ACTIVE_HIGH>;
+		dat_pin = <&gpio4 RK_PC4 GPIO_ACTIVE_HIGH>;
+		status = "okay";
+	};
+
+	/* the HDMI DDC lines as a full I2C bus: dw-hdmi's own master reads the EDID but refuses DDC/CI */
+	hdmi_ddc: i2c-hdmi-ddc {
+		compatible = "i2c-gpio";
+		sda-gpios = <&gpio0 RK_PA5 GPIO_OPEN_DRAIN>;
+		scl-gpios = <&gpio0 RK_PA4 GPIO_OPEN_DRAIN>;
+		i2c-gpio,delay-us = <5>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&hdmi_ddc_gpio>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+	};
+
+	leds: gpio-leds {
+		compatible = "gpio-leds";
+
+		pwr-wifi {
+			gpios = <&gpio1 RK_PA6 GPIO_ACTIVE_HIGH>;
+			linux,default-trigger = "none";
+			default-state = "on";
+		};
+	};
+};
+
+&adc_keys {
+	vol-up-key {
+		/* The recovery button, not a volume key: mainline's code for one. */
+		linux,code = <KEY_VENDOR>;
+	};
+};
+
+&cpu0_opp_table {
+	/delete-property/ mbist-vmin;
+	/delete-property/ rockchip,temp-hysteresis;
+	/delete-property/ rockchip,low-temp;
+	/delete-property/ rockchip,low-temp-min-volt;
+	nvmem-cells = <&cpu_leakage>, <&cpu_opp_info>;
+	nvmem-cell-names = "leakage", "opp-info";
+	rockchip,pvtm-voltage-sel = <0 1320 0>, <1321 1350 1>, <1351 1375 2>, <1376 1405 3>,
+	                            <1406 1435 4>, <1436 1470 5>, <1471 1505 6>,
+	                            <1506 1540 7>, <1541 1575 8>, <1576 1610 9>,
+	                            <1611 1640 10>, <1641 9999 11>;
+
+	opp-408000000 {
+		opp-microvolt-L0 = <862500 862500 1100000>;
+		opp-microvolt-L1 = <862500 862500 1100000>;
+		opp-microvolt-L2 = <862500 862500 1100000>;
+		opp-microvolt-L3 = <862500 862500 1100000>;
+		opp-microvolt-L4 = <862500 862500 1100000>;
+		opp-microvolt-L5 = <837500 837500 1100000>;
+	};
+
+	opp-600000000 {
+		opp-microvolt-L0 = <862500 862500 1100000>;
+		opp-microvolt-L1 = <862500 862500 1100000>;
+		opp-microvolt-L2 = <862500 862500 1100000>;
+		opp-microvolt-L3 = <862500 862500 1100000>;
+		opp-microvolt-L4 = <862500 862500 1100000>;
+		opp-microvolt-L5 = <837500 837500 1100000>;
+	};
+
+	opp-816000000 {
+		opp-microvolt-L0 = <862500 862500 1100000>;
+		opp-microvolt-L1 = <862500 862500 1100000>;
+		opp-microvolt-L2 = <862500 862500 1100000>;
+		opp-microvolt-L3 = <862500 862500 1100000>;
+		opp-microvolt-L4 = <862500 862500 1100000>;
+		opp-microvolt-L5 = <837500 837500 1100000>;
+	};
+
+	opp-1008000000 {
+		opp-microvolt-L0 = <862500 862500 1100000>;
+		opp-microvolt-L1 = <862500 862500 1100000>;
+		opp-microvolt-L2 = <862500 862500 1100000>;
+		opp-microvolt-L3 = <862500 862500 1100000>;
+		opp-microvolt-L4 = <862500 862500 1100000>;
+		opp-microvolt-L5 = <837500 837500 1100000>;
+	};
+
+	opp-1200000000 {
+		opp-microvolt-L4 = <862500 862500 1100000>;
+		opp-microvolt-L5 = <850000 850000 1100000>;
+		opp-microvolt-L6 = <837500 837500 1100000>;
+	};
+};
+
+&dfi {
+	status = "disabled";
+};
+
+&dmc {
+	/delete-property/ interrupts;
+	/delete-property/ interrupt-names;
+	/delete-property/ devfreq-events;
+	/delete-property/ upthreshold;
+	/delete-property/ downdifferential;
+	/delete-property/ system-status-level;
+	/delete-property/ auto-min-freq;
+	/delete-property/ auto-freq-en;
+};
+
+&dmc_opp_table {
+	/delete-property/ mbist-vmin;
+	nvmem-cells = <&log_leakage>, <&dmc_opp_info>;
+	nvmem-cell-names = "leakage", "opp-info";
+	rockchip,leakage-voltage-sel = <1 10 0>, <11 14 1>, <15 22 2>, <23 28 3>,
+	                               <29 254 4>;
+	/delete-node/ opp-324000000;
+	/delete-node/ opp-666000000;
+};
+
+&gpu {
+	/* Mainline lima bindings replace the vendor Mali names. */
+	interrupt-names = "gp", "gpmmu", "pp", "pp0", "ppmmu0", "pp1", "ppmmu1";
+	clocks = <&cru ACLK_GPU_MALI>, <&cru ACLK_GPU_MALI>;
+	clock-names = "bus", "core";
+};
+
+&gpu_bus_opp_table {
+	rockchip,leakage-voltage-sel = <1 22 0>, <23 254 1>;
+};
+
+&gpu_opp_table {
+	/delete-property/ mbist-vmin;
+	/delete-property/ rockchip,temp-hysteresis;
+	/delete-property/ rockchip,low-temp;
+	/delete-property/ rockchip,low-temp-min-volt;
+	nvmem-cells = <&gpu_leakage>, <&gpu_opp_info>;
+	nvmem-cell-names = "leakage", "opp-info";
+	rockchip,pvtm-voltage-sel = <0 750 0>, <751 770 1>, <771 790 2>, <791 810 3>,
+	                            <811 830 4>, <831 850 5>, <851 870 6>, <871 890 7>,
+	                            <891 9999 8>;
+};
+
+&gpu_power_model {
+	ls = <0xffffc2d6 0x1071a 0x00>;
+	ts = <0x302a42 0x1d55a 0xfffff636 0x27>;
+};
+
+&hdmi {
+	/delete-property/ rockchip,cts-manual;
+	pinctrl-names = "default", "idle";
+	ddc-i2c-bus = <&hdmi_ddc>;
+	pinctrl-1 = <&hdmi_pins_idle>;
+};
+
+&hdmi_pins {
+	rockchip,pins = <0 RK_PA3 1 &pcfg_pull_none>;
+};
+
+&mpp_srv {
+	/delete-property/ rockchip,iommu-shared-mask;
+};
+
+&otp {
+	/delete-node/ cpu-mbist-vmin@9;
+	/delete-node/ gpu-mbist-vmin@9;
+	/delete-node/ logic-mbist-vmin@9;
+	/delete-node/ cpu-tsadc-trim-l@44;
+	/delete-node/ cpu-tsadc-trim-h@45;
+};
+
+&pcie20_usb30_avdd0v9 {
+	status = "disabled";
+};
+
+&pcie20_usb30_avdd1v8 {
+	status = "disabled";
+};
+
+&pcie2x1 {
+	status = "disabled";
+};
+
+&pinctrl {
+	hdmi {
+		hdmi_ddc_gpio: hdmi-ddc-gpio {
+			rockchip,pins = <0 RK_PA4 RK_FUNC_GPIO &pcfg_pull_none>,
+			                <0 RK_PA5 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+};
+
+&pwm0 {
+	status = "disabled";
+};
+
+&pwm1 {
+	status = "disabled";
+};
+
+&pwm2 {
+	/delete-property/ interrupts;
+};
+
+&pwm3 {
+	/* Register IR as an ATF wake source. */
+	remote_support_psci = <0x01>;
+	/delete-node/ ir_key7;
+	/delete-node/ ir_key8;
+	/delete-node/ ir_key9;
+
+	ir_key4 {
+		rockchip,usercode = <0x7f80>;
+		rockchip,key_table = <0xec KEY_REPLY>, <0xd8 KEY_BACK>, <0xc7 KEY_UP>,
+		                     <0xbf KEY_DOWN>, <0xc8 KEY_LEFT>, <0xc6 KEY_RIGHT>,
+		                     <0x8c KEY_HOME>, <0x78 KEY_VOLUMEUP>,
+		                     <0x76 KEY_VOLUMEDOWN>, <0x7e KEY_POWER>,
+		                     <0x7c KEY_MENU>, <0xb7 KEY_TEXT>;
+	};
+
+	ir_key5 {
+		rockchip,usercode = <0xfe01>;
+		rockchip,key_table = <0xec KEY_REPLY>, <0xe6 KEY_BACK>, <0xe9 KEY_UP>,
+		                     <0xe5 KEY_DOWN>, <0xae KEY_LEFT>, <0xaf KEY_RIGHT>,
+		                     <0xee KEY_HOME>, <0xe7 KEY_VOLUMEUP>,
+		                     <0xef KEY_VOLUMEDOWN>, <0xbf KEY_POWER>,
+		                     <0xbe KEY_MUTE>, <0xb3 KEY_MENU>, <0xff KEY_TEXT>,
+		                     <0xb1 KEY_1>, <0xf2 KEY_2>, <0xf3 KEY_3>, <0xb5 KEY_4>,
+		                     <0xf6 KEY_5>, <0xf7 KEY_6>, <0xb9 KEY_7>, <0xfa KEY_8>,
+		                     <0xfb KEY_9>, <0xfe KEY_0>, <0xbd KEY_BACKSPACE>,
+		                     <0xbc KEY_F13>, <0xf0 KEY_F16>, <0xb4 KEY_PREVIOUS>,
+		                     <0xb8 KEY_A>, <0xb0 KEY_NEXT>;
+	};
+
+	ir_key6 {
+		rockchip,usercode = <0xfd01>;
+		/* The bundled remote, the one table no other board's stock has, onto the canonical keymap: OK, home, mouse and menu. */
+		rockchip,key_table = <0x31 KEY_OK>, <0x2f KEY_BACK>, <0x35 KEY_UP>,
+		                     <0x2d KEY_DOWN>, <0x66 KEY_LEFT>, <0x3e KEY_RIGHT>,
+		                     <0x6a KEY_HOMEPAGE>, <0x5e KEY_VOLUMEUP>,
+		                     <0x47 KEY_VOLUMEDOWN>, <0x23 KEY_POWER>,
+		                     <0x3a KEY_TOUCHPAD_TOGGLE>, <0x0d KEY_MENU>;
+	};
+};
+
+&pwm4 {
+	/delete-property/ interrupts;
+	status = "okay";
+};
+
+&pwm7 {
+	clocks = <&cru CLK_PWM0>, <&cru PCLK_PWM0>;
+	status = "okay";
+};
+
+&reboot_mode {
+	mode-bootloader = <0x5242c301>;
+	mode-charge = <0x5242c30b>;
+	mode-fastboot = <0x5242c309>;
+	mode-loader = <0x5242c301>;
+	mode-normal = <0x5242c300>;
+	mode-recovery = <0x5242c303>;
+	mode-ums = <0x5242c30c>;
+	mode-panic = <0x5242c307>;
+	mode-watchdog = <0x5242c308>;
+	/* Factory SPL reads this flag to enter Maskrom. */
+	mode-maskrom = <0xef08a53c>;
+};
+
+&rmii0_phy {
+	/delete-property/ pinctrl-0;
+	/delete-property/ rockchip,thermal-zone;
+};
+
+&rockchip_suspend {
+	rockchip,sleep-mode-config = <RKPM_SLP_ARMPD>;
+	rockchip,wakeup-config = <(RKPM_CPU0_WKUP_EN | RKPM_GPIO_WKUP_EN)>;
+	rockchip,pwm-regulator-config = <(RKPM_PWM0_M0_REGULATOR_EN | RKPM_PWM1_M0_REGULATOR_EN)>;
+};
+
+&route_hdmi {
+	/delete-property/ logo,kernel;
+	logo,mode = "fullscreen";
+};
+
+&route_tve {
+	/delete-property/ logo,kernel;
+	logo,mode = "fullscreen";
+};
+
+&sai3 {
+	/delete-property/ assigned-clocks;
+	/delete-property/ assigned-clock-rates;
+	/delete-property/ rockchip,always-on;
+};
+
+&sdio0 {
+	rockchip,use-v2-tuning;
+};
+
+&sdio_pwrseq {
+	reset-gpios = <&gpio4 RK_PA4 GPIO_ACTIVE_LOW>;
+};
+
+&sdmmc {
+	status = "okay";
+};
+
+&tsadc {
+	/delete-property/ nvmem-cells;
+	/delete-property/ nvmem-cell-names;
+};
+
+&tve {
+	rockchip,tve-upsample = <0x02>;
+};
+
+&uart2 {
+	/delete-property/ dmas;
+
+	/* the AIC8800's Bluetooth, bound on the serdev bus by bluetooth-hci-h4-serdev */
+	bluetooth {
+		compatible = "aicsemi,aic8800-bt";
+		max-speed = <1500000>;
+	};
+};
+
+&usbdrd_dwc3 {
+	/delete-property/ snps,dis-u1-entry-quirk;
+	/delete-property/ snps,dis-u2-entry-quirk;
+	/delete-property/ snps,parkmode-disable-hs-quirk;
+	/delete-property/ snps,parkmode-disable-ss-quirk;
+	dr_mode = "host";
+	snps,dis-u1u2-quirk;
+	snps,xhci-trb-ent-quirk;
+};
+
+&vcc3v3_pcie20 {
+	status = "disabled";
+};
+
+&vdd_cpu {
+	pwms = <&pwm7 0 5000 1>;
+};
+
+&vdd_gpu {
+	pwms = <&pwm4 0 5000 1>;
+};
+
+&vop {
+	/delete-property/ support-multi-area;
+	/* Give Esmart0 a 4K line buffer; sub-windows do not reach HDMI. */
+	esmart_lb_mode = [02];
+};
+
+&wdt {
+	/* Let systemd recover a hung kernel. */
+	status = "okay";
+};
+
+&wifi_enable_h {
+	rockchip,pins = <4 RK_PA4 RK_FUNC_GPIO &pcfg_pull_none>;
+};
+
+&wireless_bluetooth {
+	/delete-property/ bt_port;
+};

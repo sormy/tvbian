@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Artem Butusov <art.sormy@gmail.com>
 Date: Sun, 25 Oct 2026 15:00:00 -0400
-Subject: [PATCH] media: rc: keymaps: Add the Tanix TX1 remote
+Subject: [PATCH] media: rc: keymaps: Add the Tanix TX1 V2 remote
 
 The Tanix TX1 ships the TX3 mini's remote, whose keymap sends KEY_HOME,
 KEY_DELETE, KEY_NEXT and KEY_PREVIOUS: keys a media centre maps to the
@@ -18,7 +18,7 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
  			rc-snapstream-firefly.o \
  			rc-streamzap.o \
  			rc-su3000.o \
-+			rc-tanix-tx1.o \
++			rc-tanix-tx1-v2.o \
  			rc-tanix-tx3mini.o \
  			rc-tanix-tx5max.o \
  			rc-tbs-nec.o \
@@ -28,12 +28,12 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
  #define RC_MAP_SNAPSTREAM_FIREFLY        "rc-snapstream-firefly"
  #define RC_MAP_STREAMZAP                 "rc-streamzap"
  #define RC_MAP_SU3000                    "rc-su3000"
-+#define RC_MAP_TANIX_TX1                 "rc-tanix-tx1"
++#define RC_MAP_TANIX_TX1_V2              "rc-tanix-tx1-v2"
  #define RC_MAP_TANIX_TX3MINI             "rc-tanix-tx3mini"
  #define RC_MAP_TANIX_TX5MAX              "rc-tanix-tx5max"
  #define RC_MAP_TBS_NEC                   "rc-tbs-nec"
 --- /dev/null
-+++ b/drivers/media/rc/keymaps/rc-tanix-tx1.c	2026-10-25 18:42:38.906829875 +0000
++++ b/drivers/media/rc/keymaps/rc-tanix-tx1-v2.c	2026-10-25 18:42:38.906829875 +0000
 @@ -0,0 +1,75 @@
 +// SPDX-License-Identifier: GPL-2.0+
 +
@@ -41,12 +41,12 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 +#include <linux/module.h>
 +
 +/*
-+ * Keymap for the Tanix TX1 STB remote control: the TX3 mini's buttons, with
++ * Keymap for the Tanix TX1 V2's stock remote: the TX3 mini's buttons, with
 + * the keys a media centre reads on its labels. The mouse button toggles a
 + * pointer mode, as the vendor's software does with it.
 + */
 +
-+static struct rc_map_table tanix_tx1[] = {
++static struct rc_map_table tanix_tx1_v2[] = {
 +	{ 0x8051, KEY_POWER },
 +	{ 0x804d, KEY_MUTE },
 +
@@ -86,27 +86,27 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 +	{ 0x8044, KEY_BACKSPACE },
 +};
 +
-+static struct rc_map_list tanix_tx1_map = {
++static struct rc_map_list tanix_tx1_v2_map = {
 +	.map = {
-+		.scan     = tanix_tx1,
-+		.size     = ARRAY_SIZE(tanix_tx1),
++		.scan     = tanix_tx1_v2,
++		.size     = ARRAY_SIZE(tanix_tx1_v2),
 +		.rc_proto = RC_PROTO_NEC,
-+		.name     = RC_MAP_TANIX_TX1,
++		.name     = RC_MAP_TANIX_TX1_V2,
 +	}
 +};
 +
-+static int __init init_rc_map_tanix_tx1(void)
++static int __init init_rc_map_tanix_tx1_v2(void)
 +{
-+	return rc_map_register(&tanix_tx1_map);
++	return rc_map_register(&tanix_tx1_v2_map);
 +}
 +
-+static void __exit exit_rc_map_tanix_tx1(void)
++static void __exit exit_rc_map_tanix_tx1_v2(void)
 +{
-+	rc_map_unregister(&tanix_tx1_map);
++	rc_map_unregister(&tanix_tx1_v2_map);
 +}
 +
-+module_init(init_rc_map_tanix_tx1)
-+module_exit(exit_rc_map_tanix_tx1)
++module_init(init_rc_map_tanix_tx1_v2)
++module_exit(exit_rc_map_tanix_tx1_v2)
 +
 +MODULE_LICENSE("GPL");
-+MODULE_DESCRIPTION("Tanix TX1 STB remote controller keytable");
++MODULE_DESCRIPTION("Tanix TX1 V2 remote controller keytable");

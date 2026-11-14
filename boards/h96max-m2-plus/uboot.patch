@@ -17,7 +17,7 @@
  	#size-cells = <2>;
 -	model = "Rockchip RK3528 Evaluation Board";
 +	/* Identify this PCB in the U-Boot banner. */
-+	model = "H96 Max M2 Plus M2_P_ZX_20250328";
++	model = "H96 Max M2 Plus (M2_P_ZX_20250328)";
  
  	aliases {
  		gpio0 = "/pinctrl/gpio@ff610000";

@@ -1,9 +1,9 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Artem Butusov <art.sormy@gmail.com>
 Date: Sun, 8 Nov 2026 18:00:00 -0500
-Subject: [PATCH] media: rc: keymaps: Add the H96 Max remote
+Subject: [PATCH] media: rc: keymaps: Add the H96 Max H313 remote
 
-H96 Max TV boxes ship one NEC remote, address 0x04. Map each button as
+The H96 Max H313's stock remote, NEC, address 0x04. Map each button as
 its label reads: the four app keys as the colour keys, and the mouse
 button, which toggles a pointer in the vendor's software, as
 KEY_TOUCHPAD_TOGGLE for a pointer mode to follow.
@@ -16,7 +16,7 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
  			rc-geekbox.o \
  			rc-genius-tvgo-a11mce.o \
  			rc-gotview7135.o \
-+			rc-h96max.o \
++			rc-h96max-h313.o \
  			rc-hauppauge.o \
  			rc-hisi-poplar.o \
  			rc-hisi-tv-demo.o \
@@ -26,12 +26,12 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
  #define RC_MAP_GEEKBOX                   "rc-geekbox"
  #define RC_MAP_GENIUS_TVGO_A11MCE        "rc-genius-tvgo-a11mce"
  #define RC_MAP_GOTVIEW7135               "rc-gotview7135"
-+#define RC_MAP_H96MAX                    "rc-h96max"
++#define RC_MAP_H96MAX_H313               "rc-h96max-h313"
  #define RC_MAP_HAUPPAUGE                 "rc-hauppauge"
  #define RC_MAP_HISI_POPLAR               "rc-hisi-poplar"
  #define RC_MAP_HISI_TV_DEMO              "rc-hisi-tv-demo"
 --- /dev/null
-+++ b/drivers/media/rc/keymaps/rc-h96max.c
++++ b/drivers/media/rc/keymaps/rc-h96max-h313.c
 @@ -0,0 +1,60 @@
 +// SPDX-License-Identifier: GPL-2.0+
 +
@@ -39,12 +39,12 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 +#include <linux/module.h>
 +
 +/*
-+ * Keymap for the remote bundled with H96 Max TV boxes. The app keys,
++ * Keymap for the H96 Max H313's stock remote. The app keys,
 + * YouTube, Netflix, Prime Video and Google Play, are the colour keys. The
 + * mouse button toggles a pointer mode, as the vendor's software does with it.
 + */
 +
-+static struct rc_map_table h96max[] = {
++static struct rc_map_table h96max_h313[] = {
 +	{ 0x04f7, KEY_POWER },
 +	{ 0x04f6, KEY_MUTE },
 +	{ 0x0404, KEY_RED },
@@ -69,27 +69,27 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 +	{ 0x04d0, KEY_TOUCHPAD_TOGGLE },
 +};
 +
-+static struct rc_map_list h96max_map = {
++static struct rc_map_list h96max_h313_map = {
 +	.map = {
-+		.scan     = h96max,
-+		.size     = ARRAY_SIZE(h96max),
++		.scan     = h96max_h313,
++		.size     = ARRAY_SIZE(h96max_h313),
 +		.rc_proto = RC_PROTO_NEC,
-+		.name     = RC_MAP_H96MAX,
++		.name     = RC_MAP_H96MAX_H313,
 +	}
 +};
 +
-+static int __init init_rc_map_h96max(void)
++static int __init init_rc_map_h96max_h313(void)
 +{
-+	return rc_map_register(&h96max_map);
++	return rc_map_register(&h96max_h313_map);
 +}
 +
-+static void __exit exit_rc_map_h96max(void)
++static void __exit exit_rc_map_h96max_h313(void)
 +{
-+	rc_map_unregister(&h96max_map);
++	rc_map_unregister(&h96max_h313_map);
 +}
 +
-+module_init(init_rc_map_h96max)
-+module_exit(exit_rc_map_h96max)
++module_init(init_rc_map_h96max_h313)
++module_exit(exit_rc_map_h96max_h313)
 +
 +MODULE_LICENSE("GPL");
-+MODULE_DESCRIPTION("H96 Max TV box remote controller keytable");
++MODULE_DESCRIPTION("H96 Max H313 remote controller keytable");

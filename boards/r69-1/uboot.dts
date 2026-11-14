@@ -16,7 +16,7 @@
 	#size-cells = <2>;
 	/* the U-Boot banner's "Model:" line, so three near-identical boxes are
 	 * distinguishable on a serial console; nothing else reads it */
-	model = "R69 XR821_V1.1";
+	model = "R69-1 (XR821_V1.1)";
 
 	aliases {
 		gpio0 = "/pinctrl/gpio@ff610000";

@@ -1,0 +1,46 @@
+From c755e39836ec492b0bc210fd96c2b720b5b4a690 Mon Sep 17 00:00:00 2001
+From: Michal Piekos <michal.piekos@mmpsystems.pl>
+Date: Sun, 29 Mar 2026 13:43:04 +0200
+Subject: [PATCH] arm64: dts: allwinner: enable h616 timer support
+
+Add support for timer by reusing existing sun4i timer driver.
+
+H616 timer is compatible with earlier sunxi timer variants and provides
+both clocksource and clockevent functionality. It runs from 24 MHz
+oscillator. It can serve as broadcast clockevent for wake up from idle
+states.
+
+Tested on Orange Pi Zero 3:
+- timer is registered as clocksource:
+- switching clocksource at runtime works
+- timer operates as a broadcast clockevent device
+- no regression observed compared to arch_sys_counter
+
+Signed-off-by: Michal Piekos <michal.piekos@mmpsystems.pl>
+Reviewed-by: Jernej Skrabec <jernej.skrabec@gmail.com>
+Link: https://patch.msgid.link/20260329-h616-timer-v1-1-5966d0420a66@mmpsystems.pl
+Signed-off-by: Chen-Yu Tsai <wens@kernel.org>
+---
+ arch/arm64/boot/dts/allwinner/sun50i-h616.dtsi | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/allwinner/sun50i-h616.dtsi b/arch/arm64/boot/dts/allwinner/sun50i-h616.dtsi
+index 8d1110c14bad2f..bf054869e78be6 100644
+--- a/arch/arm64/boot/dts/allwinner/sun50i-h616.dtsi
++++ b/arch/arm64/boot/dts/allwinner/sun50i-h616.dtsi
+@@ -228,6 +228,15 @@
+ 			};
+ 		};
+ 
++		timer0: timer@3009000 {
++			compatible = "allwinner,sun50i-h616-timer",
++				     "allwinner,sun8i-a23-timer";
++			reg = <0x03009000 0xa0>;
++			interrupts = <GIC_SPI 48 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 49 IRQ_TYPE_LEVEL_HIGH>;
++			clocks = <&osc24M>;
++		};
++
+ 		watchdog: watchdog@30090a0 {
+ 			compatible = "allwinner,sun50i-h616-wdt",
+ 				     "allwinner,sun6i-a31-wdt";

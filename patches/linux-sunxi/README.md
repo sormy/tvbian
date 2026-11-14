@@ -16,15 +16,14 @@ for its API, and rewrites of top-level ones it takes in their place (`0103`, `02
 | `0001`–`0033` | LibreELEC's: MMC, clocks, SCPI, wake, Bluetooth        |
 | `0100`–`0903` | LibreELEC's: HDMI, display, video, audio, AC200        |
 | `0040`        | `hci_h4`: an AIC8800 without eFuse, the tree's address |
-| `0041`        | the H616 display pipeline in `sun50i-h616.dtsi`        |
 | `0042`        | `sunxi_wdt`: timeouts past its 16 s                    |
 | `0043`        | `sunxi-mmc`: the vendor's output phase in DDR          |
 | `0044`        | `sunxi-mmc`: the sample delay from the tree            |
 | `0045`        | Cedrus: the H616 on the H6 variant                     |
-| `0046`        | SRAM C1 for the H616 video engine                      |
+| `0046`        | upstream's H616 SRAM regions, several per device       |
 | `0047`        | `sun50i-iommu`: a master's port reset, exported        |
 | `0048`        | Cedrus: reset its IOMMU port after a timeout           |
-| `0049`–`0050` | the H96 Max remote's keymap, `rc-h96max`               |
+| `0049`–`0050` | the H96 Max H313's remote keymap, `rc-h96max-h313`     |
 | `0052`–`0063` | Cedrus: VP9, P010 10-bit, AFBC out on the H616         |
 | `0064`–`0065` | VC-1: parsed-slice uAPI and Cedrus decoding            |
 | `0066`        | Cedrus: AFBC out for HEVC                              |
@@ -74,8 +73,9 @@ display patches then apply unchanged: `0100`–`0106`, `0200`–`0275` less `023
 `drm_dev_set_dma_dev()` names; without it the console's framebuffer gets a physical address, which
 the planes read through the IOMMU, faulting each frame. `0036` is 7.2's API on 6.18:
 `struct drm_atomic_state` under its old name, the color-format bits, `of_drm_find_bridge()`,
-`hpd_notify()`'s arguments, `field_prep()`. `0041`, the H616's display pipeline nodes, is the
-`sun4i` DRM maintainer's, from Armbian's `sunxi-6.18` at `armbian/build` `fac57a0`.
+`hpd_notify()`'s arguments, `field_prep()`. The H616 dtsi takes `-next`'s nodes, `0424`–`0725`,
+after `0436`–`0439`, 7.x's NAND, timer, SRAM and hstimer nodes: both kernels' H616 dtsi are the same
+file. 6.18 binds the timer by its A23 fallback; its hstimer and NAND nodes bind nothing there.
 
 `0042` is ours: the watchdog's hardware stops at 16 s and the driver refused any longer timeout, so
 systemd's 80 s left it unarmed. It now declares 16 s as its hardware heartbeat, as `meson_gxbb_wdt`
@@ -86,15 +86,19 @@ a board's tuned sample delay as `allwinner,sample-delay`, where mainline samples
 TX1 V2.0's eMMC in DDR52 the two together end the data errors and the hang in recovery; whether
 `0044` alone does is untested. Not yet submitted: the binding needs a schema.
 
-`0045` and `0046` are Jernej Škrabec's, as Armbian's `sunxi-6.18` carries them; upstream, v2 of
-"arm64: allwinner: h616: Support Video Engine" (2026-07) and the H616 SRAM series, applied for 7.2.
-A board's tree adds the `video-codec` node and its SRAM section.
+`0045` is Jernej Škrabec's, as Armbian's `sunxi-6.18` carries it; upstream, v2 of "arm64: allwinner:
+h616: Support Video Engine" (2026-07). `0046` is the H616 SRAM series as 7.2 applied it, so a tree
+names the video engine's SRAM as upstream does. The `video-codec` node and its SRAM sections come
+with the translation, from `-next`'s dtsi.
 
 `0047` and `0048` are ours: a stream the engine cannot decode makes it read outside its buffers, the
 IOMMU's fault handler resets the engine's port while it still transfers, and the port stays stuck —
 every later stream decodes to garbage until a reboot. After its watchdog resets the engine, Cedrus
 resets the port again, with nothing in flight; the vendor BSP's `sunxi_reset_device_iommu()` is the
 same reset. Not yet submitted.
+
+`0707` is ours: the IOMMU on mixer 0, the DRM device's DMA device. `0725` adds the H616's TV
+encoder, disabled, for a board with an AV jack to enable.
 
 Ethernet on an H616 with the AC300 EPHY is the same on both kernels: EMAC1 (`0708`), the sun20i PWM
 that clocks the EPHY (`0712`–`0715`) and the AC200/AC300 EPHY driver (`0720`–`0721`). The AC200 core
@@ -125,8 +129,8 @@ in 8-pixel units and a macroblock row buffer at `0xb9c`, and past 2048 wide writ
 to memory. On top: the stop command ffmpeg and GStreamer drain with, escaped headers, the SPS timing
 and cropping, references kept out of the picture buffers, and frame rate control. `0083` lets
 `sunxi-cir` wake the system; `0085` keeps P010 the 10-bit default over `0066`'s AFBC, which a
-software consumer cannot read; `0088` is the TX1's remote keymap, `rc-tanix-tx1`, and `0050` the H96
-Max's, `rc-h96max`, both on the canonical keys. Not yet submitted.
+software consumer cannot read; `0088` is the TX1 V2's remote keymap, `rc-tanix-tx1-v2`, and `0050`
+the H96 Max H313's, `rc-h96max-h313`, both on the canonical keys. Not yet submitted.
 
 ## `next/`: `sunxi64-next`
 

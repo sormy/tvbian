@@ -30,6 +30,8 @@ from functools import cached_property
 from http import HTTPStatus
 from pathlib import Path
 
+from references import REFERENCES, Dialect, interrupt_map
+
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 DTC = str(REPO / "build/bin/dtc")
@@ -104,25 +106,10 @@ UNIT_SUFFIXES = (
     "-pascal",
     "-degrees",
 )
-# indices that follow a reference: dma request lines, gpio ranges, adc channels
-DECIMAL_ARGS = (
-    "assigned-clocks",
-    "assigned-clock-parents",
-    "dmas",
-    "gpio-ranges",
-    "io-channels",
-    "clocks",
-    "resets",
-    "phys",
-    "pwms",
-    "thermal-sensors",
-    "cooling-device",
-    "mboxes",
-    "iommus",
-    "power-domains",
-    "sound-dai",
-)
 GPIO_FLAGS = {0: "GPIO_ACTIVE_HIGH", 1: "GPIO_ACTIVE_LOW", 6: "GPIO_OPEN_DRAIN"}
+# Amlogic's pin names, by controller: the always-on bank's, then the peripheral banks'
+MESON_AO = ("GPIOAO_", "GPIO_TEST_N")
+MESON_EE = ("GPIOZ_", "GPIOH_", "BOOT_", "CARD_", "GPIODV_", "GPIOX_", "GPIOCLK_")
 ALL_ONES = "0xffffffff"
 GIC_TYPES = {0: "GIC_SPI", 1: "GIC_PPI"}
 IRQ_TYPES = {
@@ -160,7 +147,26 @@ PROPERTY = re.compile(r"^(\s*)([#\w,.+?-]+) = (.*);(.*)$")
 FLAG = re.compile(r"^(\s*)([#\w,.+?-]+);$")
 GROUP = re.compile(r"<([^<>]*)>")
 GROUPS = re.compile(r"<[^<>]*>(?:, <[^<>]*>)+")
+QUOTED = r'"((?:[^"\\]|\\.)*)"'
+STRINGS = re.compile(rf"{QUOTED}(?:, {QUOTED})*")
 WIDTH = 100  # a line, tabs at 8
+# the input header's names for where a range begins, not for a key
+INPUT_MARKERS = {
+    "KEY_MIN_INTERESTING",
+    "BTN_MISC",
+    "BTN_MOUSE",
+    "BTN_JOYSTICK",
+    "BTN_GAMEPAD",
+    "BTN_DIGI",
+    "BTN_WHEEL",
+    "BTN_TRIGGER_HAPPY",
+}
+# tables of fixed-size entries: the cells an entry
+TABLE_ENTRY = {
+    "rockchip,key_table": 2,
+    "rockchip,pvtm-voltage-sel": 3,
+    "rockchip,leakage-voltage-sel": 3,
+}
 # a cell: a bracketed expression whole, (GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_LOW), or a word
 TOKEN = re.compile(r"\((?:[^()]|\([^()]*\))*\)|\S+")
 
@@ -181,12 +187,24 @@ class Base:
     source: str
     url: str
     headers: list[str] = field(default_factory=list)
+    local: set[str] = field(default_factory=set)  # headers kept in tools/dtcx/headers, not fetched
     renderers: set[str] = field(default_factory=set)
     cells: list[Cells] = field(default_factory=list)
     decimal: list[str] = field(default_factory=list)
     gpio: set[str] = field(default_factory=set)
+    masks: dict[str, str] = field(default_factory=dict)  # property -> its bits' name pattern
+    numbers: list[str] = field(default_factory=list)  # properties of numbers, written as read
     refs: list[str] = field(default_factory=list)
-    refargs: list[str] = field(default_factory=list)
+    soc: str = ""  # the SoC dtsi a board file written against this base includes
+    soc_patches: str = ""  # the kernel conf whose patches to that dtsi our kernel applies
+
+    @property
+    def dialect(self) -> Dialect:
+        """The vendor reference properties this base declares, for reading its trees."""
+        quantities = [rule.rpartition(":")[2] for rule in (*DECIMAL, *self.decimal)]
+        units = [f"*{suffix}" for suffix in UNIT_SUFFIXES]
+        numbers = (*quantities, *units, *self.masks, *TABLE_ENTRY, *self.numbers)
+        return Dialect(frozenset(self.gpio), tuple(self.refs), tuple(numbers))
 
     @staticmethod
     def load(name: str) -> Base:
@@ -206,6 +224,9 @@ class Base:
                 base.url = rest
             elif key == "header":
                 base.headers.append(rest)
+            elif key == "local":
+                base.headers.append(rest)
+                base.local.add(rest)
             elif key == "render":
                 base.renderers.update(rest.split())
             elif key == "cells":
@@ -215,16 +236,25 @@ class Base:
                 base.decimal += rest.split()
             elif key == "gpio":
                 base.gpio.update(rest.split())
+            elif key == "numbers":
+                base.numbers += rest.split()
+            elif key == "mask":
+                prop, pattern = rest.split()
+                base.masks[prop] = pattern
             elif key == "ref":
                 base.refs += rest.split()
-            elif key == "refargs":
-                base.refargs += rest.split()
+            elif key == "soc":
+                base.soc = rest
+            elif key == "soc-patches":
+                base.soc_patches = rest
             elif key == "rules":
                 # a tree moved here from that base still carries its vendor's properties
                 source = Base.load(rest)
                 base.decimal += source.decimal
                 base.gpio |= source.gpio
-                base.refs += source.refs
+                # a binding's own name the translation writes the binding's way: a vendor's bare
+                # pwms are mainline's <&pwm 5 42 0>
+                base.refs += [r for r in source.refs if not any(fnmatch(n, r) for n in REFERENCES)]
             else:
                 sys.exit(f"{path}: unknown key {key}")
         return base
@@ -235,7 +265,10 @@ class Base:
         root = CACHE / f"{self.name}-{hashlib.sha256(self.url.encode()).hexdigest()[:12]}"
         for header in self.headers:
             target = root / header
-            if not target.exists():
+            if header in self.local:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text((HERE / "headers" / header).read_text())
+            elif not target.exists():
                 target.parent.mkdir(parents=True, exist_ok=True)
                 body = fetch(f"{self.url}/{header}")
                 # a symlink in the source tree comes back as the path it points to
@@ -321,6 +354,19 @@ def joined(text: str) -> str:
         if open_statement or PROPERTY_START.match(line):
             open_statement = not STATEMENT_END.search(line)
     return "\n".join(out)
+
+
+def cells_in_strings(value: str) -> str | None:
+    """A value dtc took for strings, as the cells its bytes are; None if it reads as text or is
+    no whole cells."""
+    strings = re.findall(QUOTED, value) if STRINGS.fullmatch(value) else []
+    if not any(s == "" or "\\" in s for s in strings):
+        return None
+    data = b"".join(ast.literal_eval(f'b"{s}"') + b"\0" for s in strings)
+    if len(data) % 4:
+        return None
+    cells = [int.from_bytes(data[i : i + 4], "big") for i in range(0, len(data), 4)]
+    return "<" + " ".join(f"{c:#x}" for c in cells) + ">"
 
 
 def number(token: str) -> int | None:
@@ -410,15 +456,43 @@ class Renderer:
                 and tree.interrupt_parent(n) in self.gic
             ]
         )
-        self.gpio = set().union(
-            *[tree.tokens(n) for n in tree.props if "gpio-controller" in tree.props[n]]
+        self.rockchip_banks = set().union(
+            *[
+                tree.tokens(n)
+                for n in tree.props
+                if "rockchip,gpio-bank" in tree.props[n].get("compatible", "")
+            ]
+        )
+        self.gpio_ao = set().union(
+            *[
+                tree.tokens(n)
+                for n in tree.props
+                if "gpio-controller" in tree.props[n]
+                and "aobus" in tree.props.get(n.rsplit("/", 1)[0], {}).get("compatible", "")
+            ]
         )
         # a vendor property dtc cannot know holds a reference keeps it as a bare phandle
-        self.refs = {
-            phandle: min(f"&{label}" for label in tree.labels[n] or [f"{{{n}}}"])
+        self.map_entries: dict[str, list[int]] = {}  # an interrupt-map's entry widths, decoded
+        self.nodes_by_phandle = {
+            phandle: n
             for n in tree.props
             for phandle in re.findall(r"0x[0-9a-f]+", tree.props[n].get("phandle", ""))
         }
+        self.refs = {
+            phandle: min(f"&{label}" for label in tree.labels[n] or [f"{{{n}}}"])
+            for phandle, n in self.nodes_by_phandle.items()
+        }
+        # every spelling of a reference, as the phandle references.py decodes
+        self.handles = {
+            token: int(phandle, 16)
+            for phandle, n in self.nodes_by_phandle.items()
+            for token in tree.tokens(n)
+        }
+        self.targets = {
+            int(phandle, 16): TreeNode(tree.props[n])
+            for phandle, n in self.nodes_by_phandle.items()
+        }
+        self.dialect = base.dialect
 
     def lookup(self, prefixes: tuple[str, ...], value: int) -> list[str]:
         table = self.by_value.get(prefixes)
@@ -432,6 +506,38 @@ class Renderer:
                     table.setdefault(v, []).append(name)
             self.by_value[prefixes] = table
         return table.get(value, [])
+
+    def interrupt_map(self, node: str, cells: list[str]) -> list[str]:
+        """Each mapping's parent by its label, as references.py decodes the map; as read, if it
+        does not decode."""
+        flat = [number(c) for c in cells]
+        values = [v for v in flat if v is not None]
+        handles = {
+            int(h, 16): TreeNode(self.tree.props[n]) for h, n in self.nodes_by_phandle.items()
+        }
+        found = interrupt_map(values, TreeNode(self.tree.props.get(node, {})), handles)
+        if not found or len(values) < len(cells):
+            return cells
+        child = min(found)  # each mapping's cells before its parent
+        bounds = [i - child for i in found] + [len(cells)]
+        self.map_entries[node] = [b - a for a, b in zip(bounds, bounds[1:])]
+        return [self.refs[c] if i in found else c for i, c in enumerate(cells)]
+
+    def bits(self, node: str, prop: str, cell: str) -> str:
+        """A mask as the one-bit names its pattern gives, or the cell if a bit has none or two."""
+        value = number(cell)
+        pattern = self.base.masks[prop]
+        named: dict[int, list[str]] = {}
+        for name, v in self.names.items():
+            if fnmatch(name, pattern) and v > 0 and v & (v - 1) == 0:
+                named.setdefault(v, []).append(name)
+        set_bits = [1 << b for b in range(32) if value is not None and value >> b & 1]
+        if not set_bits or any(len(named.get(b, [])) != 1 for b in set_bits):
+            self.unnamed.append(f"{node} {prop} {cell}: no one name a bit")
+            return cell
+        self.named += 1
+        names = [named[b][0] for b in set_bits]
+        return names[0] if len(names) == 1 else f"({' | '.join(names)})"
 
     def decimal(self, node: str, prop: str) -> bool:
         if (prop.startswith("#") and prop.endswith("-cells")) or prop == "clock-frequency":
@@ -448,6 +554,8 @@ class Renderer:
 
     def group(self, node: str, prop: str, cells: list[str]) -> list[str]:
         out = list(cells)
+        hog = "gpio-hog" in self.tree.props.get(node, {})
+        references = self.decoded(prop, out, hog)
         if "cells" in self.base.renderers:
             for i in range(len(out) - 1):
                 for tokens, rule in self.providers:
@@ -458,22 +566,28 @@ class Renderer:
                             self.named += 1
                         else:
                             self.unnamed.append(f"{node} {prop} {out[i + 1]}: {found or 'no name'}")
-        if "gpio-flags" in self.base.renderers and self.gpio_prop(prop):
-            for i in range(len(out) - 2):
-                if out[i] in self.gpio and number(out[i + 1]) is not None:
-                    out[i] = self.refs.get(out[i], out[i])
-                    out[i + 1] = str(number(out[i + 1]))
+        gpio = "#gpio-cells" in self.dialect.layouts(prop, hog)
+        if "gpio-flags" in self.base.renderers and gpio:
+            for i in (i for i, count in references.items() if count >= 2):
+                if number(out[i + 1]) is not None:
+                    pin = number(out[i + 1]) or 0
+                    out[i + 1] = str(pin)
+                    if out[i] in self.rockchip_banks and pin < 32:
+                        out[i + 1] = rockchip_pin(pin)
+                    if "meson-gpio" in self.base.renderers:
+                        bank = MESON_AO if out[i] in self.gpio_ao else MESON_EE
+                        found = self.lookup(bank, pin)
+                        if len(found) == 1:
+                            out[i + 1] = found[0]
+                        else:
+                            self.unnamed.append(f"{node} {prop} {pin}: {found or 'no pin name'}")
                     flag = number(out[i + 2])
                     if flag in GPIO_FLAGS:
                         out[i + 2] = GPIO_FLAGS[flag]
                     elif flag is not None:
                         self.unnamed.append(f"{node} {prop} {out[i + 2]}: no gpio flag name")
-        if any(fnmatch(prop, p) for p in self.base.refs) and all(c in self.refs for c in out):
-            out = [self.refs[c] for c in out]
-        # one reference and its arguments, as <&de3_sram 1>, an argument never read as a reference
-        if any(fnmatch(prop, p) for p in self.base.refargs) and out and out[0] in self.refs:
-            if all(number(c) is not None for c in out[1:]):
-                out = [self.refs[out[0]]] + [str(number(c)) for c in out[1:]]
+        # a reference dtc left a number, in a property only the model knows holds one
+        out = [self.refs.get(c, c) if i in references else c for i, c in enumerate(out)]
         if "gic" in self.base.renderers and prop == "interrupts":
             if self.tree.interrupt_parent(node) in self.gic or not self.gic:
                 values = [number(c) for c in out]
@@ -490,42 +604,44 @@ class Renderer:
                 bank, pin, func = (number(c) for c in out[i : i + 3])
                 if bank is not None and pin is not None and func is not None and pin < 32:
                     out[i] = str(bank)
-                    out[i + 1] = f"RK_P{'ABCD'[pin // 8]}{pin % 8}"
+                    out[i + 1] = rockchip_pin(pin)
                     out[i + 2] = "RK_FUNC_GPIO" if func == 0 else str(func)
-        if "input-codes" in self.base.renderers and prop == "linux,code":
-            for i, c in enumerate(out):
+        if "input-codes" in self.base.renderers and prop in ("linux,code", "rockchip,key_table"):
+            # a key table's scan code and key code pairs: the key code named
+            codes = range(1, len(out), 2) if prop == "rockchip,key_table" else range(len(out))
+            for i in codes:
+                c = out[i]
                 v = number(c)
                 found = self.lookup(("KEY_", "BTN_"), v) if v is not None else []
+                found = [n for n in found if n not in INPUT_MARKERS]
                 if len(found) == 1:
                     out[i] = found[0]
                 elif v is not None:
                     self.unnamed.append(f"{node} {prop} {c}: {found or 'no name'}")
+        if prop == "interrupt-map":
+            out = self.interrupt_map(node, out)
+        if prop in self.base.masks and len(out) == 1:
+            out = [self.bits(node, prop, out[0])]
         if "thermal" in self.base.renderers and prop == "cooling-device":
             out = ["THERMAL_NO_LIMIT" if c == "0xffffffff" else c for c in out]
-        # a gpio specifier without flags is plain numbers, as Allwinner's six cells are
-        if "gpio-flags" not in self.base.renderers and self.gpio_prop(prop):
-            out = [self.refs.get(c, c) if c in self.gpio else c for c in out]
-            after_ref = [any(t.startswith("&") for t in out[:i]) for i in range(len(out))]
-            out = [
-                str(number(c)) if c.startswith("0x") and c != ALL_ONES and a else c
-                for c, a in zip(out, after_ref)
-            ]
         # all ones is a vendor's "unset", which a decimal would hide
         if self.decimal(node, prop):
             out = [str(number(c)) if c.startswith("0x") and c != ALL_ONES else c for c in out]
-        if prop in DECIMAL_ARGS:
-            after_ref = [any(t.startswith("&") for t in out[:i]) for i in range(len(out))]
-            out = [
-                str(number(c)) if c.startswith("0x") and a else c for c, a in zip(out, after_ref)
-            ]
-        return out
+        # a reference's arguments are indices and pins, decimal; all ones a vendor's "unset"
+        arguments = {j for i, count in references.items() for j in range(i + 1, i + 1 + count)}
+        return [
+            str(number(c)) if j in arguments and c.startswith("0x") and c != ALL_ONES else c
+            for j, c in enumerate(out)
+        ]
 
-    def gpio_prop(self, prop: str) -> bool:
-        return (
-            prop in ("gpio", "gpios")
-            or prop.endswith(("-gpio", "-gpios", "_gpio", "_gpios"))
-            or prop in self.base.gpio
-        )
+    def decoded(self, prop: str, cells: list[str], hog: bool) -> dict[int, int]:
+        """Where a property's phandles are and how many cells follow each, as references.py
+        decodes it; none where it holds none or does not decode."""
+        flat = [self.handles.get(c, number(c)) for c in cells]
+        values = [v for v in flat if v is not None]
+        if len(values) < len(cells):
+            return {}
+        return self.dialect.decode(prop, values, self.targets, hog) or {}
 
     def line(self, node: str, line: str) -> str:
         m = PROPERTY.match(line)
@@ -538,6 +654,11 @@ class Renderer:
                 hz = [(cells[i] or 0) << 32 | (cells[i + 1] or 0) for i in range(0, len(cells), 2)]
                 return f"{indent}{prop} = /bits/ 64 <{' '.join(map(str, hz))}>;{rest}"
             return line
+        labels = self.tree.labels.get(value.strip('"')) if node == "/aliases" else None
+        if labels:  # dtc writes a reference in aliases as the path it names
+            return f"{indent}{prop} = &{min(labels)};{rest}"
+        if value.startswith('"'):
+            value = cells_in_strings(value) or value
         if GROUPS.fullmatch(value):  # already split, one <> an entry: one list again
             value = "<" + " ".join(GROUP.findall(value)) + ">"
         whole = GROUP.fullmatch(value)
@@ -545,11 +666,15 @@ class Renderer:
             lambda g: "<" + " ".join(self.group(node, prop, g.group(1).split())) + ">", value
         )
         if whole:
-            entries = split(TOKEN.findall(value[1:-1]), prop, self.entries(node, prop))
+            tokens = TOKEN.findall(value[1:-1])
+            widths = self.map_entries.get(node, []) if prop == "interrupt-map" else []
+            entries = by_width(tokens, widths) or split(tokens, prop, self.entries(node, prop))
             if len(entries) > 1:
                 one = f"{indent}{prop} = " + ", ".join(f"<{e}>" for e in entries) + f";{rest}"
                 if len(one.expandtabs(8)) <= WIDTH:
                     return one
+                if prop in TABLE_ENTRY:
+                    return packed(f"{indent}{prop} = ", [f"<{e}>" for e in entries], f";{rest}")
                 pad = f",\n{indent}{' ' * (len(prop) + 3)}"
                 return f"{indent}{prop} = " + pad.join(f"<{e}>" for e in entries) + f";{rest}"
         return f"{indent}{prop} = {value};{rest}"
@@ -594,6 +719,48 @@ def names_of(prop: str) -> str:
     return (prop[:-1] if prop.endswith("s") else prop) + "-names"
 
 
+@dataclass(frozen=True)
+class Written:
+    value: str
+
+
+@dataclass(frozen=True)
+class TreeNode:
+    """A decompiled node, as references.py reads one: its properties as dtc wrote them."""
+
+    props: dict[str, str]
+
+    def prop(self, name: str) -> Written | None:
+        return Written(self.props[name]) if name in self.props else None
+
+
+def rockchip_pin(pin: int) -> str:
+    return f"RK_P{'ABCD'[pin // 8]}{pin % 8}"
+
+
+def packed(head: str, entries: list[str], tail: str) -> str:
+    """Entries as many a line as fit, each line's under the first's."""
+    indent = head[: len(head) - len(head.lstrip("\t"))]
+    pad = indent + " " * (len(head) - len(indent))
+    pieces = [f"{e}," for e in entries[:-1]] + [entries[-1] + tail]
+    lines = [head + pieces[0]]
+    for piece in pieces[1:]:
+        joined = f"{lines[-1]} {piece}"
+        if len(joined.expandtabs(8)) <= WIDTH:
+            lines[-1] = joined
+        else:
+            lines.append(pad + piece)
+    return "\n".join(lines)
+
+
+def by_width(tokens: list[str], widths: list[int]) -> list[str]:
+    """Tokens as entries of the widths given, if they add up; none else."""
+    if sum(widths) != len(tokens):
+        return []
+    starts = [sum(widths[:k]) for k in range(len(widths))]
+    return [" ".join(tokens[a : a + w]) for a, w in zip(starts, widths)]
+
+
 def split(tokens: list[str], prop: str, count: int) -> list[str]:
     """One entry a group: as many as its -names property names, or else a specifier from one
     reference to the next, an interrupt under the GIC, a pin. Anything else is one group."""
@@ -602,6 +769,9 @@ def split(tokens: list[str], prop: str, count: int) -> list[str]:
         entries = [tokens[i : i + width] for i in range(0, len(tokens), width)]
         if not tokens[0].startswith("&") or all(e[0].startswith("&") for e in entries):
             return [" ".join(e) for e in entries]
+    size = TABLE_ENTRY.get(prop, 0)
+    if size and len(tokens) % size == 0:
+        return [" ".join(tokens[i : i + size]) for i in range(0, len(tokens), size)]
     if prop == "rockchip,pins" and len(tokens) % 4 == 0:
         return [" ".join(tokens[i : i + 4]) for i in range(0, len(tokens), 4)]
     if tokens and tokens[0] in GIC_TYPES.values() and len(tokens) % 3 == 0:

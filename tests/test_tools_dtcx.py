@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 import sys
 import tempfile
 import unittest
@@ -14,7 +15,9 @@ from dtcx import (  # noqa: E402
     Cells,
     Renderer,
     Tree,
+    WIDTH,
     arithmetic,
+    cells_in_strings,
     irq_type,
     joined,
     names_of,
@@ -25,8 +28,41 @@ HEADERS = {
     "dt-bindings/clock/test.h": "#define CLK_A 1\n#define CLK_B (CLK_A + 1)\n"
     "#define CLK_TWIN1 5\n#define CLK_TWIN2 5\n",
     "dt-bindings/input/linux-event-codes.h": "#define KEY_POWER 116\n"
-    "#define KEY_X 50\n#define KEY_Y 50\n",
+    "#define KEY_X 50\n#define KEY_Y 50\n#define KEY_MUTE 113\n#define KEY_MIN_INTERESTING KEY_MUTE\n",
+    "dt-bindings/gpio/meson.h": "#define GPIOAO_2 2\n#define GPIOZ_2 2\n#define GPIOX_9 88\n",
+    "dt-bindings/suspend/test.h": "#define PM_A (1 << 0)\n#define PM_B (1 << 4)\n#define PM_C (1 << 4)\n",
 }
+MESON = """/dts-v1/;
+
+/ {
+\tpinctrl@14 {
+\t\tcompatible = "amlogic,meson-gxl-aobus-pinctrl";
+
+\t\tgpio_ao: bank@14 {
+\t\t\tgpio-controller;
+\t\t\t#gpio-cells = <2>;
+\t\t\tphandle = <0x01>;
+\t\t};
+\t};
+
+\tpinctrl@4b0 {
+\t\tcompatible = "amlogic,meson-gxl-periphs-pinctrl";
+
+\t\tgpio: bank@4b0 {
+\t\t\tgpio-controller;
+\t\t\t#gpio-cells = <2>;
+\t\t\tphandle = <0x02>;
+\t\t};
+\t};
+
+\tdev {
+\t\tkey-gpios = <&gpio_ao 0x02 0x01>;
+\t\treset-gpios = <&gpio 0x02 0x00>;
+\t\tpower-gpios = <&gpio 0x58 0x00>;
+\t\twake-gpios = <&gpio 0x64 0x00>;
+\t};
+};
+"""
 TREE = """/dts-v1/;
 
 / {
@@ -38,11 +74,14 @@ TREE = """/dts-v1/;
 \t};
 
 \tcru: clock-controller@2 {
+\t\t#clock-cells = <1>;
+\t\t#dma-cells = <1>;
 \t\tphandle = <0x02>;
 \t};
 
 \tgpio0: gpio@3 {
 \t\tgpio-controller;
+\t\t#gpio-cells = <2>;
 \t\tphandle = <0x03>;
 \t};
 
@@ -57,6 +96,12 @@ TREE = """/dts-v1/;
 \t\tkey-twin = <0x32>;
 \t\tdmas = <&cru 0x0c>;
 \t\tmagic = <0x5242c300>;
+\t\tbytes = "", "\\f5";
+\t};
+
+\taliases {
+\t\tgpio0 = "/gpio@3";
+\t\tunlabelled = "/dev@4";
 \t};
 };
 """
@@ -66,6 +111,7 @@ def rendered(
     tree: str = TREE,
     renderers: frozenset[str] = frozenset({"cells", "gpio-flags", "gic", "input-codes"}),
     prefixes: tuple[str, ...] = ("CLK_",),
+    masks: dict[str, str] | None = None,
 ) -> tuple[dict[str, str], Renderer]:
     """Each property's rendered line, by name, and the renderer that made them: the clock
     controller's cells named from prefixes."""
@@ -75,6 +121,7 @@ def rendered(
             (Path(tmp) / name).write_text(body)
         base = Base("test", "test headers", "", headers=list(HEADERS))
         base.renderers = set(renderers)
+        base.masks = masks or {}
         base.cells = [Cells("clock-controller@2", ["clocks", "assigned-clocks"], prefixes)]
         base.__dict__["root"] = Path(tmp)  # the headers here, not fetched
         renderer = Renderer(base, Tree(tree))
@@ -104,6 +151,19 @@ class ArithmeticTest(unittest.TestCase):
         for expression, value in cases.items():
             with self.subTest(expression):
                 self.assertEqual(arithmetic(expression), value)
+
+
+class CellsInStringsTest(unittest.TestCase):
+    def test_strings_that_are_no_text(self) -> None:
+        for value, cells in [
+            ('"", "\\f5"', "<0xc3500>"),
+            ('"soc"', None),
+            ('"pio", "rtc"', None),
+            ('"\\x01"', None),
+            ("<1>", None),
+        ]:
+            with self.subTest(value=value):
+                self.assertEqual(cells_in_strings(value), cells)
 
 
 class JoinedTest(unittest.TestCase):
@@ -205,10 +265,27 @@ class RendererTest(unittest.TestCase):
             "linux,code": "linux,code = <KEY_POWER>;",
             "dmas": "dmas = <&cru 12>;",
             "magic": "magic = <0x5242c300>;",
+            "bytes": "bytes = <0xc3500>;",
+            "gpio0": "gpio0 = &gpio0;",
+            "unlabelled": 'unlabelled = "/dev@4";',
         }
         for prop, line in cases.items():
             with self.subTest(prop):
                 self.assertEqual(lines[prop], line)
+
+    def test_a_key_table_names_its_codes_and_packs_whole_pairs(self) -> None:
+        pairs = " ".join(f"0x{n:02x} 0x74" for n in range(20))
+        tree = f"/ {{\n\tir {{\n\t\trockchip,key_table = <{pairs}>;\n\t}};\n}};\n"
+        _, renderer = rendered(tree)
+        lines = renderer.render().splitlines()
+        first = next(i for i, line in enumerate(lines) if "rockchip,key_table" in line)
+        last = next(i for i in range(first, len(lines)) if lines[i].endswith(";"))
+        table = lines[first : last + 1]
+        self.assertGreater(len(table), 1)
+        for line in table:
+            self.assertLessEqual(len(line.expandtabs(8)), WIDTH)
+        entries = re.findall(r"<([^<>]*)>", "\n".join(table))
+        self.assertEqual(entries, [f"0x{n:02x} KEY_POWER" for n in range(20)])
 
     def test_a_value_with_two_names_stays_a_number_and_is_counted(self) -> None:
         lines, renderer = rendered()
@@ -220,10 +297,98 @@ class RendererTest(unittest.TestCase):
         _, renderer = rendered(tree)
         self.assertTrue(any("linux,code" in u for u in renderer.unnamed))
 
+    def test_a_meson_pin_takes_its_controller_s_name(self) -> None:
+        lines, renderer = rendered(MESON, frozenset({"gpio-flags", "meson-gpio"}))
+        self.assertEqual(lines["key-gpios"], "key-gpios = <&gpio_ao GPIOAO_2 GPIO_ACTIVE_LOW>;")
+        self.assertEqual(lines["reset-gpios"], "reset-gpios = <&gpio GPIOZ_2 GPIO_ACTIVE_HIGH>;")
+        self.assertEqual(lines["power-gpios"], "power-gpios = <&gpio GPIOX_9 GPIO_ACTIVE_HIGH>;")
+        self.assertEqual(lines["wake-gpios"], "wake-gpios = <&gpio 100 GPIO_ACTIVE_HIGH>;")
+        self.assertTrue(any("wake-gpios 100" in u for u in renderer.unnamed))  # no such pin
+
+    def test_gxlx_pins_as_read_off_the_box(self) -> None:
+        header = Path(__file__).resolve().parents[1] / "tools/dtcx/headers/dt-bindings/gpio/gxlx.h"
+        pins = dict(re.findall(r"#define\s+(\w+)\s+(\d+)", header.read_text()))
+        box = {"GPIOX_6": "88", "GPIOX_17": "99", "GPIOX_18": "100", "GPIODV_24": "76"}
+        self.assertEqual({name: pins[name] for name in box}, box)
+
     def test_a_header_limited_rule_names_only_that_header(self) -> None:
         only_input = ("dt-bindings/input/linux-event-codes.h", "")
         lines, _ = rendered(renderers=frozenset({"cells"}), prefixes=only_input)
         self.assertEqual(lines["clocks"], "clocks = <&cru 1>, <&cru 2>;")  # CLK_A, CLK_B unused
+
+
+VENDOR = """/dts-v1/;
+
+/ {
+\tintc: interrupt-controller@1 {
+\t\t#interrupt-cells = <1>;
+\t\tphandle = <0x05>;
+\t};
+
+\tgpio0: gpio@3 {
+\t\tcompatible = "rockchip,gpio-bank";
+\t\tgpio-controller;
+\t\t#gpio-cells = <2>;
+\t\tphandle = <0x03>;
+\t};
+
+\texpander: gpio@4 {
+\t\tgpio-controller;
+\t\t#gpio-cells = <2>;
+\t\tphandle = <0x04>;
+\t};
+
+\tits: msi@6 {
+\t\t#address-cells = <1>;
+\t\t#interrupt-cells = <1>;
+\t\tphandle = <0x06>;
+\t};
+
+\tpcie@2 {
+\t\t#address-cells = <3>;
+\t\t#interrupt-cells = <1>;
+\t\tinterrupt-map = <0x00 0x00 0x00 0x01 0x05 0x00 0x00 0x00 0x00 0x02 0x06 0x00 0x01>;
+\t\treset-gpios = <&gpio0 0x0a 0x01>;
+\t\tenable-gpios = <&expander 0x0a 0x01>;
+\t\tlinux,code = <0x71>;
+\t\twake = <0x11>;
+\t\ttwin = <0x10>;
+\t\tunnamed = <0x02>;
+\t};
+};
+"""
+
+
+class VendorRenderingTest(unittest.TestCase):
+    def test_masks_pins_and_interrupt_maps(self) -> None:
+        masks = {"wake": "PM_[AB]", "twin": "PM_*", "unnamed": "PM_[AB]"}
+        renderers = frozenset({"gpio-flags", "rockchip-pins", "input-codes"})
+        lines, renderer = rendered(VENDOR, renderers, masks=masks)
+        cases = {
+            "reset-gpios": "reset-gpios = <&gpio0 RK_PB2 GPIO_ACTIVE_LOW>;",
+            "enable-gpios": "enable-gpios = <&expander 10 GPIO_ACTIVE_LOW>;",  # no Rockchip bank
+            "linux,code": "linux,code = <KEY_MUTE>;",  # not the range marker sharing its value
+            "wake": "wake = <(PM_A | PM_B)>;",
+            "twin": "twin = <0x10>;",  # two names for the bit
+            "unnamed": "unnamed = <0x02>;",  # no name for the bit
+        }
+        for prop, line in cases.items():
+            with self.subTest(prop):
+                self.assertEqual(lines[prop], line)
+        # one mapping a group, however wide each parent's: one to a line, as they do not fit
+        mappings = re.findall(r"<[^<>]*&\w+[^<>]*>", renderer.render())
+        self.assertIn("<0x00 0x00 0x00 0x01 &intc 0x00>", mappings)
+        self.assertIn("<0x00 0x00 0x00 0x02 &its 0x00 0x01>", mappings)
+
+    def test_an_interrupt_map_to_no_known_parent_stays_as_read(self) -> None:
+        tree = VENDOR.replace(
+            "0x05 0x00 0x00 0x00 0x00 0x02 0x06", "0x09 0x00 0x00 0x00 0x00 0x02 0x09"
+        )
+        lines, _ = rendered(tree, frozenset())
+        self.assertEqual(
+            lines["interrupt-map"],
+            "interrupt-map = <0x00 0x00 0x00 0x01 0x09 0x00 0x00 0x00 0x00 0x02 0x09 0x00 0x01>;",
+        )
 
 
 if __name__ == "__main__":

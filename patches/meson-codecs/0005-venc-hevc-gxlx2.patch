@@ -4,7 +4,7 @@ Date: Mon, 12 Oct 2026 02:00:00 -0400
 Subject: [PATCH] media: meson: venc-hevc: GXLX2
 
 As venc-h264, plus GXL's clock IDs and CBUS reset base, and the vendor
-"cnm, HevcEnc" node adopted for its interrupt and io_reg_base. The
+"cnm,HevcEnc" node adopted for its interrupt and io_reg_base. The
 factory kernel probed the WAVE420L on GXLX2, so it joins the chip list.
 
 
@@ -113,7 +113,7 @@ diff --color -ruN E/venc-hevc/compat.c F/venc-hevc/compat.c
 -		ret = PTR_ERR(henc_hw.pdev);
 -		goto unmap;
 +	/* a vendor tree carries the node itself, with its interrupt and io_reg_base */
-+	henc_np = of_find_compatible_node(NULL, NULL, "cnm, HevcEnc");
++	henc_np = of_find_compatible_node(NULL, NULL, "cnm,HevcEnc");
 +	henc_hw.pdev = henc_np ? of_find_device_by_node(henc_np) : NULL;
 +	of_node_put(henc_np);
 +	if (henc_hw.pdev) {
@@ -204,7 +204,11 @@ diff --color -ruN E/venc-hevc/venc_v4l2.c F/venc-hevc/venc_v4l2.c
 diff --color -ruN E/venc-hevc/vpu.c F/venc-hevc/vpu.c
 --- a/venc-hevc/vpu.c
 +++ b/venc-hevc/vpu.c
-@@ -2502,6 +2502,7 @@
+@@ -2499,9 +2499,10 @@
+ static const struct of_device_id cnm_hevcenc_dt_match[] = {
+ 	{
+-		.compatible = "cnm, HevcEnc",
++		.compatible = "cnm,HevcEnc",
  	},
  	{},
  };

@@ -4,7 +4,7 @@ Date: Mon, 12 Oct 2026 02:00:00 -0400
 Subject: [PATCH] media: meson: venc-h264: GXLX2
 
 Find the gxlx-vdec node, the GIC through its interrupt parent, and run
-as GXLX2. A vendor tree carries an "amlogic, amvenc_avc" node with the
+as GXLX2. A vendor tree carries an "amlogic,amvenc_avc" node with the
 mailbox_2 interrupt, which already makes a platform device of that
 name: adopt it. v4l2_m2m_buf_copy_metadata() still takes
 copy_frame_flags before 6.18.50.
@@ -88,7 +88,7 @@ diff --color -ruN D/venc-h264/compat.c E/venc-h264/compat.c
 -		ret = PTR_ERR(venc_hw.pdev);
 -		goto unmap;
 +	/* a vendor tree carries the node itself, with its mailbox_2 interrupt */
-+	venc_np = of_find_compatible_node(NULL, NULL, "amlogic, amvenc_avc");
++	venc_np = of_find_compatible_node(NULL, NULL, "amlogic,amvenc_avc");
 +	venc_hw.pdev = venc_np ? of_find_device_by_node(venc_np) : NULL;
 +	of_node_put(venc_np);
 +	if (venc_hw.pdev) {
@@ -160,7 +160,11 @@ diff --color -ruN D/venc-h264/compat.h E/venc-h264/compat.h
 diff --color -ruN D/venc-h264/encoder.c E/venc-h264/encoder.c
 --- a/venc-h264/encoder.c
 +++ b/venc-h264/encoder.c
-@@ -5102,6 +5102,7 @@
+@@ -5099,9 +5099,10 @@
+ static const struct of_device_id amlogic_avcenc_dt_match[] = {
+ 	{
+-		.compatible = "amlogic, amvenc_avc",
++		.compatible = "amlogic,amvenc_avc",
  	},
  	{},
  };

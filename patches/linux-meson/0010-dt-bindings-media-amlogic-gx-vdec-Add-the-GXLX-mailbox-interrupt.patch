@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Thu, 12 Nov 2026 00:00:00 +0000
+Subject: [PATCH] dt-bindings: media: amlogic,gx-vdec: Add the GXLX mailbox interrupt
+
+GXLX's decoder takes DOS mailbox 0 as a third interrupt, mbox0, for the
+HEVC firmware's multi-instance mode. Allow it there only.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/Documentation/devicetree/bindings/media/amlogic,gx-vdec.yaml b/Documentation/devicetree/bindings/media/amlogic,gx-vdec.yaml
+--- a/Documentation/devicetree/bindings/media/amlogic,gx-vdec.yaml
++++ b/Documentation/devicetree/bindings/media/amlogic,gx-vdec.yaml
+@@ -41,11 +41,14 @@
+ 
+   interrupts:
+     minItems: 2
++    maxItems: 3
+ 
+   interrupt-names:
++    minItems: 2
+     items:
+       - const: vdec
+       - const: esparser
++      - const: mbox0
+ 
+   reg:
+     minItems: 2
+@@ -87,6 +90,20 @@
+   - if:
+       properties:
+         compatible:
++          not:
++            contains:
++              const: amlogic,gxlx-vdec
++
++    then:
++      properties:
++        interrupts:
++          maxItems: 2
++        interrupt-names:
++          maxItems: 2
++
++  - if:
++      properties:
++        compatible:
+           contains:
+             enum:
+               - amlogic,gx-vdec
