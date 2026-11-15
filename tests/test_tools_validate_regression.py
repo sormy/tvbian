@@ -148,6 +148,10 @@ class ResultsTest(unittest.TestCase):
             "09:23:00 6.12.69-tvb-rk35xx: system exit 0, 60 s\n"
         )
         self.assertEqual(duration(log, "6.1.172-tvb-rk35xx"), "19 min")
+        self.assertEqual(
+            regression.step_seconds(log, "6.1.172-tvb-rk35xx"), [("system", 49), ("video", 1145)]
+        )
+        self.assertIn("| video | 1145 |", regression.step_table(log, "6.1.172-tvb-rk35xx"))
         self.assertEqual(duration(log, "6.12.69-tvb-rk35xx"), "1 min")
         self.assertEqual(duration(log, "7.3.4-tvb-sunxi64"), "?")
 
@@ -198,6 +202,17 @@ class ResultsTest(unittest.TestCase):
         self.assertIsNone(results.skipped(known, "h96max-h313", "7.3.4-tvb-sunxi64", "recovery"))
         self.assertIsNone(results.skipped(known, "tanix-tx1-v2", "6.18.63-tvb-sunxi64", "recovery"))
         self.assertFalse(known[0].matches("h96max-h313", "6.18.63-tvb-sunxi64", "recovery: x"))
+
+    def test_a_run_past_its_profile_s_usual_time_is_flagged(self) -> None:
+        (self.dir / "host.txt").write_text("profile short\n")
+        (self.dir / "run.log").write_text(
+            "23:55:00 6.1: booting l1\n00:15:00 done: the default back\n"
+        )
+        self.assertEqual(regression.over_budget(self.dir), " ⚠ 20 min, short's usual 12")
+        (self.dir / "run.log").write_text(
+            "10:00:00 6.1: booting l1\n10:08:00 done: the default back\n"
+        )
+        self.assertEqual(regression.over_budget(self.dir), "")
 
     def test_a_run_is_told_apart_by_its_log_s_first_line(self) -> None:
         log = self.dir / "run.log"

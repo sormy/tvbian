@@ -93,6 +93,8 @@ KERNELS = {"short": 1, "default": 2, "extended": 2}  # the family's own first, t
 # display.py's synthetic screens: short, an SDR and an HDR10 one at their first mode; the rest,
 # every sink and the rating's ladder of modes
 DISPLAY_ARGS = {"short": ["--sinks", "SDR,HDR10", "--no-ladder"], "default": [], "extended": []}
+# a box's whole run as it usually takes, boots in it; past it, the report flags the run
+BUDGET_MIN = {"short": 12, "default": 45, "extended": 480}
 STEP_SECONDS = {"short": 600, "default": 1200, "extended": 7200}  # display, screen, video, dEQP
 # the video sizes a profile decodes; extended walks the whole ladder. A sample: the common size,
 # 4K
@@ -629,11 +631,52 @@ def last_run(board: str, kernel: str, before: Path) -> Path | None:
     return found[-1] if found else None
 
 
-def duration(log: Path, kernel: str) -> str:
-    """A kernel's minutes of steps, from the run log's seconds for each; boots not counted."""
+def step_seconds(log: Path, kernel: str) -> list[tuple[str, int]]:
+    """Each of a kernel's steps and its seconds, in run order, from the run log; boots, reboots
+    and recovery not counted, as a box without an RTC logs no true time for them."""
     text = log.read_text() if log.exists() else ""
-    seconds = re.findall(rf"^\S+ {re.escape(kernel)}: \S+ exit .*, (\d+) s$", text, re.M)
-    return f"{sum(map(int, seconds)) // 60} min" if seconds else "?"
+    found = re.findall(rf"^\S+ {re.escape(kernel)}: (\S+) exit .*, (\d+) s$", text, re.M)
+    return [(step, int(seconds)) for step, seconds in found]
+
+
+def duration(log: Path, kernel: str) -> str:
+    """A kernel's minutes of steps."""
+    steps = step_seconds(log, kernel)
+    return f"{sum(s for _, s in steps) // 60} min" if steps else "?"
+
+
+def step_table(log: Path, kernel: str) -> str:
+    """The kernel's steps and their seconds, folded: where its minutes went."""
+    steps = step_seconds(log, kernel)
+    if not steps:
+        return ""
+    rows = "\n".join(f"| {step} | {seconds} |" for step, seconds in steps)
+    table = f"| Step | s |\n| --- | ---: |\n{rows}"
+    return f"\n<details><summary>steps, {duration(log, kernel)}</summary>\n\n{table}\n</details>"
+
+
+def wall_minutes(log: Path) -> int | None:
+    """A box's whole run, its log's first line to its last: boots and reboots in it."""
+    stamps = re.findall(r"^(\d\d):(\d\d):(\d\d) ", log.read_text() if log.exists() else "", re.M)
+    if len(stamps) < 2:
+        return None
+    first, last = (int(h) * 3600 + int(m) * 60 + int(s) for h, m, s in (stamps[0], stamps[-1]))
+    return (last - first) % 86400 // 60  # past midnight the clock starts over
+
+
+def over_budget(board_dir: Path) -> str:
+    """A run far past its profile's usual time is a finding in itself: say so."""
+    host = board_dir / "host.txt"
+    profile = (
+        next((l.split()[1] for l in host.read_text().splitlines() if l.startswith("profile ")), "")
+        if host.exists()
+        else ""
+    )
+    took = wall_minutes(board_dir / "run.log")
+    budget = BUDGET_MIN.get(profile)
+    if not (took and budget and took > budget):
+        return ""
+    return f" ⚠ {took} min, {profile}'s usual {budget}"
 
 
 def profiles(run: Path) -> str:
@@ -689,7 +732,7 @@ def report(args: argparse.Namespace) -> int:
     known = Known.load(KNOWN)
     for board_dir in sorted(p for p in run.iterdir() if p.is_dir()):
         board = board_dir.name
-        end = ending(board_dir)
+        end = ending(board_dir) + over_budget(board_dir)
         host = Verdicts.of(board_dir / "host.txt")
         moved_inputs = changed_inputs(board, run)
         for kernel_dir in sorted(p for p in board_dir.iterdir() if p.is_dir()):
@@ -718,6 +761,7 @@ def report(args: argparse.Namespace) -> int:
                 lines = "\n".join(f"- {x}" for x in expected)
                 summary = f"{len(expected)} known failures, known.conf"
                 details.append(f"\n<details><summary>{summary}</summary>\n\n{lines}\n</details>")
+            details.append(step_table(board_dir / "run.log", kernel))
             details.append(video_table(kernel_dir))
             if last is not None:
                 moved = [
