@@ -68,6 +68,7 @@ for its API, and rewrites of top-level ones it takes in their place (`0103`, `02
 | `0812`        | Cedrus: H.264 and HEVC lines at a 32-byte pitch        |
 | `0813`        | Cedrus: cache hints on the capture queue               |
 | `0904`        | audio hub: rewinds for ordinary HDMI PCM               |
+| `0905`        | sunxi-ng: a gated PLL not waited on to relock          |
 
 The display stack is 7.2's on both kernels. `0034` takes 7.2.12's `drivers/gpu/drm/sun4i`,
 `bridge/synopsys`, `ccu-sun8i-de2.c`, `sun50i-iommu.c` and `dw_hdmi.h` as they are; LibreELEC's
@@ -296,3 +297,6 @@ the parent the tree assigns.
 
 `0904` limits the audio hub's `NO_REWINDS` to IEC958 subframes, converted in place; ordinary HDMI
 PCM keeps its application pointer rewindable. Not yet submitted.
+
+`0905` skips the relock wait after a rate change for a PLL the clock core gated again: thermal
+throttling the idle GPU on 7.3 warned in `ccu_helper_wait_for_lock`. Not yet submitted.

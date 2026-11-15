@@ -14,7 +14,6 @@
 
 - [ ] On 7.3, reloading the ATBM6031 driver in its other mode (`wifi_bt_comb`) resets the box, no
       pstore record; 6.18 reloads it. Skipped on 7.3 in `known.conf` until fixed.
-- [ ] On 7.3, under the soak's load, `ccu_helper_wait_for_lock` warns: a PLL does not lock.
 - [ ] Bluetooth in the driver's combo mode (`wifi_bt_comb=1`): no `hci0` on 6.18.
 
 - [ ] The ATBM6031 driver logs its scans at info, not warning: `[atbm_log]` lines fill

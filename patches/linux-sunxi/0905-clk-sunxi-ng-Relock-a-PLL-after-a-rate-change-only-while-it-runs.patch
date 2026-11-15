@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 15 Nov 2026 23:30:00 -0500
+Subject: [PATCH] clk: sunxi-ng: Relock a PLL after a rate change only while it
+ runs
+
+A PLL with CLK_SET_RATE_UNGATE is ungated for its rate change and gated
+again before the clock core sends POST_RATE_CHANGE. The relock notifier
+then waits for a lock that a gated PLL never reports, and warns after
+70 ms:
+
+  WARNING: drivers/clk/sunxi-ng/ccu_common.c:38 at ccu_helper_wait_for_lock
+  ccu_pll_notifier_cb
+  clk_change_rate
+  dev_pm_opp_set_rate
+  panfrost_devfreq_target
+
+On the H616 this is the GPU PLL: thermal throttling caps the GPU's
+frequency while the GPU is idle and its clock is off.
+
+Skip the relock for a gated PLL; it locks again when next enabled.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+--- a/drivers/clk/sunxi-ng/ccu_common.c
++++ b/drivers/clk/sunxi-ng/ccu_common.c
+@@ -85,7 +85,7 @@
+ 	struct ccu_pll_nb *pll = to_ccu_pll_nb(nb);
+ 	int ret = 0;
+ 
+-	if (event != POST_RATE_CHANGE)
++	if (event != POST_RATE_CHANGE || !clk_hw_is_enabled(&pll->common->hw))
+ 		goto out;
+ 
+ 	ccu_gate_helper_disable(pll->common, pll->enable);
