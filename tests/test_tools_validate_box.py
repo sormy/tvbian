@@ -44,6 +44,7 @@ class VerdictTest(unittest.TestCase):
             ("soak.jobs", "0 1 0", "FAIL"),
             ("wifi.up.mbits", "failed: no address on wlan0", "FAIL"),
             ("fio", "no fio", "UNTESTED"),
+            ("soak.server", "failed: plex not answering after 30 s", "FAIL"),
             ("mmc.errors", "0", None),
             ("mmc.errors", "1: mmc2: error -110 whilst initialising MMC card", "FAIL"),
         ]

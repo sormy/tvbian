@@ -115,7 +115,7 @@ RULES: list[tuple[str, Callable[[str], bool]]] = [
     (r".*\.scan\.unset", lambda v: not v.startswith("0 ")),
     (r".*\.mbits", lambda v: v[:1].isdigit()),
     (r"fio\..*", lambda v: v[:1].isdigit()),
-    (r"cpu\.load", lambda v: not v.startswith("failed")),
+    (r"cpu\.load|soak\.server", lambda v: not v.startswith("failed")),
     (r"bt.*\.hci\d+", lambda v: "UP RUNNING" in v and set(v.split("errors ")[1]) <= {"0", "+"}),
     (r"bt.*\.find", lambda v: v != "0"),
     (r"audio\..*\.3s", lambda v: v != "refused" and 2.9 <= float(v) <= 3.3),
@@ -135,6 +135,7 @@ RULES: list[tuple[str, Callable[[str], bool]]] = [
 TAINT_STAGING, TAINT_OOT, TAINT_UNSIGNED = 1 << 10, 1 << 12, 1 << 13
 SETTLE_PERCENT = 8
 SUSPENDS = "/sys/power/suspend_stats/success"  # the kernel's count of system sleeps entered
+SOAK_SETTLE_S = 30  # how long the soak waits for the server: a radio rejoining after sleep
 SOAK_GRACE_S = 15  # past the soak's end, how long a job may take to finish on its own
 FIO_LAYOUT_S = 120  # fio writes its file first: 512 MB on a slow SD card takes most of this
 BUSY_WAIT_S = 900  # how long a box waits for the iperf3 server other boxes are using
@@ -1144,6 +1145,9 @@ def soak(seconds: int, iperf: str) -> Iterator[Line]:
     if seconds <= 0:
         yield "soak", "not run"
         return
+    # the step before, a sleep, may leave a radio still rejoining
+    if iperf and have("ping") and not reachable(iperf, SOAK_SETTLE_S):
+        yield "soak.server", f"failed: {iperf} not answering after {SOAK_SETTLE_S} s"
     before = len(dmesg("err,warn"))
     jobs = [
         [
@@ -1198,6 +1202,17 @@ def soak(seconds: int, iperf: str) -> Iterator[Line]:
     yield "soak.jobs", " ".join(str(code) for code in codes)
     if iperf:
         yield "soak.ping.loss", f"{loss.group(1)} %" if loss else "failed"
+
+
+def reachable(host: str, seconds: int) -> bool:
+    """Whether host answers a ping within seconds: a radio back from sleep rejoins first."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        answer = subprocess.run(["ping", "-c", "1", "-W", "1", host], capture_output=True)
+        if answer.returncode == 0:
+            return True
+        time.sleep(1)
+    return False
 
 
 def ended(job: subprocess.Popen[str]) -> int:
