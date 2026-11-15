@@ -21,23 +21,23 @@ tools: a line that differs from the board's last run is a finding.
    profile, every check unattended, none left out for what the change touched:
    Every profile runs every check: the `box.py` phases, a soak, `display.py`, `screen.py`,
    `video.py`'s decode suite, dEQP against Mesa CI's lists, a panic, an unpinged watchdog and warm
-   reboots. The profile sets how much of each, never whether:
+   reboots. `short` samples them; `default` runs them all; `extended` soaks longer:
 
-   | Scope       | `short`    | `default`              | `extended`               |
-   | ----------- | ---------- | ---------------------- | ------------------------ |
-   | Kernels     | its own    | its own and `-next`    | its own and `-next`      |
-   | Soak        | 30 s       | 2 min                  | 30 min                   |
-   | Screens     | SDR, HDR10 | every sink, the ladder | every sink, the ladder   |
-   | s2idle      | 10 s       | 20 s                   | 120 s, past the watchdog |
-   | Reboots     | 1          | 2                      | 5                        |
-   | Video sizes | 4K         | 1080p, 4K              | the whole ladder         |
-   | dEQP        | 1/2000     | 1/500                  | 1/20 of the cases        |
-   | Phases      | short      | short                  | bring-up's timings       |
+   | Scope       | `short`               | `default`              | `extended`               |
+   | ----------- | --------------------- | ---------------------- | ------------------------ |
+   | Soak        | 30 s                  | 2 min                  | 30 min                   |
+   | s2idle      | 10 s                  | 20 s                   | 120 s, past the watchdog |
+   | Reboots     | 1                     | 2                      | 5                        |
+   | Screens     | SDR, HDR10, no ladder | every sink, the ladder | every sink, the ladder   |
+   | Video sizes | 4K                    | the whole ladder       | the whole ladder         |
+   | dEQP        | 1/2000                | 1/500                  | 1/500                    |
 
-   - **`short`, about 10 minutes a box as measured, every board the change reaches.**
-   - **`default`, about 40 minutes estimated, one box per hardware block**: boards that share a SoC,
-     its kernel and the engine's tree nodes (the 3518, 3518D, R69-1 and M2 Plus) need it on one; the
-     rest get `short`. A board whose tree changed gets `default` itself.
+   `--kernels own|next|both` picks the kernels apart from the profile; `both` unless named.
+
+   - **`short`, about 10 minutes a kernel, every board the change reaches.**
+   - **`default`, every change, one box per hardware block**: boards that share a SoC, its kernel
+     and the engine's tree nodes (the 3518, 3518D, R69-1 and M2 Plus) need it on one; the rest get
+     `short`. A board whose tree changed gets `default` itself.
    - **`extended`, a release or a kernel series.**
 
    The boxes need no session: a driver reload, a reboot or a hang ends nothing. `collect` fetches

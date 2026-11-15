@@ -47,5 +47,12 @@ class ClipsTest(unittest.TestCase):
         self.assertEqual(self.calls, ["encode", "decode", "encode", "decode"])
 
 
+class MemoryTest(unittest.TestCase):
+    def test_a_decode_s_memory_by_size_and_depth(self) -> None:
+        self.assertEqual(video.needed_mb("hevc", "8192x8192"), 768)
+        self.assertEqual(video.needed_mb("hevc10", "8192x8192"), 1536)  # 10-bit, twice
+        self.assertEqual(video.needed_mb("vp9p2", "7680x4320"), 759)
+
+
 if __name__ == "__main__":
     unittest.main()

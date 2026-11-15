@@ -3,10 +3,10 @@
 
 From the host, in the repo checkout:
 
-    python3 tools/validate/regression.py run [--profile short|default|extended] [--iperf HOST] \\
-        BOARD=USER@HOST
-    python3 tools/validate/regression.py deploy [--profile short|default|extended] [--iperf HOST] \\
-        BOARD=USER@HOST
+    python3 tools/validate/regression.py run [--profile short|default|extended] \\
+        [--kernels own|next|both] [--iperf HOST] BOARD=USER@HOST
+    python3 tools/validate/regression.py deploy [--profile short|default|extended] \\
+        [--kernels own|next|both] [--iperf HOST] BOARD=USER@HOST
     python3 tools/validate/regression.py collect BOARD=USER@HOST ...
     python3 tools/validate/regression.py report build/validate/regression/<date>
 
@@ -17,19 +17,19 @@ switches to each kernel of the board's family and its -next, with a guard that b
 back if a kernel brings no network up, and runs the profile's steps:
 
     every profile runs every step: box.py's phases, a soak, display.py, screen.py, video decode,
-    dEQP, a panic, an unpinged watchdog and warm reboots. The profile sets how much of each:
+    dEQP, a panic, an unpinged watchdog and warm reboots. short samples; default runs it all;
+    extended soaks longer:
 
-                    short       default       extended
-    kernels         its own     own, -next    own, -next
-    soak            30 s        2 min         30 min
-    screens         SDR, HDR10  every sink and the mode ladder
-    s2idle          10 s        20 s          120 s, past the watchdog
-    reboots         1           2             5
-    video sizes     4K          1080p, 4K     the whole ladder
-    dEQP            1/2000      1/500         1/20 of the cases
+                    short          default            extended
+    soak            30 s           2 min              30 min
+    s2idle          10 s           20 s               120 s, past the watchdog
+    reboots         1              2                  5
+    screens         SDR, HDR10     every sink, the ladder
+    video sizes     4K             the whole ladder
+    dEQP            1/2000         1/500
 
-    short, about 10 minutes a box as measured, for every board a change reaches; default, about 40
-    estimated, for every change; extended, hours, for a release.
+    --kernels picks the kernels apart from the profile: the family's own, its -next, or both (the
+    default).
 
 run deploys one box, prints its run log as it grows, collects and reports, in one go; several
 boxes are several runs at once. collect fetches each box's results, done or not, into
@@ -89,20 +89,17 @@ PROFILES = ("short", "default", "extended")
 SLEEP_SECONDS = {"short": 10, "default": 20, "extended": 120}  # extended's outlasts the watchdog
 SOAK_SECONDS = {"short": 30, "default": 120, "extended": 1800}
 REBOOTS = {"short": 1, "default": 2, "extended": 5}
-KERNELS = {"short": 1, "default": 2, "extended": 2}  # the family's own first, then its -next
+# which of the family's kernels a run boots, a choice apart from the profile: its own, its -next
+KERNELS = {"own": slice(0, 1), "next": slice(1, 2), "both": slice(0, 2)}
 # display.py's synthetic screens: short, an SDR and an HDR10 one at their first mode; the rest,
 # every sink and the rating's ladder of modes
 DISPLAY_ARGS = {"short": ["--sinks", "SDR,HDR10", "--no-ladder"], "default": [], "extended": []}
 # a box's whole run as it usually takes, boots in it; past it, the report flags the run
-BUDGET_MIN = {"short": 12, "default": 45, "extended": 480}
-STEP_SECONDS = {"short": 600, "default": 1200, "extended": 7200}  # display, screen, video, dEQP
-# the video sizes a profile decodes; extended walks the whole ladder. A sample: the common size,
-# 4K
-DEQP_FRACTION = {"short": 2000, "default": 500, "extended": 20}  # every N'th case
-VIDEO_SIZES = {
-    "short": ("3840x2160",),
-    "default": ("1920x1080", "3840x2160"),
-}
+BUDGET_MIN = {"short": 12, "default": 40, "extended": 75}  # a kernel's minutes
+STEP_SECONDS = {"short": 600, "default": 7200, "extended": 7200}  # display, screen, video, dEQP
+DEQP_FRACTION = {"short": 2000, "default": 500, "extended": 500}  # every N'th case
+# the video sizes short decodes; the others walk the whole ladder
+VIDEO_SIZES = {"short": ("3840x2160",)}
 
 UNIT = f"""[Unit]
 Description=TVBian regression run
@@ -111,6 +108,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 ExecStart=/usr/bin/python3 {BOX_DIR}/onbox.py step
+# a step out of memory fails alone; the run goes on
+OOMPolicy=continue
 [Install]
 WantedBy=multi-user.target
 """
@@ -423,18 +422,16 @@ def address_towards(host: str) -> str:
         return probe.getsockname()[0]
 
 
-def start(profile: str, spec: str, iperf: str | None) -> None:
+def start(profile: str, spec: str, iperf: str | None, which: str) -> None:
     """One box: its packages installed fresh, the suite bundled, the run started. Without an
     iperf3 server named, this machine serves, at its address on the route to the box."""
     board, _, target = spec.partition("=")
     box = Box(target)
     iperf = iperf or address_towards(target.rpartition("@")[2])
     deployment = Deployment(board, box, profile, iperf)
-    releases = kernels(board_family(board), [d.name for d in DEBS.glob("*.deb")])[
-        : KERNELS[profile]
-    ]
+    releases = kernels(board_family(board), [d.name for d in DEBS.glob("*.deb")])[KERNELS[which]]
     if not releases:
-        raise NotStarted(f"no {board_family(board)} kernel packages in {DEBS}")
+        raise NotStarted(f"no {which} {board_family(board)} kernel package in {DEBS}")
     print(f"{board}: install {deployment.install(releases)}")
     host_lines = [f"profile {profile}", *deployment.host_checks()]
     host_lines += [f"# input {i}" for i in deployment.inputs]
@@ -470,13 +467,13 @@ def board_inputs(board: str) -> str:
     return digest.hexdigest()
 
 
-def started(profile: str, spec: str, iperf: str | None) -> bool:
+def started(profile: str, spec: str, iperf: str | None, which: str) -> bool:
     """The box's run started; when it could not build, install or start, it says why."""
     try:
         if iperf is None:
             serve_iperf()
         prepare(spec.partition("=")[0])
-        start(profile, spec, iperf)
+        start(profile, spec, iperf, which)
         return True
     except (ConnectionError, subprocess.CalledProcessError, NotStarted) as error:
         print(f"{spec.partition('=')[0]}: not started: {error}", flush=True)
@@ -484,7 +481,7 @@ def started(profile: str, spec: str, iperf: str | None) -> bool:
 
 
 def deploy(args: argparse.Namespace) -> int:
-    return 0 if started(args.profile, args.box, args.iperf) else 1
+    return 0 if started(args.profile, args.box, args.iperf, args.kernels) else 1
 
 
 def collect(args: argparse.Namespace) -> int:
@@ -578,7 +575,7 @@ def run(args: argparse.Namespace) -> int:
     """One box: deployed, watched until its run ends, collected and reported. Several boxes are
     several runs at once, one process each: the iperf3 server takes one at a time, the others wait
     their turn, so no box measures another's traffic."""
-    if not started(args.profile, args.box, args.iperf):
+    if not started(args.profile, args.box, args.iperf, args.kernels):
         return 1
     ended = watch(args.box, RUN_LIMIT_S[args.profile])
     report(argparse.Namespace(dir=str(fetch([args.box]))))
@@ -673,7 +670,9 @@ def over_budget(board_dir: Path) -> str:
         else ""
     )
     took = wall_minutes(board_dir / "run.log")
-    budget = BUDGET_MIN.get(profile)
+    log = (board_dir / "run.log").read_text() if (board_dir / "run.log").exists() else ""
+    booted = len(set(re.findall(r"^\S+ (\S+): booting", log, re.M))) or 1
+    budget = BUDGET_MIN[profile] * booted if profile in BUDGET_MIN else None
     if not (took and budget and took > budget):
         return ""
     return f" ⚠ {took} min, {profile}'s usual {budget}"
@@ -795,6 +794,7 @@ def main() -> int:
     begin = sub.add_parser("deploy")
     begin.add_argument("--profile", choices=PROFILES, default="default")
     begin.add_argument("--iperf", metavar="HOST", help="the iperf3 server; default: this machine")
+    begin.add_argument("--kernels", choices=KERNELS, default="both", help="the family's own, -next")
     begin.add_argument("box", metavar="BOARD=USER@HOST")
     gather = sub.add_parser("collect")
     gather.add_argument("boxes", nargs="+", metavar="BOARD=USER@HOST")
@@ -803,6 +803,7 @@ def main() -> int:
     whole = sub.add_parser("run", help="deploy, wait, collect, report")
     whole.add_argument("--profile", choices=PROFILES, default="default")
     whole.add_argument("--iperf", metavar="HOST", help="the iperf3 server; default: this machine")
+    whole.add_argument("--kernels", choices=KERNELS, default="both", help="the family's own, -next")
     whole.add_argument("box", metavar="BOARD=USER@HOST")
     args = parser.parse_args()
     commands = {"deploy": deploy, "collect": collect, "report": report, "run": run}

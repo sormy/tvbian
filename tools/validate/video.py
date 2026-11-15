@@ -710,6 +710,23 @@ def ladder(sizes, run, emit, start):
         emit(dict(rec, size=size))
 
 
+# a decode's frames in memory at once, references and threads: 16K ran a 1.5 GB box out
+FRAMES_HELD = 8
+
+
+def needed_mb(codec, size):
+    """The memory a decode of codec at size takes, by its 4:2:0 frames, 10-bit ones twice."""
+    width, height = (int(n) for n in size.split("x"))
+    depth = 2 if codec.endswith(("10", "p10", "p2")) else 1
+    return width * height * 3 // 2 * depth * FRAMES_HELD >> 20
+
+
+def available_mb():
+    meminfo = Path("/proc/meminfo").read_text() if Path("/proc/meminfo").exists() else ""
+    found = re.search(r"^MemAvailable:\s+(\d+) kB", meminfo, re.M)
+    return int(found.group(1)) >> 10 if found else 1 << 20
+
+
 def cmd_box(args):
     global BOX_DIR
     BOX_DIR = args.dir
@@ -720,11 +737,20 @@ def cmd_box(args):
     emit = lambda rec: print(json.dumps(rec), flush=True)
 
     def runnable(suite, codec, sizes):
-        """The sizes to run; a case --skip names is recorded, not run."""
-        hazard = [s for s in sizes if skip and skip.search(f"{suite}:{codec}-{s}")]
-        for size in hazard:
-            emit({"suite": suite, "codec": codec, "size": size, "verdict": "skipped"})
-        return [s for s in sizes if s not in hazard]
+        """The sizes to run; a case --skip names, or one past the box's memory, is recorded, not
+        run."""
+        free = available_mb()
+        out = []
+        for size in sizes:
+            need = needed_mb(codec, size)
+            record = {"suite": suite, "codec": codec, "size": size, "verdict": "skipped"}
+            if skip and skip.search(f"{suite}:{codec}-{size}"):
+                emit(record)
+            elif need > free:
+                emit(dict(record, why=f"needs {need} MB, {free} MB free"))
+            else:
+                out.append(size)
+        return out
 
     emit(
         {

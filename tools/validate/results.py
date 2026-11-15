@@ -47,8 +47,9 @@ class Verdicts:
             if line.startswith("{") and '"verdict"' in line:  # video.py's records
                 record = json.loads(line)
                 case = f"{record.get('suite')} {record.get('codec')} {record.get('size')}"
-                if record["verdict"] == "skipped":  # a --skip hazard: recorded, never run
-                    found.untested.append(f"video {case}: skipped")
+                if record["verdict"] == "skipped":  # a --skip hazard, or past the box: recorded, never run
+                    why = f", {record['why']}" if "why" in record else ""
+                    found.untested.append(f"video {case}: skipped{why}")
                     continue
                 found.checks += 1
                 if record["verdict"] in FAILING:  # refused or unoffered: the engine's limit

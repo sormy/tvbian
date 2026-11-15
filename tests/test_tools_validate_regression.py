@@ -46,6 +46,12 @@ class KernelsTest(unittest.TestCase):
         ]
         self.assertEqual(kernels("sunxi64", debs), ["6.18.63-tvb-sunxi64", "7.3.10-tvb-sunxi64"])
 
+    def test_the_kernels_option_picks_own_next_or_both(self) -> None:
+        both = ["6.18.63-tvb-sunxi64", "7.3.4-tvb-sunxi64"]
+        picked = {which: both[regression.KERNELS[which]] for which in ("own", "next", "both")}
+        self.assertEqual(picked, {"own": both[:1], "next": both[1:], "both": both})
+        self.assertEqual(["6.1.172-tvb-rk35xx"][regression.KERNELS["next"]], [])  # none: refused
+
     def test_a_family_without_next_runs_one(self) -> None:
         debs = ["linux-image-tvb-rk35xx_6.1.172-0~local_arm64.deb"]
         self.assertEqual(kernels("rk35xx", debs), ["6.1.172-tvb-rk35xx"])
@@ -82,9 +88,9 @@ class StepsTest(unittest.TestCase):
             return next(str(a) for a in command if str(a).startswith(flag))
 
         self.assertEqual(arg("short", "video", "--only="), "--only=-(3840x2160)$")
-        self.assertEqual(arg("default", "video", "--only="), "--only=-(1920x1080|3840x2160)$")
-        with self.assertRaises(StopIteration):  # the whole ladder
-            arg("extended", "video", "--only")
+        for whole in ("default", "extended"):  # the whole ladder
+            with self.assertRaises(StopIteration):
+                arg(whole, "video", "--only")
         soak = {
             p: next(s for s in steps(p, "rk35xx", "plex") if s.name == "soak") for p in PROFILES
         }
@@ -339,7 +345,7 @@ class StartedTest(unittest.TestCase):
             mock.patch.object(regression, "start") as start,
             mock.patch("sys.stdout", out),
         ):
-            self.assertFalse(regression.started("short", "a=root@a", "plex"))
+            self.assertFalse(regression.started("short", "a=root@a", "plex", "both"))
         start.assert_not_called()
         self.assertTrue(out.getvalue().startswith("a: not started:"))
 
