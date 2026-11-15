@@ -15,3 +15,9 @@ What spans the family's boards.
 - [ ] **VC-1 and interlaced MPEG-4 decode exact**: SMPTE's SA00040 (176×144), SA00050 and SA10143
       (interlaced fields) differ from software in every picture, and the last two miss one and
       three; interlaced MPEG-4 comes out at 44 dB.
+- [ ] **The factory microcode our decoder does not drive**: the M20's `video_ucode.bin` also holds
+      `gxl_h263` (an H.263 decoder), `gxl_xvid_multi`, `gxl_mjpeg_multi` and the AVS builds. Whether
+      the multi-instance MPEG-4 decodes interlaced and quarter-pel MPEG-4 closer to software.
+- [ ] **A JPEG encoder on the S905L3**: the factory `video_ucode.bin` carries `gxl_jpeg_enc`.
+- [ ] **"Buffer N done but it doesn't exist in m2m_ctx"** in the decoder's log around a drain:
+      whether a buffer is completed twice.
