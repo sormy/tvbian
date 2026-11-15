@@ -4,7 +4,7 @@ Date: Sun, 14 Jan 2024 10:54:01 +0100
 Subject: [PATCH] media: cedrus: Add JPEG decoding
 
 Baseline 8-bit YCbCr JPEG up to 24 million pixels and 6000 on a side,
-6144x6144 hanging the SoC,
+6144x6144 hanging the SoC; TRY_FMT trims the height to keep within them,
 written by the rotate and scale output as NV12; 4:2:2 and 4:4:4 come
 out as 4:2:0. Motion JPEG
 too, whose frames may leave the Huffman tables out: the Annex K tables
@@ -150,7 +150,7 @@ new file mode 100644
 index 000000000..f3d1ae91f
 --- /dev/null
 +++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec_jpeg.c
-@@ -0,0 +1,395 @@
+@@ -0,0 +1,410 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * Cedrus Video Engine Driver
@@ -338,6 +338,21 @@ index 000000000..f3d1ae91f
 +/* The largest picture measured to decode; 6144x6144 hangs the SoC. */
 +#define CEDRUS_DEC_JPEG_MAX_PIXELS	(6000 * 4000)
 +
++/* Format */
++
++static int cedrus_dec_jpeg_format_prepare(struct cedrus_context *ctx,
++					  struct v4l2_format *format)
++{
++	struct v4l2_pix_format *pix_format = &format->fmt.pix;
++	int ret = cedrus_dec_format_coded_prepare(ctx, format);
++
++	if (!ret)
++		pix_format->height = min(pix_format->height,
++					 CEDRUS_DEC_JPEG_MAX_PIXELS / pix_format->width);
++
++	return ret;
++}
++
 +/* Job */
 +
 +static int cedrus_dec_jpeg_job_configure(struct cedrus_context *ctx)
@@ -493,7 +508,7 @@ index 000000000..f3d1ae91f
 +/* Engine */
 +
 +static const struct cedrus_engine_ops cedrus_dec_jpeg_ops = {
-+	.format_prepare		= cedrus_dec_format_coded_prepare,
++	.format_prepare		= cedrus_dec_jpeg_format_prepare,
 +	.format_configure	= cedrus_dec_format_coded_configure,
 +
 +	.job_configure		= cedrus_dec_jpeg_job_configure,

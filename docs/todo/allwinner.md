@@ -23,7 +23,5 @@
 
 - [ ] **H616: 4K H.264 and VP8 on the screen**, linear frames as their decoder writes them: count
       underflows and frames shown, then settle the READMEs' "to 4K" mark.
-- [ ] **Cedrus JPEG's `TRY_FMT` clamps to what it decodes**: 24 Mpixel (`linux-sunxi` `0803`), not
-      6000×6000, so `tvb-va-driver` reads the limit instead of carrying it.
 - [ ] **Cedrus's H.264 encoder takes a bitrate**, CBR and VBR: a fixed QP alone today.
 - [ ] **VC-1 Main (WMV9) on Cedrus**: `linux-sunxi` `0065` refuses it.
