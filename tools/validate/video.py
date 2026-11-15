@@ -259,7 +259,12 @@ def pixels(size):
 
 
 def cmd_clips(args):
+    """The corpus: each clip encoded by the host's FFmpeg, and its frames as software decodes them.
+    A clip is kept while what made it (size, frames, encoder) is the same, and its reference
+    decode while the clip's bytes are."""
     CORPUS.mkdir(parents=True, exist_ok=True)
+    index = CORPUS / "manifest.json"
+    before = json.loads(index.read_text())["clips"] if index.exists() else {}
     manifest = {
         "ffmpeg": sh(["ffmpeg", "-version"])[1].splitlines()[0],
         "frames": FRAMES,
@@ -268,7 +273,9 @@ def cmd_clips(args):
     for codec, (ext, enc, sizes, _) in CODECS.items():
         for size in sizes:
             path = CORPUS / f"{codec}-{size}.{ext}"
-            if not path.exists():
+            recipe = " ".join([size, str(FRAMES), *enc])
+            known = before.get(path.name, {})
+            if known.get("recipe") != recipe or not path.exists():
                 rc, out, _ = sh(
                     [
                         "ffmpeg",
@@ -289,6 +296,10 @@ def cmd_clips(args):
                     path.unlink(missing_ok=True)
                     print(f"{path.name}: the host's encoder refuses it", file=sys.stderr)
                     continue
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            if known.get("sha256") == digest and known.get("recipe") == recipe:
+                manifest["clips"][path.name] = known
+                continue
             rc, out, _ = sh(
                 [
                     "ffmpeg",
@@ -305,10 +316,11 @@ def cmd_clips(args):
                 timeout=None,
             )
             manifest["clips"][path.name] = {
-                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "recipe": recipe,
+                "sha256": digest,
                 "framemd5": md5_lines(out),
             }
-    (CORPUS / "manifest.json").write_text(json.dumps(manifest, indent=1))
+    index.write_text(json.dumps(manifest, indent=1))
     print(f"{len(manifest['clips'])} clips in {CORPUS}")
 
 

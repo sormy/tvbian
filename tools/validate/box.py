@@ -53,6 +53,7 @@ IR_RECEIVERS = ("sun6i-a31-ir", "meson-ir", "meson-gxbb-ir", "remotectl")
 TEST_TOOLS = {
     "glmark2-es2-drm",
     "iperf3",
+    "iputils-ping",
     "ffmpeg9",
     "drm-info",
     "cec-utils",
@@ -134,7 +135,8 @@ RULES: list[tuple[str, Callable[[str], bool]]] = [
 TAINT_STAGING, TAINT_OOT, TAINT_UNSIGNED = 1 << 10, 1 << 12, 1 << 13
 SETTLE_PERCENT = 8
 SUSPENDS = "/sys/power/suspend_stats/success"  # the kernel's count of system sleeps entered
-FIO_LAYOUT_S = 120  # fio writes its 512 MB file first: slow SD cards take most of this
+SOAK_GRACE_S = 15  # past the soak's end, how long a job may take to finish on its own
+FIO_LAYOUT_S = 120  # fio writes its file first: 512 MB on a slow SD card takes most of this
 BUSY_WAIT_S = 900  # how long a box waits for the iperf3 server other boxes are using
 
 
@@ -148,6 +150,7 @@ class Profile:
     iommu_s: int
     load_s: int
     fio_s: int
+    fio_mb: int  # its test file: the layout alone is seconds on an SD card
     iperf_s: int
     iperf_runs: int
     loaded_s: int
@@ -163,6 +166,7 @@ PROFILES = {
         iommu_s=2,
         load_s=15,
         fio_s=3,
+        fio_mb=64,
         iperf_s=3,
         iperf_runs=1,
         loaded_s=10,
@@ -176,6 +180,7 @@ PROFILES = {
         iommu_s=5,
         load_s=60,
         fio_s=10,
+        fio_mb=512,
         iperf_s=5,
         iperf_runs=1,
         loaded_s=20,
@@ -188,6 +193,7 @@ PROFILES = {
         iommu_s=10,
         load_s=300,
         fio_s=30,
+        fio_mb=512,
         iperf_s=8,
         iperf_runs=3,
         loaded_s=60,
@@ -603,7 +609,8 @@ def storage() -> Iterator[Line]:
         ("rand.write", "randwrite", "4k"),
     ):
         out = sh(
-            f"fio --name={name} --filename={path} --size=512M --rw={mode} --bs={block} "
+            f"fio --name={name} --filename={path} --size={PROFILE.fio_mb}M --rw={mode} "
+            f"--bs={block} "
             f"--ioengine=libaio --iodepth=32 --direct=1 --runtime={PROFILE.fio_s} --time_based "
             "--output-format=terse",
             timeout=PROFILE.fio_s * 4 + FIO_LAYOUT_S,
@@ -1163,28 +1170,45 @@ def soak(seconds: int, iperf: str) -> Iterator[Line]:
                 " do glmark2-es2-drm --off-screen >/dev/null 2>&1 || exit 1; done",
             ]
         )
-    if iperf:  # a ping stream: the iperf3 server takes one client, and every box soaks at once
+    if iperf and have("ping"):  # a ping stream: the iperf3 server takes one client at a time
         jobs.append(["ping", "-q", "-i", "0.01", "-s", "1400", "-w", str(seconds), iperf])
     with screen():
         running = [
             subprocess.Popen(
-                j, cwd="/var/tmp", stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
+                j,
+                cwd="/var/tmp",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                start_new_session=True,
             )
             for j in jobs
         ]
         hot = 0.0
         deadline = time.monotonic() + seconds
         while time.monotonic() < deadline:
-            time.sleep(10)
+            time.sleep(min(10, max(0.0, deadline - time.monotonic())))
             hot = max(hot, hottest())
-        outputs = [job.communicate(timeout=60)[0] for job in running]
+        codes = [ended(job) for job in running]
+        outputs = [job.communicate()[0] for job in running]
     loss = re.search(r"([\d.]+)% packet loss", outputs[-1]) if iperf else None
     new = dmesg("err,warn")[before:]
     yield "soak.c", f"{hot:.1f} max over {seconds} s"
     yield "soak.warnings", f"{len(new)}: {'; '.join(new[:3])}" if new else "0"
-    yield "soak.jobs", " ".join(str(j.returncode) for j in running)
+    yield "soak.jobs", " ".join(str(code) for code in codes)
     if iperf:
         yield "soak.ping.loss", f"{loss.group(1)} %" if loss else "failed"
+
+
+def ended(job: subprocess.Popen[str]) -> int:
+    """A soak job's exit status: one still running at the deadline, a glmark2 run past it, ran its
+    course and is stopped, never left holding the GPU and the display."""
+    try:
+        return job.wait(timeout=SOAK_GRACE_S)
+    except subprocess.TimeoutExpired:
+        os.killpg(job.pid, signal.SIGTERM)
+        job.wait()
+        return 0
 
 
 def verdict(key: str, value: str) -> str | None:

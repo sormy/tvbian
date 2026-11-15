@@ -56,6 +56,7 @@ class Gbm:
         gbm.gbm_bo_get_handle.restype = ctypes.c_uint64
         egl.eglGetPlatformDisplay.restype = egl.eglCreateContext.restype = ctypes.c_void_p
         egl.eglCreateWindowSurface.restype = ctypes.c_void_p
+        self.gl.glGetString.restype = ctypes.c_char_p  # undeclared, ctypes cuts it to 32 bits
         self.device = gbm.gbm_create_device(fd)
         self.surface = gbm.gbm_surface_create(
             ctypes.c_void_p(self.device),
@@ -156,7 +157,7 @@ def render(tag):
     width, height = box.mode.hdisplay, box.mode.vdisplay
     capture = box.capture_buffer()
     gbm = Gbm(box.drm.fd, width, height)
-    renderer = ctypes.string_at(gbm.gl.glGetString(0x1F01)).decode()
+    renderer = (gbm.gl.glGetString(0x1F01) or b"no GL context").decode()
     for k in range(FRAMES):
         bo = gbm.frame(k)
         error = box.compose(
@@ -184,10 +185,13 @@ def main():
     OUT.mkdir(parents=True, exist_ok=True)
     before = subprocess.run(["dmesg"], capture_output=True, text=True).stdout.count("\n")
     runs = {"gpu": {}, "llvmpipe": {"MESA_LOADER_DRIVER_OVERRIDE": "kms_swrast"}}
-    for tag, env in runs.items():
-        rc = subprocess.run([sys.executable, __file__, tag], env={**os.environ, **env}).returncode
-        if rc:
-            return rc
+    # with no screen plugged in, a synthetic one stands in, so the box needs nobody
+    with display.hdr_sink():
+        for tag, env in runs.items():
+            child = [sys.executable, __file__, tag]
+            rc = subprocess.run(child, env={**os.environ, **env}).returncode
+            if rc:
+                return rc
     failures = 0
     for k in range(FRAMES):
         gpu, ref = (OUT / f"gpu-{k}.raw").read_bytes(), (OUT / f"llvmpipe-{k}.raw").read_bytes()

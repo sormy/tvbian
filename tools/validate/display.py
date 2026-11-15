@@ -41,6 +41,7 @@ Checks, each skipped where the box lacks what it needs:
 Exit 0 all passed, 1 a failure, 77 nothing to check.
 """
 
+import argparse
 import contextlib
 import ctypes
 import fcntl
@@ -2158,7 +2159,9 @@ def encoder_registers():
     return None
 
 
-def main():
+def main(sinks, ladder):
+    """Every check, then the rating's ladder of modes if ladder, then each sink in sinks as a
+    synthetic screen."""
     composite = Composite(Drm("/dev/dri/card0"))
     composite.run()
     os.close(composite.drm.fd)
@@ -2170,7 +2173,7 @@ def main():
     box.passes += composite.passes
     box.failures += composite.failures
     with hdr_sink(hdr_edid(ladder=True)) as synthetic:
-        if synthetic:
+        if synthetic and ladder:
             rating_box = Box()
             rating_box.synthetic_sink = True
             rating_box.video_plane, rating_box.ui_plane = box.video_plane, box.ui_plane
@@ -2178,7 +2181,8 @@ def main():
             os.close(rating_box.drm.fd)
             box.passes += rating_box.passes
             box.failures += rating_box.failures
-    for name, eotfs in SINKS.items():
+    for name in sinks:
+        eotfs = SINKS[name]
         with hdr_sink(hdr_edid(eotfs)) as synthetic:
             if not synthetic:
                 break
@@ -2225,4 +2229,10 @@ def composite_only():
 
 
 if __name__ == "__main__":
-    sys.exit(composite_only() if sys.argv[1:] == ["composite"] else main())
+    if sys.argv[1:] == ["composite"]:
+        sys.exit(composite_only())
+    parser = argparse.ArgumentParser(description="the display, unattended")
+    parser.add_argument("--sinks", default=",".join(SINKS), help=f"of {', '.join(SINKS)}")
+    parser.add_argument("--no-ladder", action="store_true", help="skip the rating's mode ladder")
+    args = parser.parse_args()
+    sys.exit(main(args.sinks.split(","), not args.no_ladder))

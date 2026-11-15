@@ -16,20 +16,29 @@ tools: a line that differs from the board's last run is a finding.
    board's package built fresh from this tree; a box that fails to install is not run. The host
    checks what needs the repo: the box runs the repo's tree, and its upstream view proves. Then it
    copies the suite to the box and starts it; a systemd unit runs `onbox.py` at
-   every boot. It boots each kernel of the family, the family's and its `-next`, with a guard that
-   brings the default back if the kernel brings no network up (`boot.md`). On each it runs the
+   every boot. It boots each kernel the profile names, the family's and its `-next`, with a guard
+   that brings the default back if the kernel brings no network up (`boot.md`). On each it runs the
    profile, every check unattended, none left out for what the change touched:
-   - **`short`, a smoke test, every board the change reaches**: each kernel booted, then every
-     `box.py` phase except `throughput` at short timings, the composite check and a 1080p hardware
-     decode. No `iperf3`, so several boxes may run it at once.
-   - **`default`, one box per hardware block**: the phases with `throughput`, composite, and
-     `video.py`'s decode suite at a sample of sizes: 1080p, 4K, 4096 wide and 8K. Boards that share a
-     SoC, its kernel and the engine's tree nodes (the 3518, 3518D, R69-1 and M2 Plus) need it on one;
-     the rest get `short`. A board whose tree changed gets `default` itself.
-   - **`extended`, a release or a kernel series**: the same at bring-up's timings, with a sleep past
-     the watchdog, then the 30-minute soak, `display.py` whole, `screen.py`, the whole video matrix,
-     dEQP against Mesa CI's lists, a panic and an unpinged watchdog that must each bring the box
-     back, and 5 warm reboots.
+   Every profile runs every check: the `box.py` phases, a soak, `display.py`, `screen.py`,
+   `video.py`'s decode suite, dEQP against Mesa CI's lists, a panic, an unpinged watchdog and warm
+   reboots. The profile sets how much of each, never whether:
+
+   | Scope       | `short`    | `default`              | `extended`               |
+   | ----------- | ---------- | ---------------------- | ------------------------ |
+   | Kernels     | its own    | its own and `-next`    | its own and `-next`      |
+   | Soak        | 30 s       | 2 min                  | 30 min                   |
+   | Screens     | SDR, HDR10 | every sink, the ladder | every sink, the ladder   |
+   | s2idle      | 10 s       | 20 s                   | 120 s, past the watchdog |
+   | Reboots     | 1          | 2                      | 5                        |
+   | Video sizes | 4K         | 1080p, 4K              | the whole ladder         |
+   | dEQP        | 1/2000     | 1/500                  | 1/20 of the cases        |
+   | Phases      | short      | short                  | bring-up's timings       |
+
+   - **`short`, about 10 minutes a box as measured, every board the change reaches.**
+   - **`default`, about 40 minutes estimated, one box per hardware block**: boards that share a SoC,
+     its kernel and the engine's tree nodes (the 3518, 3518D, R69-1 and M2 Plus) need it on one; the
+     rest get `short`. A board whose tree changed gets `default` itself.
+   - **`extended`, a release or a kernel series.**
 
    The boxes need no session: a driver reload, a reboot or a hang ends nothing. `collect` fetches
    each box's results whenever it answers; the box restores its default and stops when done.
@@ -68,9 +77,9 @@ The unattended pass proves a device answers; these need a person, a screen or a 
   written address: addresses drift.
 - **Each link is measured through itself**: `iperf3 --bind-dev` the interface, whatever the
   server's address family; unbound, a box with a cable measures the cable under the radio's name.
-- **The `iperf3` server takes one box at a time**: `default` and `extended` run one box at a time;
-  `box.py` only retries a busy server, there is no lock across boxes. The soak pings instead. A
-  box that finds the server busy measured another box's test, not its own radio.
+- **The `iperf3` server takes one box at a time**, so boxes run at once, one `regression.py run`
+  each, every profile: a box the server refuses as busy waits and retries, and measures only its
+  own link. The soak pings the server instead of loading it.
 - **A missing tool is a line, not a gap**: a box without `bluetoothctl` or `iperf3` says so; a
   number that is not there is not a pass.
 - **Measure a settled box**: the first boot after an install runs setup, and a player left running

@@ -111,6 +111,25 @@ class OnboxTest(unittest.TestCase):
             (out / "soak.txt").read_text(), "soak.minutes 7\nFAIL soak: the box reset during it\n"
         )
 
+    def test_a_crashed_step_ends_the_run_and_nothing_after_it_runs(self) -> None:
+        onbox.HERE, onbox.RESULTS = self.dir, self.dir / "results"
+        dying = onbox.Step("soak", ["python3", "-c", "raise TimeoutError('glmark2')"], 30)
+        after = onbox.Step("video", ["sh", "-c", "touch ran"], 30)
+        plan = {"board": "tanix-tx1-v2", "kernels": ["6.18.63-tvb-sunxi64"], "reboots": 0}
+        plan["steps"] = [vars(dying), vars(after)]
+        (self.dir / "plan.json").write_text(json.dumps(plan))
+        (self.dir / "known.conf").write_text("")
+        onbox.State(default="l1", booted=True).save()
+        with (
+            mock.patch.object(onbox, "boot_id", return_value="boot-a"),
+            mock.patch.object(onbox, "reboot"),
+            mock.patch.object(onbox.subprocess, "run"),
+        ):
+            onbox.step()
+        self.assertFalse((self.dir / "ran").exists())
+        self.assertIn("soak: TimeoutError: glmark2", (self.dir / "results" / "crashed").read_text())
+        self.assertFalse((self.dir / "results" / "done").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

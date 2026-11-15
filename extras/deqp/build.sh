@@ -14,8 +14,10 @@ GLES_MODULES="gles2 gles3 gles31"
 INSTALL_DIR=/usr/lib/deqp
 BUILD_DEPENDS="cmake ninja-build pkg-config python3 python3-lxml libegl-dev libgles-dev libgbm-dev
   libpng-dev zlib1g-dev cargo git ca-certificates"
-# the surfaceless target loads the unversioned libEGL.so and libGLESv2.so
-RUN_DEPENDS="libegl-dev, libgles-dev, libgbm1, libpng16-16t64"
+# the surfaceless target loads the unversioned libEGL.so and libGLESv2.so: the package carries
+# those two names itself, in lib/, so it needs only the runtime libraries, not Debian's -dev
+# packages, which pin Debian's own Mesa
+RUN_DEPENDS="libegl1, libgles2, libgbm1, libpng16-16t64"
 
 WORK=/work/deqp
 CTS_SRC=$WORK/VK-GL-CTS
@@ -59,6 +61,9 @@ package() {
   local dir=$ROOT$INSTALL_DIR
   rm -rf "$ROOT" && mkdir -p "$dir" "$ROOT/DEBIAN"
   install_tests "$dir"
+  mkdir -p "$dir/lib"
+  ln -s /usr/lib/aarch64-linux-gnu/libEGL.so.1 "$dir/lib/libEGL.so"
+  ln -s /usr/lib/aarch64-linux-gnu/libGLESv2.so.2 "$dir/lib/libGLESv2.so"
   {
     git -C "$CTS_SRC" rev-parse HEAD
     "$dir/deqp-runner" --version

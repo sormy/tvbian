@@ -13,6 +13,17 @@ from pathlib import Path
 from video import FAILING
 
 SKIPPED = "77"  # a step's exit status for nothing to test on this box
+TRACEBACK = "Traceback (most recent call last):"
+
+
+def crash(path: Path) -> str | None:
+    """The exception a step's script died of, its last line; None when it did not crash."""
+    lines = path.read_text(errors="replace").splitlines() if path.exists() else []
+    if TRACEBACK not in lines:
+        return None
+    after = lines[lines.index(TRACEBACK) + 1 :]
+    raised = [l for l in after if l and not l.startswith((" ", "exit ", "FAIL ")) and ":" in l]
+    return raised[-1] if raised else "a traceback"
 
 
 @dataclass
@@ -49,6 +60,8 @@ class Verdicts:
                 (found.fails if word == "FAIL" else found.untested).append(shown)
             elif " " in line and not line.startswith(("exit ", "#", "NOTE", "RECORD")):
                 found.checks += 1
+        if why := crash(path):  # the suite's own bug: no check after it ran
+            found.fails.insert(0, f"CRASHED: {why}")
         status = next((l.split(" ", 1)[1] for l in reversed(lines) if l.startswith("exit ")), "0")
         last = lines[-2] if len(lines) > 1 else ""
         if status == SKIPPED:  # nothing to test on this box: untested, not failed

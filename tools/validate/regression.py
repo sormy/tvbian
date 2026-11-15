@@ -4,9 +4,9 @@
 From the host, in the repo checkout:
 
     python3 tools/validate/regression.py run [--profile short|default|extended] [--iperf HOST] \\
-        BOARD=USER@HOST ...
+        BOARD=USER@HOST
     python3 tools/validate/regression.py deploy [--profile short|default|extended] [--iperf HOST] \\
-        BOARD=USER@HOST ...
+        BOARD=USER@HOST
     python3 tools/validate/regression.py collect BOARD=USER@HOST ...
     python3 tools/validate/regression.py report build/validate/regression/<date>
 
@@ -16,17 +16,25 @@ the suite to the box with its plan and starts it: onbox.py, run by a systemd uni
 switches to each kernel of the board's family and its -next, with a guard that brings the default
 back if a kernel brings no network up, and runs the profile's steps:
 
-    short, a smoke test:       box.py's phases but throughput at short timings, composite, a
-                               1080p decode; minutes, and no iperf3, so boxes may run at once
-    default, every change:     box.py's phases at short timings, composite, video decode at
-                               1080p, 4K, 4096 wide and 8K
-    extended, a release:       box.py's phases at bring-up's timings and the soak, display.py,
-                               screen.py, the whole video matrix, dEQP, a panic and an unpinged
-                               watchdog, 5 warm reboots
+    every profile runs every step: box.py's phases, a soak, display.py, screen.py, video decode,
+    dEQP, a panic, an unpinged watchdog and warm reboots. The profile sets how much of each:
 
-run deploys, waits for each box, collects and reports in one go. collect fetches each box's
-results, done or not, into build/validate/regression/<date>/<board>/; report writes report.md
-there, for a pull request: every FAIL and UNTESTED line and what moved since each board's last run.
+                    short       default       extended
+    kernels         its own     own, -next    own, -next
+    soak            30 s        2 min         30 min
+    screens         SDR, HDR10  every sink and the mode ladder
+    s2idle          10 s        20 s          120 s, past the watchdog
+    reboots         1           2             5
+    video sizes     4K          1080p, 4K     the whole ladder
+    dEQP            1/2000      1/500         1/20 of the cases
+
+    short, about 10 minutes a box as measured, for every board a change reaches; default, about 40
+    estimated, for every change; extended, hours, for a release.
+
+run deploys one box, prints its run log as it grows, collects and reports, in one go; several
+boxes are several runs at once. collect fetches each box's results, done or not, into
+build/validate/regression/<date>/<board>/; report writes report.md there, for a pull request:
+every FAIL and UNTESTED line and what moved since each board's last run.
 --iperf names the iperf3 server; by default this machine serves, started if it does not yet.
 SSH_OPTIONS adds ssh options. Docs: docs/bring-up/regression.md.
 """
@@ -35,6 +43,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import fcntl
 import hashlib
 import json
 import os
@@ -64,10 +73,9 @@ RESULTS = ROOT / "build" / "validate" / "regression"
 BOX_DIR = "/var/lib/tvb-regress"
 IPERF_PORT = 5201
 COMMAND_S = 600
-REBOOTS = 5
 # how long run waits for a box's run before collecting what there is; how often it asks
 RUN_LIMIT_S = {"short": 40 * 60, "default": 120 * 60, "extended": 10 * 3600}
-POLL_S = 60
+POLL_S = 15  # how often run looks at the boxes: a crash is said within this
 ON_BOX = ("onbox.py", "box.py", "display.py", "screen.py", "video.py", "results.py", "known.conf")
 # per kernel family: video.py's engine and the Mesa CI GPU nearest the box's
 ENGINE = {"sunxi64": "sunxi", "rk35xx": "rkmpp", "meson64": "meson"}
@@ -76,14 +84,22 @@ PHASES = ("system", "cpu", "storage", "network", "throughput", "display", "audio
 PHASES += ("power",)
 # each phase's time on the box: its normal duration in the profile, about doubled
 PHASE_SECONDS = {"short": 120, "default": 300, "extended": 1200}
-SLEEP_SECONDS = {"short": 0, "default": 20, "extended": 120}  # extended's outlasts the watchdog
-# short skips throughput alone, so it never waits on the one iperf3 server
-SHORT_PHASES = tuple(p for p in PHASES if p != "throughput")
+PROFILES = ("short", "default", "extended")
+# each profile's scope within a test: how long, how many, how much of a sample
+SLEEP_SECONDS = {"short": 10, "default": 20, "extended": 120}  # extended's outlasts the watchdog
+SOAK_SECONDS = {"short": 30, "default": 120, "extended": 1800}
+REBOOTS = {"short": 1, "default": 2, "extended": 5}
+KERNELS = {"short": 1, "default": 2, "extended": 2}  # the family's own first, then its -next
+# display.py's synthetic screens: short, an SDR and an HDR10 one at their first mode; the rest,
+# every sink and the rating's ladder of modes
+DISPLAY_ARGS = {"short": ["--sinks", "SDR,HDR10", "--no-ladder"], "default": [], "extended": []}
+STEP_SECONDS = {"short": 600, "default": 1200, "extended": 7200}  # display, screen, video, dEQP
 # the video sizes a profile decodes; extended walks the whole ladder. A sample: the common size,
-# 4K, the 4096-wide path, the 8K limit
+# 4K
+DEQP_FRACTION = {"short": 2000, "default": 500, "extended": 20}  # every N'th case
 VIDEO_SIZES = {
-    "short": ("1920x1080",),
-    "default": ("1920x1080", "3840x2160", "4096x2160", "7680x4320"),
+    "short": ("3840x2160",),
+    "default": ("1920x1080", "3840x2160"),
 }
 
 UNIT = f"""[Unit]
@@ -115,10 +131,18 @@ systemctl start tvb-regress.service
 """
 INSTALL = """set -e
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
+# $1: the suite's tools, a list; the rest: package files. apt's index only for a tool missing
+tools=$1
+shift
+missing=$(for t in $tools; do
+  dpkg-query -W -f '${Status}\\n' "$t" 2>/dev/null | grep -q 'ok installed' || echo "$t"
+done)
+[ -z "$missing" ] || apt-get update -qq
+[ -n "$missing$*" ] || exit 0
 # --reinstall: a local build keeps its version, 0~local, and apt would skip it
-apt-get install -y -qq --reinstall "$@" /var/tmp/regress/*.deb
+apt-get install -y -qq --reinstall $missing "$@"
 """
+PACKAGES = "/var/tmp/regress"  # the box's copy of what it was given, kept to skip what is unchanged
 DEQP_RUN = """cd deqp
 EGL_PLATFORM=surfaceless LD_LIBRARY_PATH=/usr/lib/deqp/lib /usr/lib/deqp/deqp-runner suite \
   --suite suite.toml --output results --baseline fails.txt --flakes flakes.txt \
@@ -175,26 +199,37 @@ def changed(old: str, new: str) -> list[str]:
 
 
 def steps(profile: str, family: str, iperf: str) -> list[Step]:
-    """The plan's steps for each kernel, in order: a name, a command run in BOX_DIR, its time."""
+    """The plan's steps for each kernel, in order: a name, a command run in BOX_DIR, its time.
+    Every profile runs every step; the profile sets how much of each."""
+    soak = SOAK_SECONDS[profile]
     phase = ["python3", "box.py", "--profile", profile, "--iperf", iperf]
-    phase += ["--sleep", str(SLEEP_SECONDS[profile]), "--suite"]
-    names = SHORT_PHASES if profile == "short" else PHASES
-    out = [Step(name, [*phase, name], PHASE_SECONDS[profile]) for name in names]
+    phase += ["--sleep", str(SLEEP_SECONDS[profile]), "--soak", str(soak), "--suite"]
+    out = [Step(name, [*phase, name], PHASE_SECONDS[profile]) for name in PHASES]
     video = ["python3", "video.py", "box", "--engine", ENGINE[family], "--dir", f"{BOX_DIR}/video"]
-    if profile in VIDEO_SIZES:
-        sizes = "|".join(VIDEO_SIZES[profile])
-        out.append(Step("composite", ["python3", "display.py", "composite"], 300))
-        # joined with =: a regex starting with - would read as an option
-        decode = [*video, "--suite", "decode", f"--only=-({sizes})$"]
-        out.append(Step("video", decode, 300 if profile == "short" else 1200, ["system"]))
-        return out
-    out.append(Step("soak", [*phase, "soak"], 1800 + 600, ["system"]))
-    out.append(Step("display-full", ["python3", "display.py"], 3600, ["system"]))
-    out.append(Step("screen", ["python3", "screen.py"], 900, ["system"]))
-    out.append(Step("video", video, 7200, ["system"]))
-    out.append(Step("deqp", ["sh", "deqp/run.sh"], 7200, ["system", "gpu"]))
+    if profile in VIDEO_SIZES:  # joined with =: a regex starting with - would read as an option
+        video += ["--suite", "decode", f"--only=-({'|'.join(VIDEO_SIZES[profile])})$"]
+    long = STEP_SECONDS[profile]
+    out.append(Step("soak", [*phase, "soak"], soak + 600, ["system"]))
+    display = ["python3", "display.py", *DISPLAY_ARGS[profile]]
+    out.append(Step("display-full", display, long, ["system"]))
+    out.append(Step("screen", ["python3", "screen.py"], long, ["system"]))
+    out.append(Step("video", video, long, ["system"]))
+    out.append(Step("deqp", ["sh", "deqp/run.sh"], long, ["system", "gpu"]))
     out.append(Step("recovery", [], 0))
     out.append(Step("reboots", [], 0))
+    return out
+    extended = profile == "extended"
+    if extended:
+        out.append(Step("soak", [*phase, "soak"], 1800 + 600, ["system"]))
+    out.append(
+        Step("display-full", ["python3", "display.py"], 3600 if extended else 900, ["system"])
+    )
+    out.append(Step("screen", ["python3", "screen.py"], 900, ["system"]))
+    out.append(Step("video", video, 7200 if extended else 1200, ["system"]))
+    out.append(Step("deqp", ["sh", "deqp/run.sh"], 7200 if extended else 900, ["system", "gpu"]))
+    if extended:
+        out.append(Step("recovery", [], 0))
+        out.append(Step("reboots", [], 0))
     return out
 
 
@@ -287,8 +322,7 @@ class Deployment:
 
     def install(self, releases: list[str]) -> str:
         """The kernels' packages, the board's own package built fresh from this tree, and the
-        suite's tools."""
-        subprocess.run([str(ROOT / "build.sh"), "board", self.board], cwd=ROOT, check=True)
+        suite's tools: each sent and installed only when the box lacks that very file."""
         board = max(DEBS.glob(f"tvb-{self.board}_*.deb"), key=lambda d: d.stat().st_mtime)
         names = [d.name for d in DEBS.glob("*.deb")]
         families = self.box.run("dpkg-query -W -f '${Package}\\n' 'tvb-*-modules-*'").split()
@@ -304,40 +338,55 @@ class Deployment:
         ]:
             raise NotStarted(f"no linux-image package for {', '.join(missing)} in {DEBS}")
         wanted += [board.name, *[d.name for d in sorted(DEBS.glob("ffmpeg9_*_arm64.deb"))[-1:]]]
-        if self.profile == "extended":
-            wanted += [d.name for d in sorted(DEBS.glob("deqp_*_arm64.deb"))[-1:]]
-        self.box.run("rm -rf /var/tmp/regress && mkdir -p /var/tmp/regress", check=True)
+        wanted += [d.name for d in sorted(DEBS.glob("deqp_*_arm64.deb"))[-1:]]
         tree = ROOT / "boards" / self.board / "board.dtb"
         self.inputs = [f"{n.split('_')[0]} {sha(DEBS / n)}" for n in wanted]
         self.inputs.append(f"board.dtb {sha(tree)}")
-        for name in wanted:
-            self.box.run(f"cat > /var/tmp/regress/{name}", (DEBS / name).read_bytes(), 1800, True)
-        return (self.box.root(INSTALL, *sorted(TEST_TOOLS - {"ffmpeg9"})).splitlines() or [""])[-1]
+        listing = f"mkdir -p {PACKAGES} && cd {PACKAGES} && sha256sum * 2>/dev/null || true"
+        held = dict(line.split()[::-1] for line in self.box.run(listing, check=True).splitlines())
+        stale = [n for n in held if n.removesuffix(".installed") not in wanted]
+        if stale:
+            self.box.run(f"cd {PACKAGES} && rm -f {shlex.join(stale)}", check=True)
+        changed = [n for n in wanted if held.get(n) != full_sha(DEBS / n)]
+        for name in changed:
+            self.box.run(f"cat > {PACKAGES}/{name}", (DEBS / name).read_bytes(), 1800, True)
+        todo = [n for n in wanted if n in changed or f"{n}.installed" not in held]
+        tools = sorted(TEST_TOOLS - {"ffmpeg9"})
+        said = self.box.root(INSTALL, " ".join(tools), *[f"{PACKAGES}/{n}" for n in todo])
+        if todo:
+            marks = " ".join(f"{shlex.quote(n)}.installed" for n in todo)
+            self.box.run(f"cd {PACKAGES} && touch {marks}", check=True)
+        last = (said.splitlines() or [""])[-1]
+        return f"{len(todo)} of {len(wanted)} packages, {len(changed)} sent; {last}"
 
     def bundle(self, releases: list[str], host_lines: list[str]) -> None:
         """The suite, its plan, its units and the host's checks, into BOX_DIR, replacing any
-        earlier run's."""
+        earlier run's; its clips kept, and only those that changed sent."""
         family = board_family(self.board)
-        self.box.run(f"sudo -n rm -rf {BOX_DIR}", check=True)
+        keep = f"sudo -n find {BOX_DIR} -mindepth 1 -maxdepth 1 ! -name video -exec rm -rf {{}} +"
+        self.box.run(f"sudo -n mkdir -p {BOX_DIR}/video && {keep}", check=True)
         for name in ON_BOX:
             self.box.put(f"{BOX_DIR}/{name}", (HERE / name).read_bytes())
         plan = {
             "board": self.board,
             "kernels": releases,
             "steps": [asdict(s) for s in steps(self.profile, family, self.iperf)],
-            "reboots": REBOOTS,
+            "reboots": REBOOTS[self.profile],
         }
         self.box.put(f"{BOX_DIR}/plan.json", json.dumps(plan, indent=1).encode())
         self.box.put(f"{BOX_DIR}/tvb-regress.service", UNIT.encode())
         self.box.put(f"{BOX_DIR}/tvb-regress-guard.service", GUARD.encode())
         self.box.put(f"{BOX_DIR}/results/host.txt", ("\n".join(host_lines) + "\n").encode())
         sizes = VIDEO_SIZES.get(self.profile)
-        for clip in sorted(CLIPS.glob("*-*.*")):
-            if sizes is None or any(f"-{size}." in clip.name for size in sizes):
-                self.box.put(f"{BOX_DIR}/video/{clip.name}", clip.read_bytes())
+        clips = json.loads((CLIPS / "manifest.json").read_text())["clips"]
+        listing = f"cd {BOX_DIR}/video && sudo -n sha256sum * 2>/dev/null || true"
+        held = dict(line.split()[::-1] for line in self.box.run(listing, check=True).splitlines())
+        for name, clip in sorted(clips.items()):
+            if sizes is None or any(f"-{size}." in name for size in sizes):
+                if held.get(name) != clip["sha256"]:
+                    self.box.put(f"{BOX_DIR}/video/{name}", (CLIPS / name).read_bytes())
         self.box.put(f"{BOX_DIR}/video/manifest.json", (CLIPS / "manifest.json").read_bytes())
-        if self.profile == "extended":
-            self.deqp(family)
+        self.deqp(family)
 
     def deqp(self, family: str) -> None:
         """Mesa CI's lists for the box's GPU, the suite and the script that runs it."""
@@ -345,17 +394,23 @@ class Deployment:
         gpu = GPU[family]
         for kind in ("fails", "flakes", "skips"):
             self.box.put(f"{BOX_DIR}/deqp/{kind}.txt", expectations(version, gpu, kind).encode())
-        toml = suite_toml(GLES2 if gpu == "lima" else SUITE, 20)
+        toml = suite_toml(GLES2 if gpu == "lima" else SUITE, DEQP_FRACTION[self.profile])
         self.box.put(f"{BOX_DIR}/deqp/suite.toml", toml.encode())
         self.box.put(f"{BOX_DIR}/deqp/run.sh", DEQP_RUN.encode())
 
 
-def serve_iperf() -> None:
-    """This machine as the iperf3 server: started, unless something already listens."""
+def listening() -> bool:
     with socket.socket() as probe:
-        if probe.connect_ex(("127.0.0.1", IPERF_PORT)) == 0:
-            return
-    subprocess.run(["iperf3", "-s", "-D", "-p", str(IPERF_PORT)], check=True)
+        return probe.connect_ex(("127.0.0.1", IPERF_PORT)) == 0
+
+
+def serve_iperf() -> None:
+    """This machine as the iperf3 server, unless something already listens: another box's run may
+    have started it a moment before."""
+    if not listening() and subprocess.run(["iperf3", "-s", "-D", "-p", str(IPERF_PORT)]).returncode:
+        time.sleep(1)
+        if not listening():
+            raise NotStarted(f"no iperf3 server on port {IPERF_PORT} here")
 
 
 def address_towards(host: str) -> str:
@@ -371,11 +426,11 @@ def start(profile: str, spec: str, iperf: str | None) -> None:
     iperf3 server named, this machine serves, at its address on the route to the box."""
     board, _, target = spec.partition("=")
     box = Box(target)
-    if iperf is None:
-        serve_iperf()
-        iperf = address_towards(target.rpartition("@")[2])
+    iperf = iperf or address_towards(target.rpartition("@")[2])
     deployment = Deployment(board, box, profile, iperf)
-    releases = kernels(board_family(board), [d.name for d in DEBS.glob("*.deb")])
+    releases = kernels(board_family(board), [d.name for d in DEBS.glob("*.deb")])[
+        : KERNELS[profile]
+    ]
     if not releases:
         raise NotStarted(f"no {board_family(board)} kernel packages in {DEBS}")
     print(f"{board}: install {deployment.install(releases)}")
@@ -388,26 +443,62 @@ def start(profile: str, spec: str, iperf: str | None) -> None:
     print(f"{board}: {profile} started on {', '.join(releases)}")
 
 
-def started(profile: str, boxes: list[str], iperf: str | None) -> list[str]:
-    """The boxes whose run started; a box that failed to install or start is said and skipped."""
-    out: list[str] = []
-    for spec in boxes:
-        try:
-            start(profile, spec, iperf)
-            out.append(spec)
-        except (ConnectionError, subprocess.CalledProcessError, NotStarted) as error:
-            print(f"{spec.partition('=')[0]}: not started: {error}")
-    return out
+def prepare(board: str) -> None:
+    """What the host gives a box, made first: the board's package built fresh, the clip corpus
+    brought up to date (cached, so all but free). One process at a time, whichever asks: the build
+    container's work volume and the corpus are one each."""
+    with (ROOT / "build" / ".regression.lock").open("w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        stamp, made_of = DEBS / f".tvb-{board}.inputs", board_inputs(board)
+        built = list(DEBS.glob(f"tvb-{board}_*.deb"))
+        if not (built and stamp.exists() and stamp.read_text() == made_of):
+            subprocess.run([str(ROOT / "build.sh"), "board", board], cwd=ROOT, check=True)
+            stamp.write_text(made_of)
+        subprocess.run([sys.executable, str(HERE / "video.py"), "clips"], cwd=ROOT, check=True)
+
+
+def board_inputs(board: str) -> str:
+    """What the board's package is made of, hashed: its folder, the packaging scripts and its
+    U-Boot as built."""
+    files = [p for d in (ROOT / "boards" / board, ROOT / "package") for p in sorted(d.rglob("*"))]
+    files += [p for p in (ROOT / "build" / "out" / "uboot" / board).glob("*") if p.is_file()]
+    digest = hashlib.sha256()
+    for path in (p for p in files if p.is_file()):
+        digest.update(str(path.relative_to(ROOT)).encode() + b"\0" + path.read_bytes())
+    return digest.hexdigest()
+
+
+def started(profile: str, spec: str, iperf: str | None) -> bool:
+    """The box's run started; when it could not build, install or start, it says why."""
+    try:
+        if iperf is None:
+            serve_iperf()
+        prepare(spec.partition("=")[0])
+        start(profile, spec, iperf)
+        return True
+    except (ConnectionError, subprocess.CalledProcessError, NotStarted) as error:
+        print(f"{spec.partition('=')[0]}: not started: {error}", flush=True)
+        return False
 
 
 def deploy(args: argparse.Namespace) -> int:
-    return 0 if len(started(args.profile, args.boxes, args.iperf)) == len(args.boxes) else 1
+    return 0 if started(args.profile, args.box, args.iperf) else 1
 
 
 def collect(args: argparse.Namespace) -> int:
     into = fetch(args.boxes)
     print(f"then: python3 {Path(__file__).relative_to(ROOT)} report {into.relative_to(ROOT)}")
     return 0
+
+
+def ending(folder: Path) -> str:
+    """How a box's collected run ended: done, crashed and why, or not yet."""
+    if (folder / "done").exists():
+        return "done"
+    crashed = folder / "crashed"
+    if crashed.exists():
+        return f"**crashed**: {crashed.read_text().strip().split(' ', 2)[-1]}"
+    return "**not finished**"
 
 
 def fetch(boxes: list[str]) -> Path:
@@ -438,7 +529,7 @@ def fetch(boxes: list[str]) -> Path:
         for board in fetched:
             out = into / board
             shutil.copytree(Path(tmp) / board, out, dirs_exist_ok=True)
-            print(f"{board}: {'done' if (out / 'done').exists() else 'still running'}, into {out}")
+            print(f"{board}: {ending(out)}, into {out}")
     return into
 
 
@@ -452,39 +543,53 @@ def fresh(folder: Path) -> Path:
     return found
 
 
-def finished(target: str) -> bool:
-    """Whether a box's run is done; a box rebooting between kernels is not."""
-    try:
-        return Box(target).run(f"test -f {BOX_DIR}/results/done && echo done") == "done"
-    except ConnectionError:
-        return False
+def state(box: Box) -> str:
+    """A box's run: done, crashed (its suite's own bug), failed (onbox.py's unit died), or
+    running; a box rebooting between kernels is running."""
+    probe = f"cd {BOX_DIR}/results && for m in done crashed; do test -f $m && echo $m; done; "
+    probe += "systemctl is-failed -q tvb-regress.service && echo failed"
+    return (box.run(probe).split() or ["running"])[0]
+
+
+def watch(spec: str, seconds: float) -> str:
+    """The box's run log as it grows, until its run ends or the time is up; how it ended."""
+    board, _, target = spec.partition("=")
+    box, seen, deadline = Box(target), 0, time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        time.sleep(POLL_S)
+        try:
+            lines = box.run(f"tail -n +{seen + 1} {BOX_DIR}/results/run.log").splitlines()
+            now = state(box)
+        except ConnectionError:
+            continue  # rebooting
+        seen += len(lines)
+        for line in lines:
+            print(f"{board}: {line}", flush=True)
+        if now != "running":
+            print(f"{board}: {now}", flush=True)
+            return now
+    print(f"{board}: timed out", flush=True)
+    return "timed out"
 
 
 def run(args: argparse.Namespace) -> int:
-    """Deploy, wait for each box that started, collect and report: short on every box at once,
-    the profiles that measure throughput one box at a time, the one iperf3 server's rule."""
-    batches = [args.boxes] if args.profile == "short" else [[box] for box in args.boxes]
-    folders: list[Path] = []
-    begun = 0
-    for batch in batches:
-        running = started(args.profile, batch, args.iperf)
-        begun += len(running)
-        if not running:
-            continue
-        deadline = time.monotonic() + RUN_LIMIT_S[args.profile]
-        while time.monotonic() < deadline:
-            time.sleep(POLL_S)
-            if all(finished(spec.partition("=")[2]) for spec in running):
-                break
-        folders.append(fetch(running))
-    for folder in dict.fromkeys(folders):
-        report(argparse.Namespace(dir=str(folder)))
-    return 0 if begun == len(args.boxes) else 1
+    """One box: deployed, watched until its run ends, collected and reported. Several boxes are
+    several runs at once, one process each: the iperf3 server takes one at a time, the others wait
+    their turn, so no box measures another's traffic."""
+    if not started(args.profile, args.box, args.iperf):
+        return 1
+    ended = watch(args.box, RUN_LIMIT_S[args.profile])
+    report(argparse.Namespace(dir=str(fetch([args.box]))))
+    return 0 if ended == "done" else 1
+
+
+def full_sha(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def sha(path: Path) -> str:
     """A file's content, short: a rebuilt package keeps its version, 0~local, not its hash."""
-    return hashlib.sha256(path.read_bytes()).hexdigest()[:12]
+    return full_sha(path)[:12]
 
 
 def inputs(host: Path) -> dict[str, str]:
@@ -584,7 +689,7 @@ def report(args: argparse.Namespace) -> int:
     known = Known.load(KNOWN)
     for board_dir in sorted(p for p in run.iterdir() if p.is_dir()):
         board = board_dir.name
-        state = "done" if (board_dir / "done").exists() else "**not finished**"
+        end = ending(board_dir)
         host = Verdicts.of(board_dir / "host.txt")
         moved_inputs = changed_inputs(board, run)
         for kernel_dir in sorted(p for p in board_dir.iterdir() if p.is_dir()):
@@ -605,7 +710,7 @@ def report(args: argparse.Namespace) -> int:
             expected = [f"{f}  ({why})" for f, why in reasons.items() if why is not None]
             counts = f"{total.checks} | {len(new)} | {len(expected)} | {len(total.untested)}"
             minutes = duration(board_dir / "run.log", kernel)
-            rows.append(f"| {board} | {kernel} | {state}, {minutes} | {counts} |")
+            rows.append(f"| {board} | {kernel} | {end}, {minutes} | {counts} |")
             details += [f"### {board}, {kernel}\n", moved_inputs]
             details += [f"- ❌ {x}" for x in new]
             details += [f"- ❓ {x}" for x in total.untested]
@@ -644,17 +749,17 @@ def main() -> int:
     )
     sub = parser.add_subparsers(dest="command", required=True)
     begin = sub.add_parser("deploy")
-    begin.add_argument("--profile", choices=PHASE_SECONDS, default="default")
+    begin.add_argument("--profile", choices=PROFILES, default="default")
     begin.add_argument("--iperf", metavar="HOST", help="the iperf3 server; default: this machine")
-    begin.add_argument("boxes", nargs="+", metavar="BOARD=USER@HOST")
+    begin.add_argument("box", metavar="BOARD=USER@HOST")
     gather = sub.add_parser("collect")
     gather.add_argument("boxes", nargs="+", metavar="BOARD=USER@HOST")
     write = sub.add_parser("report")
     write.add_argument("dir")
     whole = sub.add_parser("run", help="deploy, wait, collect, report")
-    whole.add_argument("--profile", choices=PHASE_SECONDS, default="default")
+    whole.add_argument("--profile", choices=PROFILES, default="default")
     whole.add_argument("--iperf", metavar="HOST", help="the iperf3 server; default: this machine")
-    whole.add_argument("boxes", nargs="+", metavar="BOARD=USER@HOST")
+    whole.add_argument("box", metavar="BOARD=USER@HOST")
     args = parser.parse_args()
     commands = {"deploy": deploy, "collect": collect, "report": report, "run": run}
     return commands[args.command](args)

@@ -23,7 +23,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from results import Known, new_failures
+from results import Known, crash, new_failures
 
 HERE = Path(__file__).resolve().parent
 RESULTS = HERE / "results"
@@ -34,6 +34,8 @@ UNIT = "tvb-regress.service"
 GUARD_UNIT = "tvb-regress-guard.service"
 WATCHDOG_WAIT_S = 300  # an unpinged watchdog resets within this, or never will
 WDIOC_GETTIMEOUT = 0x80045707
+WDIOC_SETTIMEOUT = 0xC0045706
+WATCHDOG_TEST_S = 10  # the unpinged watchdog's timeout: systemd's 80 s proves nothing more
 
 
 @dataclass
@@ -196,6 +198,14 @@ def step() -> int:
     plan, state = Plan.load(), State.load()
     if not state.default:
         state.default = default_entry()
+    try:
+        return run_kernels(plan, state)
+    except Crashed as error:  # fail fast: stop the run, say why
+        return finish(state, "crashed", str(error))
+
+
+def run_kernels(plan: Plan, state: State) -> int:
+    """Each kernel of the plan booted in turn and its steps run, to the end."""
     while state.kernel < len(plan.kernels):
         release = plan.kernels[state.kernel]
         out = RESULTS / release
@@ -228,10 +238,21 @@ def step() -> int:
             False,
         )
         state.save()
+    return finish(state, "done", "the default back")
+
+
+class Crashed(Exception):
+    """A step's script died of its own bug: every result after it would be the suite's, not the
+    box's."""
+
+
+def finish(state: State, marker: str, why: str) -> int:
+    """The run over, done or crashed: the default boot back, the units off, the marker the host
+    waits for."""
     set_default(state.default)
     subprocess.run(["systemctl", "disable", UNIT, GUARD_UNIT], check=False)
-    (RESULTS / "done").write_text(time.strftime("%Y-%m-%d %H:%M:%S\n"))
-    log("done: the default back")
+    (RESULTS / marker).write_text(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {why}\n")
+    log(f"{marker}: {why}")
     reboot()
     return 0
 
@@ -254,10 +275,14 @@ def carry_on(plan: Plan, state: State, out: Path) -> bool:
             # an expensive step on a box already failing in new ways measures nothing worth its time
             reason = f"not run, new failures before it: {'; '.join(blocked[:3])}"
             record(out, item.name, [f"{item.name} {reason}", f"UNTESTED {item.name}"])
+            log(f"{out.name}: {item.name} {reason}")
         else:
             state.begin("step", item.name)
             run(item, out)
             state.pending = None
+            if why := crash(out / f"{item.name}.txt"):
+                state.save()
+                raise Crashed(f"{out.name}: {item.name}: {why}")
         state.steps_done.append(item.name)
         state.save()
     return True
@@ -268,6 +293,7 @@ def recover(state: State, out: Path) -> bool:
     makes. True while a reboot is on its way; a watchdog that never resets is written as a
     failure here, and the run goes on."""
     state.recovery += 1
+    os.sync()  # each makes the kernel stop dead: what is not on disk is lost
     if state.recovery == 1:
         state.begin("panic")
         Path("/proc/sys/kernel/sysrq").write_text("1")
@@ -321,6 +347,7 @@ def take_watchdog() -> tuple[str, int | None]:
     except OSError as error:
         return f"refused: {error.strerror}", None
     os.write(fd, b"1")
+    fcntl.ioctl(fd, WDIOC_SETTIMEOUT, WATCHDOG_TEST_S.to_bytes(4, "little"))
     seconds = int.from_bytes(fcntl.ioctl(fd, WDIOC_GETTIMEOUT, b"\0" * 4), "little")
     return f"armed {seconds} s", fd
 

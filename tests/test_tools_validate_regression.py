@@ -16,6 +16,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools/validate"))
 import regression  # noqa: E402
 from regression import (  # noqa: E402
+    PROFILES,
     Box,
     Known,
     Verdicts,
@@ -64,37 +65,32 @@ class KernelsTest(unittest.TestCase):
 
 
 class StepsTest(unittest.TestCase):
-    def test_short_is_a_smoke_test_that_never_waits_on_iperf3(self) -> None:
-        plan = steps("short", "rk35xx", "plex")
-        names = [s.name for s in plan]
-        self.assertNotIn("throughput", names)
-        self.assertEqual(names[-2:], ["composite", "video"])
-        self.assertIn("--only=-(1920x1080)$", plan[-1].command)
+    def test_every_profile_runs_every_step(self) -> None:
+        names = {p: [s.name for s in steps(p, "sunxi64", "plex")] for p in PROFILES}
+        self.assertEqual(names["short"], names["default"])
+        self.assertEqual(names["default"], names["extended"])
+        for check in ("throughput", "soak", "display-full", "screen", "video", "deqp", "reboots"):
+            self.assertIn(check, names["short"])
+        self.assertEqual(
+            len(names["short"]), len(set(names["short"]))
+        )  # onbox.py skips a name done
 
-    def test_default_samples_the_video_sizes(self) -> None:
-        plan = steps("default", "rk35xx", "plex")
-        names = [s.name for s in plan]
-        self.assertEqual(names[-2:], ["composite", "video"])
-        self.assertIn("throughput", names)
-        self.assertNotIn("soak", names)
-        only = [a for a in plan[-1].command if str(a).startswith("--only=")]
-        self.assertEqual(only, ["--only=-(1920x1080|3840x2160|4096x2160|7680x4320)$"])
+    def test_the_profile_sets_the_scope(self) -> None:
+        def arg(profile: str, step: str, flag: str) -> str:
+            command = next(s for s in steps(profile, "rk35xx", "plex") if s.name == step).command
+            return next(str(a) for a in command if str(a).startswith(flag))
 
-    def test_extended_walks_the_whole_ladder(self) -> None:
-        video = next(s for s in steps("extended", "sunxi64", "plex") if s.name == "video")
-        self.assertFalse([a for a in video.command if str(a).startswith("--only")])
-
-    def test_no_profile_names_a_step_twice(self) -> None:
-        """onbox.py skips a name it has done: a second step under it would never run."""
-        for profile in ("short", "default", "extended"):
-            names = [s.name for s in steps(profile, "sunxi64", "plex")]
-            self.assertEqual(len(names), len(set(names)), profile)
-
-    def test_extended_adds_the_long_and_the_rebooting_steps(self) -> None:
-        names = [s.name for s in steps("extended", "sunxi64", "plex")]
-        for long in ("soak", "display-full", "screen", "deqp", "recovery", "reboots"):
-            self.assertIn(long, names)
-        self.assertEqual(names[-2:], ["recovery", "reboots"])
+        self.assertEqual(arg("short", "video", "--only="), "--only=-(3840x2160)$")
+        self.assertEqual(arg("default", "video", "--only="), "--only=-(1920x1080|3840x2160)$")
+        with self.assertRaises(StopIteration):  # the whole ladder
+            arg("extended", "video", "--only")
+        soak = {
+            p: next(s for s in steps(p, "rk35xx", "plex") if s.name == "soak") for p in PROFILES
+        }
+        self.assertEqual(
+            [soak[p].command[soak[p].command.index("--soak") + 1] for p in PROFILES],
+            ["30", "120", "1800"],
+        )
 
 
 class ChangedTest(unittest.TestCase):
@@ -173,6 +169,16 @@ class ResultsTest(unittest.TestCase):
             line = f"{step}: composite PAL writeback colour bars LOST, 720x576"
             self.assertTrue(any(k.matches("r69-1", "6.1.172-tvb-rk35xx", line) for k in known))
 
+    def test_a_crashed_script_is_its_own_failure(self) -> None:
+        found = self.verdicts(
+            'cpu.ladder 480\nTraceback (most recent call last):\n  File "box.py", line 3\n'
+            "subprocess.TimeoutExpired: Command 'glmark2' timed out after 60 seconds\nexit 1\n"
+        )
+        self.assertEqual(
+            found.fails[0],
+            "CRASHED: subprocess.TimeoutExpired: Command 'glmark2' timed out after 60 seconds",
+        )
+
     def test_a_skipped_video_case_is_untested_not_a_check(self) -> None:
         record = '{"suite": "decode", "codec": "av1", "size": "7680x4320", "verdict": "skipped"}'
         found = self.verdicts(f"{record}\nexit 0\n")
@@ -233,8 +239,9 @@ class FetchTest(unittest.TestCase):
                 raise ConnectionError("root@down: no route")
             return results_tar("12:00:00 this run")
 
-        with mock.patch.object(regression, "RESULTS", results), mock.patch.object(
-            Box, "raw", answer
+        with (
+            mock.patch.object(regression, "RESULTS", results),
+            mock.patch.object(Box, "raw", answer),
         ):
             into = regression.fetch(["a=root@up", "down=root@down", "b=root@up2"])
         self.assertNotEqual(into, today)
@@ -242,16 +249,71 @@ class FetchTest(unittest.TestCase):
         self.assertEqual((today / "b" / "run.log").read_text(), "08:00:00 an earlier run\n")
 
 
-class StartedTest(unittest.TestCase):
-    def test_a_box_whose_build_fails_is_skipped_and_the_next_starts(self) -> None:
-        def build(profile: str, spec: str, iperf: str | None) -> None:
-            if spec.startswith("a="):
-                raise subprocess.CalledProcessError(1, ["build.sh", "board", "a"])
+class WatchTest(unittest.TestCase):
+    def test_a_crash_ends_the_wait_and_is_said(self) -> None:
+        answers = iter(
+            ["12:00 6.1: system exit 0, 20 s", "running", "12:01 6.1: cpu exit 1, 2 s", "crashed"]
+        )
 
-        with mock.patch.object(regression, "start", build):
-            self.assertEqual(
-                regression.started("short", ["a=root@a", "b=root@b"], "plex"), ["b=root@b"]
-            )
+        def run(
+            box: Box,
+            command: str,
+            stdin: str | bytes = b"",
+            seconds: float = 0,
+            check: bool = False,
+        ) -> str:
+            return next(answers)
+
+        out = io.StringIO()
+        with (
+            mock.patch.object(Box, "run", run),
+            mock.patch.object(regression, "POLL_S", 0),
+            mock.patch("sys.stdout", out),
+        ):
+            self.assertEqual(regression.watch("a=root@a", 60), "crashed")
+        self.assertEqual(
+            out.getvalue().splitlines(),
+            ["a: 12:00 6.1: system exit 0, 20 s", "a: 12:01 6.1: cpu exit 1, 2 s", "a: crashed"],
+        )
+
+
+class InstallTest(unittest.TestCase):
+    def test_only_what_changed_is_sent_and_installed(self) -> None:
+        debs = Path(tempfile.mkdtemp())
+        for name, data in (
+            ("linux-image-6.1.172-tvb-rk35xx_6.1.172-0~local_arm64.deb", b"kernel"),
+            ("tvb-h96max-m2-plus_0~local_arm64.deb", b"board, rebuilt"),
+        ):
+            (debs / name).write_bytes(data)
+        kernel, board = sorted(p.name for p in debs.iterdir())
+        held = f"{regression.full_sha(debs / kernel)}  {kernel}\n{'0' * 64}  {kernel}.installed\n"
+        held += f"{'1' * 64}  {board}\n{'2' * 64}  old.deb\n"
+        box = mock.MagicMock()
+        box.run.side_effect = lambda command, *a, **k: held if "sha256sum" in command else ""
+        box.root.return_value = "done"
+        deployment = regression.Deployment("h96max-m2-plus", box, "short", "plex")
+        with mock.patch.object(regression, "DEBS", debs):
+            said = deployment.install(["6.1.172-tvb-rk35xx"])
+        sent = [c.args[0] for c in box.run.call_args_list if c.args[0].startswith("cat > ")]
+        self.assertEqual(sent, [f"cat > {regression.PACKAGES}/{board}"])
+        installed = [a for a in box.root.call_args.args if a.endswith(".deb")]
+        self.assertEqual(installed, [f"{regression.PACKAGES}/{board}"])
+        self.assertTrue(any("rm -f old.deb" in c.args[0] for c in box.run.call_args_list))
+        self.assertTrue(said.startswith("1 of 2 packages, 1 sent"))
+
+
+class StartedTest(unittest.TestCase):
+    def test_a_box_whose_build_fails_is_not_started_and_says_why(self) -> None:
+        failed = subprocess.CalledProcessError(1, ["build.sh", "board", "a"])
+        out = io.StringIO()
+        with (
+            mock.patch.object(regression, "prepare", side_effect=failed),
+            mock.patch.object(regression, "start") as start,
+            mock.patch("sys.stdout", out),
+        ):
+            self.assertFalse(regression.started("short", "a=root@a", "plex"))
+        start.assert_not_called()
+        self.assertTrue(out.getvalue().startswith("a: not started:"))
 
     def test_a_fresh_folder_never_reuses_one(self) -> None:
         base = Path(tempfile.mkdtemp()) / "2026-11-14-1904"
