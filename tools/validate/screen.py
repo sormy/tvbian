@@ -23,7 +23,10 @@ import display  # noqa: E402
 
 FRAMES = 3
 GRID = (200, 120)  # cells across and down, two triangles each
-SAME_FLOOR = 0.999  # share of pixels that must match llvmpipe exactly
+SAME_FLOOR = 0.999  # share of bytes that must match llvmpipe, within ROUNDING
+ROUNDING = 1  # lima rounds the last bit apart from llvmpipe: off by one is the same picture
+VISIBLE = 8  # a channel off by more than this is a difference the eye can see
+TILE = 16  # the side of a square the differences are counted in
 OUT = Path("/var/tmp/tvb-screen")
 GBM_FORMAT_XRGB8888 = display.XRGB8888
 GBM_BO_USE_SCANOUT, GBM_BO_USE_RENDERING = 1, 4
@@ -156,6 +159,9 @@ def render(tag):
         return 77
     width, height = box.mode.hdisplay, box.mode.vdisplay
     capture = box.capture_buffer()
+    if capture is None:
+        print("SKIP screen: the writeback takes no capture at this mode")
+        return 77
     gbm = Gbm(box.drm.fd, width, height)
     renderer = (gbm.gl.glGetString(0x1F01) or b"no GL context").decode()
     for k in range(FRAMES):
@@ -166,17 +172,39 @@ def render(tag):
         )
         (OUT / f"{tag}-{k}.raw").write_bytes(bytes(capture.map) if not error else b"")
         gbm.release(bo)
+    (OUT / "size").write_text(f"{capture.width} {capture.height}")
     print(f"{tag}: {renderer}, {width}x{height}, capture {capture.width}x{capture.height}")
     return 0
 
 
 def compare(a, b):
-    """Share of identical bytes, and the PSNR, of two captures."""
+    """Share of bytes the same within ROUNDING, and the PSNR, of two captures."""
     if not a or len(a) != len(b):
         return 0.0, 0.0
     diffs = [abs(x - y) for x, y in zip(a, b)]
     mse = sum(d * d for d in diffs) / len(diffs)
-    return diffs.count(0) / len(diffs), 99.0 if not mse else 10 * math.log10(255 * 255 / mse)
+    same = sum(d <= ROUNDING for d in diffs) / len(diffs)
+    return same, 99.0 if not mse else 10 * math.log10(255 * 255 / mse)
+
+
+def where(a, b, width):
+    """Where two captures differ visibly: the pixels, the worst channel, the tiles and their span.
+    Rounding is few pixels off by one or two; an artifact is whole tiles off by a lot."""
+    worst, pixels, tiles = 0, 0, set()
+    for i in range(0, min(len(a), len(b)) - 3, 4):
+        delta = max(abs(a[i + c] - b[i + c]) for c in range(3))  # B, G, R; X is padding
+        if delta > VISIBLE:
+            pixels += 1
+            x, y = i // 4 % width, i // 4 // width
+            tiles.add((x // TILE, y // TILE))
+        worst = max(worst, delta)
+    if not tiles:
+        return f"no pixel off by more than {VISIBLE}, the worst by {worst}"
+    xs, ys = [x for x, _ in tiles], [y for _, y in tiles]
+    span = f"{(max(xs) - min(xs) + 1) * TILE}x{(max(ys) - min(ys) + 1) * TILE} at "
+    span += f"{min(xs) * TILE},{min(ys) * TILE}"
+    off = f"{pixels} pixels off by more than {VISIBLE}, the worst by {worst}"
+    return f"{off}, in {len(tiles)} tiles over {span}"
 
 
 def main():
@@ -199,8 +227,11 @@ def main():
         ok = same >= SAME_FLOOR
         failures += not ok
         print(
-            f"{'PASS' if ok else 'FAIL'} screen: frame {k} against llvmpipe, {same:.4%} identical, {db:.1f} dB"
+            f"{'PASS' if ok else 'FAIL'} screen: frame {k} against llvmpipe, {same:.4%} the same, {db:.1f} dB"
         )
+        if not ok:
+            width = int((OUT / "size").read_text().split()[0])
+            print(f"RECORD screen: frame {k} against llvmpipe: {where(gpu, ref, width)}")
         if k:
             moved = compare(gpu, (OUT / f"gpu-{k - 1}.raw").read_bytes())[0] < SAME_FLOOR
             failures += not moved
