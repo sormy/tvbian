@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Rewrite an Amlogic board's eMMC partition table and device trees for single boot.
 
-  aml-layout.py <factory-mpt.bin> <factory-multidtb.bin> <emmc-sectors> <out-mpt.bin> <out-dtb.bin>
+  aml-layout.py <factory_mpt.bin> <factory_multidtb.bin> <emmc-sectors> <out-mpt.bin> <out-dtb.bin>
 
 Single boot, as ampart's `dclone data::-1:4` leaves it: bootloader, reserved, cache at 0 bytes, env,
 and one data partition to the end - Android's partitions gone. The vendor U-Boot lays the eMMC out

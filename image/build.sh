@@ -88,8 +88,8 @@ case "$BOARD_FAMILY" in
     UEXT_SEEK=8192 UEXT_SECTORS=8192 FAT_SEEK=16384 AML_MPT_SECTORS=8 AML_DTB_OFFSET=8192
     AML_TUNING_OFFSET=6144 AML_TUNING_BYTES=131072
     UBOOT_ADDR=0x1000000
-    STOCK=/repo/stock/$BOARD
-    python3 /repo/image/aml-layout.py "$STOCK/factory-mpt.bin" "$STOCK/factory-multidtb.bin" \
+    FACTORY=/repo/boards/$BOARD
+    python3 /repo/image/aml-layout.py "$FACTORY/factory_mpt.bin" "$FACTORY/factory_multidtb.bin" \
       "$BOARD_AML_EMMC_SECTORS" "$WORK/mpt.bin" "$WORK/dtb.bin"
     read -r ENV_SEEK ENV_SECTORS <<<"$(python3 /repo/image/aml-mpt.py "$WORK/mpt.bin" env)"
     read -r RESERVED_SEEK _ <<<"$(python3 /repo/image/aml-mpt.py "$WORK/mpt.bin" reserved)"
@@ -125,7 +125,7 @@ EOF
     mcopy -i "$WORK/boot.fat" "$WORK/u-boot.ext" "$WORK/aml_autoscript" "$WORK/boot.scr" ::
     # the eMMC's env: the factory one, booting the u-boot.ext beside it; a bare number is hex
     UEXT_COUNT=$((($(stat -c %s "$WORK/u-boot.ext") + 511) / 512))
-    python3 /repo/image/aml-env.py "$STOCK/factory-env.bin" "$WORK/env.bin" \
+    python3 /repo/image/aml-env.py "$FACTORY/factory_env.bin" "$WORK/env.bin" \
       "bootcmd=run linux_boot; run storeboot" \
       "linux_boot=if amlmmc read $BOARD_AML_MMC_DEV $UBOOT_ADDR $(printf 0x%x $UEXT_SEEK) $(printf 0x%x $UEXT_COUNT); then go $UBOOT_ADDR; fi"
 
@@ -141,7 +141,7 @@ EOF
     dd if="$WORK/root.ext4" of="$IMG" bs=1M seek=$((ROOT_SEEK / 2048)) conv=notrunc status=none
     # the rest of the eMMC's layout, so tvb-install copies a whole disk: the factory bootloader past
     # the MBR, and reserved's eMMC tuning pattern
-    dd if="$STOCK/bootloader.bin" of="$IMG" bs=512 skip=1 seek=1 count=$((UEXT_SEEK - 1)) conv=notrunc status=none
+    dd if="$FACTORY/factory_bootloader.bin" of="$IMG" bs=512 skip=1 seek=1 count=$((UEXT_SEEK - 1)) conv=notrunc status=none
     python3 -c "import sys; sys.stdout.buffer.write(b'\xaa\x55' * ($AML_TUNING_BYTES // 2))" |
       dd of="$IMG" bs=512 seek=$((RESERVED_SEEK + AML_TUNING_OFFSET)) conv=notrunc status=none
     ;;
