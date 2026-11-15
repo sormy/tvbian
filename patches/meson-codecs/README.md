@@ -43,6 +43,7 @@ in-tree: `patches/linux-meson/` `0002` puts meson-sm1-codecs's decoder under
 | `0034` | a drain waits for the pictures its end code pushes out              |
 | `0035` | HEVC and VP9 at a width not a multiple of 64                        |
 | `0036` | VC-1: a drain pushes out the two held pictures                      |
+| `0037` | a buffer sent as an empty LAST is not recycled again                |
 
 | Overlay package     | Module        | Device                |
 | ------------------- | ------------- | --------------------- |
@@ -213,6 +214,13 @@ end-of-sequence code a drain queued does not count as one: every stream lost its
 now queues two frame start codes, one per held picture. SA10091, SA20021 and `ilaced_twomv` give
 every coded picture bit-exact, and none gives one more. A skipped picture still yields none: the
 microcode only counts it as a repeat of the picture before.
+
+## 0037
+
+A drain takes a queued CAPTURE buffer for its empty LAST behind the microcode's back, so the
+microcode still counts it free; queued again, it was recycled a second time, and the microcode
+decoded two pictures into it in a row, overwriting the client's. Such a buffer now skips its next
+recycle. MJPEG and MPEG-4 drained and restarted 15 times gave 23 of these double completions, now 1.
 
 ## Upstream
 

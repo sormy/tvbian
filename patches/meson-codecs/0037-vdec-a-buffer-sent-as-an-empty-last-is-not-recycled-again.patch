@@ -1,0 +1,72 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 15 Nov 2026 23:55:00 -0500
+Subject: [PATCH] media: meson: vdec: a buffer sent as an empty LAST is not
+ recycled again
+
+A drain takes a queued CAPTURE buffer for its empty LAST without the
+microcode knowing: the microcode still counts it free. When the client
+queues it again, the recycle tells the microcode a second time, and the
+microcode decodes two pictures into it in a row. The second completion
+finds the buffer gone: "Buffer 0 done but it doesn't exist in m2m_ctx",
+and the client's picture is overwritten.
+
+Mark a buffer sent as an empty LAST and skip its next recycle. A buffer
+that only now carries a pending LAST was not recycled yet: recycle it
+first. MJPEG and MPEG-4 drained and restarted 15 times gave 23 double
+completions, now 1.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+--- a/vdec/vdec.c
++++ b/vdec/vdec.c
+@@ -718,6 +718,8 @@
+ 	if (vb->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE && !held &&
+ 	    READ_ONCE(sess->last_pending)) {
+ 		WRITE_ONCE(sess->last_pending, false);
++		if (vdec_codec_needs_recycle(sess))
++			vdec_queue_recycle(sess, vb);
+ 		amvdec_dst_buf_done_empty_last(sess);
+ 		return;
+ 	}
+@@ -734,7 +736,9 @@
+ 
+ 	if (sess->streamon_cap &&
+ 	    vb->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE &&
+-	    vdec_codec_needs_recycle(sess))
++	    vdec_codec_needs_recycle(sess) &&
++	    !(vb->index < VIDEO_MAX_FRAME &&
++	      test_and_clear_bit(vb->index, sess->last_unused)))
+ 		vdec_queue_recycle(sess, vb);
+ 
+ }
+@@ -901,6 +905,7 @@
+ 		list_del(&tmp->list);
+ 		kfree(tmp);
+ 	}
++	bitmap_zero(sess->last_unused, VIDEO_MAX_FRAME);
+ }
+ 
+ static void vdec_stop_streaming(struct vb2_queue *q)
+--- a/vdec/vdec.h
++++ b/vdec/vdec.h
+@@ -430,6 +430,8 @@
+ 	u32 last_offset;
+ 	u32 wrap_count;
+ 	u32 fw_idx_to_vb2_idx[32];
++	/* CAPTURE buffers sent as an empty LAST: still free in the microcode */
++	DECLARE_BITMAP(last_unused, VIDEO_MAX_FRAME);
+ 
+ 	enum amvdec_status status;
+ 	void *priv;
+--- a/vdec/vdec_helpers.c
++++ b/vdec/vdec_helpers.c
+@@ -572,6 +572,8 @@
+ 	if (!vbuf)
+ 		return false;
+ 
++	if (vbuf->vb2_buf.index < VIDEO_MAX_FRAME)
++		set_bit(vbuf->vb2_buf.index, sess->last_unused);
+ 	for (plane = 0; plane < vbuf->vb2_buf.num_planes; plane++)
+ 		vb2_set_plane_payload(&vbuf->vb2_buf, plane, 0);
+ 	vbuf->vb2_buf.timestamp = 0;
