@@ -42,6 +42,7 @@ in-tree: `patches/linux-meson/` `0002` puts meson-sm1-codecs's decoder under
 | `0033` | `V4L2_DEC_CMD_START` clears CAPTURE's last-buffer state             |
 | `0034` | a drain waits for the pictures its end code pushes out              |
 | `0035` | HEVC and VP9 at a width not a multiple of 64                        |
+| `0036` | VC-1: a drain pushes out the two held pictures                      |
 
 | Overlay package     | Module        | Device                |
 | ------------------- | ------------- | --------------------- |
@@ -204,6 +205,14 @@ core reads its references at 64. A width a multiple of 64 hides it; 642×362, co
 at 672 where the client read 704, and every inter picture came out at 8 dB, HEVC and VP9 alike.
 CAPTURE now announces the HEVC core's pitch, and at such a width the references stay compressed, as
 for 10-bit: the 642×362 HEVC and VP9 clips decode bit-exact.
+
+## 0036
+
+The VC-1 microcode keeps its last two decoded pictures until it parses the next frame, and the
+end-of-sequence code a drain queued does not count as one: every stream lost its last two. A drain
+now queues two frame start codes, one per held picture. SA10091, SA20021 and `ilaced_twomv` give
+every coded picture bit-exact, and none gives one more. A skipped picture still yields none: the
+microcode only counts it as a repeat of the picture before.
 
 ## Upstream
 

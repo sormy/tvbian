@@ -12,3 +12,6 @@ What spans the family's boards.
 - [ ] **No kernel self-tests in meson64.** 146 of its 4433 modules are KUnit and test modules, from
       Armbian's config: off in `kernel/meson64.fragment` (`CONFIG_KUNIT`), then a boot on the M20.
       The rest of its breadth stays: USB Wi-Fi, tuners and cameras are why a box is general.
+- [ ] **VC-1 and interlaced MPEG-4 decode exact**: SMPTE's SA00040 (176×144), SA00050 and SA10143
+      (interlaced fields) differ from software in every picture, and the last two miss one and
+      three; interlaced MPEG-4 comes out at 44 dB.

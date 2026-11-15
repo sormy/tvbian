@@ -63,8 +63,14 @@ the CPU instead, on its own.
 9. The chip's microcode for it is on hand; our driver has no decoder for it yet.
 10. At 3840×2160, decoding while a large file is written can freeze the box, and the first decode
     after a boot fails.
-11. A skipped picture yields none, and a stream's last two stay in the microcode: 9 of 1451 missing
-    on a WMV clip.
+11. A skipped picture yields none: the player shows the picture before it longer.
+
+The S905L3's microcode decodes MJPEG into at most 4 pictures and MPEG-4 into 8, the canvas registers
+it reads: a player holding more pictures than that copies them out. Its MPEG-1/2, MPEG-4 and VC-1
+microcode keeps the last two pictures it decoded until more of the stream arrives, and its H.264
+microcode its reorder depth plus two, three for baseline; only the stream's end lets them out, and
+ends the decode. A player that needs a picture before it sends the next one gets it only by ending
+and restarting the stream, which loses the references until the next keyframe.
 
 ## Hardware decode speed at 3840×2160
 

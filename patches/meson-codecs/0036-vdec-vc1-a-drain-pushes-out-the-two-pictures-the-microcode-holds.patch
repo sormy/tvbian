@@ -1,0 +1,40 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 15 Nov 2026 17:00:00 -0500
+Subject: [PATCH] media: meson: vdec: vc1: a drain pushes out the two
+ pictures the microcode holds
+
+The VC-1 microcode keeps the last two pictures it decoded until it
+parses the next frame, and the end-of-sequence code queued at a drain
+does not count as one: every stream lost its last two pictures.
+
+End a drain with two frame start codes instead, one for each picture
+held. SMPTE's SA10091, SA20021 and ilaced_twomv now give every coded
+picture, bit-exact; no stream gives one more.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+
+--- a/vdec/codec_vc1.c
++++ b/vdec/codec_vc1.c
+@@ -29,7 +29,6 @@
+ #define BOTTOM_FIELD_FIRST_FLAG	BIT(6)
+ 
+ #define SC_FRAME		0x0d
+-#define SC_END_OF_SEQ		0x0a
+ 
+ struct codec_vc1 {
+ 	void	  *workspace_vaddr;
+@@ -39,7 +38,11 @@
+ };
+ 
+ static const u8 frame_start_code[] = { 0x00, 0x00, 0x01, SC_FRAME };
+-static const u8 eos_sequence[SZ_4K] = { 0x00, 0x00, 0x01, SC_END_OF_SEQ };
++/* the microcode holds two pictures; each frame start code it parses pushes one out */
++static const u8 eos_sequence[SZ_4K] = {
++	0x00, 0x00, 0x01, SC_FRAME,
++	[SZ_1K] = 0x00, 0x00, 0x01, SC_FRAME,
++};
+ 
+ static const u8 *codec_vc1_eos_sequence(u32 *len)
+ {
