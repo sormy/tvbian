@@ -38,6 +38,21 @@ class InputTest(unittest.TestCase):
                 self.assertEqual(box.on_usb(device), usb)
 
 
+class NetworkTest(unittest.TestCase):
+    def test_a_usb_adapter_is_not_the_board_s(self) -> None:
+        devices = {
+            "/sys/class/net/end0/device": "/sys/devices/platform/soc/5020000.ethernet",
+            "/sys/class/net/wlan0/device": "/sys/devices/platform/soc/4021000.mmc/mmc_host/mmc1",
+            "/sys/class/net/enx00e04c/device": "/sys/devices/platform/soc/5200000.usb/usb1/1-1",
+        }
+        found = [f"{d.rsplit('/', 1)[0]}/phydev" for d in devices]
+        with (
+            mock.patch.object(box.glob, "glob", return_value=found),
+            mock.patch.object(box.os.path, "realpath", side_effect=devices.__getitem__),
+        ):
+            self.assertEqual(box.board_nets("phydev"), ["end0", "wlan0"])
+
+
 class VerdictTest(unittest.TestCase):
     def test_each_rule_fails_what_it_should(self) -> None:
         cases = [
@@ -59,6 +74,7 @@ class VerdictTest(unittest.TestCase):
             ("soak.server", "failed: plex not answering after 30 s", "FAIL"),
             ("mmc.errors", "0", None),
             ("mmc.errors", "1: mmc2: error -110 whilst initialising MMC card", "FAIL"),
+            ("usb.hubs.external", "1", None),  # a hub plugged in or on the board: the reader judges
         ]
         for key, value, expected in cases:
             with self.subTest(key=key, value=value):

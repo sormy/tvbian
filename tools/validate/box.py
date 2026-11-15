@@ -98,7 +98,7 @@ RULES: list[tuple[str, Callable[[str], bool]]] = [
         lambda v: v == "none",
     ),
     (
-        r"iommu\.faults|iommu\.irqs|mmc\.errors|usb\.errors|usb\.hubs\.external|tainted"
+        r"iommu\.faults|iommu\.irqs|mmc\.errors|usb\.errors|tainted"
         r"|firmware\.unowned|cpu\.load\.cooling|soak\.warnings",
         lambda v: v == "0",
     ),
@@ -468,7 +468,9 @@ def assigned_addresses() -> str:
     """Interfaces whose address userspace set (addr_assign_type 3), and units that attach or set
     addresses."""
     set_by_user = [
-        Path(n).name for n in glob.glob("/sys/class/net/*") if read(f"{n}/addr_assign_type") == "3"
+        n
+        for n in board_nets("addr_assign_type")
+        if read(f"/sys/class/net/{n}/addr_assign_type") == "3"
     ]
     units = sh("systemctl list-unit-files --no-legend | grep -iE 'hciattach|macaddr|btattach'")
     return " ".join(set_by_user + units.split()[:1]) or NONE
@@ -630,21 +632,25 @@ def storage() -> Iterator[Line]:
 # network.md
 
 
+def board_nets(leaf: str) -> list[str]:
+    """Interfaces that have leaf in sysfs, a USB adapter's left out: plugged in, not the board's."""
+    found = [Path(p).parent for p in glob.glob(f"/sys/class/net/*/{leaf}")]
+    return sorted(n.name for n in found if not on_usb(os.path.realpath(f"{n}/device")))
+
+
 def network() -> Iterator[Line]:
-    for path in sorted(glob.glob("/sys/class/net/*")):
-        name = Path(path).name
-        if Path(f"{path}/device").exists():
-            kind = read(f"{path}/addr_assign_type")
-            yield f"addr.{name}", f"{read(f'{path}/address')} type {kind}"
-    for path in glob.glob("/sys/class/net/*/phydev"):
-        name = Path(path).parent.name
-        driver = Path(os.path.realpath(f"{path}/driver")).name
+    for name in board_nets("device"):
+        path = f"/sys/class/net/{name}"
+        kind = read(f"{path}/addr_assign_type")
+        yield f"addr.{name}", f"{read(f'{path}/address')} type {kind}"
+    for name in board_nets("phydev"):
+        driver = Path(os.path.realpath(f"/sys/class/net/{name}/phydev/driver")).name
         yield f"eth.{name}.phy", driver
         carrier = read(f"/sys/class/net/{name}/carrier") == "1"
         yield f"eth.{name}.link", (
             f"{read(f'/sys/class/net/{name}/speed')} Mb/s" if carrier else "no cable"
         )
-    for wifi in [Path(p).parent.name for p in glob.glob("/sys/class/net/*/wireless")]:
+    for wifi in board_nets("wireless"):
         driver = Path(os.path.realpath(f"/sys/class/net/{wifi}/device/driver/module")).name
         modes = MODES.get(driver) if PROFILE.driver_modes else None
         for mode, has_bt in modes or [("", True)]:
@@ -657,7 +663,7 @@ def network() -> Iterator[Line]:
         if modes:  # the box's own mode back, as its modprobe.d sets it
             yield "wifi.restored", reload(driver, "", wifi)
         yield "wifi.reloads", reloads(driver, wifi)
-    if not glob.glob("/sys/class/net/*/wireless"):
+    if not board_nets("wireless"):
         yield from bluetooth("bt")
 
 
@@ -667,11 +673,10 @@ def throughputs(iperf: str) -> Iterator[Line]:
     if not iperf:
         yield "throughput", "not run: no iperf3 server named"
         return
-    for path in glob.glob("/sys/class/net/*/phydev"):
-        name = Path(path).parent.name
+    for name in board_nets("phydev"):
         if read(f"/sys/class/net/{name}/carrier") == "1":
             yield from loaded(f"eth.{name}", iperf, name)
-    for wifi in [Path(p).parent.name for p in glob.glob("/sys/class/net/*/wireless")]:
+    for wifi in board_nets("wireless"):
         driver = Path(os.path.realpath(f"/sys/class/net/{wifi}/device/driver/module")).name
         for mode, _ in MODES.get(driver, [("", True)]):
             tag = f"wifi.{mode}" if driver in MODES else "wifi"
