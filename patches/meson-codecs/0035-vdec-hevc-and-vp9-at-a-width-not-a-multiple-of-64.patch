@@ -1,0 +1,98 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 15 Nov 2026 16:30:00 -0500
+Subject: [PATCH] media: meson: vdec: HEVC and VP9 at a width not a multiple
+ of 64
+
+The HEVC core writes an uncompressed picture at a 32-byte pitch, while
+CAPTURE announced 64, and reads its references at 64. At a width a
+multiple of 64 the three agree. At 642x362, coded 656 wide, the picture
+landed at a 672 pitch where the client read 704, and every inter
+picture predicted from references read at the wrong pitch: 8 dB, in HEVC
+and VP9 alike.
+
+Announce the HEVC core's CAPTURE lines at a 32-byte pitch, and keep its
+references compressed at such a width, as for 10-bit, so the
+uncompressed write is the picture alone. The other core's canvases stay
+at 64.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+
+--- a/vdec/codec_hevc_common.h
++++ b/vdec/codec_hevc_common.h
+@@ -36,10 +36,14 @@
+ 	u32 ref_buffer_count;
+ };
+ 
+-/* Returns 1 if references are compressed: 10-bit, a downscaled or a compressed CAPTURE */
++/*
++ * Returns 1 if references are compressed: 10-bit, a downscaled or a compressed CAPTURE, or a
++ * width the uncompressed write's 32-byte pitch and the references' 64-byte one disagree on
++ */
+ static inline int codec_hevc_use_fbc(struct amvdec_session *sess, int is_10bit)
+ {
+-	return is_10bit || sess->dw_ratio > 1 || amvdec_fbc_capture(sess);
++	return is_10bit || sess->dw_ratio > 1 || amvdec_fbc_capture(sess) ||
++	       !IS_ALIGNED(sess->width, 64);
+ }
+ 
+ /* Returns 1 if CAPTURE gets the decoder's second, uncompressed write */
+--- a/vdec/vdec.c
++++ b/vdec/vdec.c
+@@ -24,6 +24,7 @@
+ #include "vdec.h"
+ #include "esparser.h"
+ #include "vdec_helpers.h"
++#include "vdec_hevc.h"
+ 
+ struct dummy_buf {
+ 	struct vb2_v4l2_buffer vb;
+@@ -1046,6 +1047,12 @@
+ 	return 0;
+ }
+ 
++/* The HEVC core writes lines at a 32-byte pitch; the other core's canvases, 64. */
++static u32 vdec_cap_stride(const struct amvdec_format *fmt_out, u32 width)
++{
++	return ALIGN(width, fmt_out->vdec_ops == &vdec_hevc_ops ? 32 : 64);
++}
++
+ static const struct amvdec_format *
+ vdec_try_fmt_common(struct amvdec_session *sess, u32 size,
+ 		    struct v4l2_format *f)
+@@ -1092,7 +1099,7 @@
+ 		memset(pfmt[1].reserved, 0, sizeof(pfmt[1].reserved));
+ 		if (pixmp->pixelformat == V4L2_PIX_FMT_NV12) {
+ 			pfmt[0].sizeimage = output_size + output_size / 2;
+-			pfmt[0].bytesperline = ALIGN(pixmp->width, 64);
++			pfmt[0].bytesperline = vdec_cap_stride(fmt_out, pixmp->width);
+ 			pixmp->num_planes = 1;
+ 		} else if (pixmp->pixelformat == V4L2_PIX_FMT_AM_FBC8 ||
+ 			   pixmp->pixelformat == V4L2_PIX_FMT_AM_FBC10) {
+@@ -1106,20 +1113,20 @@
+ 			pixmp->num_planes = 1;
+ 		} else if (pixmp->pixelformat == V4L2_PIX_FMT_NV12M) {
+ 			pfmt[0].sizeimage = output_size;
+-			pfmt[0].bytesperline = ALIGN(pixmp->width, 64);
++			pfmt[0].bytesperline = vdec_cap_stride(fmt_out, pixmp->width);
+ 
+ 			pfmt[1].sizeimage = output_size / 2;
+-			pfmt[1].bytesperline = ALIGN(pixmp->width, 64);
++			pfmt[1].bytesperline = vdec_cap_stride(fmt_out, pixmp->width);
+ 			pixmp->num_planes = 2;
+ 		} else if (pixmp->pixelformat == V4L2_PIX_FMT_YUV420M) {
+ 			pfmt[0].sizeimage = output_size;
+-			pfmt[0].bytesperline = ALIGN(pixmp->width, 64);
++			pfmt[0].bytesperline = vdec_cap_stride(fmt_out, pixmp->width);
+ 
+ 			pfmt[1].sizeimage = output_size / 4;
+-			pfmt[1].bytesperline = ALIGN(pixmp->width, 64) / 2;
++			pfmt[1].bytesperline = vdec_cap_stride(fmt_out, pixmp->width) / 2;
+ 
+ 			pfmt[2].sizeimage = output_size / 4;
+-			pfmt[2].bytesperline = ALIGN(pixmp->width, 64) / 2;
++			pfmt[2].bytesperline = vdec_cap_stride(fmt_out, pixmp->width) / 2;
+ 			pixmp->num_planes = 3;
+ 		}
+ 	}

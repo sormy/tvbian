@@ -41,6 +41,7 @@ in-tree: `patches/linux-meson/` `0002` puts meson-sm1-codecs's decoder under
 | `0032` | HEVC: an interrupt before anything is parsed is no error            |
 | `0033` | `V4L2_DEC_CMD_START` clears CAPTURE's last-buffer state             |
 | `0034` | a drain waits for the pictures its end code pushes out              |
+| `0035` | HEVC and VP9 at a width not a multiple of 64                        |
 
 | Overlay package     | Module        | Device                |
 | ------------------- | ------------- | --------------------- |
@@ -195,6 +196,14 @@ and ends once the decoder has been 50 ms without an interrupt. That quiet counte
 interrupt before the drain, so a client quiet for longer had the drain end at once: a 3-picture
 1080p MPEG-4 stream, queued whole and stopped a second later, gave 1 or 2 pictures. It now counts
 from the sequence; 3 of 3 in each run.
+
+## 0035
+
+The HEVC core writes an uncompressed picture at a 32-byte pitch, while CAPTURE announced 64 and the
+core reads its references at 64. A width a multiple of 64 hides it; 642×362, coded 656 wide, landed
+at 672 where the client read 704, and every inter picture came out at 8 dB, HEVC and VP9 alike.
+CAPTURE now announces the HEVC core's pitch, and at such a width the references stay compressed, as
+for 10-bit: the 642×362 HEVC and VP9 clips decode bit-exact.
 
 ## Upstream
 
