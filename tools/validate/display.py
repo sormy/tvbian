@@ -51,6 +51,7 @@ import os
 import select
 import re
 import struct
+from pathlib import Path
 import subprocess
 import sys
 import time
@@ -1884,11 +1885,290 @@ class Box:
         self.check("underruns: none over a static picture, 3 s", last == first, f"({last - first})")
 
 
+# ---- composite: display.md H12's unattended half; the picture itself needs a screen
+CONNECTOR_COMPOSITE = 5
+MODE_INTERLACE = 0x10
+STANDARDS = {576: "PAL", 480: "NTSC"}
+BARS = (
+    (235, 235, 235),
+    (235, 235, 16),
+    (16, 235, 235),
+    (16, 235, 16),
+    (235, 16, 16),
+    (16, 16, 235),
+)
+# a bar comes back as its colour when each channel stays on its side of mid-scale: the composite
+# path converts to YCbCr and back, which moves saturated colours by tens of codes
+MID_SCALE = 128
+ENCODER_WORDS = 16
+# the TV encoder's enable bit, by vendor, where its layout is known: (word, bit). Only these
+# are read: on the RK3528, reading the TVE's range through /dev/mem hangs the bus
+ENCODER_ENABLE = {"allwinner": (0, 0)}
+
+
+class Composite:
+    """Composite-1 forced on; each standard set on a CRTC that takes it, colour bars on a plane read
+    back by writeback; the TV encoder's registers while on; the connector forced off after, as the
+    image's command line leaves it."""
+
+    def __init__(self, drm):
+        self.drm, self.failures, self.passes = drm, 0, 0
+        for cap in (CAP_ATOMIC, CAP_WRITEBACK):
+            drm.call("cap", ClientCap(capability=cap, value=1))
+        res = drm.call("res", CardRes())
+        crtcs, connectors = drm.ids(res.count_crtcs), drm.ids(res.count_connectors)
+        drm.call(
+            "res",
+            CardRes(
+                crtcs=ctypes.addressof(crtcs),
+                connectors=ctypes.addressof(connectors),
+                count_crtcs=res.count_crtcs,
+                count_connectors=res.count_connectors,
+            ),
+        )
+        self.crtcs = list(crtcs[: res.count_crtcs])
+        self.connector = self.writeback = None
+        for i in range(res.count_connectors):
+            c = drm.call("connector", Connector(connector_id=connectors[i]))
+            if c.connector_type == CONNECTOR_COMPOSITE:
+                self.connector = c.connector_id
+            if c.connector_type == CONNECTOR_WRITEBACK:
+                self.writeback = c.connector_id
+        pr = drm.call("planes", PlaneRes())
+        ids = drm.ids(pr.count_planes)
+        drm.call("planes", PlaneRes(planes=ctypes.addressof(ids), count_planes=pr.count_planes))
+        self.planes = [drm.call("plane", Plane(plane_id=ids[i])) for i in range(pr.count_planes)]
+        self.encoders = {}  # each standard's encoder registers
+
+    def check(self, name, ok, detail=""):
+        print(f"{'PASS' if ok else 'FAIL'} {name} {detail}".rstrip())
+        self.passes += ok
+        self.failures += not ok
+
+    def prop(self, obj, kind, name):
+        return self.drm.props(obj, kind)[name][0]
+
+    def modes(self):
+        c = self.drm.call("connector", Connector(connector_id=self.connector))
+        modes = (ModeInfo * max(c.count_modes, 1))()
+        self.drm.call(
+            "connector",
+            Connector(
+                connector_id=self.connector,
+                count_modes=c.count_modes,
+                modes=ctypes.addressof(modes),
+            ),
+        )
+        return list(modes[: c.count_modes])
+
+    def changes(self, crtc, mode, plane, bars, capture, fence):
+        """The connector on crtc at mode, bars full screen on plane, and the writeback."""
+        width, height = mode.hdisplay, mode.vdisplay
+        plane_props = self.drm.props(plane, OBJ_PLANE)
+        values = {
+            "FB_ID": bars.fb,
+            "CRTC_ID": crtc,
+            "SRC_X": 0,
+            "SRC_Y": 0,
+            "SRC_W": width << 16,
+            "SRC_H": height << 16,
+            "CRTC_X": 0,
+            "CRTC_Y": 0,
+            "CRTC_W": width,
+            "CRTC_H": height,
+        }
+        changes = {
+            crtc: {
+                self.prop(crtc, OBJ_CRTC, "MODE_ID"): self.drm.blob(bytes(mode)),
+                self.prop(crtc, OBJ_CRTC, "ACTIVE"): 1,
+            },
+            self.connector: {self.prop(self.connector, OBJ_CONNECTOR, "CRTC_ID"): crtc},
+            plane: {plane_props[k][0]: v for k, v in values.items()},
+        }
+        tv_mode = self.drm.props(self.connector, OBJ_CONNECTOR).get("TV mode")
+        if tv_mode is not None:  # the standard is the connector's property, not the mode's size
+            standard = STANDARDS[mode.vdisplay]
+            changes[self.connector][tv_mode[0]] = self.drm.enum_value(tv_mode[2], standard)
+        if capture is not None:
+            changes[self.writeback] = {
+                self.prop(self.writeback, OBJ_CONNECTOR, "CRTC_ID"): crtc,
+                self.prop(self.writeback, OBJ_CONNECTOR, "WRITEBACK_FB_ID"): capture.fb,
+                self.prop(
+                    self.writeback, OBJ_CONNECTOR, "WRITEBACK_OUT_FENCE_PTR"
+                ): ctypes.addressof(fence),
+            }
+        return changes
+
+    def placement(self, mode, bars):
+        """The first CRTC and plane the driver takes the connector on, at mode."""
+        for index, crtc in enumerate(self.crtcs):
+            for plane in self.planes:
+                if not plane.possible_crtcs & 1 << index:
+                    continue
+                changes = self.changes(crtc, mode, plane.plane_id, bars, None, None)
+                if not self.drm.commit(changes, TEST_ONLY | ALLOW_MODESET):
+                    return crtc, plane.plane_id
+        return None
+
+    def standard(self, mode):
+        name = STANDARDS.get(mode.vdisplay, f"{mode.hdisplay}x{mode.vdisplay}")
+        width, height = mode.hdisplay, mode.vdisplay
+        bars = Buffer(self.drm, width, height, XRGB8888)
+        side = width // len(BARS)
+        for y in range(height):
+            row = b"".join(
+                struct.pack("<I", 255 << 24 | r << 16 | g << 8 | b) * side for r, g, b in BARS
+            )
+            bars.map[y * bars.pitch : y * bars.pitch + len(row)] = row
+        placed = self.placement(mode, bars)
+        if placed is None:
+            self.check(f"composite {name}", False, "no CRTC and plane take it")
+            return
+        crtc, plane = placed
+        interlaced = "interlaced" if mode.flags & MODE_INTERLACE else "progressive"
+        self.check(f"composite {name}", True, f"{width}x{height} {interlaced} on CRTC {crtc}")
+        capture, error, ready = None, 0, False
+        for fourcc, scale in ((XRGB8888, 1), (ARGB8888, 1), (NV12, 1), (XRGB8888, 2), (NV12, 2)):
+            if self.writeback is None:
+                break
+            capture = Buffer(self.drm, width // scale, height // scale, fourcc)
+            fence = ctypes.c_int32(-1)
+            error = self.drm.commit(
+                self.changes(crtc, mode, plane, bars, capture, fence), ALLOW_MODESET
+            )
+            if not error:
+                ready = bool(select.select([fence.value], [], [], 2)[0])
+                os.close(fence.value)
+                break
+        if self.writeback is None or error:
+            error = self.drm.commit(
+                self.changes(crtc, mode, plane, bars, None, None), ALLOW_MODESET
+            )
+            capture = None
+        if error:  # the test commit placed it; the real one must take too
+            self.check(f"composite {name} mode set", False, f"the commit failed, error {error}")
+        encoder = encoder_registers() if not error else None  # only while the driver powers it
+        if self.writeback is None:
+            print(f"SKIP composite {name} writeback: no writeback connector")
+        elif capture is None:
+            self.check(f"composite {name} writeback", False, "every capture format refused")
+        else:
+            scale = width // capture.width
+            seen = [
+                capture.pixel((side * i + side // 2) // scale, height // 2 // scale)
+                for i in range(len(BARS))
+            ]
+            kept = all(
+                (a > MID_SCALE) == (b > MID_SCALE)
+                for got, want in zip(seen, BARS)
+                for a, b in zip(got, want)
+            )
+            detail = f"colour bars {'kept' if kept else 'LOST'}, {capture.width}x{capture.height}"
+            self.check(
+                f"composite {name} writeback",
+                ready and kept,
+                detail if ready else "no frame in 2 s",
+            )
+            print(f"RECORD composite {name} writeback bars: {seen}")
+        self.drm.commit(
+            {
+                crtc: {self.prop(crtc, OBJ_CRTC, "ACTIVE"): 0},
+                self.connector: {self.prop(self.connector, OBJ_CONNECTOR, "CRTC_ID"): 0},
+                plane: {
+                    self.prop(plane, OBJ_PLANE, "FB_ID"): 0,
+                    self.prop(plane, OBJ_PLANE, "CRTC_ID"): 0,
+                },
+            },
+            ALLOW_MODESET,
+        )
+        self.detach_writeback()
+        if encoder is None:
+            print(f"SKIP composite {name} encoder: no TV encoder node, or the output never came on")
+            return
+        vendor, words = encoder
+        if words is None:
+            print(
+                f"UNTESTED composite {name} encoder: {vendor}'s TVE registers are not read safely"
+            )
+            return
+        self.encoders[name] = words
+        print(f"RECORD composite {name} encoder: {' '.join(f'{w:08x}' for w in words)}")
+        if vendor in ENCODER_ENABLE:
+            word, bit = ENCODER_ENABLE[vendor]
+            self.check(f"composite {name} encoder", bool(words[word] >> bit & 1), "enabled")
+
+    def detach_writeback(self):
+        """The writeback connector off every CRTC: left bound, the driver refuses the next mode set."""
+        if self.writeback is not None:
+            self.drm.commit(
+                {self.writeback: {self.prop(self.writeback, OBJ_CONNECTOR, "CRTC_ID"): 0}},
+                ALLOW_MODESET,
+            )
+
+    def run(self):
+        if self.connector is None:
+            print("SKIP composite: no composite connector")
+            return
+        self.detach_writeback()
+        status = next(iter(glob.glob("/sys/class/drm/card*-Composite-*/status")), None)
+        if status:
+            Path(status).write_text("on")
+        try:
+            offered = {
+                STANDARDS.get(m.vdisplay): m for m in self.modes() if m.vdisplay in STANDARDS
+            }
+            self.check("composite modes", bool(offered), " ".join(sorted(k for k in offered if k)))
+            for mode in offered.values():
+                self.standard(mode)
+            if len(self.encoders) > 1:
+                programs = {tuple(words) for words in self.encoders.values()}
+                self.check(
+                    "composite standards",
+                    len(programs) == len(self.encoders),
+                    "each programs the encoder its own way",
+                )
+        finally:
+            if status:
+                Path(status).write_text("off")
+
+
+def encoder_registers():
+    """The TV encoder's vendor and first registers, as the tree places it; None without one. Read
+    only while the output is on: a block whose power domain is off can stall the bus."""
+    for compatible in glob.glob("/proc/device-tree/**/compatible", recursive=True):
+        names = Path(compatible).read_bytes().split(b"\0")
+        found = [n for n in names if b"tv-encoder" in n or n.endswith(b"-tve")]
+        if not found:
+            continue
+        vendor = found[0].decode().split(",")[0]
+        if vendor not in ENCODER_ENABLE:
+            return vendor, None
+        node = Path(compatible).parent
+        cells = int.from_bytes((node.parent / "#address-cells").read_bytes(), "big")
+        address = int.from_bytes((node / "reg").read_bytes()[: cells * 4], "big")
+        fd = os.open("/dev/mem", os.O_RDONLY | os.O_SYNC)
+        try:
+            page = address & ~0xFFF
+            m = mmap.mmap(fd, 0x1000, mmap.MAP_SHARED, mmap.PROT_READ, offset=page)
+            words = struct.unpack_from(f"<{ENCODER_WORDS}I", m, address - page)
+            m.close()
+        finally:
+            os.close(fd)
+        return vendor, words
+    return None
+
+
 def main():
+    composite = Composite(Drm("/dev/dri/card0"))
+    composite.run()
+    os.close(composite.drm.fd)
     with hdr_sink() as synthetic:
         box = run(synthetic)
     if box is None:
-        return 77
+        print(f"{composite.passes} passed, {composite.failures} failed")
+        return 1 if composite.failures else 0 if composite.passes else 77
+    box.passes += composite.passes
+    box.failures += composite.failures
     with hdr_sink(hdr_edid(ladder=True)) as synthetic:
         if synthetic:
             rating_box = Box()
@@ -1936,5 +2216,13 @@ def run(synthetic_sink):
     return box
 
 
+def composite_only():
+    """The composite check alone, for the default profile."""
+    composite = Composite(Drm("/dev/dri/card0"))
+    composite.run()
+    os.close(composite.drm.fd)
+    return 1 if composite.failures else 0 if composite.passes else 77
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(composite_only() if sys.argv[1:] == ["composite"] else main())

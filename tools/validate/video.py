@@ -1014,32 +1014,43 @@ def key(c):
     return (c["suite"], c["codec"], c["size"])
 
 
-def cmd_compare(args):
-    _, old = load(args.old)
-    _, new = load(args.new)
+# how good each verdict is, for telling a run that got worse
+RANK = {
+    "pass": 3,
+    "full": 2,
+    "linear": 2,
+    "refused": 2,
+    "unoffered": 1,
+    "flaky": 1,
+    "broken": 0,
+    "hang": -1,
+    "software": 1,
+}
+# verdicts that are a failure at any size: wrong frames, a hang, or no hardware at all
+FAILING = {"broken", "hang", "flaky", "software"}
+
+
+def worse(old, new):
+    """Each case of new that did worse than in old: a lower verdict, or 1 dB less luma PSNR."""
     before = {key(c): c for c in old}
-    rank = {
-        "pass": 3,
-        "full": 2,
-        "linear": 2,
-        "refused": 2,
-        "unoffered": 1,
-        "flaky": 1,
-        "broken": 0,
-        "hang": -1,
-        "software": 1,
-    }
-    worse = []
+    out = []
     for c in new:
         o = before.get(key(c))
         if not o or c["verdict"] == "skipped":
             continue
-        if rank.get(c["verdict"], 0) < rank.get(o["verdict"], 0):
-            worse.append(f"{' '.join(key(c))}: {o['verdict']} -> {c['verdict']}")
+        if RANK.get(c["verdict"], 0) < RANK.get(o["verdict"], 0):
+            out.append(f"{' '.join(key(c))}: {o['verdict']} -> {c['verdict']}")
         elif o.get("psnr_y") and c.get("psnr_y") and c["psnr_y"] < o["psnr_y"] - 1:
-            worse.append(f"{' '.join(key(c))}: {o['psnr_y']:.1f} -> {c['psnr_y']:.1f} dB")
-    print("\n".join(worse) or "nothing worse")
-    sys.exit(1 if worse else 0)
+            out.append(f"{' '.join(key(c))}: {o['psnr_y']:.1f} -> {c['psnr_y']:.1f} dB")
+    return out
+
+
+def cmd_compare(args):
+    _, old = load(args.old)
+    _, new = load(args.new)
+    worse_cases = worse(old, new)
+    print("\n".join(worse_cases) or "nothing worse")
+    sys.exit(1 if worse_cases else 0)
 
 
 def main():

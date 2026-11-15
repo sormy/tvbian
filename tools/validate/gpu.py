@@ -6,6 +6,9 @@ this installs on the box:
 
     python3 tools/validate/gpu.py --box root@<box> --gpu g52 [--fraction 20]
 
+--gpu lima, for a Mali-400 or -450, takes lima's lists and runs GLES 2 alone, all lima offers.
+SSH_OPTIONS adds ssh options, a known_hosts file or a jump host.
+
 Runs dEQP's GLES 2, 3 and 3.1 and Khronos lists through deqp-runner on 256x256 pbuffers, as
 Mesa's CI does, every --fraction'th case. The baseline is Mesa's own CI expectations for --gpu
 (fails, flakes, skips) at the Mesa version the box runs: a failure Mesa expects passes, any other
@@ -14,6 +17,8 @@ llvmpipe fails the same scenes. Exit 0 nothing unexpected, 1 otherwise.
 """
 
 import argparse
+import os
+import shlex
 import subprocess
 import sys
 import urllib.request
@@ -23,7 +28,8 @@ ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "build" / "out" / "debs"
 DEQP_DIR = "/usr/lib/deqp"
 BOX_DIR = "/var/tmp/tvb-gpu"
-MESA_CI = "https://gitlab.freedesktop.org/mesa/mesa/-/raw/mesa-{version}/src/panfrost/ci/panfrost-{gpu}-{kind}.txt"
+MESA_CI = "https://gitlab.freedesktop.org/mesa/mesa/-/raw/mesa-{version}/{path}"
+SSH = ["-o", "BatchMode=yes", *shlex.split(os.environ.get("SSH_OPTIONS", ""))]
 SURFACE = [
     "--deqp-surface-width=256",
     "--deqp-surface-height=256",
@@ -37,11 +43,12 @@ SUITE = [
     ("gles31/deqp-gles31", ["gles31-main.txt"]),
     ("glcts/glcts", ["gles2-khr-main.txt", "gles3-khr-main.txt", "gles31-khr-main.txt"]),
 ]
+GLES2 = [("gles2/deqp-gles2", ["gles2-main.txt"]), ("glcts/glcts", ["gles2-khr-main.txt"])]
 
 
 def ssh(box, cmd, check=True):
     return subprocess.run(
-        ["ssh", "-o", "BatchMode=yes", box, cmd],
+        ["ssh", *SSH, box, cmd],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -52,18 +59,21 @@ def ssh(box, cmd, check=True):
 
 def expectations(version, gpu, kind):
     """Mesa CI's list for the GPU at this Mesa version; empty where Mesa keeps none."""
+    path = (
+        f"src/gallium/drivers/lima/ci/lima-{kind}.txt"
+        if gpu == "lima"
+        else f"src/panfrost/ci/panfrost-{gpu}-{kind}.txt"
+    )
     try:
-        with urllib.request.urlopen(
-            MESA_CI.format(version=version, gpu=gpu, kind=kind), timeout=30
-        ) as r:
+        with urllib.request.urlopen(MESA_CI.format(version=version, path=path), timeout=30) as r:
             return r.read().decode()
     except OSError:
         return ""
 
 
-def suite_toml(fraction):
+def suite_toml(suite, fraction):
     entries = []
-    for binary, lists in SUITE:
+    for binary, lists in suite:
         caselists = ", ".join(f'"{DEQP_DIR}/mustpass/{c}"' for c in lists)
         args = ", ".join(f'"{a}"' for a in SURFACE)
         entries.append(
@@ -89,28 +99,30 @@ def main():
     deb = debs[-1]
 
     version = ssh(args.box, "dpkg-query -W -f '${Version}' libgbm1").split("-")[0]
-    print(f"Mesa {version}, baseline panfrost-{args.gpu}, every {args.fraction}th case")
+    print(f"Mesa {version}, baseline {args.gpu}, every {args.fraction}th case")
     want = deb.name.split("_")[1]
     if ssh(args.box, "dpkg-query -W -f '${Version}' deqp 2>/dev/null", check=False) != want:
-        subprocess.run(["scp", "-q", str(deb), f"{args.box}:/var/tmp/"], check=True)
-        print(
-            ssh(
-                args.box,
-                f"apt-get install -y -qq --allow-downgrades /var/tmp/{deb.name} >/dev/null && rm /var/tmp/{deb.name} "
-                f"&& echo installed {want}",
-            )
+        subprocess.run(["scp", "-q", *SSH, str(deb), f"{args.box}:/var/tmp/"], check=True)
+        installed = ssh(
+            args.box,
+            f"apt-get install -y -qq --allow-downgrades /var/tmp/{deb.name} 2>&1 | tail -3",
+            check=False,
         )
+        if ssh(args.box, "dpkg-query -W -f '${Version}' deqp 2>/dev/null", check=False) != want:
+            print(f"FAIL deqp: the package did not install\n{installed}")
+            return 1
+        print(f"installed {want}")
     ssh(args.box, f"rm -rf {BOX_DIR} && mkdir -p {BOX_DIR}")
     for kind in ("fails", "flakes", "skips"):
         subprocess.run(
-            ["ssh", "-o", "BatchMode=yes", args.box, f"cat > {BOX_DIR}/{kind}.txt"],
+            ["ssh", *SSH, args.box, f"cat > {BOX_DIR}/{kind}.txt"],
             input=expectations(version, args.gpu, kind),
             text=True,
             check=True,
         )
     subprocess.run(
-        ["ssh", "-o", "BatchMode=yes", args.box, f"cat > {BOX_DIR}/suite.toml"],
-        input=suite_toml(args.fraction),
+        ["ssh", *SSH, args.box, f"cat > {BOX_DIR}/suite.toml"],
+        input=suite_toml(GLES2 if args.gpu == "lima" else SUITE, args.fraction),
         text=True,
         check=True,
     )
@@ -118,7 +130,8 @@ def main():
     # Mesa's default EGL platform is X11; the surfaceless target needs it named, as Mesa CI does
     out = ssh(
         args.box,
-        f"cd {BOX_DIR} && EGL_PLATFORM=surfaceless {DEQP_DIR}/deqp-runner suite --suite suite.toml "
+        f"cd {BOX_DIR} && EGL_PLATFORM=surfaceless LD_LIBRARY_PATH={DEQP_DIR}/lib "
+        f"{DEQP_DIR}/deqp-runner suite --suite suite.toml "
         f"--output results --baseline fails.txt --flakes flakes.txt --skips skips.txt "
         f"--jobs 4 2>&1 | tail -25",
         check=False,

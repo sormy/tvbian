@@ -2,9 +2,10 @@
 
 ## Do
 
-1. **The full pass**: `system.md` to `input.md` again on the family's kernel. On its `-next`, the
-   unattended lines a kernel can change, in their own table: the image, the bootloader, the hardware
-   and the hands-on lines are marked once. A number that differs between kernels is a finding.
+1. **The full pass**: `system.md` to `input.md` again on the family's kernel, by `regression.md`'s
+   tools. On its `-next`, the unattended lines a kernel can change, in their own table: the image,
+   the bootloader, the hardware and the hands-on lines are marked once. A number that differs
+   between kernels is a finding.
 2. **What remains**, off the Test report: each ❌ and each gap scoped in Known gaps: the vendor's
    code, the closest mainline driver, any series in flight, an estimate.
 3. **A few days of daily use** by the human, every issue a worklog entry.

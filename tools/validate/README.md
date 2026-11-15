@@ -1,14 +1,18 @@
 # validate — a running box against the bring-up criteria
 
-One script a component, each run from the host or on the box as its header says.
+One script a component, each run from the host or on the box as its header says;
+`docs/bring-up/regression.md` runs them after a change.
 
-| Script        | Checks                                                                            |
-| ------------- | --------------------------------------------------------------------------------- |
-| `validate.sh` | boot, watchdog, Wi-Fi, decode, audio: one regression pass                         |
-| `video.py`    | the hardware video matrix: decode, scale, encode                                  |
-| `display.py`  | the display: planes, composition, pacing, colour stages, HDMI HDR out, unattended |
-| `gpu.py`      | GLES conformance: dEQP against Mesa CI's expectations, from the host              |
-| `screen.py`   | the GPU's frames at the display's mode, by writeback, against llvmpipe's          |
+| Script          | Checks                                                                    |
+| --------------- | ------------------------------------------------------------------------- |
+| `regression.py` | deploy the suite to the boxes, collect their results, write the PR report |
+| `onbox.py`      | on the box, alone: each kernel, each step of the profile, across reboots  |
+| `box.py`        | on the box, a sub-suite a bring-up phase: system to soak                  |
+| `reboots.sh`    | warm reboots from the host, each proven by its `boot_id`                  |
+| `video.py`      | the hardware video matrix: decode, scale, encode                          |
+| `display.py`    | the display: planes, composition, pacing, colour stages, HDMI, composite  |
+| `gpu.py`        | GLES conformance: dEQP against Mesa CI's expectations, from the host      |
+| `screen.py`     | the GPU's frames at the display's mode, by writeback, against llvmpipe's  |
 
 ## Build the box tools
 

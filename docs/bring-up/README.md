@@ -18,26 +18,28 @@ The effort goes where this board differs from them: its wiring, RAM, eMMC, ports
 and its heat: sisters by block are not sisters by heat, and a stick runs hotter than its box
 sibling.
 
-| File          | Covers                                                    |
-| ------------- | --------------------------------------------------------- |
-| `contact.md`  | photos, a way in, the SoC read off the box, the kind      |
-| `backup.md`   | the full eMMC image, the DRAM-init blobs, a way back      |
-| `identity.md` | the board ID, its components, `board.md`, the serial pins |
-| `dump.md`     | the stock firmware as files, the factory trees, the bases |
-| `trees.md`    | the board's kernel and U-Boot trees                       |
-| `boot.md`     | board data, RAM first, a first boot, install, changes     |
-| `system.md`   | boot, reboots, RAM, the watchdog, crash records, heat     |
-| `video.md`    | decode, encode, the picture path from decoder to screen   |
-| `display.md`  | HDMI, audio, CEC, DDC, the AV jack, the GPU               |
-| `power.md`    | sleep, wake, off, draw                                    |
-| `storage.md`  | eMMC, SD, install, the service mode on our U-Boot         |
-| `network.md`  | Ethernet, Wi-Fi, Bluetooth, addresses                     |
-| `input.md`    | USB, the remote, buttons, LEDs                            |
-| `chip.md`     | a driver for a chip that has none                         |
-| `family.md`   | what every board of a new family inherits                 |
-| `alias.md`    | another box on a listed board's image                     |
-| `import.md`   | a board from its stock image, no box in hand              |
-| `finish.md`   | the full pass, `-next`'s kernel lines, the pull request   |
+| File            | Covers                                                         |
+| --------------- | -------------------------------------------------------------- |
+| `contact.md`    | photos, a way in, the SoC read off the box, the kind           |
+| `backup.md`     | the full eMMC image, the DRAM-init blobs, a way back           |
+| `identity.md`   | the board ID, its components, `board.md`, the serial pins      |
+| `dump.md`       | the stock firmware as files, the factory trees, the bases      |
+| `trees.md`      | the board's kernel and U-Boot trees                            |
+| `conversion.md` | a vendor tree translated to mainline, and its validation       |
+| `boot.md`       | board data, RAM first, a first boot, install, changes          |
+| `system.md`     | boot, reboots, RAM, the watchdog, crash records, heat          |
+| `video.md`      | decode, encode, the picture path from decoder to screen        |
+| `display.md`    | HDMI, audio, CEC, DDC, the AV jack, the GPU                    |
+| `power.md`      | sleep, wake, off, draw                                         |
+| `storage.md`    | eMMC, SD, install, the service mode on our U-Boot              |
+| `network.md`    | Ethernet, Wi-Fi, Bluetooth, addresses                          |
+| `input.md`      | USB, the remote, buttons, LEDs                                 |
+| `chip.md`       | a driver for a chip that has none                              |
+| `family.md`     | what every board of a new family inherits                      |
+| `alias.md`      | another box on a listed board's image                          |
+| `import.md`     | a board from its stock image, no box in hand                   |
+| `regression.md` | a change re-run against the board's last results, both kernels |
+| `finish.md`     | the full pass, `-next`'s kernel lines, the pull request        |
 
 ## The run
 

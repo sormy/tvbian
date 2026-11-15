@@ -7,7 +7,7 @@
 2. **HDR and frame rate**: every transition a player makes at one mode, SDR to HDR, film to film,
    back, proven by the InfoFrame read back from the HDMI controller; the refresh following the
    content's 23.976, 24, 25 or 50 fps.
-3. **Audio**: every sound card times 3 s in 3 s (`tools/validate/validate.sh`).
+3. **Audio**: every sound card times 3 s in 3 s (`tools/validate/box.py --suite audio`).
 4. **The AV jack and S/PDIF** through the kit's adapters: the composite picture on an HDMI screen,
    the jack's audio in headphones. First find the jack's ground: the RCA that beeps to a USB shell,
    box off. A cable grounded elsewhere gives no picture; the CTIA-to-OMTP adapter fixes it. Video

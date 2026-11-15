@@ -27,6 +27,9 @@
       fringe on the right, then that a 1080p display still comes up clean.
 
 - [ ] **The R69's Wi-Fi comes back after every warm reboot.**
+- [ ] **The M2 Plus's `gpu-bus` binds.** Its factory tree enables the `rockchip,rk3528-bus`
+      node, the 3518s' and the R69's disable it; nothing binds it on either kernel, though
+      `ARM_ROCKCHIP_BUS_DEVFREQ` is built in. Bind it, or disable it as the siblings do.
 
 - [ ] **RK3528: name the DDR parameters a vendor tunes.** The H96 Max 3518's factory DDR init is
       rkbin's `rk3528_ddr_1056MHz_4BIT_PCB_v1.11.bin` with three bytes changed in its parameter
