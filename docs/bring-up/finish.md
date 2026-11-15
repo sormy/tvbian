@@ -22,8 +22,14 @@
 
 ## Bites
 
-- **One board, one PR**: tree, data, docs and patches, however large. A chip may follow in its own
-  PR, the board landing with it ❌.
+- **One PR, one verified change, shippable as it is**: run on the hardware it changes, and breaking
+  no other board. What it reaches beyond its board, a kernel patch, a family's U-Boot, an extra or a
+  driver, is run there too: `short` on one box of every family it reaches at least. A board's
+  tree, data, docs and patches land together, however large. A family or a chip's driver may come
+  in its own PR, but it is accepted only with the board PR that tests it, each linking the other:
+  neither merges alone. A board may land with a chip ❌, its driver following on that board. A
+  family's tools may land alone, once a backup and a restore have been run with them and the
+  procedure is written down.
 - **An AI reviews it** for structure and content, not form: a factory-derived tree is not rewritten
   to look hand-made.
 - **Kernel patches stay focused**, one fix each in `patches/<upstream>/` with its status: every
