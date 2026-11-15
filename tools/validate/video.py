@@ -265,6 +265,33 @@ ENGINES = {
         "encoders": {"h264": "h264_v4l2m2m", "hevc": "hevc_v4l2m2m"},
     },
 }
+# VA-API through tvb-va-driver, installed: libva finds it by the render node's DRM driver
+RENDER_NODE = "/dev/dri/renderD128"
+VAAPI_DEVICE = ["-hwaccel", "vaapi", "-hwaccel_device", RENDER_NODE]
+ENGINES["vaapi"] = {
+    # FFmpeg has no VA-API hwaccel for MPEG-1: it decodes in software
+    "decode": lambda c: (
+        None if c == "mpeg1" else VAAPI_DEVICE + ["-hwaccel_output_format", "vaapi"]
+    ),
+    "download": "hwdownload,format=nv12,",
+    # a 10-bit picture's surface is P010, or NV12 where the engine narrows: checked by frames
+    "count_only": TEN_BIT,
+    "fallback": r"Failed setup for format vaapi|hwaccel initialisation returned error"
+    r"|Failed to create decode context|Failed to end picture decode",
+    "irq": r"cedrus|vdpu|rkvdec|jpegd|vdec|esparser|venc|hcodec|rkvenc",
+    "encoders": {"h264": "h264_vaapi", "hevc": "hevc_vaapi", "mjpeg": "mjpeg_vaapi"},
+    # VA encodes surfaces, uploaded; without packed headers a stream has no extradata to mux
+    "encode_device": ["-init_hw_device", f"vaapi=va:{RENDER_NODE}", "-filter_hw_device", "va"],
+    "encode_input": ["-vf", "format=nv12,hwupload"],
+    "encode_raw": True,
+    "encode_refused": r"larger than|resolution not supported|No usable encoding profile",
+    # every VA engine takes a fixed QP, Cedrus's alone; mjpeg_vaapi reads -global_quality
+    "encode_quality": {
+        "h264": ["-qp", "20"],
+        "hevc": ["-qp", "20"],
+        "mjpeg": ["-global_quality", "90"],
+    },
+}
 # the CPU's fastest encoder per codec: a hardware encoder slower than it has no use
 CPU_ENCODERS = {
     "h264": ["-c:v", "libx264", "-preset", "ultrafast"],
@@ -679,15 +706,18 @@ def clip_size(clip):
 
 
 def encode_case(ff, engine, codec, encoder, size, time_cpu):
-    out = f"{BOX_DIR}/enc.mkv"
     eng = ENGINES[engine]
+    out = f"{BOX_DIR}/enc.{codec}" if eng.get("encode_raw") else f"{BOX_DIR}/enc.mkv"
     before, irqs = dmesg_lines(), irq_count(eng["irq"])
     src = ["-f", "lavfi", "-i", f"testsrc2=size={size}:rate=30", "-frames:v", str(FRAMES)]
     quality = ["-q:v", "3"] if codec == "mjpeg" else ["-b:v", "40M"]
+    quality = eng.get("encode_quality", {}).get(codec, quality)
     rc, log, secs = sh(
         [ff, "-hide_banner", "-nostdin", "-v", "error", "-y"]
+        + eng.get("encode_device", [])
         + src
-        + ["-pix_fmt", "nv12", "-c:v", encoder]
+        + eng.get("encode_input", ["-pix_fmt", "nv12"])
+        + ["-c:v", encoder]
         + quality
         + [out]
     )
@@ -698,7 +728,7 @@ def encode_case(ff, engine, codec, encoder, size, time_cpu):
         verdict = (
             "unoffered"
             if "Unknown encoder" in log
-            else "refused" if "larger than" in log else "broken"
+            else "refused" if re.search(eng.get("encode_refused", "larger than"), log) else "broken"
         )
         return {
             "verdict": verdict,

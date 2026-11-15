@@ -48,6 +48,8 @@ do the tools they need: `./build.sh tool <name>` builds one from `tools/<name>/`
 ./build.sh extra mesa                   # host: Debian's mesa, rebuilt with patches/mesa/
 ./build.sh extra ffmpeg9                # host: ffmpeg9, FFmpeg 9 with patches/ffmpeg/, beside Debian's
 ./build.sh extra deqp                   # host: deqp, Mesa CI's GLES conformance tests, for gpu.py
+./build.sh va-driver rk35xx             # host: tvb-va-driver-rk35xx, from va-driver/rk35xx.conf
+./build.sh va-driver check              # host: every family's driver, then its tests on the host
 ./build.sh debs                         # host: all of the above, every kernel and board
 ./build.sh image h96max-m20             # host: build/out/images/, from build/out/debs/
 ./build.sh test                         # host: tests/, in the build container
@@ -117,12 +119,12 @@ a Mac's alike; `verify.py` also runs alone, on the host.
 `.github/workflows/release.yml` splits the same steps into jobs, on `ubuntu-24.04-arm`: native
 arm64, GitHub's hosted runners, free for a public repo.
 
-| Job     | Count        | Does                                                                  |
-| ------- | ------------ | --------------------------------------------------------------------- |
-| plan    | 1            | each group's version, `new` or `published`, as an artifact            |
-| kernel  | one a kernel | that kernel's debs, unless already published; as artifacts            |
-| test    | 1            | `tests/`, on the runner; the release waits on it                      |
-| release | 1            | firmware, boards, base, keyring, extras, guard, images, repo; publish |
+| Job     | Count        | Does                                                                              |
+| ------- | ------------ | --------------------------------------------------------------------------------- |
+| plan    | 1            | each group's version, `new` or `published`, as an artifact                        |
+| kernel  | one a kernel | that kernel's debs, unless already published; as artifacts                        |
+| test    | 1            | `tests/`, on the runner; the release waits on it                                  |
+| release | 1            | firmware, boards, base, keyring, extras, VA drivers, guard, images, repo; publish |
 
 | Trigger                   | Builds                | Publishes |
 | ------------------------- | --------------------- | --------- |

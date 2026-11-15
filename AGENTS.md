@@ -38,6 +38,7 @@ our boxes. A board's key names its model (`h96max-m20`), never its SoC.
 | `uboot/`            | each U-Boot a board package ships, and each FEL loader: pin, defconfig, the step building it   |
 | `package/`          | the steps building `tvb-<board>`, `tvb-firmware-<chip>`, `tvb-base` and `tvb-archive-keyring`  |
 | `extras/<package>/` | a Debian package we shadow until Debian ships the fix, or an upstream one beside Debian's      |
+| `va-driver/`        | our VA-API driver: its source, a conf per family, the step building `tvb-va-driver-<family>`   |
 | `image/`            | the image step, its package list, and the image's own state: locale, root's first SSH login    |
 | `release/`          | the release plan, the signed `apt` repo, and the upload to GitHub                              |
 | `site/`             | the public page and the script that builds it                                                  |
@@ -80,6 +81,8 @@ another, so nothing rots when one is rewritten.
 | `docs/first-login.md`                    | a new box's user, timezone, locale and Wi-Fi, by hand                |
 | `docs/mpp.md`                            | reaching the video engines; the codec test commands                  |
 | `docs/video-support.md`                  | each SoC's hardware decode, encode and display formats, by codec     |
+| `va-driver/README.md`                    | the VA-API driver: what each engine offers, how VA maps onto it      |
+| `va-driver/worklog.md`                   | the VA-API driver's dated history, wrong turns included              |
 | `docs/emmc-layout.md`                    | the measured eMMC map: every replicated structure and its sectors    |
 | `docs/build.md`                          | `./build.sh`: hosts, steps, outputs, and making a release            |
 | `site/README.md`                         | the public page: one HTML file from the repo, deployed on a release  |
@@ -156,8 +159,8 @@ cannot be backed, say so rather than rounding up.
 
 ## Documentation
 
-- **Written for people first, AI second.** A reader who knows the field but not this repo
-  follows every doc; an agent reads the same words, never a version written only for it.
+- **Written for people first, AI second.** A reader who knows the field but not this repo follows
+  every doc; an agent reads the same words, never a version written only for it.
 - **Docs are updated in the same pass as the change.** Work isn't done when the box works; it's done
   when the docs say what the box does. A doc that contradicts the repo is worse than no doc.
 - **Docs stand alone: none names another**, by link or in prose, nor explains itself through another

@@ -2,8 +2,8 @@
 
 Which Debian 13 programs decode video in hardware on a TVBian box, and how they reach the chip.
 `video-support.md` lists what each chip decodes; this page lists which programs get to use it. Read
-from Debian's packaging and the upstream source Debian builds (2026-11-13); only `ffmpeg9` is
-measured on a box so far.
+from Debian's packaging and the upstream source Debian builds (2026-11-13); `ffmpeg9` and the VA
+driver are measured on a box.
 
 A program reaches the video hardware one of three ways:
 
@@ -19,6 +19,52 @@ V4L2 decoders copy every frame to memory.
 
 The chip columns are Debian as installed, without the VA driver; the last column, with it. ✅
 measured · 🟡 the path exists, not tried · 🟠 works with known faults · ❓ unknown · ➖ no path.
+
+## What the VA driver decodes and encodes
+
+Measured 2026-11-15 with `va-driver/tests/vaapi_test.py` on `tanix-tx1-v2` and `h96max-h313` (H313),
+`r69-1` (RK3518) and `h96max-m20` (S905L3, `meson-codecs` `0033`–`0036`). Each limit is what the
+engine reports, not a table: the largest picture offered.
+
+| Decode            | H313                | RK35xx              | S905L3              |
+| ----------------- | ------------------- | ------------------- | ------------------- |
+| H.264 8-bit       | ✅ exact, 4096×2304 | ✅ exact, 8192×4320 | ✅ exact, 3840×2160 |
+| H.264 10-bit      | ➖                  | ➖ not offered      | ➖                  |
+| HEVC Main         | ✅ exact, 8192×4320 | ✅ exact, 8192×4320 | ✅ exact, 4096×2304 |
+| HEVC Main 10      | ✅ exact, 6144×3456 | ✅ 56 dB, 8192×4320 | ✅ 61 dB, 4096×2304 |
+| VP9 profile 0     | ✅ exact, 8192×4320 | ✅ exact, 8192×4320 | ✅ exact, 3840×2160 |
+| VP9 profile 2     | ✅ exact, 6144×3456 | ✅ 61 dB, 8192×4320 | ✅ 65 dB, 3840×2160 |
+| VP8               | ✅ exact, 4096×2304 | ✅ exact, 1920×1088 | ➖                  |
+| MPEG-2            | ✅ 74 dB, 4096×2304 | ✅ 73 dB, 1920×1088 | 🟠 69 dB, 1920×1088 |
+| MPEG-4 SP, ASP    | ✅ 68 dB, 4080×2304 | ✅ 68 dB, 1920×1088 | 🟠 53 dB, 1920×1088 |
+| H.263             | ✅ 71 dB, 4080×2304 | ✅ 71 dB, 1920×1088 | ➖                  |
+| VC-1 Advanced     | ✅ exact, 4096×2304 | ➖                  | 🟠 1920×1088        |
+| VC-1 Simple, Main | ❓ Simple; ➖ Main  | ➖                  | ➖                  |
+| JPEG              | ✅ 77 dB, 6000×6000 | ➖                  | ✅ 71 dB, 1920×1088 |
+
+| Encode | H313                     | RK35xx                   | S905L3              |
+| ------ | ------------------------ | ------------------------ | ------------------- |
+| H.264  | ✅ 52 dB, CQP, 4096×4096 | ✅ 53 dB, CBR, 1920×1088 | ✅ 49 dB, 1920×1088 |
+| HEVC   | ➖                       | ✅ 48 dB, 1920×1088      | ✅ 48 dB, 4096×2304 |
+| JPEG   | ✅ 43 dB, 4096×4096      | ➖                       | ➖                  |
+
+"exact" is every frame identical to FFmpeg's software decode; a figure in dB is the worst clip's
+luma PSNR against it, from the engine's IDCT or a 10-bit picture narrowed to 8 bits. Encode is
+decoded back.
+
+- **Limits come from the engine:** V4L2's frame sizes, or the size `TRY_FMT` clamps to, and its
+  profile menus; on the H313 a 10-bit size is probed with the stream header Cedrus checks. MPP
+  reports its SoC's decoders and encoders as 8K, 4K or 1080p classes.
+- **RK35xx 10-bit** comes out of MPP as NV15, unpacked to P010 or narrowed to NV12 by the CPU.
+- **RK35xx interlaced MPEG-2 and MPEG-4, H313 interlaced MPEG-4** are refused, as through `ffmpeg9`.
+- **S905L3 10-bit** is written by the decoder as 8 bits, widened into the client's P010.
+- **S905L3 MPEG-1/2/4 and VC-1** hold their last pictures until more stream comes. A player that
+  feeds ahead, as mpv, Kodi and browsers do, gets every picture. A client that waits for each before
+  sending the next, as FFmpeg's command line, gets some refused, never wrong: `VAAPI_HELD_PICTURES`,
+  or `held-pictures` in `/etc/tvb-va-driver.conf`, sets `refuse` (the default), `off` or `decoded`.
+  Interlaced MPEG-4 comes out at 44 dB, as through `ffmpeg9`.
+- **S905L3 H.264 encode** writes Main streams; it is offered as High too, which FFmpeg asks first.
+- **H.264 10-bit** has no VA profile FFmpeg 7.1 uses: RK35xx decodes it through `ffmpeg9` only.
 
 ## Players
 
@@ -68,7 +114,7 @@ measured · 🟡 the path exists, not tried · 🟠 works with known faults · �
 | Program                    | Asks for           | H313 | RK35xx | S905L3 | With the VA driver |
 | -------------------------- | ------------------ | ---- | ------ | ------ | ------------------ |
 | [ffmpeg 7.1][ffmpeg]       | VA-API, V4L2       | ➖   | ➖     | 🟠     | every chip         |
-| `ffmpeg9`, TVBian's        | V4L2, MPP          | ✅   | ✅     | ✅     | not needed         |
+| `ffmpeg9`, TVBian's        | V4L2, MPP, VA-API  | ✅   | ✅     | ✅     | not needed         |
 | GStreamer pipelines        | V4L2, VA-API       | 🟡   | ➖     | 🟡     | adds RK35xx        |
 | [Kdenlive 24.12][kdenlive] | VA-API             | ➖   | ➖     | ➖     | every chip         |
 | [Shotcut 25.03][shotcut]   | VA-API             | ➖   | ➖     | ➖     | every chip         |

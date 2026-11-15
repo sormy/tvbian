@@ -1,3 +1,3 @@
 {
-  "extraPaths": ["release", "site", "tools/dtcx", "tools/validate"]
+  "extraPaths": ["release", "site", "tools/dtcx", "tools/validate", "va-driver/tests"]
 }

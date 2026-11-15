@@ -46,10 +46,13 @@ python3 tools/validate/video.py compare <before>.json <after>.json
 ```
 
 `--engine` is `sunxi` (Cedrus through `v4l2request`), `rkmpp` (Rockchip's MPP) or `meson`
-(`meson_vdec` through `v4l2m2m`); `--ffmpeg` the FFmpeg to run, `ffmpeg9` by default. `--only` takes
-a regex over `<codec>-<size>`, `--suite` any of `decode,scale,encode,afbc,deinterlace`. `--skip`
-takes a regex over `<suite>:<codec>-<size>` for the cases known to hang a box its watchdog does not
-reset: recorded as skipped, never run, so the pass finishes.
+(`meson_vdec` through `v4l2m2m`); `--ffmpeg` the FFmpeg to run, `ffmpeg9` by default. `vaapi` runs
+the same matrix through the box's `tvb-va-driver`, with `ffmpeg9` or with Debian's FFmpeg
+(`--ffmpeg ffmpeg`), `--suite decode,encode`: the package installed, and `vainfo` among its clients.
+`--only` takes a regex over `<codec>-<size>`, `--suite` any of
+`decode,scale,encode,afbc,deinterlace`. `--skip` takes a regex over `<suite>:<codec>-<size>` for the
+cases known to hang a box its watchdog does not reset: recorded as skipped, never run, so the pass
+finishes.
 
 `report` gives the largest passing size per codec, its frame rate, the largest that runs at 24 fps,
 and what failed past it; `matrix` the whole grid, the table a board's `board.md` publishes with its

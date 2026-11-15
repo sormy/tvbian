@@ -23,6 +23,7 @@ on:
       - kernel/**
       - modules/**
       - extras/**
+      - va-driver/**
       - uboot/**
       - patches/**
       - package/**
@@ -42,6 +43,7 @@ on:
       - kernel/**
       - modules/**
       - extras/**
+      - va-driver/**
       - uboot/**
       - patches/**
       - package/**

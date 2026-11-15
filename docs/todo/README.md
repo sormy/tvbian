@@ -185,7 +185,7 @@ below.
 | File                            | Open question                               |
 | ------------------------------- | ------------------------------------------- |
 | `docs/todo/video.md`            | hardware video: what is left, every SoC     |
-| `docs/todo/hwaccel.md`          | hardware video in Debian's own programs     |
+| `docs/todo/va-driver.md`        | `tvb-va-driver`: video in Debian's programs |
 | `docs/todo/usages.md`           | server, desk and TV on one image            |
 | `docs/todo/media-stick.md`      | the universal media stick                   |
 | `docs/todo/kodi.md`             | Kodi 22 on our FFmpeg, built on trixie      |
