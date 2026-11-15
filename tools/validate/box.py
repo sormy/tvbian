@@ -587,7 +587,7 @@ def storage() -> Iterator[Line]:
         volts = fields.get("signal voltage", "").strip()
         yield f"mmc.{Path(ios).parent.name}", f"{timing} {volts}"
     errors = [l for l in dmesg() if re.search(r"mmc\d.*(error|timeout|fail)", l, re.I)]
-    yield "mmc.errors", str(len(errors))
+    yield "mmc.errors", f"{len(errors)}: {'; '.join(errors[:3])}" if errors else "0"
     disk = boot_disk()
     kind = read(f"/sys/block/{Path(disk).name}/device/type")
     yield "root.device", f"{disk} {kind or '?'}"
