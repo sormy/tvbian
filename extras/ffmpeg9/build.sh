@@ -10,8 +10,8 @@ FFMPEG_URL=https://ffmpeg.org/releases/ffmpeg-$VERSION.tar.xz
 MPP_REPO=https://github.com/rockchip-linux/mpp.git
 MPP_TAG=1.1.0
 INSTALL_DIR=/usr/lib/ffmpeg9
-BUILD_DEPENDS="cmake pkg-config libdrm-dev libudev-dev"
-RUN_DEPENDS="libdrm2, libudev1"
+BUILD_DEPENDS="cmake pkg-config libdrm-dev libudev-dev libva-dev"
+RUN_DEPENDS="libdrm2, libudev1, libva2, libva-drm2"
 
 WORK=/work/ffmpeg9
 MPP_SRC=$WORK/mpp
@@ -46,6 +46,7 @@ build_ffmpeg() {
   PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig" ./configure --prefix="$PREFIX" \
     --disable-autodetect --disable-doc --disable-debug \
     --enable-libdrm --enable-libudev --enable-v4l2-request --enable-v4l2-m2m --enable-rkmpp \
+    --enable-vaapi \
     --enable-version3 --enable-static --disable-shared \
     --extra-ldflags="-Wl,-rpath-link,$PREFIX/lib -Wl,-rpath,$INSTALL_DIR/lib"
   make -j "$TVB_BUILD_CPUS" ffmpeg ffprobe

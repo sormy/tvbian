@@ -1,0 +1,218 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] fftools/ffmpeg_dec: add a -hwaccel_output_delay option
+
+A hardware decoder may hand a picture out only once more of the stream
+has come: Amlogic's MPEG-2, MPEG-4 and VC-1 microcode holds its last
+pictures until the next start codes arrive. ffmpeg passes each decoded
+frame on at once, and hwdownload then waits on a picture the decoder
+still holds, while the decoder waits for packets ffmpeg has not sent.
+Through VA-API the driver can only end the stream to free it, which
+costs the next pictures their references.
+
+-hwaccel_output_delay N holds N decoded frames back before passing them
+on, so the decoder has N more packets by the time a frame is downloaded,
+as players that queue frames already do. The frames held go out at the
+decoder's end of stream, a flush included, and the decoder's pool of
+hardware frames grows by N.
+---
+diff --git a/doc/ffmpeg.texi b/doc/ffmpeg.texi
+index 8825031..7e906af 100644
+--- a/doc/ffmpeg.texi
++++ b/doc/ffmpeg.texi
+@@ -2063,6 +2063,13 @@ by name, or it can create a new device as if
+ @samp{-init_hw_device} @var{type}:@var{hwaccel_device}
+ were called immediately before.
+ 
++@item -hwaccel_output_delay[:@var{stream_specifier}] @var{frames} (@emph{input,per-stream})
++Hold this many decoded frames back before passing them on. Some hardware
++decoders hand a picture out only once more of the stream has come; a filter
++that downloads each frame as it arrives then waits on a picture the decoder
++still holds. Holding frames back lets the decoder have that stream first.
++The decoder's pool of hardware frames grows by as many. Default 0.
++
+ @item -hwaccels
+ List all hardware acceleration components enabled in this build of ffmpeg.
+ Actual runtime availability depends on the hardware and its suitable driver
+diff --git a/fftools/ffmpeg.h b/fftools/ffmpeg.h
+index c44aaf6..6e25929 100644
+--- a/fftools/ffmpeg.h
++++ b/fftools/ffmpeg.h
+@@ -164,6 +164,7 @@ typedef struct OptionsContext {
+     SpecifierOptList hwaccels;
+     SpecifierOptList hwaccel_devices;
+     SpecifierOptList hwaccel_output_formats;
++    SpecifierOptList hwaccel_output_delays;
+     SpecifierOptList autorotate;
+     SpecifierOptList apply_cropping;
+ 
+@@ -436,6 +437,8 @@ typedef struct DecoderOpts {
+     enum AVHWDeviceType         hwaccel_device_type;
+     char                       *hwaccel_device;
+     enum AVPixelFormat          hwaccel_output_format;
++    // decoded frames held back before they are passed on
++    int                         hwaccel_output_delay;
+ 
+     AVRational                  time_base;
+ 
+diff --git a/fftools/ffmpeg_dec.c b/fftools/ffmpeg_dec.c
+index 1b37d39..87dfe80 100644
+--- a/fftools/ffmpeg_dec.c
++++ b/fftools/ffmpeg_dec.c
+@@ -22,6 +22,7 @@
+ #include "libavutil/avstring.h"
+ #include "libavutil/dict.h"
+ #include "libavutil/error.h"
++#include "libavutil/fifo.h"
+ #include "libavutil/log.h"
+ #include "libavutil/mem.h"
+ #include "libavutil/opt.h"
+@@ -59,6 +60,10 @@ typedef struct DecoderPriv {
+     enum AVHWDeviceType hwaccel_device_type;
+     enum AVPixelFormat  hwaccel_output_format;
+ 
++    // decoded frames held back before they are passed on, and the frames held
++    int                 output_delay;
++    AVFifo             *delayed;
++
+     // pts/estimated duration of the last decoded frame
+     // * in decoder timebase for video,
+     // * in last_frame_tb (may change during decoding) for audio
+@@ -143,6 +148,13 @@ void dec_free(Decoder **pdec)
+     av_freep(&dp->views_requested);
+     av_freep(&dp->view_map);
+ 
++    if (dp->delayed) {
++        AVFrame *held;
++        while (av_fifo_read(dp->delayed, &held, 1) >= 0)
++            av_frame_free(&held);
++        av_fifo_freep2(&dp->delayed);
++    }
++
+     av_freep(pdec);
+ }
+ 
+@@ -689,6 +701,50 @@ static int transcode_subtitles(DecoderPriv *dp, const AVPacket *pkt,
+     return process_subtitle(dp, frame);
+ }
+ 
++static int send_delayed(DecoderPriv *dp)
++{
++    AVFrame *oldest;
++    int ret;
++
++    av_fifo_read(dp->delayed, &oldest, 1);
++    ret = sch_dec_send(dp->sch, dp->sch_idx, 0, oldest);
++    av_frame_free(&oldest);
++    return ret == AVERROR_EOF ? AVERROR_EXIT : ret;
++}
++
++static int drain_delayed(DecoderPriv *dp)
++{
++    while (dp->delayed && av_fifo_can_read(dp->delayed)) {
++        int ret = send_delayed(dp);
++        if (ret < 0)
++            return ret;
++    }
++    return 0;
++}
++
++/* A hardware decoder may hand a picture out only once more of the stream has
++ * come; holding frames back lets it have that before a frame is downloaded. */
++static int delay_frame(DecoderPriv *dp, AVFrame *frame)
++{
++    AVFrame *held = av_frame_alloc();
++    int ret;
++
++    if (!held)
++        return AVERROR(ENOMEM);
++    av_frame_move_ref(held, frame);
++    ret = av_fifo_write(dp->delayed, &held, 1);
++    if (ret < 0) {
++        av_frame_free(&held);
++        return ret;
++    }
++    while (av_fifo_can_read(dp->delayed) > dp->output_delay) {
++        ret = send_delayed(dp);
++        if (ret < 0)
++            return ret;
++    }
++    return 0;
++}
++
+ static int packet_decode(DecoderPriv *dp, AVPacket *pkt, AVFrame *frame)
+ {
+     AVCodecContext *dec = dp->dec_ctx;
+@@ -753,7 +809,8 @@ static int packet_decode(DecoderPriv *dp, AVPacket *pkt, AVFrame *frame)
+             av_assert0(pkt); // should never happen during flushing
+             return 0;
+         } else if (ret == AVERROR_EOF) {
+-            return ret;
++            int err = drain_delayed(dp);
++            return err < 0 ? err : ret;
+         } else if (ret < 0) {
+             av_log(dp, AV_LOG_ERROR, "Decoding error: %s\n", av_err2str(ret));
+             dp->dec.decode_errors++;
+@@ -800,6 +857,13 @@ static int packet_decode(DecoderPriv *dp, AVPacket *pkt, AVFrame *frame)
+ 
+         dp->dec.frames_decoded++;
+ 
++        if (dp->delayed && outputs_mask == 1) {
++            ret = delay_frame(dp, frame);
++            if (ret < 0)
++                return ret;
++            continue;
++        }
++
+         for (int i = 0; i < stdc_count_ones(outputs_mask); i++) {
+             AVFrame *to_send = frame;
+             int pos;
+@@ -1532,6 +1596,13 @@ static int dec_open(DecoderPriv *dp, AVDictionary **dec_opts,
+     dp->hwaccel_id              = o->hwaccel_id;
+     dp->hwaccel_device_type     = o->hwaccel_device_type;
+     dp->hwaccel_output_format   = o->hwaccel_output_format;
++    dp->output_delay            = FFMAX(o->hwaccel_output_delay, 0);
++    if (dp->output_delay) {
++        dp->delayed = av_fifo_alloc2(dp->output_delay + 1, sizeof(AVFrame *),
++                                     AV_FIFO_FLAG_AUTO_GROW);
++        if (!dp->delayed)
++            return AVERROR(ENOMEM);
++    }
+ 
+     snprintf(dp->log_name, sizeof(dp->log_name), "dec:%s", codec->name);
+ 
+@@ -1609,7 +1680,7 @@ static int dec_open(DecoderPriv *dp, AVDictionary **dec_opts,
+         // called after avcodec_open2() because the user-set value of
+         // extra_hw_frames becomes valid in there, and we need to add
+         // this on top of it.
+-        int extra_frames = DEFAULT_FRAME_THREAD_QUEUE_SIZE;
++        int extra_frames = DEFAULT_FRAME_THREAD_QUEUE_SIZE + dp->output_delay;
+         if (dp->dec_ctx->extra_hw_frames >= 0)
+             dp->dec_ctx->extra_hw_frames += extra_frames;
+         else
+diff --git a/fftools/ffmpeg_demux.c b/fftools/ffmpeg_demux.c
+index 9d870bf..4798d21 100644
+--- a/fftools/ffmpeg_demux.c
++++ b/fftools/ffmpeg_demux.c
+@@ -1507,6 +1507,8 @@ static int ist_add(const OptionsContext *o, Demuxer *d, AVStream *st, AVDictiona
+             return ret;
+ 
+         opt_match_per_stream_str(ist, &o->hwaccels, ic, st, &hwaccel);
++        opt_match_per_stream_int(ist, &o->hwaccel_output_delays, ic, st,
++                                 &ds->dec_opts.hwaccel_output_delay);
+         opt_match_per_stream_str(ist, &o->hwaccel_output_formats, ic, st,
+                                        &hwaccel_output_format);
+         if (!hwaccel_output_format && hwaccel && !strcmp(hwaccel, "cuvid")) {
+diff --git a/fftools/ffmpeg_opt.c b/fftools/ffmpeg_opt.c
+index 2c362c6..60e2ca1 100644
+--- a/fftools/ffmpeg_opt.c
++++ b/fftools/ffmpeg_opt.c
+@@ -1935,6 +1935,9 @@ const OptionDef options[] = {
+     { "hwaccel_output_format",      OPT_TYPE_STRING, OPT_VIDEO | OPT_EXPERT | OPT_PERSTREAM | OPT_INPUT,
+         { .off = OFFSET(hwaccel_output_formats) },
+         "select output format used with HW accelerated decoding", "format" },
++    { "hwaccel_output_delay",       OPT_TYPE_INT,    OPT_VIDEO | OPT_EXPERT | OPT_PERSTREAM | OPT_INPUT,
++        { .off = OFFSET(hwaccel_output_delays) },
++        "hold this many decoded frames back before passing them on", "frames" },
+     { "hwaccels",                   OPT_TYPE_FUNC,   OPT_EXIT | OPT_EXPERT,
+         { .func_arg = show_hwaccels },
+         "show available HW acceleration methods" },

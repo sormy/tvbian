@@ -3,7 +3,7 @@
 FFmpeg has no hwaccel for stateless V4L2 decoders such as Cedrus, and its `v4l2_m2m` wrappers for
 stateful ones such as the Amlogic decoder stumble on raw streams, resolution changes and draining;
 its `rkmpp` codecs for Rockchip's MPP lack 10-bit, scaling and AFBC. One set on FFmpeg 9.0.2, the
-newest release, carries all three; `0001`–`0043` apply in order with `patch -p1`. They ship as the
+newest release, carries all three; `0001`–`0044` apply in order with `patch -p1`. They ship as the
 `ffmpeg9` package, `ffmpeg9` and `ffprobe9` beside Debian's FFmpeg: `./build.sh extra ffmpeg9`.
 
 | Patch  | Adds                                                                | From      |
@@ -51,6 +51,7 @@ newest release, carries all three; `0001`–`0043` apply in order with `patch -p
 | `0041` | `vc1`: `AV_CODEC_FLAG_LOW_DELAY` honoured, as MPEG-1/2/4 honour it  | ours      |
 | `0042` | `v4l2request`: option `import_capture`, caller-owned dma-bufs       | ours      |
 | `0043` | `v4l2request` VC-1: slice start codes and repeated headers          | ours      |
+| `0044` | `-hwaccel_output_delay`: decoded frames held back before passed on  | ours      |
 
 `0001`, `0002` and `0014` are LibreELEC's `packages/multimedia/ffmpeg/patches/v4l2-request` and
 `vf-deinterlace-v4l2m2m` at LibreELEC.tv `96d9f0f`: Jonas Karlman's request-API series, posted to
@@ -82,6 +83,11 @@ bit depths as `0018`'s and `0025`'s do, and asks DRM PRIME frames in the decoder
 format, Amlogic FBC in its scatter layout: `DRM_FORMAT_YUV420_8BIT` or `_10BIT` with
 `DRM_FORMAT_MOD_AMLOGIC_FBC`, which only the display's video plane reads.
 
+`0044` is for VA-API, which `ffmpeg9` is built with too: a decoder that hands a picture out only
+once more of the stream has come, as the Amlogic microcode does for MPEG-1/2/4, VC-1 and H.264, gets
+that stream before a frame is downloaded with `-hwaccel_output_delay`: 1 for H.264 and HEVC, 4 for
+MPEG-4, measured on the S905L3. Players that queue frames need nothing.
+
 `v4l2request` registers its own device type, `AV_HWDEVICE_TYPE_V4L2REQUEST`; Kodi accepts it from
 Kodi 22 (`xbmc/xbmc` PR #25467).
 
@@ -94,7 +100,7 @@ checkout:
 apt-get install -y --no-install-recommends build-essential pkg-config curl xz-utils nasm libdrm-dev libudev-dev
 curl -fsSL https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz | tar -xJ
 for p in patches/ffmpeg/0*.patch; do patch -d ffmpeg-9.0.2 -p1 < $p; done
-cd ffmpeg-9.0.2 && ./configure --disable-autodetect --disable-doc --enable-libdrm --enable-libudev --enable-v4l2-request --enable-v4l2-m2m --enable-static --disable-shared
+cd ffmpeg-9.0.2 && ./configure --disable-autodetect --disable-doc --enable-libdrm --enable-libudev --enable-v4l2-request --enable-v4l2-m2m --enable-vaapi --enable-static --disable-shared
 make -j$(nproc) ffmpeg && ./ffmpeg -hide_banner -hwaccels
 ```
 
@@ -108,7 +114,7 @@ apt-get install -y --no-install-recommends cmake git
 git clone --depth 1 -b 1.1.0 https://github.com/rockchip-linux/mpp
 cmake -S mpp -B mpp/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local
 make -C mpp/build -j$(nproc) install && ldconfig
-cd ffmpeg-9.0.2 && PKG_CONFIG_PATH=/usr/local/lib/pkgconfig ./configure --disable-autodetect --disable-doc --enable-libdrm --enable-libudev --enable-v4l2-request --enable-v4l2-m2m --enable-rkmpp --enable-version3 --enable-static --disable-shared
+cd ffmpeg-9.0.2 && PKG_CONFIG_PATH=/usr/local/lib/pkgconfig ./configure --disable-autodetect --disable-doc --enable-libdrm --enable-libudev --enable-v4l2-request --enable-v4l2-m2m --enable-rkmpp --enable-vaapi --enable-version3 --enable-static --disable-shared
 ```
 
 ## Decode test
