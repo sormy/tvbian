@@ -1,4 +1,5 @@
 /backup/
+/stock/
 /build/
 /tmp/
 # rkdeveloptool's own log, written where it runs

@@ -1,3 +1,0 @@
-Module                  Size  Used by
-swt6621s_wifi         413696  0 
-skw_sdio_lite         114688  8 

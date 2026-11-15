@@ -10,7 +10,10 @@ shell on stock is at hand.
    chip: a dump carved from the image has no `dmesg` or `getprop`. Text files and small binaries fit
    serial, each `gzip | base64` on the console and its SHA-256 checked on the host, a 1 MiB file in
    about two minutes at 115200.
-2. **`stock/<board>/`**, what that shell gave; the rest comes from the factory image in `backup/`:
+2. **`stock/<board>/`, local, never in the repo**, what that shell gave; the rest comes from the
+   factory image in `backup/`. Both are evidence to reason from: fed to the AI, they land in the
+   repo only as what they showed, digested into `board.md`. Hundreds of boards' dumps would take the
+   repo past its host's free limits.
 
    | File                                                     | What                                  |
    | -------------------------------------------------------- | ------------------------------------- |
@@ -50,16 +53,19 @@ shell on stock is at hand.
   the base's source.
 - **Odd RAM sizes are known trouble** (1.5 GB, 3 GB): search the DRAM blob's values (`para1`,
   `para2`, `tpr13`) and the size against public reports before the first boot.
-- **Kept out of the repo**, `backup/` alone holding them: the per-unit window, DRM and attestation
-  keys, secure storage, Wi-Fi credentials, anything naming the owner, a traceable MAC.
+- **Kept out of the repo**, `backup/` and `stock/` holding them locally: every dump and log, and
+  above all the per-unit window, DRM and attestation keys, secure storage, Wi-Fi credentials,
+  anything naming the owner, a traceable MAC. The factory trees in `boards/<board>/` are the
+  exception: small, and the build needs them.
 
 ## Check
 
 - [ ] **D1** If stock Android gave a shell, its captured files (`dmesg`, `getprop` and the rest) are
-      in `stock/<board>/`
+      in the local `stock/<board>/`, and what they show is in `board.md`
 - [ ] **D2** For a new family or chip, its README's identity table is filled
 - [ ] **D3** The factory trees are carved from the image
 - [ ] **D4** Nothing kept out is in the repo
 - [ ] **D5** The `_SOURCE` bases are named, with versions and their source
 - [ ] **D6** The per-unit values are listed in `board.md`, each with how it is detected
+- [ ] **D7** No dump or log from `stock/` or `backup/` is in the repo
 - [ ] **D7** The vendor's codec matrix and stock's IR keymaps are recorded

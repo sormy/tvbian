@@ -1,7 +1,0 @@
-disconnected
-connected
-connected
---- connectors ---
-card0-HDMI-A-1 disconnected disabled
-card0-TV-1 connected enabled
-card0-Writeback-1 connected disabled

@@ -1,5 +1,0 @@
-mmc0::  work-green  work-red
----
-/sys/class/leds/mmc0:: trigger=
-/sys/class/leds/work-green trigger=
-/sys/class/leds/work-red trigger=

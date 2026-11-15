@@ -1,2 +1,0 @@
-soc_thermal
-48000

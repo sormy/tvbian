@@ -1,6 +1,0 @@
---- ir node ---
-#pwm-cells     interrupts  ir_key5  name           remote_pwm_id
-clock-names    ir_key1     ir_key6  phandle        remote_support_psci
-clocks         ir_key2     ir_key7  pinctrl-0      status
-compatible     ir_key3     ir_key8  pinctrl-names
-handle_cpu_id  ir_key4     ir_key9  reg
