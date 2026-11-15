@@ -156,6 +156,8 @@ cannot be backed, say so rather than rounding up.
 
 ## Documentation
 
+- **Written for people first, AI second.** A reader who knows the field but not this repo
+  follows every doc; an agent reads the same words, never a version written only for it.
 - **Docs are updated in the same pass as the change.** Work isn't done when the box works; it's done
   when the docs say what the box does. A doc that contradicts the repo is worse than no doc.
 - **Docs stand alone: none names another**, by link or in prose, nor explains itself through another
@@ -171,6 +173,8 @@ cannot be backed, say so rather than rounding up.
   project-wide item too big for a line. A page grows topics as `<scope>-<topic>.md`. Every page has
   its row in the index. An item says what we want in the end, in a line or two, not how. A finished
   item is removed: the worklog and the commit record it.
+- **A todo changed is a todo cross-checked**: the board's `board.md` and `dtb.md`, the READMEs that
+  name it, and `tools/validate/known.conf`, whose lines point at todos and go when the fix lands.
 - **An ask made in the middle of other work is a todo first**, to do or to consider, on its page.
   Then back to the work.
 - **Worklogs are written as work happens** — dated entries, wrong turns included. They are the raw
@@ -183,7 +187,7 @@ cannot be backed, say so rather than rounding up.
 - **No titles or file names from the owner's media** in docs, patches, commits or messages: a film
   is named by its format, "a 4K24 HEVC Main10 film"; tests use synthetic streams.
 - **Short and plain**: docs, instructions and comments, an agent's most of all. Leave out the
-  obvious; no flourish.
+  obvious; no flourish. What can be said in half the words is said in half.
 
 ## Markdown
 
