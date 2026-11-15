@@ -114,7 +114,7 @@ class OnboxTest(unittest.TestCase):
         )
 
     def test_a_panic_that_waited_on_a_power_cycle_skips_the_watchdog(self) -> None:
-        onbox.PSTORE = self.dir / "pstore"
+        onbox.RESULTS, onbox.PSTORE = self.dir / "results", self.dir / "pstore"
         for back_s, recovery, tail in [
             (40.0, 1, []),
             (900.0, 2, ["FAIL recovery.panic: no timely reset", "UNTESTED recovery.watchdog"]),
