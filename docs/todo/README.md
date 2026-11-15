@@ -9,12 +9,6 @@ below.
       Debian's, a third of Panfrost's on-screen speed at 2256×1504. Ours outranks Debian's by
       version once published.
 
-- [ ] **Every board: the tree's `model` as `Box (Silkscreen Date)`**, in `board.patch` and
-      `uboot.patch` alike, built from `BOARD_NAME`, `BOARD_PCB` and `BOARD_DATE`:
-      `H96 Max 3518 (3518_ZX_V01 2025-08-18)`, not `H96 Max 3518 3518_ZX_V01`; the date left out
-      where the PCB shows none. `BOARD_DATE` is set only on the Tanix TX1 V2.0 today; the 3518's
-      (`20250818`) and the 3518D's (`20250401`) are in their docs, the M20's and R69's to be read
-      off the PCB photos.
 
 - [ ] **Every board in one folder**: `docs/<board>/`, its `board.md`, worklog, `dtb.md` and photos,
       merged into `boards/<board>/` beside its `board.conf` and trees, an alias's too; every link,
