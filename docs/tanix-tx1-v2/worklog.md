@@ -1772,3 +1772,15 @@ gain, the unit's own DRAM init on the eMMC, is not worth it; the install keeps w
 
 - `retain-state-suspended` and `retain-state-shutdown` on both LED nodes, as the trees phase's graft
   asks: the sleep and shutdown hooks set the colour, and the LED core no longer turns it off after.
+
+## 2026-11-13 — the watchdog armed through sleep
+
+- `linux-sunxi/0092` reworked: the watchdog stays armed in s2idle, and the timer block's channel 1
+  (IRQ 49) pings it every 8 s, only while the system idles in the s2idle loop. The first version
+  stopped the watchdog across sleep, which left the H313 dead after a 100 s s2idle.
+- 6.18.63 and 7.3.4: `rtcwake -m freeze` for 120 s and 300 s kept the same `boot_id`, with 15 and 37
+  pings on `sunxi-wdt-sleep`; the watchdog was still `active` afterwards.
+- `tools/validate/sleep-stall`, a module that hangs 200 s in its noirq suspend: the box reset after
+  131 s (6.18.63) and 153 s (7.3.4), counted from the last journal entry to the next boot (systemd's
+  80 s, the hardware's 16 s, then the boot). The module's own message is not in pstore: the console
+  record kept only one line of the next boot.

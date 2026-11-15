@@ -34,7 +34,7 @@ for its API, and rewrites of top-level ones it takes in their place (`0103`, `02
 | `0089`        | `sun4i_tv`: the H616 TV encoder                        |
 | `0090`        | `tve0` kept on its assigned parent                     |
 | `0091`        | mixer: the H616 display engine at 696 MHz              |
-| `0092`        | `sunxi_wdt`: stopped across system sleep               |
+| `0092`        | `sunxi_wdt`: armed through system sleep, pinged        |
 | `0093`        | `sun50i-iommu`: page sizes to 1 MiB advertised         |
 | `0094`        | Cedrus: CAPTURE scaled by 2 or 4 via COMPOSE           |
 | `0095`        | bridge connector: a mode set on HDR change             |
@@ -162,9 +162,16 @@ setup, the bridge state hook and the atomic check again, so `-next` takes five r
 counts since 6.19 and 7.0, NTFS3 as 6.18 builds it, and LibreELEC's AC200 core built in, its PHY
 driver sharing the module name.
 
-`0092` is ours: the watchdog's timer runs on in s2idle, where nothing pings it, so any sleep past
-its 16 s hardware maximum reset the box. Stopped on suspend and restarted on resume, as
-`meson_gxbb_wdt` does. Not yet submitted.
+`0092` is ours. In s2idle nothing pings the watchdog, so any sleep longer than its 16 s hardware
+maximum reset the box. The first fix stopped the watchdog across sleep, but then a hang during sleep
+never recovered: the H313 did not come back from a 100 s s2idle. Now the watchdog stays armed, and
+the unused channel 1 of the timer block next to it pings it at half the timeout while the system
+idles in the s2idle loop (`platform_s2idle_ops`). A device that hangs in its own suspend or resume
+gets no ping, so the watchdog resets the box once systemd's 80 s run out. A tree without that timer
+falls back to stopping the watchdog across sleep. Tested on the Tanix with 6.18.63 and 7.3.4: 120 s
+and 300 s of s2idle on one boot (15 and 37 pings), and a 200 s hang in a noirq suspend
+(`tools/validate/sleep-stall`) reset after 131 s and 153 s. On the H313, 6.18.63, 120 s of s2idle
+kept its boot, but the same hang was not reset (`docs/todo/h96max-h313.md`). Not yet submitted.
 
 `0093` is ours: LibreELEC's `0409` writes runs of entries per call, but the domain still advertised
 4 KiB alone, so the core mapped buffers a page at a time. Importing a 4K P010 frame and dropping it

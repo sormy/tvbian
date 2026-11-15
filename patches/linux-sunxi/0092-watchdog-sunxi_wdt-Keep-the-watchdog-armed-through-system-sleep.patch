@@ -1,0 +1,241 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Fri, 13 Nov 2026 10:00:00 -0500
+Subject: [PATCH] watchdog: sunxi_wdt: Keep the watchdog armed through system
+ sleep
+
+The watchdog timer runs on in s2idle, where neither userspace nor the
+watchdog core's worker pings it, so a sleep longer than its 16 s
+hardware maximum resets the system. Stopping it across sleep fixes that,
+but then a hang while asleep is never recovered.
+
+Keep it armed instead, and ping it from channel 1 of the timer block
+beside it, which no driver uses, only while the system idles in s2idle:
+from the s2idle loop's entry, after every device's noirq suspend, to its
+exit, before any resumes, the channel interrupts at half the hardware
+timeout and a handler that does not suspend pings the watchdog without
+waking the system. A device hung in its own suspend or resume gets no
+such ping, and the watchdog core stops pinging once userspace's timeout
+runs out, so the system is reset.
+
+Where the device tree has no such timer, stop the watchdog across sleep,
+as a system with nothing to ping it must.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ drivers/watchdog/sunxi_wdt.c | 157 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 157 insertions(+)
+
+--- a/drivers/watchdog/sunxi_wdt.c
++++ b/drivers/watchdog/sunxi_wdt.c
+@@ -9,16 +9,21 @@
+  *      (c) Copyright 2010 Novell, Inc.
+  */
+ 
++#include <linux/bitfield.h>
+ #include <linux/clk.h>
+ #include <linux/delay.h>
+ #include <linux/err.h>
+ #include <linux/init.h>
++#include <linux/interrupt.h>
+ #include <linux/io.h>
+ #include <linux/kernel.h>
+ #include <linux/module.h>
+ #include <linux/moduleparam.h>
+ #include <linux/of.h>
++#include <linux/of_address.h>
++#include <linux/of_irq.h>
+ #include <linux/platform_device.h>
++#include <linux/suspend.h>
+ #include <linux/types.h>
+ #include <linux/watchdog.h>
+ 
+@@ -30,6 +35,21 @@
+ 
+ #define WDT_MODE_EN             (1 << 0)
+ 
++/*
++ * The timer block beside the watchdog: its channel 1, which no driver uses,
++ * pings the watchdog while the system idles in s2idle, so a hang still resets.
++ */
++#define TMR_IRQ_EN		0x00
++#define TMR_IRQ_STA		0x04
++#define TMR1_CTRL		0x20
++#define TMR1_INTV		0x24
++#define TMR1_IRQ		BIT(1)
++#define TMR1_CTRL_EN		BIT(0)
++#define TMR1_CTRL_RELOAD	BIT(1)
++#define TMR1_CTRL_OSC24M	FIELD_PREP(GENMASK(3, 2), 1)
++#define TMR1_CTRL_DIV128	FIELD_PREP(GENMASK(6, 4), 7)
++#define TMR1_HZ			(24000000 / 128)
++
+ #define DRV_NAME		"sunxi-wdt"
+ #define DRV_VERSION		"1.0"
+ 
+@@ -54,8 +74,13 @@
+ 	struct watchdog_device wdt_dev;
+ 	void __iomem *wdt_base;
+ 	const struct sunxi_wdt_reg *wdt_regs;
++	void __iomem *tmr_base;		/* the sleep pinger's timer, or NULL */
++	bool sleep_pinging;
+ };
+ 
++/* The watchdog the sleep pinger serves: s2idle's hooks take no argument. */
++static struct sunxi_wdt_dev *sunxi_wdt_sleeper;
++
+ /*
+  * wdt_timeout_map maps the watchdog timer interval value in seconds to
+  * the value of the register WDT_MODE at bits .wdt_timeout_shift ~ +3
+@@ -279,6 +304,135 @@
+ 	.wdt_key_val = 0x16aa0000,
+ };
+ 
++static irqreturn_t sunxi_wdt_sleep_ping(int irq, void *data)
++{
++	struct sunxi_wdt_dev *sunxi_wdt = data;
++
++	if (!(readl(sunxi_wdt->tmr_base + TMR_IRQ_STA) & TMR1_IRQ))
++		return IRQ_NONE;
++
++	writel(TMR1_IRQ, sunxi_wdt->tmr_base + TMR_IRQ_STA);
++	sunxi_wdt_ping(&sunxi_wdt->wdt_dev);
++
++	return IRQ_HANDLED;
++}
++
++static bool sunxi_wdt_armed(struct sunxi_wdt_dev *sunxi_wdt)
++{
++	return watchdog_active(&sunxi_wdt->wdt_dev) ||
++	       watchdog_hw_running(&sunxi_wdt->wdt_dev);
++}
++
++/* Without a sleep pinger, the timer stops across sleep: nothing pings it. */
++static int sunxi_wdt_suspend(struct device *dev)
++{
++	struct sunxi_wdt_dev *sunxi_wdt = dev_get_drvdata(dev);
++
++	if (sunxi_wdt->tmr_base || !sunxi_wdt_armed(sunxi_wdt))
++		return 0;
++
++	return sunxi_wdt_stop(&sunxi_wdt->wdt_dev);
++}
++
++static int sunxi_wdt_resume(struct device *dev)
++{
++	struct sunxi_wdt_dev *sunxi_wdt = dev_get_drvdata(dev);
++
++	if (sunxi_wdt->tmr_base || !sunxi_wdt_armed(sunxi_wdt))
++		return 0;
++
++	return sunxi_wdt_start(&sunxi_wdt->wdt_dev);
++}
++
++/*
++ * From the s2idle loop's entry, after every device's noirq suspend, to its exit,
++ * before any resumes: pings at half the hardware timeout. A device that hangs in
++ * its own suspend or resume gets none, and the watchdog resets the system.
++ */
++static int sunxi_wdt_s2idle_enter(void)
++{
++	struct sunxi_wdt_dev *sunxi_wdt = sunxi_wdt_sleeper;
++	void __iomem *tmr = sunxi_wdt->tmr_base;
++	unsigned int hw_timeout;
++
++	if (!sunxi_wdt_armed(sunxi_wdt))
++		return 0;
++
++	hw_timeout = min(sunxi_wdt->wdt_dev.timeout, WDT_MAX_TIMEOUT);
++	sunxi_wdt_ping(&sunxi_wdt->wdt_dev);
++
++	writel(hw_timeout * TMR1_HZ / 2, tmr + TMR1_INTV);
++	writel(TMR1_IRQ, tmr + TMR_IRQ_STA);
++	writel(readl(tmr + TMR_IRQ_EN) | TMR1_IRQ, tmr + TMR_IRQ_EN);
++	writel(TMR1_CTRL_DIV128 | TMR1_CTRL_OSC24M | TMR1_CTRL_RELOAD |
++	       TMR1_CTRL_EN, tmr + TMR1_CTRL);
++	sunxi_wdt->sleep_pinging = true;
++
++	return 0;
++}
++
++static void sunxi_wdt_s2idle_exit(void)
++{
++	struct sunxi_wdt_dev *sunxi_wdt = sunxi_wdt_sleeper;
++	void __iomem *tmr = sunxi_wdt->tmr_base;
++
++	if (!sunxi_wdt->sleep_pinging)
++		return;
++
++	writel(0, tmr + TMR1_CTRL);
++	writel(readl(tmr + TMR_IRQ_EN) & ~TMR1_IRQ, tmr + TMR_IRQ_EN);
++	writel(TMR1_IRQ, tmr + TMR_IRQ_STA);
++	sunxi_wdt_ping(&sunxi_wdt->wdt_dev);
++	sunxi_wdt->sleep_pinging = false;
++}
++
++static const struct platform_s2idle_ops sunxi_wdt_s2idle_ops = {
++	.prepare_late = sunxi_wdt_s2idle_enter,
++	.restore_early = sunxi_wdt_s2idle_exit,
++};
++
++/* The timer block's channel 1 and its interrupt, where the tree has them. */
++static void sunxi_wdt_get_sleep_timer(struct device *dev,
++				      struct sunxi_wdt_dev *sunxi_wdt)
++{
++	struct device_node *np;
++	struct resource res;
++	void __iomem *base;
++	int irq, ret;
++
++	if (sunxi_wdt_sleeper)
++		return;
++
++	np = of_find_compatible_node(NULL, NULL, "allwinner,sun8i-a23-timer");
++	if (!np)
++		return;
++
++	irq = of_irq_get(np, 1);
++	ret = of_address_to_resource(np, 0, &res);
++	of_node_put(np);
++	if (irq <= 0 || ret)
++		return;
++
++	/* The clock event driver holds the block; channel 1 is ours. */
++	base = devm_ioremap(dev, res.start, resource_size(&res));
++	if (!base)
++		return;
++
++	ret = devm_request_irq(dev, irq, sunxi_wdt_sleep_ping, IRQF_NO_SUSPEND,
++			       "sunxi-wdt-sleep", sunxi_wdt);
++	if (ret) {
++		dev_warn(dev, "no sleep pinger: %d\n", ret);
++		return;
++	}
++
++	sunxi_wdt->tmr_base = base;
++	sunxi_wdt_sleeper = sunxi_wdt;
++	s2idle_set_ops(&sunxi_wdt_s2idle_ops);
++}
++
++static DEFINE_SIMPLE_DEV_PM_OPS(sunxi_wdt_pm_ops, sunxi_wdt_suspend,
++				sunxi_wdt_resume);
++
+ static const struct of_device_id sunxi_wdt_dt_ids[] = {
+ 	{ .compatible = "allwinner,sun4i-a10-wdt", .data = &sun4i_wdt_reg },
+ 	{ .compatible = "allwinner,sun6i-a31-wdt", .data = &sun6i_wdt_reg },
+@@ -319,6 +473,8 @@
+ 	watchdog_set_restart_priority(&sunxi_wdt->wdt_dev, 128);
+ 
+ 	watchdog_set_drvdata(&sunxi_wdt->wdt_dev, sunxi_wdt);
++	platform_set_drvdata(pdev, sunxi_wdt);
++	sunxi_wdt_get_sleep_timer(dev, sunxi_wdt);
+ 
+ 	if (sunxi_wdt_is_running(&sunxi_wdt->wdt_dev)) {
+ 		running_timeout = sunxi_wdt_get_timeout(&sunxi_wdt->wdt_dev);
+@@ -348,6 +504,7 @@
+ 	.driver		= {
+ 		.name		= DRV_NAME,
+ 		.of_match_table	= sunxi_wdt_dt_ids,
++		.pm		= pm_sleep_ptr(&sunxi_wdt_pm_ops),
+ 	},
+ };
+ 
