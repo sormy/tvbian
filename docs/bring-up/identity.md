@@ -6,7 +6,8 @@
    the brand where it owns a domain. Search it: if the results mix years, PCBs or SoCs, qualify it
    with a version or PCB revision, `r69-1` not `r69`. The agent proposes it from the sticker,
    silkscreen and photos; the human confirms it before any file is named, since a renamed board is a
-   package rename on every installed box.
+   package rename on every installed box. A board is its PCB, not its case: another PCB is another
+   board, however alike the boxes look. The H96 Max H313 and 3518 share one case.
 2. **The case open, every component**, the heat sink lifted where it comes off:
 
    | Component   | Record                                                                  |
@@ -30,15 +31,31 @@
    | File                        | Shows                                                       |
    | --------------------------- | ----------------------------------------------------------- |
    | `image1.*`                  | the box and its remote                                      |
-   | `image1_alt<N>.*`           | the same box in another retail look, one a look             |
+   | `image1_alt<N>.*`           | the same box, same name, in another look: colour, top       |
    | `image2.*`                  | the box beside a ruler, every port in view                  |
    | `image3.*`                  | the whole package, its retail box too                       |
    | `label.*`                   | the sticker's address and serial, wherever it is            |
    | `pcb-top.*`, `pcb-bottom.*` | both sides of the PCB, the markings readable                |
    | `pcb-<chip>.*`              | a standalone Wi-Fi or Ethernet chip close up, its part read |
 
-   The retail box's art often names the same box sold under another brand; the site shows each
-   `image1_alt<N>` beside `image1`, so a reader finds the look they bought.
+   One PCB sold under one name in several looks is one board with an `image1_alt<N>` a look: the H96
+   Max boxes come in black and white, some with another pattern moulded in the top; the site shows
+   them beside `image1`, so a reader sees whether it looks like the box they have. The same box
+   under another name is an alias (`alias.md`), with its own photos; the retail box's art often
+   names the other brands.
+
+   | Photos                | Shape and size                                  | Format                 |
+   | --------------------- | ----------------------------------------------- | ---------------------- |
+   | `image1`–`image3`     | square, up to 1200×1200, the subject filling it | WebP, `cwebp -q 80`    |
+   | `pcb-*`, `label`      | cropped to the board, up to 1600 px long side   | WebP, `cwebp -q 80`    |
+   | screenshots, diagrams | as drawn                                        | PNG through `pngquant` |
+
+   The photos stay in the repo: a box is sold a year or so, then its listing and photos are gone,
+   and the repo is how a reader finds the box they have. The site shows `image1` in a square tile,
+   so a square photo fills it. Each file under 200 KB: hundreds of boards' photos in git would take
+   the repo past its host's free limits. The full-resolution originals go to the PR as attachments,
+   which GitHub keeps. WebP keeps a PCB photo sharp at that size; `pngquant`'s 256 colours band it.
+   The PCB with its heat sink off, the serial pads, if used, marked TX, RX and GND.
 
 4. **`board.md`**, in this order:
 
