@@ -33,6 +33,8 @@ PSTORE = Path("/var/lib/systemd/pstore")
 UNIT = "tvb-regress.service"
 GUARD_UNIT = "tvb-regress-guard.service"
 WATCHDOG_WAIT_S = 300  # an unpinged watchdog resets within this, or never will
+PANIC_RESET_S = 10  # the kernels' CONFIG_PANIC_TIMEOUT
+BOOT_S = 120  # a reset's boot, past which the box waited on a power cycle
 WDIOC_GETTIMEOUT = 0x80045707
 WDIOC_SETTIMEOUT = 0xC0045706
 WATCHDOG_TEST_S = 10  # the unpinged watchdog's timeout: systemd's 80 s proves nothing more
@@ -89,7 +91,9 @@ class State:
         return State(**raw, pending=Pending(**pending) if pending else None)
 
     def save(self) -> None:
+        """On disk before anything else: a panic or a reset next would lose an unsynced write."""
         STATE.write_text(json.dumps(asdict(self), indent=1))
+        os.sync()
 
     def begin(self, kind: str, detail: str = "") -> None:
         self.pending = Pending(kind, boot_id(), time.time(), detail)
@@ -174,10 +178,15 @@ def ended(state: State, out: Path) -> None:
     if pending.kind == "panic":
         records = len(list(PSTORE.rglob("dmesg*"))) if PSTORE.exists() else 0
         lines = [f"recovery.panic back {gap:.0f} s after it, {records} pstore records"]
-        lines += [] if new_boot else ["FAIL recovery.panic: the same boot"]
+        if not new_boot:
+            lines += ["FAIL recovery.panic: the same boot"]
+        elif gap > PANIC_RESET_S + BOOT_S:
+            # a box that needed a power cycle would only hang again in the watchdog's test
+            state.recovery = 2
+            lines += ["FAIL recovery.panic: no timely reset", "UNTESTED recovery.watchdog"]
     elif pending.kind == "watchdog":
         lines = [f"recovery.watchdog {pending.detail}, reset {gap:.0f} s after it went unpinged"]
-        late = gap > WATCHDOG_WAIT_S + 120
+        late = gap > WATCHDOG_WAIT_S + BOOT_S
         lines += [] if new_boot and not late else ["FAIL recovery.watchdog: no timely reset"]
     elif pending.kind == "step":  # it never returned: its output stays, the step is not rerun
         state.steps_done.append(pending.detail)
@@ -299,7 +308,6 @@ def recover(state: State, out: Path) -> bool:
     makes. True while a reboot is on its way; a watchdog that never resets is written as a
     failure here, and the run goes on."""
     state.recovery += 1
-    os.sync()  # each makes the kernel stop dead: what is not on disk is lost
     if state.recovery == 1:
         state.begin("panic")
         Path("/proc/sys/kernel/sysrq").write_text("1")

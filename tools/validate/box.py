@@ -971,13 +971,19 @@ def gpu() -> Iterator[Line]:
 # input.md
 
 
+def on_usb(device: str) -> bool:
+    """An input under a USB bus: a keyboard or mouse plugged in, not the board's."""
+    return re.search(r"/usb\d+/", device) is not None
+
+
 def input_() -> Iterator[Line]:
     unnamed = []
     for event in sorted(glob.glob("/dev/input/event*")):
         linked = any(
             os.path.realpath(l) == event for l in glob.glob("/dev/input/*") if os.path.islink(l)
         )
-        if not linked:
+        device = os.path.realpath(f"/sys/class/input/{Path(event).name}/device")
+        if not linked and not on_usb(device):
             unnamed.append(read(f"/sys/class/input/{Path(event).name}/device/name"))
     yield "input.unnamed", "; ".join(unnamed) or NONE
     for rc in sorted(glob.glob("/sys/class/rc/rc*")):

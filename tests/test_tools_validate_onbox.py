@@ -48,7 +48,9 @@ class OnboxTest(unittest.TestCase):
     def test_state_with_a_pending_reboot_survives_a_save(self) -> None:
         state = onbox.State(default="l1", kernel=1, steps_done=["system"], recovery=1)
         state.pending = onbox.Pending("panic", "boot-a", 1.5, "")
-        state.save()
+        with mock.patch.object(onbox.os, "sync") as sync:
+            state.save()
+        sync.assert_called_once()  # the panic comes next: an unsynced save loops the box
         self.assertEqual(onbox.State.load(), state)
 
     def test_a_run_boots_the_kernel_it_already_runs(self) -> None:
@@ -110,6 +112,24 @@ class OnboxTest(unittest.TestCase):
         self.assertEqual(
             (out / "soak.txt").read_text(), "soak.minutes 7\nFAIL soak: the box reset during it\n"
         )
+
+    def test_a_panic_that_waited_on_a_power_cycle_skips_the_watchdog(self) -> None:
+        onbox.PSTORE = self.dir / "pstore"
+        for back_s, recovery, tail in [
+            (40.0, 1, []),
+            (900.0, 2, ["FAIL recovery.panic: no timely reset", "UNTESTED recovery.watchdog"]),
+        ]:
+            with self.subTest(back_s=back_s):
+                out = self.dir / f"back-{back_s:.0f}"
+                out.mkdir()
+                state = onbox.State(pending=onbox.Pending("panic", "boot-a", 0.0), recovery=1)
+                with (
+                    mock.patch.object(onbox, "boot_id", return_value="boot-b"),
+                    mock.patch.object(onbox, "booted_at", return_value=back_s),
+                ):
+                    onbox.ended(state, out)
+                self.assertEqual(state.recovery, recovery)
+                self.assertEqual((out / "recovery.txt").read_text().splitlines()[1:], tail)
 
     def test_a_crashed_step_ends_the_run_and_nothing_after_it_runs(self) -> None:
         onbox.HERE, onbox.RESULTS = self.dir, self.dir / "results"

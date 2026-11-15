@@ -26,6 +26,18 @@ class SoakJobTest(unittest.TestCase):
         self.assertEqual(box.ended(self.job("exit 3")), 3)
 
 
+class InputTest(unittest.TestCase):
+    def test_a_plugged_in_keyboard_is_not_the_board_s(self) -> None:
+        for device, usb in [
+            ("/sys/devices/platform/soc/5311000.usb/usb4/4-1/4-1:1.0/0003:046D:C534.0001", True),
+            ("/sys/devices/platform/soc/5100000.usb/musb-hdrc.2.auto/usb1/1-1/1-1:1.1", True),
+            ("/sys/devices/platform/gpio-keys", False),
+            ("/sys/devices/platform/soc/7040000.ir/rc/rc0", False),
+        ]:
+            with self.subTest(device=device):
+                self.assertEqual(box.on_usb(device), usb)
+
+
 class VerdictTest(unittest.TestCase):
     def test_each_rule_fails_what_it_should(self) -> None:
         cases = [
