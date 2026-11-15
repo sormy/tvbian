@@ -1117,7 +1117,8 @@
 		clocks = <&scmi_clk SCMI_CLK_GPU>;
 		clock-names = "bus";
 		operating-points-v2 = <&gpu_bus_opp_table>;
-		status = "okay";
+		/* its OPP table wants a pvtm-supply no tree gives; the siblings' factory trees disable it */
+		status = "disabled";
 		bus-supply = <&vdd_logic>;
 	};
 

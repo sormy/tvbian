@@ -21,6 +21,7 @@ Kernel binary: 6.1.118, ARMv7. U-Boot binary: 2017.09-250331-dirty.
 | Kernel | Remove multi-area                | Unusable Esmart sub-windows                  |
 | Kernel | IR PSCI wake                     | ATF wake source                              |
 | Kernel | Enable watchdog                  | Recover kernel hangs                         |
+| Kernel | Disable `gpu-bus`                | No pvtm-supply; siblings disable it          |
 | Kernel | LED names                        | Shared hooks                                 |
 | Kernel | SDIO `power-off-delay-us` 200 ms | Wi-Fi chip resets between init retries       |
 | Kernel | Recovery button `KEY_VENDOR`     | Mainline's code; factory `KEY_VOLUMEUP`      |

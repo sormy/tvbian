@@ -38,7 +38,17 @@
  		assigned-clocks = <&scmi_clk SCMI_CLK_GPU>;
  		assigned-clock-rates = <300000000>;
  		power-domains = <&power RK3528_PD_GPU>;
-@@ -1370,8 +1374,8 @@
+@@ -1196,7 +1200,8 @@
+ 		clocks = <&scmi_clk SCMI_CLK_GPU>;
+ 		clock-names = "bus";
+ 		operating-points-v2 = <&gpu_bus_opp_table>;
+-		status = "okay";
++		/* its OPP table wants a pvtm-supply no tree gives; the siblings' factory trees disable it */
++		status = "disabled";
+ 		bus-supply = <&vdd_logic>;
+ 		phandle = <0xf4>;
+ 	};
+@@ -1370,8 +1375,8 @@
  		iommus = <&vop_mmu>;
  		rockchip,grf = <&grf>;
  		status = "okay";
@@ -49,7 +59,7 @@
  		phandle = <0xf9>;
  
  		vop_out: ports {
-@@ -1609,6 +1613,7 @@
+@@ -1609,6 +1614,7 @@
  		rockchip,cts-manual;
  		pinctrl-names = "default";
  		pinctrl-0 = <&hdmi_pins>;
@@ -57,7 +67,7 @@
  		phys = <&hdmiphy>;
  		phy-names = "hdmi";
  		#sound-dai-cells = <0>;
-@@ -1968,7 +1973,8 @@
+@@ -1968,7 +1974,8 @@
  		status = "okay";
  		remote_pwm_id = <0x03>;
  		handle_cpu_id = <0x01>;
@@ -67,7 +77,7 @@
  		phandle = <0x114>;
  
  		ir_key1 {
-@@ -2040,18 +2046,19 @@
+@@ -2040,18 +2047,19 @@
  
  		ir_key6 {
  			rockchip,usercode = <0xfb04>;
@@ -94,7 +104,7 @@
  		};
  
  		ir_key7 {
-@@ -2175,7 +2182,8 @@
+@@ -2175,7 +2183,8 @@
  		clocks = <&cru TCLK_WDT_NS>, <&cru PCLK_WDT_NS>;
  		clock-names = "tclk", "pclk";
  		interrupts = <GIC_SPI 28 IRQ_TYPE_LEVEL_HIGH>;
@@ -104,7 +114,7 @@
  		phandle = <0x11a>;
  	};
  
-@@ -3435,12 +3443,15 @@
+@@ -3435,12 +3444,15 @@
  		hdmi {
  
  			hdmi_pins: hdmi-pins {
@@ -123,7 +133,7 @@
  			hdmi_pins_idle: hdmi-pins-idle {
  				rockchip,pins = <0 RK_PA3 1 &pcfg_pull_none>,
  				                <0 RK_PA4 RK_FUNC_GPIO &pcfg_output_low_pull_down>,
-@@ -4410,6 +4421,18 @@
+@@ -4410,6 +4422,18 @@
  		};
  	};
  
@@ -142,7 +152,7 @@
  	adc_keys: adc-keys {
  		status = "okay";
  		compatible = "adc-keys";
-@@ -4421,7 +4444,8 @@
+@@ -4421,7 +4445,8 @@
  
  		vol-up-key {
  			label = "volume up";
@@ -152,7 +162,7 @@
  			press-threshold-microvolt = <1750>;
  		};
  	};
-@@ -4686,6 +4710,8 @@
+@@ -4686,6 +4711,8 @@
  		pinctrl-names = "default";
  		pinctrl-0 = <&wifi_enable_h>, <&clkm1_32k_out>;
  		post-power-on-delay-ms = <200>;
@@ -161,7 +171,7 @@
  		reset-gpios = <&gpio3 RK_PB2 GPIO_ACTIVE_LOW>;
  		status = "okay";
  		phandle = <0x85>;
-@@ -4730,7 +4756,8 @@
+@@ -4730,7 +4757,8 @@
  		compatible = "gpio-leds";
  		phandle = <0x1d0>;
  
@@ -171,7 +181,7 @@
  			gpios = <&gpio4 RK_PC1 GPIO_ACTIVE_LOW>;
  			linux,default-trigger = "none";
  			default-state = "on";
-@@ -4738,7 +4765,7 @@
+@@ -4738,7 +4766,7 @@
  			retain-state-shutdown;
  		};
  

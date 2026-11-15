@@ -95,6 +95,11 @@
 	clock-names = "bus", "core";
 };
 
+&gpu_bus {
+	/* its OPP table wants a pvtm-supply no tree gives; the siblings' factory trees disable it */
+	status = "disabled";
+};
+
 &gpu_bus_opp_table {
 	rockchip,leakage-voltage-sel = <1 22 0>, <23 254 1>;
 };

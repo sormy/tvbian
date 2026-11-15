@@ -27,9 +27,6 @@
       fringe on the right, then that a 1080p display still comes up clean.
 
 - [ ] **The R69's Wi-Fi comes back after every warm reboot.**
-- [ ] **The M2 Plus's `gpu-bus` binds.** Its factory tree enables the `rockchip,rk3528-bus`
-      node, the 3518s' and the R69's disable it; nothing binds it on either kernel, though
-      `ARM_ROCKCHIP_BUS_DEVFREQ` is built in. Bind it, or disable it as the siblings do.
 - [ ] **6.12: a `_regulator_put` WARNING in the USB2 PHY's deferred probe**, now and then on the
       3518D and the R69. The probe fails `IRQ index 0 not found`, after `vcc5v0_host: could not add
       device link ... -ENOENT`; its cleanup puts the regulator. Taints the kernel (512).
