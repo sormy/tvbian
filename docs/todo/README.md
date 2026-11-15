@@ -75,9 +75,6 @@ below.
 - [ ] **FFmpeg, Kodi and Fuseamp install as `tvb-*` packages**, Fuseamp once it is ready for
       release.
 
-- [ ] **A new kernel or driver is shown not to regress, unattended, on every board it ships to**,
-      before it ships.
-
 - [ ] **Consider: the console fits each screen plugged after the first.** The kernel's console is
       one framebuffer, sized by the first screen and cloned to every output, so a larger screen
       plugged later shows it small. A userspace console (kmscon) redraws per screen on hot-plug.
