@@ -23,7 +23,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from results import Known, crash, new_failures
+from results import Known, crash, new_failures, skipped
 
 HERE = Path(__file__).resolve().parent
 RESULTS = HERE / "results"
@@ -259,10 +259,16 @@ def finish(state: State, marker: str, why: str) -> int:
 
 def carry_on(plan: Plan, state: State, out: Path) -> bool:
     """The kernel's steps not yet done; False when one rebooted the box."""
+    known = Known.load(HERE / "known.conf")
     for item in plan.steps:
         if item.name in state.steps_done:
             continue
-        if item.name == "recovery":
+        if why := skipped(known, plan.board, out.name, item.name):
+            record(
+                out, item.name, [f"{item.name} skipped, known.conf: {why}", f"UNTESTED {item.name}"]
+            )
+            log(f"{out.name}: {item.name} skipped, known.conf: {why}")
+        elif item.name == "recovery":
             while state.recovery < 2:
                 if recover(state, out):
                     return False
@@ -271,7 +277,7 @@ def carry_on(plan: Plan, state: State, out: Path) -> bool:
                 state.begin("reboot")
                 reboot()
                 return False
-        elif blocked := new_failures(out, item.needs, Known.load(HERE / "known.conf"), plan.board):
+        elif blocked := new_failures(out, item.needs, known, plan.board):
             # an expensive step on a box already failing in new ways measures nothing worth its time
             reason = f"not run, new failures before it: {'; '.join(blocked[:3])}"
             record(out, item.name, [f"{item.name} {reason}", f"UNTESTED {item.name}"])

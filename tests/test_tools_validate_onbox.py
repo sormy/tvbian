@@ -130,6 +130,14 @@ class OnboxTest(unittest.TestCase):
         self.assertIn("soak: TimeoutError: glmark2", (self.dir / "results" / "crashed").read_text())
         self.assertFalse((self.dir / "results" / "done").exists())
 
+    def test_a_step_known_conf_skips_is_untested_not_run(self) -> None:
+        out = self.gated("tanix-* * step:video  # hangs the box until the fix lands\n")
+        self.assertFalse((self.dir / "ran").exists())
+        self.assertIn(
+            "video skipped, known.conf: hangs the box until the fix lands",
+            (out / "video.txt").read_text(),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

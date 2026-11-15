@@ -46,6 +46,8 @@ tools: a line that differs from the board's last run is a finding.
 3. **Report**: `regression.py report build/validate/regression/<date>` writes `report.md` there, for
    the pull request: each board and kernel with its checks and minutes, new failures apart from the
    known ones in `tools/validate/known.conf`, every ❓, and what moved since the board's last run.
+   A step that breaks a box, hanging it or worse, is skipped there by a `step:<name>` line in
+   `known.conf` with its reason: shown ❓ in every report until the fix lands.
    Attach it to the PR. A new ❌ is a finding; a known one stays known only with its reason, and its
    line goes when the fix lands.
 4. **Record** each kernel's lines in the board's Test report and a worklog entry: the lines that

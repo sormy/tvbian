@@ -15,6 +15,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools/validate"))
 import regression  # noqa: E402
+import results  # noqa: E402
 from regression import (  # noqa: E402
     PROFILES,
     Box,
@@ -185,6 +186,18 @@ class ResultsTest(unittest.TestCase):
         self.assertEqual(
             (found.checks, found.untested), (0, ["video decode av1 7680x4320: skipped"])
         )
+
+    def test_a_step_entry_skips_the_step_and_matches_no_check(self) -> None:
+        path = self.dir / "known.conf"
+        path.write_text("h96max-h313 6.18* step:recovery  # the watchdog test hangs it\n")
+        known = Known.load(path)
+        self.assertEqual(
+            results.skipped(known, "h96max-h313", "6.18.63-tvb-sunxi64", "recovery"),
+            "the watchdog test hangs it",
+        )
+        self.assertIsNone(results.skipped(known, "h96max-h313", "7.3.4-tvb-sunxi64", "recovery"))
+        self.assertIsNone(results.skipped(known, "tanix-tx1-v2", "6.18.63-tvb-sunxi64", "recovery"))
+        self.assertFalse(known[0].matches("h96max-h313", "6.18.63-tvb-sunxi64", "recovery: x"))
 
     def test_a_run_is_told_apart_by_its_log_s_first_line(self) -> None:
         log = self.dir / "run.log"

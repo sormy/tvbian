@@ -14,6 +14,8 @@ from video import FAILING
 
 SKIPPED = "77"  # a step's exit status for nothing to test on this box
 TRACEBACK = "Traceback (most recent call last):"
+SKIP = "step:"  # known.conf's form for a step not run: step:<name>
+NOTHING = "(?!)"  # a pattern no line matches
 
 
 def crash(path: Path) -> str | None:
@@ -74,12 +76,14 @@ class Verdicts:
 
 @dataclass(frozen=True)
 class Known:
-    """A failure known and not yet fixed, from known.conf: which boards and kernels, which check."""
+    """A failure known and not yet fixed, from known.conf: which boards and kernels, which check;
+    or, as step:<name>, a step not run there at all until the fix lands."""
 
     boards: tuple[str, ...]
     kernels: str
     check: re.Pattern[str]
     reason: str
+    step: str = ""
 
     @staticmethod
     def load(path: Path) -> list[Known]:
@@ -89,15 +93,21 @@ class Known:
             if not entry.strip() or entry.startswith("#"):
                 continue
             boards, kernels, check = entry.split(None, 2)
-            out.append(Known(tuple(boards.split(",")), kernels, re.compile(check), reason.strip()))
+            step = check.removeprefix(SKIP) if check.startswith(SKIP) else ""
+            pattern = re.compile(NOTHING if step else check)
+            out.append(Known(tuple(boards.split(",")), kernels, pattern, reason.strip(), step))
         return out
 
+    def on(self, board: str, kernel: str) -> bool:
+        return any(fnmatch(board, b) for b in self.boards) and fnmatch(kernel, self.kernels)
+
     def matches(self, board: str, kernel: str, line: str) -> bool:
-        return (
-            any(fnmatch(board, b) for b in self.boards)
-            and fnmatch(kernel, self.kernels)
-            and bool(self.check.search(line))
-        )
+        return self.on(board, kernel) and bool(self.check.search(line))
+
+
+def skipped(known: list[Known], board: str, kernel: str, step: str) -> str | None:
+    """Why known.conf keeps a step from running on this board and kernel, if it does."""
+    return next((k.reason for k in known if k.step == step and k.on(board, kernel)), None)
 
 
 def known_reason(known: list[Known], board: str, kernel: str, line: str) -> str | None:
