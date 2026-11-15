@@ -18,6 +18,7 @@ import re
 import subprocess
 import sys
 import time
+import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -152,6 +153,42 @@ CODECS = {
     ),
 }
 
+# streams FFmpeg cannot encode, or with features its encoders never use, from its FATE suite:
+# name: (codec, FATE path, sha256). Each decodes exact or fails, and twice alike.
+FATE = "https://fate-suite.ffmpeg.org/"
+CONFORMANCE = {
+    "vc1-SA00040.vc1": (
+        "vc1",
+        "vc1/SA00040.vc1",
+        "898035e63cfe0ddb1cc2c8749d7dafdfcc1b12fe5dac7e5b65941e6c4e41c860",
+    ),
+    "vc1-SA00050.vc1": (
+        "vc1",
+        "vc1/SA00050.vc1",
+        "29cf8bebc87be73a1b7a6169aff4c1c36d8891a20c200da7676560fefe3e461c",
+    ),
+    "vc1-SA10091.vc1": (
+        "vc1",
+        "vc1/SA10091.vc1",
+        "c60a0da89873b40d7e436f1c29757c6cc71f3c51f2ac2ea8c6bd023762c94b6c",
+    ),
+    "vc1-SA10143.vc1": (
+        "vc1",
+        "vc1/SA10143.vc1",
+        "5d4a5dff66ca45f32331810fc7f845ab0600850a0ee97d05db32572bb588222e",
+    ),
+    "vc1-SA20021.vc1": (
+        "vc1",
+        "vc1/SA20021.vc1",
+        "99098ebb84a71b3a62d48988d79169843d73dbfd12c620961ab5f1973a9f1b05",
+    ),
+    "vc1-ilaced_twomv.vc1": (
+        "vc1",
+        "vc1/ilaced_twomv.vc1",
+        "8052c6f2514d7b9e0e6322b4cde440a590cbf6c7e97487336eafa4145ba74d30",
+    ),
+}
+
 # engine: decoder input options per codec (None: not offered), how frames come out, encoders
 ENGINES = {
     "sunxi": {
@@ -201,7 +238,7 @@ ENGINES = {
     "rkmpp": {
         "decode": lambda c: (
             ["-c:v", {"h264p10": "h264", "hevc10": "hevc", "vp9p2": "vp9"}.get(c, c) + "_rkmpp"]
-            if c != "mjpeg"
+            if c not in ("mjpeg", "vc1")
             else None
         ),
         "scale": lambda c: ["-capture_max_height", str(SCALE_LINES)]
@@ -272,6 +309,26 @@ def pixels(size):
 # host: the corpus
 
 
+def reference_md5(path):
+    """The host's software decode of a clip, frame by frame."""
+    rc, out, _ = sh(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-i",
+            str(path),
+            "-pix_fmt",
+            "yuv420p10le",
+            "-f",
+            "framemd5",
+            "-",
+        ],
+        timeout=None,
+    )
+    return md5_lines(out)
+
+
 def cmd_clips(args):
     """The corpus: each clip encoded by the host's FFmpeg, and its frames as software decodes them.
     A clip is kept while what made it (size, frames, encoder) is the same, and its reference
@@ -314,26 +371,24 @@ def cmd_clips(args):
             if known.get("sha256") == digest and known.get("recipe") == recipe:
                 manifest["clips"][path.name] = known
                 continue
-            rc, out, _ = sh(
-                [
-                    "ffmpeg",
-                    "-v",
-                    "error",
-                    "-i",
-                    str(path),
-                    "-pix_fmt",
-                    "yuv420p10le",
-                    "-f",
-                    "framemd5",
-                    "-",
-                ],
-                timeout=None,
-            )
             manifest["clips"][path.name] = {
                 "recipe": recipe,
                 "sha256": digest,
-                "framemd5": md5_lines(out),
+                "framemd5": reference_md5(path),
             }
+    for name, (codec, fate, digest) in CONFORMANCE.items():
+        path = CORPUS / name
+        if not path.exists() or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+            urllib.request.urlretrieve(FATE + fate, path)
+            if hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+                path.unlink()
+                raise SystemExit(f"{name}: {FATE + fate} is not the stream pinned")
+        known = before.get(name, {})
+        manifest["clips"][name] = (
+            known
+            if known.get("sha256") == digest
+            else {"sha256": digest, "framemd5": reference_md5(path)}
+        )
     index.write_text(json.dumps(manifest, indent=1))
     print(f"{len(manifest['clips'])} clips in {CORPUS}")
 
@@ -473,7 +528,7 @@ def decode_case(ff, engine, codec, size, clip, ref):
     opts = eng["decode"](codec)
     if opts is None:
         return {"verdict": "unoffered"}
-    exact = CODECS[codec][3]
+    exact = CODECS[codec][3] if codec in CODECS else True
     before, irqs = dmesg_lines(), irq_count(eng["irq"])
     r = decode_verdict(ff, eng, codec, clip, opts, exact, ref, before)
     if r["verdict"] == "pass" and irq_count(eng["irq"]) == irqs:
@@ -517,6 +572,14 @@ def decode_verdict(ff, eng, codec, clip, opts, exact, ref, before):
         r.update(identical=False, psnr_y=y, psnr_uv=uv)
         r["verdict"] = "pass" if not exact and y is not None and y >= LOSSY_FLOOR_DB else "broken"
     return r
+
+
+def conformance_case(decode):
+    """A conformance stream decoded twice: a verdict that changes between runs is flaky."""
+    rec = decode()
+    if rec["verdict"] != "unoffered" and decode()["verdict"] != rec["verdict"]:
+        rec["verdict"] = "flaky"
+    return rec
 
 
 def scale_case(ff, engine, codec, clip):
@@ -870,6 +933,19 @@ def cmd_box(args):
                     size=SCALE_FROM,
                 )
             )
+    if "conformance" in args.suite:
+        for name, (codec, _, _) in CONFORMANCE.items():
+            if name not in manifest:
+                continue
+            if not (root / name).exists():
+                raise SystemExit(f"{name}: in the manifest, not deployed")
+            start("conformance", codec)(name)
+            rec = conformance_case(
+                lambda: decode_case(
+                    ff, args.engine, codec, name, str(root / name), manifest[name]["framemd5"]
+                )
+            )
+            emit(dict(rec, suite="conformance", codec=codec, size=name))
     if "encode" in args.suite:
         for codec, encoder in ENGINES[args.engine]["encoders"].items():
             if f"encode:{codec}" in after:

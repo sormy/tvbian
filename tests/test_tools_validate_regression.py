@@ -72,10 +72,11 @@ class KernelsTest(unittest.TestCase):
 
 
 class StepsTest(unittest.TestCase):
-    def test_every_profile_runs_every_step(self) -> None:
+    def test_every_profile_runs_every_step_but_short_conformance(self) -> None:
         names = {p: [s.name for s in steps(p, "sunxi64", "plex")] for p in PROFILES}
-        self.assertEqual(names["short"], names["default"])
+        self.assertEqual(names["short"], [n for n in names["default"] if n != "conformance"])
         self.assertEqual(names["default"], names["extended"])
+        self.assertIn("conformance", names["default"])
         for check in ("throughput", "soak", "display-full", "screen", "video", "deqp", "reboots"):
             self.assertIn(check, names["short"])
         self.assertEqual(

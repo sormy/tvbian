@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import hashlib
 import tempfile
 import unittest
 from argparse import Namespace
@@ -28,15 +29,36 @@ class ClipsTest(unittest.TestCase):
         self.calls.append("decode")
         return 0, "0, 0, 0, 1, 10, abc\n", 0.0
 
-    def clips(self, encoder: list[str]) -> None:
+    def clips(
+        self, encoder: list[str], conformance: dict[str, tuple[str, str, str]] | None = None
+    ) -> None:
         codecs = {"h264": ("mp4", encoder, ["16x16"], None)}
         with (
             mock.patch.object(video, "CORPUS", self.corpus),
             mock.patch.object(video, "CODECS", codecs),
+            mock.patch.object(video, "CONFORMANCE", conformance or {}),
             mock.patch.object(video, "sh", self.ffmpeg),
             mock.patch("builtins.print"),
         ):
             video.cmd_clips(Namespace())
+
+    def test_a_conformance_stream_is_fetched_once_and_must_match_its_pin(self) -> None:
+        served = b"stream"
+        pinned = {"vc1-a.vc1": ("vc1", "vc1/a.vc1", hashlib.sha256(served).hexdigest())}
+        fetched: list[str] = []
+
+        def fetch(url: str, path: Path) -> None:
+            fetched.append(url)
+            Path(path).write_bytes(served)
+
+        with mock.patch.object(video.urllib.request, "urlretrieve", fetch):
+            self.clips(["-c:v", "libx264"], pinned)
+            self.clips(["-c:v", "libx264"], pinned)
+            self.assertEqual(fetched, [video.FATE + "vc1/a.vc1"])
+            (self.corpus / "vc1-a.vc1").unlink()
+            served = b"another"
+            with self.assertRaises(SystemExit):
+                self.clips(["-c:v", "libx264"], pinned)
 
     def test_made_once_then_kept_then_remade_when_its_recipe_changes(self) -> None:
         self.clips(["-c:v", "libx264"])
@@ -64,6 +86,28 @@ class ClampedTest(unittest.TestCase):
 
     def test_a_swapped_format_says_nothing(self) -> None:
         self.assertIsNone(video.clamped(self.TRIED.format("1920/1080", "S264"), "S265"))
+
+
+class ConformanceTest(unittest.TestCase):
+    def test_a_verdict_that_changes_between_runs_is_flaky(self) -> None:
+        for runs, verdict in [
+            (["pass", "pass"], "pass"),
+            (["broken", "broken"], "broken"),
+            (["pass", "broken"], "flaky"),
+            (["unoffered"], "unoffered"),
+        ]:
+            with self.subTest(runs=runs):
+                left = iter(runs)
+                rec = video.conformance_case(lambda: {"verdict": next(left)})
+                self.assertEqual(rec["verdict"], verdict)
+
+    def test_every_stream_is_pinned(self) -> None:
+        for name, (codec, fate, digest) in video.CONFORMANCE.items():
+            with self.subTest(name=name):
+                self.assertTrue(
+                    name.startswith(f"{codec}-") and name.endswith(fate.rsplit("/")[-1])
+                )
+                self.assertRegex(digest, r"^[0-9a-f]{64}$")
 
 
 class LadderTest(unittest.TestCase):

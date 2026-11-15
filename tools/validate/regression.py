@@ -201,12 +201,21 @@ def changed(old: str, new: str) -> list[str]:
 
 def steps(profile: str, family: str, iperf: str) -> list[Step]:
     """The plan's steps for each kernel, in order: a name, a command run in BOX_DIR, its time.
-    Every profile runs every step; the profile sets how much of each."""
+    Every profile runs every step but short, which skips conformance; it sets how much of each."""
     soak = SOAK_SECONDS[profile]
     phase = ["python3", "box.py", "--profile", profile, "--iperf", iperf]
     phase += ["--sleep", str(SLEEP_SECONDS[profile]), "--soak", str(soak), "--suite"]
     out = [Step(name, [*phase, name], PHASE_SECONDS[profile]) for name in PHASES]
-    video = ["python3", "video.py", "box", "--engine", ENGINE[family], "--dir", f"{BOX_DIR}/video"]
+    video_box = [
+        "python3",
+        "video.py",
+        "box",
+        "--engine",
+        ENGINE[family],
+        "--dir",
+        f"{BOX_DIR}/video",
+    ]
+    video = list(video_box)
     if profile in VIDEO_SIZES:  # joined with =: a regex starting with - would read as an option
         video += ["--suite", "decode", f"--only=-({'|'.join(VIDEO_SIZES[profile])})$"]
     long = STEP_SECONDS[profile]
@@ -215,22 +224,11 @@ def steps(profile: str, family: str, iperf: str) -> list[Step]:
     out.append(Step("display-full", display, long, ["system"]))
     out.append(Step("screen", ["python3", "screen.py"], long, ["system"]))
     out.append(Step("video", video, long, ["system"]))
+    if profile != "short":
+        out.append(Step("conformance", [*video_box, "--suite", "conformance"], long, ["system"]))
     out.append(Step("deqp", ["sh", "deqp/run.sh"], long, ["system", "gpu"]))
     out.append(Step("recovery", [], 0))
     out.append(Step("reboots", [], 0))
-    return out
-    extended = profile == "extended"
-    if extended:
-        out.append(Step("soak", [*phase, "soak"], 1800 + 600, ["system"]))
-    out.append(
-        Step("display-full", ["python3", "display.py"], 3600 if extended else 900, ["system"])
-    )
-    out.append(Step("screen", ["python3", "screen.py"], 900, ["system"]))
-    out.append(Step("video", video, 7200 if extended else 1200, ["system"]))
-    out.append(Step("deqp", ["sh", "deqp/run.sh"], 7200 if extended else 900, ["system", "gpu"]))
-    if extended:
-        out.append(Step("recovery", [], 0))
-        out.append(Step("reboots", [], 0))
     return out
 
 
@@ -378,10 +376,10 @@ class Deployment:
         self.box.put(f"{BOX_DIR}/tvb-regress.service", UNIT.encode())
         self.box.put(f"{BOX_DIR}/tvb-regress-guard.service", GUARD.encode())
         self.box.put(f"{BOX_DIR}/results/host.txt", ("\n".join(host_lines) + "\n").encode())
-        sizes = VIDEO_SIZES.get(self.profile)
         clips = json.loads((CLIPS / "manifest.json").read_text())["clips"]
         listing = f"cd {BOX_DIR}/video && sudo -n sha256sum * 2>/dev/null || true"
         held = dict(line.split()[::-1] for line in self.box.run(listing, check=True).splitlines())
+        sizes = VIDEO_SIZES.get(self.profile)
         for name, clip in sorted(clips.items()):
             if sizes is None or any(f"-{size}." in name for size in sizes):
                 if held.get(name) != clip["sha256"]:
