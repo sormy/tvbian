@@ -1,0 +1,51 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] avcodec/rkmppdec: add an immediate_out option
+
+MPP holds decoded pictures back for display order, which adds the
+stream's reorder depth to every picture's latency. A stream without
+B-frames, as a camera, a game or desktop stream or a video call sends,
+loses nothing by taking pictures as soon as MPP decodes them; a caller
+that reorders pictures itself needs them that way.
+
+immediate_out sets MPP_DEC_SET_IMMEDIATE_OUT, which MPP reads as its
+parser starts, so it is set before mpp_init(). It is off by default:
+with B-frames the pictures come out in decode order.
+---
+diff --git a/libavcodec/rkmppdec.c b/libavcodec/rkmppdec.c
+--- a/libavcodec/rkmppdec.c
++++ b/libavcodec/rkmppdec.c
+@@ -66,6 +66,7 @@
+     int capture_max_height;
+     int afbc;
+     int cacheable;
++    int immediate_out;
+ } RKMPPDecodeContext;
+ 
+ typedef struct {
+@@ -313,6 +314,17 @@
+         goto fail;
+     }
+ 
++    // read before mpp_init, by the parser as it starts
++    if (rk_context->immediate_out) {
++        paramS32 = 1;
++        ret = decoder->mpi->control(decoder->ctx, MPP_DEC_SET_IMMEDIATE_OUT, &paramS32);
++        if (ret != MPP_OK) {
++            av_log(avctx, AV_LOG_ERROR, "Failed to ask for immediate output (code = %d).\n", ret);
++            ret = AVERROR_UNKNOWN;
++            goto fail;
++        }
++    }
++
+     // initialize mpp
+     ret = mpp_init(decoder->ctx, MPP_CTX_DEC, codectype);
+     if (ret != MPP_OK) {
+@@ -722,6 +734,8 @@
+         OFFSET(afbc), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, VD },
+     { "cacheable", "Allocate frames CPU-cacheable; a CPU reader brackets its reads with DMA_BUF_IOCTL_SYNC",
+         OFFSET(cacheable), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, VD },
++    { "immediate_out", "Output each picture once decoded, in decode order",
++        OFFSET(immediate_out), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, VD },
+     { NULL },
+ };
+ 

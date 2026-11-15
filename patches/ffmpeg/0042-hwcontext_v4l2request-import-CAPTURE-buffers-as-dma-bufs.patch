@@ -1,0 +1,196 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] hwcontext_v4l2request: import CAPTURE buffers as dma-bufs
+
+The CAPTURE buffers were always the driver's own, so a picture could
+only land in memory the decoder allocated, and a caller that needs
+pictures in its own memory had to copy each one: a compositor or
+display allocating scanout buffers, a pipeline sharing buffers with
+another process or device, a caller holding memory to a budget, a
+VA-API driver whose surfaces exist before any decode.
+
+The device option "import_capture" makes the CAPTURE queue
+V4L2_MEMORY_DMABUF. A frame from the pool then carries the layout of
+the CAPTURE format with no dma-bufs; the caller fills the objects' fd
+and size before the frame is decoded into, from its get_buffer2()
+callback, and keeps the dma-bufs open until the frame is freed. Each
+buffer is queued with the dma-bufs of the frame decoded into it. It is
+off by default: the decoder's own buffers stay the zero-copy path for
+callers that export them.
+---
+
+--- a/libavcodec/v4l2_request.c
++++ b/libavcodec/v4l2_request.c
+@@ -128,15 +128,23 @@
+ }
+ 
+ static int v4l2_request_queue_buffer(V4L2RequestContext *ctx,
+-                                     struct v4l2_buffer *buffer)
++                                     struct v4l2_buffer *buffer,
++                                     const AVDRMFrameDescriptor *import)
+ {
+     struct v4l2_plane planes[V4L2_PLANES_MAX] = {};
+ 
+     if (V4L2_TYPE_IS_MULTIPLANAR(buffer->type)) {
+         planes[0].bytesused = buffer->bytesused;
+         buffer->bytesused = 0;
+-        buffer->length = FF_ARRAY_ELEMS(planes);
++        buffer->length = import ? import->nb_objects : FF_ARRAY_ELEMS(planes);
+         buffer->m.planes = planes;
++        for (int i = 0; import && i < import->nb_objects; i++) {
++            planes[i].m.fd = import->objects[i].fd;
++            planes[i].length = import->objects[i].size;
++        }
++    } else if (import) {
++        buffer->m.fd = import->objects[0].fd;
++        buffer->length = import->objects[0].size;
+     }
+ 
+     // Queue the buffer
+@@ -153,14 +161,15 @@
+ }
+ 
+ static int v4l2_request_queue_capture_buffer(V4L2RequestContext *ctx,
+-                                             uint32_t index)
++                                             const V4L2RequestPictureContext *pic)
+ {
++    int import = ctx->fctxi->import_capture;
+     struct v4l2_buffer buffer = {
+-        .index = index,
++        .index = pic->capture_index,
+         .type = ctx->fctxi->capture.format.type,
+-        .memory = V4L2_MEMORY_MMAP,
++        .memory = import ? V4L2_MEMORY_DMABUF : V4L2_MEMORY_MMAP,
+     };
+-    return v4l2_request_queue_buffer(ctx, &buffer);
++    return v4l2_request_queue_buffer(ctx, &buffer, import ? pic->capture_desc : NULL);
+ }
+ 
+ static int v4l2_request_queue_output_buffer(V4L2RequestContext *ctx,
+@@ -176,7 +185,7 @@
+         .request_fd = output->request_fd,
+         .flags = V4L2_BUF_FLAG_REQUEST_FD | flags,
+     };
+-    return v4l2_request_queue_buffer(ctx, &buffer);
++    return v4l2_request_queue_buffer(ctx, &buffer, NULL);
+ }
+ 
+ static int v4l2_request_dequeue_buffer(V4L2RequestContext *ctx,
+@@ -185,7 +194,8 @@
+     struct v4l2_plane planes[V4L2_PLANES_MAX] = {};
+     struct v4l2_buffer buffer = {
+         .type = type,
+-        .memory = V4L2_MEMORY_MMAP,
++        .memory = !V4L2_TYPE_IS_OUTPUT(type) && ctx->fctxi->import_capture ?
++                  V4L2_MEMORY_DMABUF : V4L2_MEMORY_MMAP,
+     };
+ 
+     if (V4L2_TYPE_IS_MULTIPLANAR(buffer.type)) {
+@@ -438,7 +448,7 @@
+          * current request, otherwise frames may be output in wrong order or
+          * wrong CAPTURE buffer could get used as a reference frame.
+          */
+-        ret = v4l2_request_queue_capture_buffer(ctx, pic->capture_index);
++        ret = v4l2_request_queue_capture_buffer(ctx, pic);
+         if (ret < 0) {
+             av_log(ctx, AV_LOG_ERROR, "Failed to queue CAPTURE buffer %d for request %d: %s (%d)\n",
+                    pic->capture_index, pic->output->request_fd, strerror(errno), errno);
+@@ -557,6 +567,7 @@
+ 
+     // CAPTURE buffer used for current frame
+     pic->capture_index = index;
++    pic->capture_desc = (const AVDRMFrameDescriptor *)frame->data[0];
+ 
+     return 0;
+ }
+--- a/libavcodec/v4l2_request.h
++++ b/libavcodec/v4l2_request.h
+@@ -24,6 +24,7 @@
+ #include <linux/videodev2.h>
+ 
+ #include "libavutil/buffer.h"
++#include "libavutil/hwcontext_drm.h"
+ #include "libavutil/log.h"
+ #include "libavutil/thread.h"
+ #include "avcodec.h"
+@@ -57,6 +58,7 @@
+ typedef struct V4L2RequestPictureContext {
+     V4L2RequestOutputBuffer *output;
+     uint32_t capture_index;
++    const AVDRMFrameDescriptor *capture_desc;
+ } V4L2RequestPictureContext;
+ 
+ uint64_t ff_v4l2_request_get_capture_timestamp(AVFrame *frame);
+--- a/libavutil/hwcontext_v4l2request.c
++++ b/libavutil/hwcontext_v4l2request.c
+@@ -65,6 +65,9 @@
+ 
+     // CAPTURE buffers CPU-cacheable, for a CPU that reads the pictures
+     int cacheable;
++
++    // CAPTURE buffers imported from the caller's dma-bufs, not allocated
++    int import_capture;
+ } V4L2RequestDeviceContext;
+ 
+ typedef struct V4L2RequestFramesContext {
+@@ -254,6 +257,8 @@
+ 
+     if ((entry = av_dict_get(opts, "cacheable", NULL, 0)))
+         hwctx->cacheable = strtol(entry->value, NULL, 10);
++    if ((entry = av_dict_get(opts, "import_capture", NULL, 0)))
++        hwctx->import_capture = strtol(entry->value, NULL, 10);
+ 
+     // TODO: enumerate V4L2 Request API capable video decoders
+     //       and fill hwctx->decoders and hwctx->nb_decoders,
+@@ -830,6 +835,9 @@
+     uint8_t num_planes;
+     AVBufferRef *ref;
+ 
++    if (fctxi->import_capture && format->type == fctxi->capture.format.type)
++        buffers.memory = V4L2_MEMORY_DMABUF;
++
+     num_planes = V4L2_TYPE_IS_MULTIPLANAR(format->type) ?
+                  format->fmt.pix_mp.num_planes : 0;
+ 
+@@ -847,7 +855,7 @@
+     }
+ 
+     // the driver syncs a non-coherent buffer at QBUF and DQBUF, so it is only asked for a CPU reader
+-    if (hwctx->cacheable && format->type == fctxi->capture.format.type &&
++    if (hwctx->cacheable && !fctxi->import_capture && format->type == fctxi->capture.format.type &&
+         (fctxi->capture.capabilities & V4L2_BUF_CAP_SUPPORTS_MMAP_CACHE_HINTS))
+         buffers.flags = V4L2_MEMORY_FLAG_NON_COHERENT;
+ 
+@@ -950,7 +958,9 @@
+     desc->base.nb_objects = V4L2_TYPE_IS_MULTIPLANAR(format->type) ?
+                             format->fmt.pix_mp.num_planes : 1;
+     av_assert0(desc->base.nb_objects <= AV_DRM_MAX_PLANES);
+-    for (int i = 0; i < desc->base.nb_objects; i++) {
++    for (int i = 0; i < desc->base.nb_objects && fctxi->import_capture; i++)
++        desc->base.objects[i].fd = -1;
++    for (int i = 0; i < desc->base.nb_objects && !fctxi->import_capture; i++) {
+         struct v4l2_exportbuffer exportbuffer = {
+             .type = buffer->type,
+             .index = buffer->index,
+@@ -988,6 +998,7 @@
+     hwctx->p.internal = fctxi;
+     fctxi->media_fd = -1;
+     fctxi->video_fd = -1;
++    fctxi->import_capture = ((V4L2RequestDeviceContext *)hwfc->device_ctx->hwctx)->import_capture;
+ 
+     // Locate and open a capable video decoder device
+     ret = v4l2request_open_decoder(hwfc);
+--- a/libavutil/hwcontext_v4l2request_internal.h
++++ b/libavutil/hwcontext_v4l2request_internal.h
+@@ -42,6 +42,12 @@
+     int video_fd;
+ 
+     /**
++     * CAPTURE buffers are V4L2_MEMORY_DMABUF: each frame's caller fills its
++     * AVDRMFrameDescriptor objects with the dma-bufs to decode into.
++     */
++    int import_capture;
++
++    /**
+      * Details of the initialized CAPTURE and OUTPUT queues.
+      */
+     struct {

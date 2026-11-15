@@ -1,0 +1,22 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] avcodec/vc1dec: honour AV_CODEC_FLAG_LOW_DELAY
+
+The decoder held each I- and P-picture back until the next one, for
+display order, whatever the caller asked. With AV_CODEC_FLAG_LOW_DELAY
+it now hands every picture out once decoded, as the MPEG-1/2 and
+MPEG-4 Part 2 decoders already do, so a low-latency caller gets the
+same behaviour across the codecs.
+---
+diff --git a/libavcodec/vc1dec.c b/libavcodec/vc1dec.c
+--- a/libavcodec/vc1dec.c
++++ b/libavcodec/vc1dec.c
+@@ -1014,7 +1014,8 @@
+         if (ret < 0)
+             goto err;
+ 
+-        s->low_delay = !avctx->has_b_frames || v->res_sprite;
++        s->low_delay = !avctx->has_b_frames || v->res_sprite ||
++                       (avctx->flags & AV_CODEC_FLAG_LOW_DELAY);
+ 
+         if (v->profile == PROFILE_ADVANCED) {
+             if(avctx->coded_width<=1 || avctx->coded_height<=1) {

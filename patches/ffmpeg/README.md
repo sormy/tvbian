@@ -46,6 +46,10 @@ newest release, carries all three; `0001`–`0038` apply in order with `patch -p
 | `0036` | `rkmpp`: option `cacheable`, frames on the cached system heap       | ours      |
 | `0037` | `v4l2request`: option `cacheable`, CAPTURE buffers non-coherent     | ours      |
 | `0038` | `rkmpp`: every packet taken before EAGAIN; resolution changes       | ours      |
+| `0039` | `h264`: option `decode_order`, pictures unreordered, off by default | ours      |
+| `0040` | `rkmpp`: option `immediate_out`, no reorder delay, off by default   | ours      |
+| `0041` | `vc1`: `AV_CODEC_FLAG_LOW_DELAY` honoured, as MPEG-1/2/4 honour it  | ours      |
+| `0042` | `v4l2request`: option `import_capture`, caller-owned dma-bufs       | ours      |
 
 `0001`, `0002` and `0014` are LibreELEC's `packages/multimedia/ffmpeg/patches/v4l2-request` and
 `vf-deinterlace-v4l2m2m` at LibreELEC.tv `96d9f0f`: Jonas Karlman's request-API series, posted to
