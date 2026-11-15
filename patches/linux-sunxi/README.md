@@ -57,6 +57,7 @@ for its API, and rewrites of top-level ones it takes in their place (`0103`, `02
 | `0288`        | H616 PHY: PLL settings bounded by TMDS rate            |
 | `0289`        | dw-hdmi: HDR in 10 bits, RGB or 4:2:2                  |
 | `0290`        | dw-hdmi: HDMI or DVI from the connector, its override  |
+| `0291`        | dw-hdmi: HDR10+ at a mode with no HDMI VIC             |
 | `0800`–`0804` | Cedrus: VP8 to 4096 wide, JPEG both ways               |
 | `0805`–`0806` | Cedrus: MPEG-4 Part 2 and H.263 decode                 |
 | `0807`        | Cedrus: a coded format sized by its own engine         |

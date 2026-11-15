@@ -1,0 +1,42 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 15 Nov 2026 07:45:00 -0500
+Subject: [PATCH] drm/bridge: dw-hdmi: Send HDR10+ at a mode with no HDMI VIC
+
+hdmi_config_hdr10plus_infoframe() asks for the mode's HDMI VSIF only to
+learn whether a 3D VSIF needs the slot and whether an HDMI_VIC moves the
+VIC to the AVI InfoFrame, but returned when the helper fails. It fails
+for every mode with neither an HDMI_VIC nor 3D, 1080p and most 4K modes
+among them, so the HDR10+ VSIF was never sent there.
+
+Take a failure as no HDMI VSIF of its own: send the HDR10+ one, and leave
+the AVI VIC as hdmi_config_AVI() set it.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+--- a/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
++++ b/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
+@@ -2008,10 +2008,12 @@
+ 					    const struct drm_display_mode *mode)
+ {
+ 	struct hdmi_vendor_infoframe frame;
++	bool hdmi_vsif;
+ 	int i;
+ 
+-	if (drm_hdmi_vendor_infoframe_from_display_mode(&frame, connector, mode) ||
+-	    frame.s3d_struct != HDMI_3D_STRUCTURE_INVALID)
++	/* fails for a mode with neither an HDMI_VIC nor 3D: no HDMI VSIF of its own, the usual case */
++	hdmi_vsif = !drm_hdmi_vendor_infoframe_from_display_mode(&frame, connector, mode);
++	if (hdmi_vsif && frame.s3d_struct != HDMI_3D_STRUCTURE_INVALID)
+ 		return;
+ 
+ 	hdmi_mask_writeb(hdmi, 0, HDMI_FC_DATAUTO0, HDMI_FC_DATAUTO0_VSD_OFFSET,
+@@ -2028,7 +2030,7 @@
+ 			 HDMI_FC_DATAUTO0_VSD_MASK);
+ 
+ 	/* Without HDMI_VIC in the VSIF, the AVI InfoFrame names the CTA VIC. */
+-	if (frame.vic)
++	if (hdmi_vsif && frame.vic)
+ 		hdmi_writeb(hdmi, drm_match_cea_mode(mode), HDMI_FC_AVIVID);
+ }
+ 
