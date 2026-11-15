@@ -1,0 +1,80 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 14 Nov 2026 15:30:00 -0500
+Subject: [PATCH] usb: musb: sunxi: Put the USB PHY before unregistering it
+
+Probe takes the generic USB PHY with devm_usb_get_phy(), but remove
+unregisters the PHY's platform device by hand, before devres runs. The
+PHY's driver is unbound by then, so the devres release's usb_put_phy()
+dereferences its NULL driver:
+
+  Unable to handle kernel NULL pointer dereference at virtual address 0000000000000010
+  pc : devm_usb_phy_release+0x24/0x58
+   devres_release_all+0x94/0x100
+   device_unbind_cleanup+0x1c/0x78
+   device_release_driver_internal+0x1f4/0x240
+   unbind_store+0xb4/0xc0
+
+Unregister the PHY device from a devres action added before the PHY is
+taken, so devres puts the PHY first, and drop the error path and the
+remove step that did it by hand.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+--- a/drivers/usb/musb/sunxi.c
++++ b/drivers/usb/musb/sunxi.c
+@@ -674,6 +674,11 @@
+ 	.ram_bits	= SUNXI_MUSB_RAM_BITS,
+ };
+ 
++static void sunxi_musb_unregister_usb_phy(void *usb_phy)
++{
++	usb_phy_generic_unregister(usb_phy);
++}
++
+ static int sunxi_musb_probe(struct platform_device *pdev)
+ {
+ 	struct musb_hdrc_platform_data	pdata;
+@@ -768,11 +773,16 @@
+ 		return PTR_ERR(glue->usb_phy);
+ 	}
+ 
++	ret = devm_add_action_or_reset(&pdev->dev, sunxi_musb_unregister_usb_phy,
++				       glue->usb_phy);
++	if (ret)
++		return ret;
++
+ 	glue->xceiv = devm_usb_get_phy(&pdev->dev, USB_PHY_TYPE_USB2);
+ 	if (IS_ERR(glue->xceiv)) {
+ 		ret = PTR_ERR(glue->xceiv);
+ 		dev_err(&pdev->dev, "Error getting usb-phy %d\n", ret);
+-		goto err_unregister_usb_phy;
++		return ret;
+ 	}
+ 
+ 	platform_set_drvdata(pdev, glue);
+@@ -792,23 +802,17 @@
+ 	if (IS_ERR(glue->musb_pdev)) {
+ 		ret = PTR_ERR(glue->musb_pdev);
+ 		dev_err(&pdev->dev, "Error registering musb dev: %d\n", ret);
+-		goto err_unregister_usb_phy;
++		return ret;
+ 	}
+ 
+ 	return 0;
+-
+-err_unregister_usb_phy:
+-	usb_phy_generic_unregister(glue->usb_phy);
+-	return ret;
+ }
+ 
+ static void sunxi_musb_remove(struct platform_device *pdev)
+ {
+ 	struct sunxi_glue *glue = platform_get_drvdata(pdev);
+-	struct platform_device *usb_phy = glue->usb_phy;
+ 
+ 	platform_device_unregister(glue->musb_pdev);
+-	usb_phy_generic_unregister(usb_phy);
+ }
+ 
+ static const struct sunxi_musb_cfg sun4i_a10_musb_cfg = {

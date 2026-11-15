@@ -24,6 +24,7 @@ for its API, and rewrites of top-level ones it takes in their place (`0103`, `02
 | `0047`        | `sun50i-iommu`: a master's port reset, exported        |
 | `0048`        | Cedrus: reset its IOMMU port after a timeout           |
 | `0049`–`0050` | the H96 Max H313's remote keymap, `rc-h96max-h313`     |
+| `0051`        | `musb` sunxi: unbinds without a NULL dereference       |
 | `0052`–`0063` | Cedrus: VP9, P010 10-bit, AFBC out on the H616         |
 | `0064`–`0065` | VC-1: parsed-slice uAPI and Cedrus decoding            |
 | `0066`        | Cedrus: AFBC out for HEVC                              |
