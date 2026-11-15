@@ -3,7 +3,7 @@
 FFmpeg has no hwaccel for stateless V4L2 decoders such as Cedrus, and its `v4l2_m2m` wrappers for
 stateful ones such as the Amlogic decoder stumble on raw streams, resolution changes and draining;
 its `rkmpp` codecs for Rockchip's MPP lack 10-bit, scaling and AFBC. One set on FFmpeg 9.0.2, the
-newest release, carries all three; `0001`–`0038` apply in order with `patch -p1`. They ship as the
+newest release, carries all three; `0001`–`0043` apply in order with `patch -p1`. They ship as the
 `ffmpeg9` package, `ffmpeg9` and `ffprobe9` beside Debian's FFmpeg: `./build.sh extra ffmpeg9`.
 
 | Patch  | Adds                                                                | From      |
@@ -50,6 +50,7 @@ newest release, carries all three; `0001`–`0038` apply in order with `patch -p
 | `0040` | `rkmpp`: option `immediate_out`, no reorder delay, off by default   | ours      |
 | `0041` | `vc1`: `AV_CODEC_FLAG_LOW_DELAY` honoured, as MPEG-1/2/4 honour it  | ours      |
 | `0042` | `v4l2request`: option `import_capture`, caller-owned dma-bufs       | ours      |
+| `0043` | `v4l2request` VC-1: slice start codes and repeated headers          | ours      |
 
 `0001`, `0002` and `0014` are LibreELEC's `packages/multimedia/ffmpeg/patches/v4l2-request` and
 `vf-deinterlace-v4l2m2m` at LibreELEC.tv `96d9f0f`: Jonas Karlman's request-API series, posted to

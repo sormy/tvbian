@@ -1,0 +1,122 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] avcodec/v4l2_request_vc1: hand the engine each slice it can read
+
+A VC-1 Advanced picture cut into slices decoded right up to its second
+slice, then garbage, and some pictures timed out. Three faults:
+
+- Every slice's start code was dropped, so the engine, which finds a
+  slice by its start code, read the next slice header as macroblocks.
+- data_bit_offset was taken at the end of the frame, after the last
+  slice header was parsed: that slice header's length, not the
+  picture header's.
+- A slice with PIC_HEADER_FLAG repeats the picture header after its
+  address. The engine reads the address and the flag, not the header.
+
+A picture's first data now sets the offset to its header's length; a
+later slice keeps its start code; a slice repeating the header is
+handed over with the flag cleared and the repeat left out, its
+macroblocks shifted to where the header ended and escaped again. The
+repeat must match the picture's header, so nothing is lost.
+
+SMPTE's SA20021, 3 to 27 slices a picture, most repeating the header,
+decodes bit-exact against the software decoder on the H313's Cedrus,
+60 of 60 frames, where before none matched.
+---
+
+--- a/libavcodec/v4l2_request_vc1.c
++++ b/libavcodec/v4l2_request_vc1.c
+@@ -19,8 +19,11 @@
+ #include "config.h"
+ #include "config_components.h"
+ 
++#include "libavutil/mem.h"
++
+ #include "hwaccel_internal.h"
+ #include "hwconfig.h"
++#include "put_bits.h"
+ #include "v4l2_request.h"
+ #include "vc1.h"
+ #include "vc1-ctrls.h"
+@@ -519,6 +522,49 @@
+     return 0;
+ }
+ 
++/*
++ * The engine reads a slice's address and PIC_HEADER_FLAG, not the picture
++ * header the flag says is repeated after them: hand it the slice with the
++ * flag cleared and the repeat left out, its macroblocks where the header
++ * ended, escaped again.
++ */
++static int v4l2_request_vc1_append_bare_slice(AVCodecContext *avctx,
++                                              V4L2RequestControlsVC1 *controls,
++                                              int mb_y, GetBitContext gb)
++{
++    int left = get_bits_left(&gb);
++    int raw_size = (10 + left + 7) / 8;
++    uint8_t *raw = av_malloc(raw_size);
++    uint8_t *out = av_malloc(4 + raw_size * 3 / 2 + 1);
++    PutBitContext pb;
++    int n = 4, zeros = 0, ret = AVERROR(ENOMEM);
++
++    if (!raw || !out)
++        goto end;
++
++    init_put_bits(&pb, raw, raw_size);
++    put_bits(&pb, 9, mb_y);
++    put_bits(&pb, 1, 0);
++    for (; left > 0; left -= FFMIN(left, 24))
++        put_bits(&pb, FFMIN(left, 24), get_bits(&gb, FFMIN(left, 24)));
++    flush_put_bits(&pb);
++
++    AV_WB32(out, VC1_CODE_SLICE);
++    for (int i = 0; i < put_bytes_output(&pb); i++) {
++        if (zeros >= 2 && raw[i] <= 3) {
++            out[n++] = 3;
++            zeros = 0;
++        }
++        out[n++] = raw[i];
++        zeros = raw[i] ? 0 : zeros + 1;
++    }
++    ret = ff_v4l2_request_append_output(avctx, &controls->pic, out, n);
++end:
++    av_free(raw);
++    av_free(out);
++    return ret;
++}
++
+ static int v4l2_request_vc1_decode_slice(AVCodecContext *avctx, const uint8_t *buffer, uint32_t size)
+ {
+     const VC1Context *v = avctx->priv_data;
+@@ -528,11 +574,19 @@
+     if (controls->skipped)
+         return 0;
+ 
+-    /* Current bit buffer is beyond any marker for VC-1, so skip it */
+-    if (avctx->codec_id == AV_CODEC_ID_VC1 && size >= 4 &&
+-        IS_MARKER(AV_RB32(buffer))) {
+-        buffer += 4;
+-        size -= 4;
++    /*
++     * The picture's first data follows its header; a later slice keeps its
++     * start code, where the engine finds it and reads the slice header.
++     */
++    if (!controls->pic.output->bytesused) {
++        if (avctx->codec_id == AV_CODEC_ID_VC1 && size >= 4 &&
++            IS_MARKER(AV_RB32(buffer))) {
++            buffer += 4;
++            size -= 4;
++        }
++        controls->slice_params.data_bit_offset = get_bits_count(&v->gb);
++    } else if (v->pic_header_flag) {
++        return v4l2_request_vc1_append_bare_slice(avctx, controls, s->mb_y, v->gb);
+     }
+ 
+     return ff_v4l2_request_append_output(avctx, &controls->pic, buffer, size);
+@@ -561,7 +615,6 @@
+     };
+ 
+     controls->slice_params.bit_size = controls->pic.output->bytesused * 8;
+-    controls->slice_params.data_bit_offset = get_bits_count(&v->gb);
+ 
+     return ff_v4l2_request_decode_frame(avctx, &controls->pic,
+                                         control, FF_ARRAY_ELEMS(control));
