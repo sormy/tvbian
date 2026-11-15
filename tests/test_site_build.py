@@ -91,6 +91,19 @@ class Parse(unittest.TestCase):
         self.assertGreater(jpg[0], 0)
         self.assertGreater(png[1], 0)
 
+    def test_webp_size_from_each_kind_of_first_chunk(self) -> None:
+        def webp(chunk: bytes, body: bytes) -> bytes:
+            return b"RIFF" + bytes(4) + b"WEBP" + chunk + bytes(4) + body
+
+        lossy = webp(b"VP8 ", bytes(6) + (1200).to_bytes(2, "little") + (900).to_bytes(2, "little"))
+        lossless = webp(b"VP8L", b"\x2f" + (1199 | 899 << 14).to_bytes(4, "little") + bytes(5))
+        extended = webp(
+            b"VP8X", bytes(4) + (1199).to_bytes(3, "little") + (899).to_bytes(3, "little")
+        )
+        for data in (lossy, lossless, extended):
+            self.assertEqual(build.webp_size(data), (1200, 900))
+        self.assertIsNone(build.webp_size(b"RIFF" + bytes(4) + b"WAVE" + bytes(20)))
+
     def test_terminal_follows_first_board_and_repo_logo(self) -> None:
         cards = build.load_cards(ROOT)
         banner = build.terminal_html(ROOT, cards)

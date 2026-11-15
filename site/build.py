@@ -460,9 +460,27 @@ def jpeg_size(data: bytes) -> tuple[int, int] | None:
     return None
 
 
+def webp_size(data: bytes) -> tuple[int, int] | None:
+    """A WebP's size from its first chunk: lossy VP8, lossless VP8L, or the extended VP8X."""
+    if len(data) < 30 or data[:4] != b"RIFF" or data[8:12] != b"WEBP":
+        return None
+    chunk = data[12:16]
+    if chunk == b"VP8 ":
+        return (
+            int.from_bytes(data[26:28], "little") & 0x3FFF,
+            int.from_bytes(data[28:30], "little") & 0x3FFF,
+        )
+    if chunk == b"VP8L":
+        bits = int.from_bytes(data[21:25], "little")
+        return (bits & 0x3FFF) + 1, (bits >> 14 & 0x3FFF) + 1
+    if chunk == b"VP8X":
+        return int.from_bytes(data[24:27], "little") + 1, int.from_bytes(data[27:30], "little") + 1
+    return None
+
+
 def image_size(path: Path) -> tuple[int, int] | None:
     data = path.read_bytes()
-    return png_size(data) or jpeg_size(data)
+    return png_size(data) or jpeg_size(data) or webp_size(data)
 
 
 def esc(value: str) -> str:
