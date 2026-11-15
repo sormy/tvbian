@@ -60,6 +60,7 @@ TEST_TOOLS = {
     "fio",
     "stress-ng",
     "ir-keytable",
+    "v4l-utils",
 }
 # tree nodes that never get a driver of their own: register banks, buses' QoS, the arch timer
 DRIVERLESS = ("syscon", "qos", "timer", "opp-", "psci", "shmem", "debug")

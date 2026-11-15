@@ -34,11 +34,12 @@ tools: a line that differs from the board's last run is a finding.
 
    `--kernels own|next|both` picks the kernels apart from the profile; `both` unless named.
 
-   - **`short`, about 10 minutes a kernel, every board the change reaches.**
-   - **`default`, every change, one box per hardware block**: boards that share a SoC, its kernel
-     and the engine's tree nodes (the 3518, 3518D, R69-1 and M2 Plus) need it on one; the rest get
-     `short`. A board whose tree changed gets `default` itself.
-   - **`extended`, a release or a kernel series.**
+   - **`short`, 9 minutes a kernel as measured, every board the change reaches.**
+   - **`default`, 22 minutes a kernel as measured, every change, one box per hardware block**:
+     boards that share a SoC, its kernel and the engine's tree nodes (the 3518, 3518D, R69-1 and
+     M2 Plus) need it on one; the rest get `short`. A board whose tree changed gets `default`
+     itself.
+   - **`extended`, about an hour a kernel estimated, a release or a kernel series.**
 
    The boxes need no session: a driver reload, a reboot or a hang ends nothing. `collect` fetches
    each box's results whenever it answers; the box restores its default and stops when done.

@@ -54,5 +54,32 @@ class MemoryTest(unittest.TestCase):
         self.assertEqual(video.needed_mb("vp9p2", "7680x4320"), 759)
 
 
+class ClampedTest(unittest.TestCase):
+    TRIED = "\tWidth/Height      : {}\n\tPixel Format      : '{}' (H.265)\n"
+
+    def test_the_size_the_driver_gives_back(self) -> None:
+        self.assertEqual(
+            video.clamped(self.TRIED.format("8192/4320", "S265"), "S265"), (8192, 4320)
+        )
+
+    def test_a_swapped_format_says_nothing(self) -> None:
+        self.assertIsNone(video.clamped(self.TRIED.format("1920/1080", "S264"), "S265"))
+
+
+class LadderTest(unittest.TestCase):
+    def test_a_pass_too_slow_to_play_stops_the_climb(self) -> None:
+        rates = {"1920x1080": 120.0, "3840x2160": 18.0, "7680x4320": 5.0}
+        tried: list[str] = []
+
+        def run(size: str) -> dict[str, object]:
+            tried.append(size)
+            return {"verdict": "pass", "fps": rates[size]}
+
+        out: list[dict[str, object]] = []
+        video.ladder(list(rates), run, out.append, lambda size: None)
+        self.assertNotIn("7680x4320", tried)
+        self.assertEqual([r["size"] for r in out], ["1920x1080", "3840x2160"])
+
+
 if __name__ == "__main__":
     unittest.main()

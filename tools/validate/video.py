@@ -183,6 +183,20 @@ ENGINES = {
         "fallback": r"Failed setup for format|hwaccel initialisation returned error|Failed to get a hw",
         "irq": r"cedrus",
         "encoders": {"h264": "h264_v4l2m2m", "mjpeg": "mjpeg_v4l2m2m"},
+        # the decoder asked for its largest frame per coded format
+        "device": "cedrus-dec",
+        "formats": {
+            "h264": "S264",
+            "h264i": "S264",
+            "h264p10": "S264",
+            "hevc": "S265",
+            "hevc10": "S265",
+            "vp9": "VP9F",
+            "vp9p2": "VP9F",
+            "vp8": "VP8F",
+            "mpeg2": "MG2S",
+            "mjpeg": "MJPG",
+        },
     },
     "rkmpp": {
         "decode": lambda c: (
@@ -690,8 +704,9 @@ def encode_case(ff, engine, codec, encoder, size, time_cpu):
 
 
 def ladder(sizes, run, emit, start):
-    """Each size once, smallest first, stopping after STOP_AFTER failing in a row; the largest pass
-    and the first failure again, to catch a case that differs run to run."""
+    """Each size once, smallest first, stopping after STOP_AFTER failing in a row, or after a pass
+    too slow to play: a larger size is slower still. The largest pass and the first failure again,
+    to catch a case that differs run to run."""
     done, misses = {}, 0
     for size in sorted(sizes, key=pixels):
         if misses >= STOP_AFTER:
@@ -700,7 +715,11 @@ def ladder(sizes, run, emit, start):
         began = time.monotonic()
         done[size] = run(size)
         done[size]["secs"] = round(time.monotonic() - began, 1)
-        misses = 0 if done[size]["verdict"] == "pass" else misses + 1
+        passed = done[size]["verdict"] == "pass"
+        misses = 0 if passed else misses + 1
+        fps = done[size].get("fps")
+        if passed and fps is not None and fps < PLAYABLE_FPS:
+            break
     passed = [s for s in done if done[s]["verdict"] == "pass"]
     edges = passed[-1:] + [s for s in done if s not in passed][:1]
     for size in edges:
@@ -727,6 +746,31 @@ def available_mb():
     return int(found.group(1)) >> 10 if found else 1 << 20
 
 
+def largest(eng, codec):
+    """The largest frame the engine's decoder takes for codec, as TRY_FMT clamps a huge one;
+    None when the engine does not say or the format is not offered."""
+    fourcc = eng.get("formats", {}).get(codec)
+    names = Path("/sys/class/video4linux").glob("*/name")
+    device = next(
+        (n.parent.name for n in names if n.read_text().strip() == eng.get("device")), None
+    )
+    if fourcc is None or device is None:
+        return None
+    asked = f"width=65535,height=65535,pixelformat={fourcc}"
+    code, out, _ = sh(["v4l2-ctl", "-d", f"/dev/{device}", f"--try-fmt-video-out={asked}"])
+    if code:
+        raise RuntimeError(f"v4l2-ctl on /dev/{device}: {out.strip()}")
+    return clamped(out, fourcc)
+
+
+def clamped(out, fourcc):
+    """The size v4l2-ctl's TRY_FMT gave back, None when the driver swapped the format."""
+    size = re.search(r"Width/Height\s*:\s*(\d+)/(\d+)", out)
+    if f"'{fourcc}'" not in out or size is None:
+        return None
+    return int(size[1]), int(size[2])
+
+
 def cmd_box(args):
     global BOX_DIR
     BOX_DIR = args.dir
@@ -737,19 +781,27 @@ def cmd_box(args):
     emit = lambda rec: print(json.dumps(rec), flush=True)
 
     def runnable(suite, codec, sizes):
-        """The sizes to run; a case --skip names, or one past the box's memory, is recorded, not
-        run."""
+        """The sizes to run; a case --skip names, one past the decoder's largest frame or past the
+        box's memory, is recorded, not run."""
         free = available_mb()
-        out = []
+        most = None if suite == "encode" else largest(ENGINES[args.engine], codec)
+        out, past = [], []
         for size in sizes:
             need = needed_mb(codec, size)
+            width, height = (int(n) for n in size.split("x"))
             record = {"suite": suite, "codec": codec, "size": size, "verdict": "skipped"}
             if skip and skip.search(f"{suite}:{codec}-{size}"):
                 emit(record)
+            elif most and (width > most[0] or height > most[1]):
+                past.append(size)
             elif need > free:
                 emit(dict(record, why=f"needs {need} MB, {free} MB free"))
             else:
                 out.append(size)
+        if most and past:  # the hardware's bound, one line a codec
+            above = f"above {most[0]}x{most[1]}"
+            why = f"{len(past)} sizes past the driver's limit"
+            emit({"suite": suite, "codec": codec, "size": above, "verdict": "skipped", "why": why})
         return out
 
     emit(
