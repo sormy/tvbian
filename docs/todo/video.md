@@ -9,9 +9,6 @@ FFmpeg's, and what no chip has measured yet.
       controls telling an MPEG-1 stream apart, and an `mpeg1_v4l2request` hwaccel.
 - [ ] VC-1 Main: chroma drifts on the SMPTE conformance streams with B pictures, luma too with
       FASTUVMC; the vendor's register writes for Main against ours.
-- [ ] VC-1 Advanced: chroma drifts in P pictures, luma exact: SMPTE's SA00040 from its fourth
-      picture, SA10091 from its second; SA20021, SA00050, SA10143 and `ilaced_twomv` decode
-      bit-exact. Not slices, not FASTUVMC (off in both).
 - [ ] VC-1 Simple: a Simple profile file to decode.
 - [ ] MPEG-4: interlaced B-VOPs are refused, their field direct mode wrong with every field-distance
       encoding tried at `0x120`. Quarter-sample luma sits 45–57 dB from FFmpeg's, Xvid's 3-point GMC

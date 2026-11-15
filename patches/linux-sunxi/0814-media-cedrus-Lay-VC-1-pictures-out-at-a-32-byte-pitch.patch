@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 15 Nov 2026 14:30:00 -0500
+Subject: [PATCH] media: cedrus: Lay VC-1 pictures out at a 32-byte pitch
+
+VC-1 motion compensation fetches its references at a 32-byte pitch, as
+H.264's and HEVC's do. A picture 16 but not 32 aligned in width decoded
+its luma exact and its chroma wrong in every inter picture, wrong
+differently from run to run where the fetch reached the line padding:
+SMPTE's SA00040 (176x144) and SA10091 (720x480).
+
+Lay VC-1 pictures out at a 32-byte pitch too.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+--- a/drivers/staging/media/sunxi/cedrus/cedrus.h
++++ b/drivers/staging/media/sunxi/cedrus/cedrus.h
+@@ -225,13 +225,14 @@
+ 	return ALIGN(bytesperline * height * 3 / 2, 256);
+ }
+ 
+-/* H.264 and HEVC motion compensation fetches references at a 32-byte pitch. */
++/* H.264, HEVC and VC-1 fetch references at a 32-byte pitch. */
+ static inline unsigned int cedrus_picture_stride(struct cedrus_context *ctx,
+ 						 unsigned int width)
+ {
+ 	switch (ctx->v4l2.format_coded.fmt.pix.pixelformat) {
+ 	case V4L2_PIX_FMT_H264_SLICE:
+ 	case V4L2_PIX_FMT_HEVC_SLICE:
++	case V4L2_PIX_FMT_VC1_SLICE:
+ 		return ALIGN(width, 32);
+ 	default:
+ 		return ALIGN(width, 16);
