@@ -45,6 +45,9 @@ FFmpeg's, and what no chip has measured yet.
 
 ## Amlogic S905L3
 
+- [ ] Decoding after a drain: `V4L2_DEC_CMD_START`, or a seek (OUTPUT off and on), decodes nothing
+      more once a drain's end code has ended the microcode's session; START must restart the
+      session, as streaming on does.
 - [ ] `meson_vdec`'s MPEG-1/2/4, VC-1 and JPEG take their size from the client's format, clamped to
       1920x1080: a bigger picture decodes broken until the client refuses the clamp, below. H.264,
       VP9 and HEVC refuse past their size, `meson-codecs/0030`.

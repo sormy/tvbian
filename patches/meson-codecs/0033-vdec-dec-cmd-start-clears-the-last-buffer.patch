@@ -1,0 +1,32 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 15 Nov 2026 12:00:00 -0500
+Subject: [PATCH] media: meson: vdec: V4L2_DEC_CMD_START clears the last
+ buffer dequeued
+
+A drain ends with a CAPTURE buffer flagged LAST, after which videobuf2
+answers every DQBUF with EPIPE until the queue's last-buffer state is
+cleared. V4L2_DEC_CMD_START resumed the decoder but left that state set,
+so a client that drained and started again dequeued nothing more, and
+spun on EPIPE.
+
+Clear it on V4L2_DEC_CMD_START, as other stateful decoders do.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ vdec/vdec.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff -ruN a/vdec/vdec.c b/vdec/vdec.c
+--- a/vdec/vdec.c
++++ b/vdec/vdec.c
+@@ -1345,6 +1345,7 @@ vdec_decoder_cmd(struct file *file, void *fh, struct v4l2_decoder_cmd *cmd)
+ 
+ 	if (cmd->cmd == V4L2_DEC_CMD_START) {
+ 		v4l2_m2m_clear_state(sess->m2m_ctx);
++		vb2_clear_last_buffer_dequeued(v4l2_m2m_get_dst_vq(sess->m2m_ctx));
+ 		sess->should_stop = 0;
+ 		sess->last_pending = false;
+ 		sess->draining = false;
+-- 
+2.47.3

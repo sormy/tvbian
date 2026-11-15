@@ -39,6 +39,8 @@ in-tree: `patches/linux-meson/` `0002` puts meson-sm1-codecs's decoder under
 | `0030` | H.264 and VP9 past their largest picture refused, H.264 past 8 bits |
 | `0031` | VP9: an interrupt without a parsed header is no error               |
 | `0032` | HEVC: an interrupt before anything is parsed is no error            |
+| `0033` | `V4L2_DEC_CMD_START` clears CAPTURE's last-buffer state             |
+| `0034` | a drain waits for the pictures its end code pushes out              |
 
 | Overlay package     | Module        | Device                |
 | ------------------- | ------------- | --------------------- |
@@ -175,6 +177,24 @@ The same interrupt in HEVC, `dec_status` 0 with nothing parsed, aborted a 4K Mai
 start while its CAPTURE buffers migrated into CMA. It is ignored too, the debug tag cleared; any
 other unknown status still aborts. 🟡 The status-0 interrupt did not recur in 30 runs since; no
 regression.
+
+## 0033
+
+A drain ends with a CAPTURE buffer flagged LAST, and videobuf2 then answers every DQBUF with `EPIPE`
+until the queue's last-buffer state is cleared. `V4L2_DEC_CMD_START` resumed the decoder but left it
+set, so a client that drained and started again dequeued nothing more. Mainline has the same gap.
+The VA-API driver drains on a sync; as a swapped module on 6.18, a drain at the end of an H.264
+stream then handed every held picture out. On a built 6.18 kernel the `EPIPE` is gone, but the
+stream does not resume: after a drain's end code the microcode's session is over, and pictures fed
+after `V4L2_DEC_CMD_START` come out as none, or a few, late.
+
+## 0034
+
+A drain queues the end-of-stream sequence, which pushes the pictures the microcode holds through,
+and ends once the decoder has been 50 ms without an interrupt. That quiet counted from the last
+interrupt before the drain, so a client quiet for longer had the drain end at once: a 3-picture
+1080p MPEG-4 stream, queued whole and stopped a second later, gave 1 or 2 pictures. It now counts
+from the sequence; 3 of 3 in each run.
 
 ## Upstream
 

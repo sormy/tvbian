@@ -1,0 +1,32 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 15 Nov 2026 15:30:00 -0500
+Subject: [PATCH] media: meson: vdec: a drain waits for the pictures its end
+ code pushes out
+
+A drain queues the codec's end-of-stream sequence, which pushes the
+pictures the microcode still holds through, then waits until the
+decoder has been without an interrupt for 50 ms. The wait counted from
+the last interrupt before the drain: after a client had been quiet for
+longer, the drain ended at once and flagged LAST before the microcode
+decoded what the sequence pushed out. A 3-picture 1080p MPEG-4 stream,
+queued whole and stopped a second later, gave 1 or 2 pictures.
+
+Count the quiet from the moment the sequence is queued.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ vdec/vdec.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+--- a/vdec/vdec.c
++++ b/vdec/vdec.c
+@@ -461,6 +461,8 @@
+ 
+ 		/* push the last picture through, then let it decode */
+ 		esparser_queue_eos(sess->core, data, len);
++		/* the quiet that ends the drain starts now, not at the last interrupt */
++		sess->last_irq_jiffies = get_jiffies_64();
+ 		if (codec_ops->eos_queued)
+ 			codec_ops->eos_queued(sess);
+ 		vdec_wait_eos_decoded(sess, len);
