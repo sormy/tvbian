@@ -1,0 +1,29 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 15 Nov 2026 07:30:00 -0500
+Subject: [PATCH] drm/bridge: dw-hdmi: Take the sink from the connector
+
+dw-hdmi sets sink_is_hdmi and sink_has_audio only in its own EDID read
+over DDC. An EDID override, or any EDID the connector has that DDC did
+not give, never reaches them: with no screen on the bus the sink stays
+DVI, and DVI mode sends no AVI, vendor or DRM InfoFrame at all, so an
+HDR mode set on a synthetic HDR screen sends SDR.
+
+Take both from the connector's display_info when the bridge is enabled,
+as the FIXME beside the DDC read asks; it holds what the connector read,
+the override included.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+--- a/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
++++ b/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
+@@ -3163,6 +3163,9 @@
+ 	mutex_lock(&hdmi->mutex);
+ 	hdmi->disabled = false;
+ 	hdmi->curr_conn = connector;
++	/* what the connector read, its EDID override too, not only our own DDC read */
++	hdmi->sink_is_hdmi = connector->display_info.is_hdmi;
++	hdmi->sink_has_audio = connector->display_info.has_audio;
+ 	dw_hdmi_update_power(hdmi);
+ 	dw_hdmi_update_phy_mask(hdmi);
+ 	handle_plugged_change(hdmi, true);
