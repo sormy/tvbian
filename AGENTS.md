@@ -246,6 +246,12 @@ never seen the box must get through it.
 
 ## Commits
 
+**Commit and push only when the owner asks**, after showing the change; never as a step of other
+work. A push starts a release.
+
+**Nothing is committed untested**, unless the owner approves it untested. A kernel, tree or driver
+change is tested on the box it targets, on every kernel it ships on.
+
 **A title. A paragraph only where it earns its place** — something a reader cannot get from the
 diff. The diff is the record; reasoning belongs in the comment, the doc, or the todo it came from.
 
@@ -278,6 +284,9 @@ Less code is better. Communicate through names, not comments: comment a non-obvi
 never what the code already says, and keep it shorter than the code it explains. One responsibility
 per script.
 
+**A device tree's comment is one line**, on a line its patch changes: the board's reason. What dtcx
+or a base's translation writes needs none.
+
 ## Reach for the lowest layer that can express it
 
 1. **Device tree** — it describes hardware, needs no code, and survives every userspace and init
@@ -298,6 +307,10 @@ the next reader must find both. If the lower layer can only do part of it, do al
 higher one and record why.
 
 ## Hardware
+
+**Not sure how the hardware behaves? Check the vendor tree first**: `factory_board.dts`, then the
+vendor kernel's driver for that node. It shows what the vendor configured and relied on, before a
+guess, a test or another board's tree.
 
 - **The first login asks for a new root password**: the image ships `1234`, expired. With a network,
   copy an SSH key into `/root/.ssh/authorized_keys` over serial once, and the rest of bring-up runs

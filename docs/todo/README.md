@@ -54,6 +54,10 @@ below.
 
 - [ ] **Blu-ray 3D plays in 3D on a 3D TV.** Today only its 2D view.
 
+- [ ] **Three uses on one image**: server (the minimal image), desk (`tvb-labwc-session`: labwc, a
+      macOS-like theme, 3D and video in hardware) and TV (`tvb-kodi-session`,
+      `tvb-fuseamp-session`). Its own page.
+
 - [ ] **FFmpeg, Kodi and Fuseamp install as `tvb-*` packages**, Fuseamp once it is ready for
       release.
 
@@ -171,6 +175,7 @@ below.
 | ------------------------------- | ------------------------------------------- |
 | `docs/todo/video.md`            | hardware video: what is left, every SoC     |
 | `docs/todo/hwaccel.md`          | hardware video in Debian's own programs     |
+| `docs/todo/usages.md`           | server, desk and TV on one image            |
 | `docs/todo/media-stick.md`      | the universal media stick                   |
 | `docs/todo/kodi.md`             | Kodi 22 on our FFmpeg, built on trixie      |
 | `docs/todo/extras-upstream.md`  | extras built from an upstream release       |

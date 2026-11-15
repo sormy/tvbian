@@ -30,6 +30,9 @@
 - [ ] **The M2 Plus's `gpu-bus` binds.** Its factory tree enables the `rockchip,rk3528-bus`
       node, the 3518s' and the R69's disable it; nothing binds it on either kernel, though
       `ARM_ROCKCHIP_BUS_DEVFREQ` is built in. Bind it, or disable it as the siblings do.
+- [ ] **6.12: a `_regulator_put` WARNING in the USB2 PHY's deferred probe**, now and then on the
+      3518D and the R69. The probe fails `IRQ index 0 not found`, after `vcc5v0_host: could not add
+      device link ... -ENOENT`; its cleanup puts the regulator. Taints the kernel (512).
 
 - [ ] **RK3528: name the DDR parameters a vendor tunes.** The H96 Max 3518's factory DDR init is
       rkbin's `rk3528_ddr_1056MHz_4BIT_PCB_v1.11.bin` with three bytes changed in its parameter
@@ -39,6 +42,20 @@
 - [ ] **AIC8800 Bluetooth address as on sunxi.** The chip's eFuse first, then the Wi-Fi's own
       address plus one, wherever it came from; today a tree address beats the eFuse, and the
       fallback is the SoC serial's.
+
+- [ ] **To consider: RK3528 and RK3518 on mainline.** Mainline 7.3.4's `rk3528.dtsi` describes 60
+      of the 95 blocks the M2 Plus enables: enough for a headless server. Missing, by size:
+
+      | Size   | Blocks                                                            |
+      | ------ | ----------------------------------------------------------------- |
+      | Small  | `tsadc`, SAI, S/PDIF, RNG, crypto, SFC, timer, DFI, SRAM, IOMMUs  |
+      | Medium | Hantro `vdpu`, JPEG decoder, RGA, IEP                             |
+      | Large  | VOP2's RK3528 variant, HDMI and its PHY: no picture without them  |
+      | Large  | rkvdec (HEVC, H.264, VP9), rkvenc: no mainline encoder driver     |
+      | Large  | audio codec, composite TV encoder                                 |
+
+      Check the lists for posted RK3528 VOP2, HDMI and rkvdec series first. Video would go through
+      V4L2 stateless, as on the H616, not MPP.
 
 - [ ] **8K in real time on the DDR3 boxes**: decode and display together at 8K, fps and dropped
       frames, against an LPDDR3 box. The 8K line today is the engine alone; bandwidth is what DDR3
