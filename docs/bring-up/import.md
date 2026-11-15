@@ -61,6 +61,8 @@ Allwinner and Amlogic images are not run yet.
   vendor's template shared by every box is not evidence either way.
 - **Shared tools change only for a tied image.** An unchecked image's quirk is not a reason to widen
   a build script.
+- **A forum's dump can be carved from the vendor image**: hash its tree against the image's before
+  taking it as the box's.
 - **An image is not a dump**: no per-unit data, MACs or DRAM training.
 
 ## Marks

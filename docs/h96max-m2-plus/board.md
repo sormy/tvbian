@@ -342,6 +342,7 @@ in their own table.
 | eMMC user area               | 31,272,730,624 bytes; USB flash query      |
 | Usable RAM                   | 3921 MiB                                   |
 | RAM bandwidth, 1 / 4 cores   | 1267 / 2833 MB/s read, 786 MHz             |
+| RAM type                     | DDR3, `PMUGRF_OS_REG18` `0x100064c1`       |
 | First boot                   | 11.453 s; kernel + userspace               |
 | Second boot                  | 10.336 s; kernel + userspace               |
 | RAM verification             | 2800M, 60 s; no failures                   |

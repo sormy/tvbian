@@ -61,7 +61,7 @@ In the bring-up checklist's order, each kernel's mark side by side; numbers read
 | forced panic            | ✅  | ✅  | reboots; oops in pstore                            |
 | lockup panic            | ✅  | 🟠  | 6.18 panics with a record; 7.3 by watchdog         |
 | all-CPU lockup          | 🟠  | ❓  | reset at 16 s by watchdog, no record               |
-| OPP table               | ✅  | ✅  | factory bin 4: 480–1416 MHz, 1150 mV top           |
+| OPP table               | ✅  | ❓  | stock's ladder: 480–1344 MHz, 1120 mV top          |
 | 4-core heat             | 🟠  | 🟠  | 70 °C trip: 1200–1320 MHz, 73 °C peak              |
 | Ethernet 10/100         | ✅  | ✅  | both rates link; AC300 EPHY driver                 |
 | Ethernet rate           | ✅  | ✅  | 93.9 / 93.3 idle, 93.8 / 89.4 loaded               |
@@ -77,7 +77,7 @@ In the bring-up checklist's order, each kernel's mark side by side; numbers read
 | USB 2.0 480M            | ❓  | ❓  | 👤 a stick in each USB-A port; `fio`               |
 | OTG port host           | ❓  | ❓  | 👤 a stick in the port nearest the SD slot         |
 | input names             | ✅  | 🟡  | `cec-remote`, `ir-remote`                          |
-| IR keymap               | ✅  | ✅  | `rc-h96max`, 22 keys, NEC                          |
+| IR keymap               | ✅  | ✅  | `rc-h96max-h313`, 22 keys, NEC                     |
 | s2idle 20 s             | ✅  | ❓  | RTC wake, same boot                                |
 | s2idle 100 s            | ❌  | ❓  | resets with no record                              |
 | deep suspend            | ❌  | ❌  | H616: no SCPI; s2idle only                         |

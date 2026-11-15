@@ -1773,6 +1773,28 @@ gain, the unit's own DRAM init on the eMMC, is not worth it; the install keeps w
 - `retain-state-suspended` and `retain-state-shutdown` on both LED nodes, as the trees phase's graft
   asks: the sleep and shutdown hooks set the colour, and the LED core no longer turns it off after.
 
+## 2026-11-11 — the tree is the translation and its board facts
+
+- `boards/tanix-tx1-v2/board.patch` now applies to `translate.py`'s tree: 40 changed lines, board
+  identity, the eMMC sample delay, Wi-Fi's second reset line, the blocks not fitted.
+- The CPU table is the factory's, translated: stock's ladder on SID `0x5c00`, 480–1344 MHz. The 1320
+  MHz step mainline's table added at 1.10 V, which stock never ran, is gone. DCDC2 is held to
+  900–1120 mV; DCDC1 and DCDC3 keep the vendor's span, their boot voltages standing, where the old
+  patch had copied other boards' ranges.
+- UART1, S/PDIF, PWM and TWI3 stay enabled, idle, their pins free; EMAC1 and the SD slot stay off.
+  The recovery button on PH9 comes from stock's `key_boot_recovery`.
+- Same kernel changes as the H313: `0046`, `0707`, `0725`, and one H616 dtsi for both kernels. Not
+  yet built or booted.
+
+## 2026-11-12 — regression, both kernels; bank supplies
+
+- Each pin bank's supply as measured: `PIO_POW_VAL` reads `0x18`, the mode the tree now sets; port
+  C had been set to the wrong mode. The eMMC's `vqmmc` is DLDO1. The keymap is `rc-tanix-tx1-v2`.
+- `validate.sh` and `reboots.sh` 5 on 6.18.63 and 7.3.4, tree `b762ee92`: 45 lines each. No `hci0`,
+  as BLE is off by default (board.md, Bluetooth). Wi-Fi 61/77 Mbit/s on 6.18, 43/61 on 7.3.4 with
+  the link at 65 Mbit/s for part of the run: the access point's narrowing or the kernel, rerun
+  before deciding. No MMC error, failed unit or IOMMU fault; every reboot back.
+
 ## 2026-11-13 — the watchdog armed through sleep
 
 - `linux-sunxi/0092` reworked: the watchdog stays armed in s2idle, and the timer block's channel 1

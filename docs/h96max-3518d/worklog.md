@@ -3196,3 +3196,14 @@ driver loads, brings in `skw_sdio_lite`, and the devices it creates bring in the
 
 - `stress-ng --stream`, 15 s, read / write MB/s: 1065 / 710 on one core, 2282 / 1521 on four; DMC
   666 MHz.
+
+## 2026-11-12 — regression, both kernels; the canonical remote table
+
+- The bundled remote's `ir_key6` table maps onto the canonical keymap (cog, voice, mouse, OK, home,
+  P and the app keys); no receiver is fitted here, so it waits for a box that has one. The model
+  reads `H96 Max 3518D (3518_DG_ZX_V01)`. `board-upstream.dts` on EVB1, proven: 505 lines.
+- `validate.sh` and `reboots.sh` 5 on 6.1.172 and 6.12.69, tree `195f5cfb`: 42 lines each. Wi-Fi
+  392/397 and 396/399 Mbit/s at 80 MHz HE; BLE scan 32 and 29; HDMI audio at both rates; no MMC
+  error, failed unit or IOMMU fault; every reboot back. A first pass lost every reboot: as `art`,
+  `reboots.sh` ran `systemctl reboot` without `sudo`, refused, so the box never went down; it now
+  reboots through `sudo -n`.

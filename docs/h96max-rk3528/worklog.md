@@ -40,3 +40,12 @@
 - Renamed `h96max-rk3528`. Built: trees, loader, U-Boot, `tvb-h96max-rk3528`, the image. Read off
   the image: the idblock at sector 64, our U-Boot at 16384, `board.dtb` byte-identical,
   `board-{id,name,pcb}` right. `./build.sh test` passes.
+
+## 2026-11-14 — every public "M2" source is this image
+
+- d5stick's `01_dtbdump_rockchip,rk3528-evb2-ddr3-v10.dtb` (ophub #2404) is byte-identical to
+  `factory_board.dtb`: carved from this image, not read off an M2.
+- ophub's `android_tv_h96-max-m2_rk3528.tar.xz` holds this image (2,446,783,050 bytes) and a photo
+  of a board's back; its `…_ota_rk3528-20230630.1201.zip` is the same build.
+- The M2 itself, from #2404's stock dmesg: an RTL8211F at 1 Gbps on `gmac1`, an AIC8800 module.
+  Importing it needs a tree read off an M2.

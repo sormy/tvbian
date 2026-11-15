@@ -2442,3 +2442,12 @@ card once the same DDR blob was on its eMMC. The eMMC's FIT is 2026.10 again.
 
 - `PMUGRF_OS_REG18` `0x1000caa0`: LPDDR3, one channel; DMC 786 MHz. `stress-ng --stream`, 15 s, read
   / write MB/s: 1124 / 749 on one core, 2626 / 1750 on four.
+
+## 2026-11-12 — regression, both kernels; the upstream view
+
+- The model reads `H96 Max 3518 (3518_ZX_V01)`. `board-upstream.dts`, `upstream.py`'s view on
+  Rockchip's EVB1, the template the factory tree names, is proven against `board.dtb`: 461 lines.
+- `validate.sh` and `reboots.sh` 5 on 6.1.172 and 6.12.69, one tree `a5da3ed3`: the same 51 lines
+  each. Wi-Fi 400/402 and 399/401 Mbit/s up/down at 80 MHz HE; BLE scan 32 and 22; no MMC error,
+  failed unit or IOMMU fault; every reboot back. The kernels number the SD and SDIO hosts
+  differently (`mmc1`/`mmc2` swap); both run SDR104.

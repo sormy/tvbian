@@ -201,20 +201,24 @@ for the AIC8800D80 at the same revision and sub-ID.
 
 ### Input
 
-| Check                  | Mark | Evidence                                             |
-| ---------------------- | ---- | ---------------------------------------------------- |
-| USB 3.0 and 2.0 ports  | ❓   | Not run                                              |
-| Bundled remote over IR | ❓   | Six remotes in the factory tree; which is bundled ❓ |
-| Recovery button        | ❓   | `KEY_VENDOR` from the factory's ADC key; not run     |
-| Input device names     | 🟡   | `base/input-names.rules`, every board                |
-| LEDs                   | ➖   | None on the board; the clock LCD instead             |
+| Check                  | Mark | Evidence                                         |
+| ---------------------- | ---- | ------------------------------------------------ |
+| USB 3.0 and 2.0 ports  | ❓   | Not run                                          |
+| Bundled remote over IR | 🟡   | `0xfd01`, canonical keys; pressed ❓ (below)     |
+| Recovery button        | ❓   | `KEY_VENDOR` from the factory's ADC key; not run |
+| Input device names     | 🟡   | `base/input-names.rules`, every board            |
+| LEDs                   | ➖   | None on the board; the clock LCD instead         |
 
 ## Known gaps
 
 - Nothing here has run on the box: every ❓ above.
 - The front clock LCD stays dark: no FD655 driver packaged. [tm16xx-display][tm16xx], an out-of-tree
   driver that lists the FD655, can make it work (`docs/todo/README.md`).
-- The bundled remote's codes are unknown: the factory's six key tables ship unmapped.
+- The bundled remote is inferred, not pressed: a 12-button handset (power, menu, home, D-pad and OK,
+  back, volume, mouse; `image1.jpg`), not the other H96 Max boxes' or the R69's. Of the factory's
+  six key tables only `0xfd01` is in no other board's stock, and it holds 12 keys: mapped onto the
+  canonical keymap (`docs/remote-keymap.md`), its `KEY_F6` the menu button by elimination. Every
+  button pressed, `evtest` on `/dev/input/ir-remote`, settles it.
 - The U-Boot tree is the M2 Plus's conversion on this board's factory tree: never run.
 - Gigabit Ethernet is an option on H96's listing; this PCB and its image carry 100 Mbit.
 - The image is older than this board's own stock: its radio driver and calibration are from 2023,

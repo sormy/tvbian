@@ -15,7 +15,7 @@ Boots from SD on 6.18.62, and on 7.3.3, the `-next` kernel.
 | EPHY clock   | PWM5 PA12, 24 MHz bypass                           |
 | LEDs         | PH6 power, blue; PH7 standby, red; states retained |
 | Recovery     | None; FEL in the AV jack, the boot ROM's           |
-| IR           | PH10, `rc-h96max`                                  |
+| IR           | PH10, `rc-h96max-h313`                             |
 | USB          | Factory host mode; FEL loader uses peripheral mode |
 | Video, audio | Existing H616 mainline bindings                    |
 | AV           | Mixer1, TCON TV1, the TV encoder; composite off    |
@@ -33,8 +33,11 @@ on TWI3, so the tree has no TWI3 and no AC200 node.
 ## Pending checks
 
 - eMMC: stock's 100 MHz and HS200; HS400 left out, mainline's `sunxi-mmc` has none. No sample delay.
-- Port G at 3.3 V: the bank's mode register and DLDO1's 3.3 V both show it. Stock's SDIO node sets
-  `sdio-used-1v8`: its Wi-Fi bus runs at 1.8 V, ours at 3.3 V, held to high-speed.
-- CPU OPPs are the factory table, every bin, DCDC2 capped at 1160 mV.
+- Pin banks on the rails `PIO_POW_VAL` (`0x0300b348`) measures: PC and PG at 1.8 V on ALDO1, PF, PH
+  and PI at 3.3 V on DLDO1. The Wi-Fi host's `vqmmc-supply` is ALDO1, so the bus signals at 1.8 V as
+  its bank runs; high speed, no UHS. Wi-Fi associates and Bluetooth comes up on it.
+- CPU OPPs are stock's table, one row a frequency, `opp-microvolt-speed4` for SID `0x5c00`, stock's
+  bit 2 and mainline's bin 4; the other bins are open questions and get no rows. DCDC2 is held to
+  those OPPs, 900–1120 mV; DCDC1 and DCDC3 keep the vendor's span, so their boot voltages stand.
 - Bluetooth host wake, PG16, is not wired; nothing wakes on it yet.
 - The remote's keys need validation.

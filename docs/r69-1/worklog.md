@@ -1959,3 +1959,12 @@ nothing failed. The previous tree is kept at `/root/board.dtb.known-good`.
   field 6, LPDDR3, one channel; `REG19` `0x30000001`, version 3, no extended type bits. DMC at 780
   MHz (`/sys/class/devfreq/dmc/cur_freq`).
 - `stress-ng --stream`, 15 s: 1129 / 753 MB/s read / write on one core, 2604 / 1736 on four.
+
+## 2026-11-12 — regression, both kernels; the upstream view
+
+- `board-upstream.dts` on EVB1, the template the factory tree names, proven: 529 lines. EVB3 would
+  save 9 by trading EVB1's Ethernet and SDIO deletions for its PCIe and microphone disables, so it
+  stays on EVB1.
+- `validate.sh` and `reboots.sh` 5 on 6.1.172 and 6.12.69, tree `d76e65a4`: 51 lines each. Wi-Fi
+  187/191 and 186/183 Mbit/s at 40 MHz HE; BLE scan 26 and 23; no MMC error, failed unit or IOMMU
+  fault; every reboot back. `dmesg` warnings 143 and 155, most from `[drm]`, as before.

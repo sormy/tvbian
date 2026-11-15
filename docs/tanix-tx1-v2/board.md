@@ -191,7 +191,7 @@ regression pass on each.
 | daily use        | 🟡  | 🟡  | daily use begun, a media server                                       |
 | CI green         | ❓  | ❓  | not yet in CI                                                         |
 | untested named   | ❓  | ❓  | no PR yet                                                             |
-| no board patch   | ✅  | ✅  | `rc-tanix-tx1`, the one board-only patch, named here                  |
+| no board patch   | ✅  | ✅  | `rc-tanix-tx1-v2`, the one board-only patch, named here               |
 
 Beyond the checklist:
 
@@ -284,7 +284,7 @@ so the factory tree's `vp9@01c00000` has no hardware behind it on the H616.
 
 ## IR remote — 2026-10-25
 
-NEC, address 0x80; the stock remote is the Tanix TX3 mini's. `linux-sunxi/0088`, `rc-tanix-tx1`:
+NEC, address 0x80; the stock remote is the Tanix TX3 mini's. `linux-sunxi/0088`, `rc-tanix-tx1-v2`:
 
 | Button              | Scancode                            | Key                                |
 | ------------------- | ----------------------------------- | ---------------------------------- |

@@ -1791,3 +1791,16 @@ before), CMA 768 MiB as before, `wlan0` connected, nothing failed. The previous 
 ## 2026-11-09 — RAM bandwidth
 
 - `stress-ng --stream`, 15 s, read / write MB/s: 954 / 636 on one core, 2087 / 1392 on four.
+
+## 2026-11-12 — regression, both kernels; one tree for any RAM size
+
+- U-Boot rewrites `memory@0`'s `reg` at boot (0x7fe5b000 live), so one tree serves any RAM size.
+  `board-upstream.dts` on our S905L3 dtsi, proven: 389 lines; every Amlogic reference board, all
+  GXL, gives 477 or more.
+- `validate.sh` and `reboots.sh` 5 on 6.18.63 and 7.3.4, tree `4e810b69`: 43 lines each. BLE scan
+  15 and 16; the card plays at both rates; HDMI not connected. A `simpledrm` card, U-Boot's framebuffer,
+  stays registered beside meson's on both kernels (its `Unknown-1` reads connected): to look into; no MMC error, failed unit
+  or IOMMU fault; every reboot back. No throughput: the box has no `iperf3`, which `validate.sh`
+  now says. Wi-Fi associates in 17–18 s every boot.
+- A first pass lost a reboot on 7.3.4: the box was up, but avahi lost a name race and took
+  `h96max-m20-2.local`, so `.local` stopped resolving. The bare name reached it.

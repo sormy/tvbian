@@ -585,3 +585,13 @@ MPP 1.1.0's `osal/mpp_soc.c`, the `rk3528` entry, against `patches/ffmpeg/`; not
 
 - `stress-ng --stream`, 15 s, read / write MB/s: 1267 / 844 on one core, 2833 / 1889 on four; DMC
   786 MHz.
+
+## 2026-11-12 — regression, both kernels; RAM type; the upstream view
+
+- `PMUGRF_OS_REG18` `0x100064c1`: type 3, DDR3, as the K4B4G0446B marking; DMC 786 MHz. The
+  factory tree still names the DDR4 EVB1: a template, not the memory.
+- `board-upstream.dts` on EVB1, proven: 379 lines. The model reads
+  `H96 Max M2 Plus (M2_P_ZX_20250328)`.
+- `validate.sh` and `reboots.sh` 5 on 6.1.172 and 6.12.69, tree `bfcbf934`: 51 lines each. Wi-Fi
+  209/219 and 207/204 Mbit/s at 40 MHz HE; BLE scan 29 on both; 3921 MiB; no MMC error, failed unit
+  or IOMMU fault; every reboot back. `mmc1`/`mmc2` swap numbers between the kernels.

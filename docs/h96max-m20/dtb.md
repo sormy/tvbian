@@ -64,33 +64,34 @@ Ethernet, serial — is present at the same address.
 
 ## How the tree is built
 
-`boards/h96max-m20/factory_board.dtb` is the base, as on every other board: `./build.sh board-dtb`
-decompiles it with the vendor 4.9 kernel's clock names (`kernel-gxl-vendor-4.9`), applies
-`boards/h96max-m20/board.patch`, and compiles against mainline's (`kernel-gxl-mainline-6.18`). A
-clock the patch leaves alone keeps its vendor name and takes mainline's number for it. The tree
-describes this board and the board has not changed — what changes is the driver that reads it, so
-the patch says what each modern binding needs and why.
+`./build.sh board-dtb` decompiles `factory_board.dtb` against `kernel-gxl-vendor-4.9`, its pins
+named by GXLX's own numbering (`tools/dtcx/headers/dt-bindings/gpio/gxlx.h`, read off this box:
+see `worklog-wifi.md`). `translate.py` writes it in mainline's dialect against the GXLX2 dtsi our
+kernels carry (`patches/linux-meson/0008`), by the vendor base's `.translate.conf`, and
+`board.patch` holds only this board's decisions. Until 2026-11-11 the tree was the factory's with a
+1464-line patch rewriting it by hand; the sections below are that bring-up's record, the evidence
+the translation's rules and this patch cite.
 
-The mainline `meson-gxlx-s905l-p271.dtb` is the **reference** for what a node should look like,
-never the base: p271 is a different board.
+What the translation now does that the hand patch did: mainline's SoC wiring for every block it
+meets (clocks, resets, the AO UART's, the clock controller's crystal, socinfo and the secure
+monitor), the `*_all_pins` state as `default`, each slot's voltage window as a 3.3 V card rail and
+its `f_max` as the host's 50 MHz, the Wi-Fi power sequence on GPIOX_6 and its 32 kHz clock, HDMI
+enabled with its connector, and the pin functions mainline renames (`cec_ao`, `hdmi_i2c`,
+`remote_input_ao`).
 
-| Hunk                       | Reason                                                      |
-| -------------------------- | ----------------------------------------------------------- |
-| `reset@4404`               | `meson-gx-mmc` takes a reset line; the vendor tree has none |
-| `clkc_AO`                  | `meson-gx-uart` needs a `pclk` from the AO clock controller |
-| `uart_AO`                  | three named clocks where the vendor had one `clk_uart`      |
-| `sd_emmc_a/b/c`            | mainline clocks and a reset; board properties untouched     |
-| `hdmi-tx` `reset-names`    | in-tree dw-hdmi takes its resets by name, not by index      |
-| `/ao-secure@c8100140`      | `meson-gx-socinfo`: `soc0`, `GXLX2 (S905L3)`                |
-| `/firmware/secure-monitor` | `meson_sm`: the chip serial, in `firmware:secure-monitor`   |
-
-Node names stay as the vendor wrote them — Linux binds on `compatible`, not on names, so renaming
-would be churn without a reason.
-
-What the vendor tree already gets right, and the patch therefore leaves alone: the clock controller
-is `amlogic,gxl-clkc`, an exact mainline match; the MMC nodes already carry mainline's `"core"`,
-`"clkin0"`, `"clkin1"` clock names; the CPUs use `enable-method = "psci"`; and the GIC is
-`arm,cortex-a15-gic`, which mainline still supports.
+| `board.patch`               | Reason                                                        |
+| --------------------------- | ------------------------------------------------------------- |
+| `model`, `compatible`       | identity; the factory's model is only "Amlogic"               |
+| `stdout-path`               | `earlycon` in `BOARD_CMDLINE` takes its console from it       |
+| LED `power`, active low     | the one LED, the factory's `sys_red`; `sys_green` NOT FITTED  |
+| pwrseq: GPIOX_17            | the combo chip's Bluetooth enable powers up with its Wi-Fi    |
+| no `cap-sdio-irq`           | the factory caps ask for it; the MT7668 then loses events     |
+| USB `dr_mode = "host"`      | the USB-C (port 0) as Android runs it; the USB-A is host only |
+| Ethernet, its MDIO mux      | NOT FITTED: no jack                                           |
+| IR                          | NOT FITTED: no receiver                                       |
+| DDC as `i2c-gpio`           | DDC/CI, which dw-hdmi's own master refuses                    |
+| AO-CEC, AIU, the sound card | the factory's CEC and HDMI audio, as mainline's nodes         |
+| critical trip 110 °C        | the factory's 260 °C shuts nothing down                       |
 
 ## Pinctrl: one word per controller
 

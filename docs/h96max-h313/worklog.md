@@ -521,6 +521,47 @@ Log paths in this table are under `build/logs/new-board/`.
 - `systemctl suspend`, 21 s of s2idle with an RTC wake: red asleep, blue on resume, watched by the
   owner. `rtcwake -m freeze` alone bypasses systemd's sleep hooks and leaves it blue.
 
+## 2026-11-10 — the CPU ran rows stock never gave this chip
+
+- Found comparing the two H616 trees' conversions of one factory property: the Tanix renumbers
+  `opp-supported-hw`, this tree passed the factory's masks through. Stock selects SID `0x5c00`'s
+  rows by bit 2 (the Tanix's worklog, 1344 MHz as `0x04`); mainline's `sun50i-cpufreq-nvmem` maps
+  `0x5c00` to bin 4 and selects bit 4. So 6.18 ran another grade's rows: 480–1416 MHz, 1416 at 1150
+  mV, and 1008 and 1200 MHz 70 and 50 mV under stock's 1020 and 1100.
+- Each mask renumbered: bit 4 now marks the rows bit 2 marked, the factory's frequencies and
+  voltages as they are. The other grades' mapping is unknown, said so in the tree.
+- On the box, 6.18.62: 480, 600, 792, 1008, 1200, 1344 MHz, stock's ladder.
+  `stress-ng --cpu 4 --cpu-method all --verify` 90 s: 0 failed, 1344 MHz at `vdd-cpu` 1120000 µV,
+  63–66 °C. The previous tree kept as `/usr/lib/tvb/board.dtb.opp-before`. 7.3 not yet booted on it.
+
+## 2026-11-11 — the tree is the translation and its board facts
+
+- `boards/h96max-h313/board.patch` now applies to `translate.py`'s tree, not the factory's: 52
+  changed lines, board identity, fitted and not-fitted blocks with their reasons, the AC300 EPHY.
+- What the old patch copied from the X96 Mate, Orange Pi Zero3 and X96Q went: rail names, DCDC1
+  810–990 mV, DCDC3 fixed at 1.2 V, `mali-supply` on DCDC1, `psci-1.0`, `vqmmc` at 3.3 V. DCDC1 and
+  DCDC3 keep the vendor's span, so their boot voltages stand; DCDC2 is held to the CPU's OPPs,
+  900–1120 mV, stock's own.
+- Port G at 1.8 V, as stock's `sdio-used-1v8`. The CPU table in mainline's form, one row a
+  frequency, `opp-microvolt-speed4`: the same ladder. Vendor pin groups by mainline's names, with
+  `emac1` for EMAC1's pins, which mainline's pinctrl knows and `gmac1` it did not.
+- Kernel: `0046` is upstream's H616 SRAM series, so the tree names the video engine's SRAM as
+  upstream does; `0707` gives mixer 0 the IOMMU; `0725` adds the TV encoder; mixer 1 keeps the
+  display series' `CLK_BUS_MIXER0`, where the retired `0041` had `CLK_BUS_MIXER1`, under which
+  composite was tested. Both kernels now apply the same H616 dts patches, 6.18 with `0436`–`0439`
+  backported first, so their dtsi are one file. Not yet built or booted.
+
+## 2026-11-12 — regression, both kernels; bank supplies, the Bluetooth node
+
+- Each pin bank's supply as measured: `PIO_POW_VAL` (`0x0300b348`) reads `0x5c`, the mode the tree
+  sets, on both kernels.
+- The AIC8800's Bluetooth is a `bluetooth` node under its UART with `reset-gpios` and
+  `device-wakeup-gpios`, for the serdev driver patch, in place of GPIO hogs. The keymap is
+  `rc-h96max-h313`, after the board.
+- `validate.sh` and `reboots.sh` 5 on 6.18.63 and 7.3.4, tree `51c67e84`: 49 lines each. Wi-Fi
+  128/154 and 122/153 Mbit/s at 40 MHz HE; BLE scan 21 and 16; HDMI connected, CEC `1.0.0.0`;
+  both cards play at both rates; no MMC error, failed unit or IOMMU fault; every reboot back.
+
 ## 2026-11-14 — s2idle: devices resuming in parallel hang the box
 
 - Since the tree changes after `d3bb7be`, an RTC-timed s2idle on 6.18.63 sleeps and never comes

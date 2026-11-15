@@ -13,13 +13,18 @@ Test report marking each side by side; a number that differs between them is a f
 4. RAM under load and its bandwidth, `stress-ng --stream 1`, then `4`, read and write against a
    sibling family's; then the watchdog's two traps, a forced panic, and a real hang: the box resets
    itself each time. It is what every later phase relies on to run unattended.
-5. **Heat**: the factory OPP table, then CPU stress against the trip points. A stick, or a box with
-   a small heat sink, also gets a combined soak, CPU, GPU, a 4K decode, Wi-Fi and eMMC traffic at
-   once for 30 minutes, every thermal zone logged. Where it throttles or errs, its trip points, OPPs
-   and the eMMC, DRAM and Wi-Fi settings are tuned for it, each change measured.
+5. **Heat**: the CPU's ladder first, each frequency at its voltage the same as stock runs it on this
+   chip, then CPU stress against the trip points. A stick, or a box with a small heat sink, also
+   gets a combined soak, CPU, GPU, a 4K decode, Wi-Fi and eMMC traffic at once for 30 minutes, every
+   thermal zone logged. Where it throttles or errs, its trip points, OPPs and the eMMC, DRAM and
+   Wi-Fi settings are tuned for it, each change measured.
 
 ## Bites
 
+- **A vendor's OPP table is not mainline's**: `opp-supported-hw` numbers speed grades per driver. On
+  the H616, SID `0x5c00` is stock's bit 2 and mainline's bin 4; the factory's masks passed through
+  ran another grade's rows, 50–70 mV under stock and a step above it. Compare the booted ladder with
+  stock's, never the table with the factory's.
 - **A boot that grew** is the cheapest signal: a unit waiting on absent hardware, a getty on a
   missing tty, DHCP on an unplugged port.
 - **A watchdog has two known traps**: counting through system sleep (`power.md`), and a timeout set
@@ -67,7 +72,8 @@ Test report marking each side by side; a number that differs between them is a f
 - [ ] **S16** A forced panic reboots the box, the oops in `/sys/fs/pstore/`
 - [ ] **S17** No userspace service sets an address or attaches a device
 - [ ] **S18** The image adds nothing beyond `tvb-base`, the board's packages and their depends
-- [ ] **S19** `scaling_available_frequencies` is the factory OPP table
+- [ ] **S19** The ladder is stock's: `scaling_available_frequencies` as the dump's `cpufreq.txt`,
+      and `vdd-cpu`'s voltage at each step as the factory row stock selects
 - [ ] **S20** 5 minutes of 4-core `stress-ng` stays under the trip points, not throttled
 - [ ] **S21** A stick or small heat sink: the 30-minute combined soak, no throttling, no eMMC, DRAM
       or Wi-Fi error
