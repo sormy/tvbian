@@ -85,6 +85,7 @@ another, so nothing rots when one is rewritten.
 | `va-driver/worklog.md`                   | the VA-API driver's dated history, wrong turns included              |
 | `docs/emmc-layout.md`                    | the measured eMMC map: every replicated structure and its sectors    |
 | `docs/build.md`                          | `./build.sh`: hosts, steps, outputs, and making a release            |
+| `docs/release-checklist.md`              | what a new package needs to build and publish: extras, new steps     |
 | `site/README.md`                         | the public page: one HTML file from the repo, deployed on a release  |
 | `docs/sources.md`                        | every upstream we build from: what floats, what is pinned, and why   |
 | `docs/migrate.md`                        | moving a box off the overlay: in place on Rockchip, or a reinstall   |
