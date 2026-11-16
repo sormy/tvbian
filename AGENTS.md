@@ -81,6 +81,7 @@ another, so nothing rots when one is rewritten.
 | `docs/first-login.md`                    | a new box's user, timezone, locale and Wi-Fi, by hand                |
 | `docs/mpp.md`                            | reaching the video engines; the codec test commands                  |
 | `docs/video-support.md`                  | each SoC's hardware decode, encode and display formats, by codec     |
+| `docs/va-driver.md`                      | Debian's programs in hardware; what the VA driver adds               |
 | `va-driver/README.md`                    | the VA-API driver: what each engine offers, how VA maps onto it      |
 | `va-driver/worklog.md`                   | the VA-API driver's dated history, wrong turns included              |
 | `docs/emmc-layout.md`                    | the measured eMMC map: every replicated structure and its sectors    |
