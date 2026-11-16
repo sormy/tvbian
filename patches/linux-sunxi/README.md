@@ -67,6 +67,8 @@ for its API, and rewrites of top-level ones it takes in their place (`0103`, `02
 | `0811`        | Cedrus: VP9's low 2 bits plane by frame height         |
 | `0812`        | Cedrus: H.264 and HEVC lines at a 32-byte pitch        |
 | `0813`        | Cedrus: cache hints on the capture queue               |
+| `0814`        | Cedrus: VC-1 lines at a 32-byte pitch                  |
+| `0815`        | Cedrus: VC-1 Main without B pictures                   |
 | `0904`        | audio hub: rewinds for ordinary HDMI PCM               |
 | `0905`        | sunxi-ng: a gated PLL not waited on to relock          |
 
@@ -232,6 +234,14 @@ submitted.
 
 `0813` is ours: the capture queue takes `V4L2_MEMORY_FLAG_NON_COHERENT`, so a CPU reading decoded
 pictures reads them cached; videobuf2 syncs them at dequeue and queue. Not yet submitted.
+
+`0814` is ours: VC-1 motion compensation also fetches references at a 32-byte pitch, as `0812` found
+for H.264 and HEVC; its pictures are laid out at 32 bytes, and the chroma no longer drifts across P
+pictures. Not yet submitted.
+
+`0815` is ours: with `0814`, VC-1 Main decodes bit-exact where the sequence has no B pictures,
+SMPTE's SMM0015 among them; its B pictures still come out at 37 to 58 dB, in SMM0005, so a sequence
+that allows them stays refused. Not yet submitted.
 
 `0276` is ours: DE33's VI channel 0 carries a 17-point 3D LUT, CDC, ahead of the channel's CSC, on
 the channel's own signal: Y, Cb, Cr for YUV input in the red, green and blue fields; R, G, B for

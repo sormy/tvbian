@@ -24,4 +24,5 @@
 - [ ] **H616: 4K H.264 and VP8 on the screen**, linear frames as their decoder writes them: count
       underflows and frames shown, then settle the READMEs' "to 4K" mark.
 - [ ] **Cedrus's H.264 encoder takes a bitrate**, CBR and VBR: a fixed QP alone today.
-- [ ] **VC-1 Main (WMV9) on Cedrus**: `linux-sunxi` `0065` refuses it.
+- [ ] **VC-1 Main's B pictures on Cedrus** decode exact: SMPTE's SMM0005 gives them at 37 to 58 dB,
+      I and P bit-exact, so `0815` refuses a Main sequence with B pictures. Its P pictures use 4MV.

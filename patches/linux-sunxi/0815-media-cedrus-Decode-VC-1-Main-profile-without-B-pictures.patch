@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Mon, 16 Nov 2026 00:30:00 -0500
+Subject: [PATCH] media: cedrus: Decode VC-1 Main profile without B pictures
+
+Main profile was refused for chroma drift across P pictures and luma
+errors with FASTUVMC. The drift was the 32-byte reference pitch, fixed
+by "media: cedrus: Lay VC-1 pictures out at a 32-byte pitch"; SMPTE's
+SMM0015, with FASTUVMC and no B pictures, now decodes bit-exact.
+
+B pictures still come out a little off: SMPTE's SMM0005 gives every I
+and P picture bit-exact and its B pictures at 37 to 58 dB. Refuse Main
+profile only where the sequence allows B pictures.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_dec_vc1.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec_vc1.c
+@@ -821,12 +821,8 @@
+ 	if (slice->sequence.profile == V4L2_VC1_PROFILE_COMPLEX)
+ 		return -EINVAL;
+ 
+-	/*
+-	 * Main profile decodes incorrectly, against the SMPTE conformance
+-	 * streams: chroma drifts across P pictures in a stream with B
+-	 * pictures, and luma too with FASTUVMC.
+-	 */
+-	if (slice->sequence.profile == V4L2_VC1_PROFILE_MAIN)
++	/* Main profile's B pictures decode a little off: SMPTE's SMM0005, 37 dB */
++	if (slice->sequence.profile == V4L2_VC1_PROFILE_MAIN && slice->metadata.maxbframes)
+ 		return -EINVAL;
+ 
+ 	/* Reduced-resolution (multi-res) coding is not supported. */

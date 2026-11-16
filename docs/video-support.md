@@ -46,7 +46,7 @@ the CPU instead, on its own.
 | H.263                  | 🟠 1408×1152 ² | ✅ 1408×1152 | ✅ 1408×1152 | ❌ ⁹            |
 | VC-1 Advanced          | ✅ 1920×1080   | ❓           | ❓           | 🟠 1920×1080 ¹¹ |
 | VC-1 Simple            | 🟡 ⁴           | ❓           | ❓           | ❌ ⁹            |
-| VC-1 Main (WMV9)       | ❌ ⁵           | ❓           | ❓           | ❌ ⁹            |
+| VC-1 Main (WMV9)       | 🟠 720×576 ⁵   | ❓           | ❓           | ❌ ⁹            |
 | JPEG, MJPEG            | ✅ 24 Mpixel   | ❌ ⁶         | ❌ ⁶         | ✅ 1920×1080    |
 | AVS, AVS+              | ❌             | ❌ ⁶         | ❌ ⁶         | ❌ ⁹            |
 | RealVideo 8, 9         | ❓             | ❓           | ❓           | ❌ ⁹            |
@@ -56,7 +56,8 @@ the CPU instead, on its own.
 2. Plain H.263 only; files using its later extensions play on the CPU.
 3. The engine has an MPEG-1 mode; our FFmpeg's hardware path takes MPEG-2 only.
 4. Our driver takes it; no Simple profile file has been tried.
-5. Plays on the CPU: the hardware's colours drift on it.
+5. Files without B-frames only; the hardware's B-frames come out slightly off, so files with them
+   play on the CPU.
 6. MPP decodes it; our FFmpeg's `rkmpp` decoders do not take it yet.
 7. Plays as 8-bit, or at 10 bits as compressed frames for the display.
 8. Files using quarter-pixel or global motion show slight differences from the CPU's picture.
