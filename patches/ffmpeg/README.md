@@ -148,8 +148,7 @@ On the box, `h264_v4l2m2m` on Cedrus:
 ./ffmpeg -hide_banner -f lavfi -i testsrc2=size=1920x1080:rate=30 -frames:v 300 -pix_fmt nv12 -c:v h264_v4l2m2m out.mp4
 ```
 
-"Failed to set header mode" and "Failed to set bit rate" are expected: the encoder takes headers
-with the first frame and a fixed QP only.
+"Failed to set header mode" is expected: the encoder takes headers with the first frame.
 
 ## Results
 
