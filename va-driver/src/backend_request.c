@@ -27,8 +27,6 @@
 /* allocated at the start; more as surfaces hold pictures, up to REQUEST_MAX_CAPTURES */
 #define INITIAL_CAPTURES 4
 #define CODED_BUFFER_SIZE (4 << 20)
-/* linux-sunxi 0803: past it the SoC hangs */
-#define CEDRUS_JPEG_PIXELS (24 * 1000 * 1000)
 #define REQUEST_TIMEOUT_MS 1000
 #define USEC_TO_NSEC 1000
 #define DUMP_ENV "VAAPI_REQUEST_DUMP"
@@ -439,12 +437,9 @@ static int request_init(struct driver *drv)
              c++)
             offers[drv->num_offers++] = (struct offer){ .profile = c->profile,
                                                         .entrypoint = c->entrypoint };
-    for (unsigned i = 0; i < drv->num_offers; i++) {
-        if (offers[i].profile == VAProfileJPEGBaseline && offers[i].entrypoint == VLD)
-            offers[i].max_pixels = CEDRUS_JPEG_PIXELS;
+    for (unsigned i = 0; i < drv->num_offers; i++)
         if (offers[i].profile == VAProfileHEVCMain10 || offers[i].profile == VAProfileVP9Profile2)
             size_ten_bit(&offers[i]);
-    }
     return drv->num_offers ? 0 : -ENODEV;
 }
 
@@ -708,7 +703,6 @@ static void request_encoder_close(struct context *ctx)
 
 const struct backend backend_request = {
     .name = "sunxi",
-    .probe_path = "/sys/bus/platform/drivers/cedrus",
     .init = request_init,
     .uninit = request_uninit,
     .decoder_open = request_decoder_open,
@@ -716,7 +710,6 @@ const struct backend backend_request = {
     .decoder_close = request_decoder_close,
     .sync = request_sync,
     /* Cedrus's H.264 encoder takes a fixed quantiser only */
-    .encode_rate_controls = VA_RC_CQP,
     .encoder_open = request_encoder_open,
     .encode = request_encode,
     .encoder_close = request_encoder_close,

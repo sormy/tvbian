@@ -31,7 +31,7 @@
 #define CAPTURE_BUDGET (192u << 20)
 #define OUTPUT_WAIT_MS 200
 #define SYNC_WAIT_MS 1000
-/* meson's decoder hands a picture out in a few ms: one quiet for longer holds it */
+/* a decoder hands a picture out in a few ms: one quiet for longer holds it */
 #define QUIET_MS 20
 #define ENCODE_WAIT_MS 2000
 #define PERCENT 100
@@ -764,7 +764,6 @@ static int m2m_sync(struct driver *drv, struct context *ctx, VASurfaceID id, boo
 
 const struct backend backend_v4l2m2m = {
     .name = "v4l2m2m",
-    .probe_path = "/sys/bus/platform/drivers/meson-vdec",
     .init = m2m_init,
     .uninit = m2m_uninit,
     .decoder_open = m2m_decoder_open,
@@ -774,7 +773,6 @@ const struct backend backend_v4l2m2m = {
     .scaled_codecs = 1u << CODEC_HEVC | 1u << CODEC_VP9,
     .max_scale_factor = 4,
     .sync = m2m_sync,
-    .encode_rate_controls = VA_RC_CQP | VA_RC_CBR | VA_RC_VBR,
     .encoder_open = m2m_encoder_open,
     .encode = m2m_encode,
     .encoder_close = m2m_close,

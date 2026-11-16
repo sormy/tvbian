@@ -718,8 +718,8 @@ VA_INIT_NAME(VA_MAJOR_VERSION, VA_MINOR_VERSION)(VADriverContextP ctx)
 
     if (!drv)
         return VA_STATUS_ERROR_ALLOCATION_FAILED;
-    drv->backend = backend_select();
-    if (!drv->backend || drv->backend->init(drv) < 0) {
+    drv->backend = backend_open(drv);
+    if (!drv->backend) {
         free(drv);
         return VA_STATUS_ERROR_HW_BUSY;
     }

@@ -29,12 +29,17 @@ no image installs it yet.
 ## What each engine offers
 
 Offers are read from the engine in `vaInitialize`, never kept per family, so a new SoC needs no
-code:
+code. The engine is the first backend built in whose probe finds something to offer: MPP, then a
+stateless V4L2 decoder, then a stateful one.
 
-| Engine | Codec and profile                               | Largest picture                           |
-| ------ | ----------------------------------------------- | ----------------------------------------- |
-| V4L2   | `ENUM_FMT` on the coded queue; the profile menu | `ENUM_FRAMESIZES`, else `TRY_FMT`'s clamp |
-| MPP    | its SoC table: each client's codings, 10-bit    | the client's class: 8K, 4K or 1080p       |
+| Engine | Codec and profile              | Largest picture                         |
+| ------ | ------------------------------ | --------------------------------------- |
+| V4L2   | `ENUM_FMT`; the profile menu   | `ENUM_FRAMESIZES`, or `TRY_FMT`'s clamp |
+| MPP    | its SoC table: codings, 10-bit | the client's class: 8K, 4K or 1080p     |
+
+An encoder takes a fixed QP, and on V4L2 the bitrate modes its `V4L2_CID_MPEG_VIDEO_BITRATE_MODE`
+menu lists; MPP all three. `TRY_FMT` is asked three sizes, very wide, very tall and both: a clamp
+that trims by area, as Cedrus's JPEG does, says so only in the last.
 
 A device with no profile menu offers every profile of a format it takes; a 10-bit profile on Cedrus
 needs a 10-bit CAPTURE format, and is sized by the 10-bit headers its context takes
@@ -261,7 +266,7 @@ VA carries none of these whole.
   - `vaPutImage`.
 - **Import:** Chromium's `DRM_PRIME` and `DRM_PRIME_2` buffers come in linear, one object.
 - **Encode:**
-  - One L0 reference, no B-frames, no packed headers; CQP, CBR and VBR.
+  - One L0 reference, no B-frames, no packed headers; the rate controls the engine lists.
   - A client's IDR request becomes the engine's forced key frame.
   - The picture size is the input surface's.
   - FFmpeg 7.1 lists `h264_v4l2m2m` before `h264_vaapi`, and Firefox takes the first, so on `meson`
@@ -333,21 +338,22 @@ GStreamer, which needs a render node, and the mapping of interlaced VC-1 picture
 
 On a box of each family, 2026-11-15, `tools/validate/va_driver.py`:
 
-| Family       | Box            | Fails                                         |
-| ------------ | -------------- | --------------------------------------------- |
-| `rk35xx`     | `r69-1`        | none                                          |
-| `sunxi-h616` | `tanix-tx1-v2` | none                                          |
-| `meson-gxl`  | `h96max-m20`   | VC-1 AP slices: a wrong picture after a drain |
+| Family       | Box            | Fails                             |
+| ------------ | -------------- | --------------------------------- |
+| `rk35xx`     | `r69-1`        | none                              |
+| `sunxi-h616` | `tanix-tx1-v2` | none                              |
+| `meson-gxl`  | `h96max-m20`   | interlaced MPEG-4; VC-1 AP slices |
 
-The `meson-gxl` fails are the decoder's, `ffmpeg9`'s alike, but `mpv --hwdec=vaapi`, which cannot
-open VA on the display node. Every other offer passes, decode and encode, with
-`mpv --hwdec=vaapi-copy` everywhere and GStreamer on `rk35xx` and `sunxi-h616`.
+Interlaced MPEG-4 on `meson-gxl` is the decoder's, as through `ffmpeg9`; `vc1-ap-slices` there lets
+one wrong picture through after a drain, open. Every other offer passes, decode and encode.
 
-- **Bit-exact on a box:** H.264 (all 9 clips), HEVC Main and Main 10 (`sunxi-h616`), VP9 profiles 0
-  and 2 (`sunxi-h616`), VP8; VP9 profile 0 on `meson-gxl`. HEVC Main 10 and VP9 profile 2 on
-  `rk35xx` narrow to NV12 at 56 and 61 dB.
-- **Within 50 dB:** MPEG-2, MPEG-4 and H.263 at 68–74 dB, the engines' IDCT.
+- **Bit-exact on a box:** H.264 (all 9 clips) everywhere; HEVC Main and VP9 profile 0 everywhere,
+  odd sizes included; HEVC Main 10 and VP9 profile 2 on `sunxi-h616`; VP8; VC-1 Advanced on
+  `sunxi-h616` and interlaced on `meson-gxl`. HEVC Main 10 and VP9 profile 2 narrow to 8 bits on
+  `rk35xx` (56, 61 dB) and `meson-gxl` (61, 65 dB).
+- **Within 50 dB:** MPEG-2, MPEG-4 and H.263 at 50–74 dB, the engines' IDCT; JPEG 71–77 dB.
+- **`meson-gxl` held pictures:** FFmpeg's command line syncs each picture before the next packet;
+  with `meson-codecs` `0037` every MPEG-2 and MPEG-4 clip but the interlaced one comes out whole.
 - **Clients:** `mpv --hwdec=vaapi-copy` and GStreamer's `va` decoders and encoders on `rk35xx` and
   `sunxi-h616`; `mpv --hwdec=vaapi` fails on `meson-gxl` and is untested on the others, which had no
   display connected.
-- **`meson-gxl`:** MPEG-4 with matrices lost pictures in 1 run of 3, the decoder's drain.

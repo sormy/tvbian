@@ -42,11 +42,11 @@ engine reports, not a table: the largest picture offered.
 | VC-1 Simple, Main | ❓ Simple; ➖ Main  | ➖                  | ➖                  |
 | JPEG              | ✅ 77 dB, 6000×6000 | ➖                  | ✅ 71 dB, 1920×1088 |
 
-| Encode | H313                     | RK35xx                   | S905L3              |
-| ------ | ------------------------ | ------------------------ | ------------------- |
-| H.264  | ✅ 52 dB, CQP, 4096×4096 | ✅ 53 dB, CBR, 1920×1088 | ✅ 49 dB, 1920×1088 |
-| HEVC   | ➖                       | ✅ 48 dB, 1920×1088      | ✅ 48 dB, 4096×2304 |
-| JPEG   | ✅ 43 dB, 4096×4096      | ➖                       | ➖                  |
+| Encode | H313                | RK35xx              | S905L3              |
+| ------ | ------------------- | ------------------- | ------------------- |
+| H.264  | ✅ 52 dB, 4096×4096 | ✅ 53 dB, 1920×1088 | ✅ 49 dB, 1920×1088 |
+| HEVC   | ➖                  | ✅ 48 dB, 1920×1088 | ✅ 48 dB, 4096×2304 |
+| JPEG   | ✅ 43 dB, 4096×4096 | ➖                  | ➖                  |
 
 "exact" is every frame identical to FFmpeg's software decode; a figure in dB is the worst clip's
 luma PSNR against it, from the engine's IDCT or a 10-bit picture narrowed to 8 bits. Encode is
@@ -64,6 +64,8 @@ decoded back.
   or `held-pictures` in `/etc/tvb-va-driver.conf`, sets `refuse` (the default), `off` or `decoded`.
   Interlaced MPEG-4 comes out at 44 dB, as through `ffmpeg9`.
 - **S905L3 H.264 encode** writes Main streams; it is offered as High too, which FFmpeg asks first.
+- **Rate control** is what each encoder lists: a fixed QP, VBR and CBR on the H313 and RK35xx; a
+  fixed QP and VBR on the S905L3.
 - **H.264 10-bit** has no VA profile FFmpeg 7.1 uses: RK35xx decodes it through `ffmpeg9` only.
 
 ## Players

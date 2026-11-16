@@ -93,6 +93,8 @@ struct offer {
     unsigned max_width;
     unsigned max_height;
     unsigned max_pixels;
+    /* an encoder's VA_RC_*, as the engine takes them */
+    unsigned rate_controls;
 };
 
 struct config {
@@ -201,10 +203,10 @@ struct driver;
 /* One engine behind the front end: it decodes access units into its own buffers, or encodes. */
 struct backend {
     const char *name;
-    /* present when the kernel drives this engine */
-    const char *probe_path;
+    /* a test engine: used only when named */
+    bool named_only;
     /* in vaInitialize, so device nodes are open before a browser's sandbox closes; sets the
-     * driver's offers, as the engine reports them */
+     * driver's offers, as the engine reports them, and fails where it finds none */
     int (*init)(struct driver *drv);
     void (*uninit)(struct driver *drv);
     int (*decoder_open)(struct driver *drv, struct context *ctx);
@@ -226,7 +228,6 @@ struct backend {
      * drained; NULL where vaEndPicture always has it */
     int (*sync)(struct driver *drv, struct context *ctx, VASurfaceID id, bool last);
     /* the rate controls its video encoders take, VA_RC_* */
-    unsigned encode_rate_controls;
     int (*encoder_open)(struct driver *drv, struct context *ctx, const struct encode_params *p);
     int (*encode)(struct context *ctx, struct surface *input, bool idr, struct annexb *packet);
     void (*encoder_close)(struct context *ctx);
@@ -256,7 +257,8 @@ void *handle_take(struct driver *drv, struct handle_table *t, VAGenericID id);
 struct surface *surface_of(struct driver *drv, VASurfaceID id);
 
 /* backend.c: the family's engine, or a test engine named in VAAPI_ENGINE */
-const struct backend *backend_select(void);
+/* the first engine whose init finds hardware to offer, initialised; NULL for none */
+const struct backend *backend_open(struct driver *drv);
 
 /* driver.c */
 const struct codec *codec_of(VAProfile profile);

@@ -60,7 +60,7 @@ unsigned encode_attribute(const struct backend *b, const struct config *config,
     switch (type) {
     case VAConfigAttribRateControl:
         /* JPEG's quality is a fixed quantiser */
-        return jpeg ? VA_RC_CQP : b->encode_rate_controls;
+        return jpeg ? VA_RC_CQP : config->offer->rate_controls;
     case VAConfigAttribEncPackedHeaders:
         return VA_ENC_PACKED_HEADER_NONE;
     case VAConfigAttribEncMaxRefFrames:

@@ -18,6 +18,8 @@
 #include "pixels.h"
 
 #define PITCH_ALIGN 64
+/* libavcodec's encoders take a fixed QP and both bitrate modes */
+#define EVERY_RATE_CONTROL (VA_RC_CQP | VA_RC_CBR | VA_RC_VBR)
 #define MAX_JPEG_QUALITY 100
 #define MAX_QSCALE 31
 
@@ -29,29 +31,29 @@ struct lavc {
 };
 
 static const struct offer lavc_offers[] = {
-    { VAProfileH264ConstrainedBaseline, VAEntrypointVLD, 0, 0, 0 },
-    { VAProfileH264Main, VAEntrypointVLD, 0, 0, 0 },
-    { VAProfileH264High, VAEntrypointVLD, 0, 0, 0 },
-    { VAProfileH264High10, VAEntrypointVLD, 0, 0, 0 },
-    { VAProfileHEVCMain, VAEntrypointVLD, 0, 0, 0 },
-    { VAProfileHEVCMain10, VAEntrypointVLD, 0, 0, 0 },
-    { VAProfileVP9Profile0, VAEntrypointVLD, 0, 0, 0 },
-    { VAProfileVP9Profile2, VAEntrypointVLD, 0, 0, 0 },
-    { VAProfileVP8Version0_3, VAEntrypointVLD, 0, 0, 0 },
-    { VAProfileMPEG2Simple, VAEntrypointVLD, 0, 0, 0 },
-    { VAProfileMPEG2Main, VAEntrypointVLD, 0, 0, 0 },
-    { VAProfileJPEGBaseline, VAEntrypointVLD, 0, 0, 0 },
-    { VAProfileMPEG4Simple, VAEntrypointVLD, 0, 0, 0 },
-    { VAProfileMPEG4AdvancedSimple, VAEntrypointVLD, 0, 0, 0 },
-    { VAProfileH263Baseline, VAEntrypointVLD, 0, 0, 0 },
-    { VAProfileVC1Simple, VAEntrypointVLD, 0, 0, 0 },
-    { VAProfileVC1Main, VAEntrypointVLD, 0, 0, 0 },
-    { VAProfileVC1Advanced, VAEntrypointVLD, 0, 0, 0 },
-    { VAProfileH264ConstrainedBaseline, VAEntrypointEncSlice, 0, 0, 0 },
-    { VAProfileH264Main, VAEntrypointEncSlice, 0, 0, 0 },
-    { VAProfileH264High, VAEntrypointEncSlice, 0, 0, 0 },
-    { VAProfileHEVCMain, VAEntrypointEncSlice, 0, 0, 0 },
-    { VAProfileJPEGBaseline, VAEntrypointEncPicture, 0, 0, 0 },
+    { VAProfileH264ConstrainedBaseline, VAEntrypointVLD, 0, 0, 0, 0 },
+    { VAProfileH264Main, VAEntrypointVLD, 0, 0, 0, 0 },
+    { VAProfileH264High, VAEntrypointVLD, 0, 0, 0, 0 },
+    { VAProfileH264High10, VAEntrypointVLD, 0, 0, 0, 0 },
+    { VAProfileHEVCMain, VAEntrypointVLD, 0, 0, 0, 0 },
+    { VAProfileHEVCMain10, VAEntrypointVLD, 0, 0, 0, 0 },
+    { VAProfileVP9Profile0, VAEntrypointVLD, 0, 0, 0, 0 },
+    { VAProfileVP9Profile2, VAEntrypointVLD, 0, 0, 0, 0 },
+    { VAProfileVP8Version0_3, VAEntrypointVLD, 0, 0, 0, 0 },
+    { VAProfileMPEG2Simple, VAEntrypointVLD, 0, 0, 0, 0 },
+    { VAProfileMPEG2Main, VAEntrypointVLD, 0, 0, 0, 0 },
+    { VAProfileJPEGBaseline, VAEntrypointVLD, 0, 0, 0, 0 },
+    { VAProfileMPEG4Simple, VAEntrypointVLD, 0, 0, 0, 0 },
+    { VAProfileMPEG4AdvancedSimple, VAEntrypointVLD, 0, 0, 0, 0 },
+    { VAProfileH263Baseline, VAEntrypointVLD, 0, 0, 0, 0 },
+    { VAProfileVC1Simple, VAEntrypointVLD, 0, 0, 0, 0 },
+    { VAProfileVC1Main, VAEntrypointVLD, 0, 0, 0, 0 },
+    { VAProfileVC1Advanced, VAEntrypointVLD, 0, 0, 0, 0 },
+    { VAProfileH264ConstrainedBaseline, VAEntrypointEncSlice, 0, 0, 0, EVERY_RATE_CONTROL },
+    { VAProfileH264Main, VAEntrypointEncSlice, 0, 0, 0, EVERY_RATE_CONTROL },
+    { VAProfileH264High, VAEntrypointEncSlice, 0, 0, 0, EVERY_RATE_CONTROL },
+    { VAProfileHEVCMain, VAEntrypointEncSlice, 0, 0, 0, EVERY_RATE_CONTROL },
+    { VAProfileJPEGBaseline, VAEntrypointEncPicture, 0, 0, 0, EVERY_RATE_CONTROL },
 };
 
 /* VC-1 Simple and Main: STRUCT_C ahead of each frame */
@@ -361,13 +363,13 @@ static int lavc_encode(struct context *ctx, struct surface *input, bool idr, str
 
 const struct backend backend_lavc = {
     .name = "lavc",
+    .named_only = true,
     .init = lavc_init,
     .uninit = lavc_uninit,
     .decoder_open = lavc_decoder_open,
     .decode = lavc_decode,
     .decoder_close = lavc_close,
     .sync = lavc_sync,
-    .encode_rate_controls = VA_RC_CQP | VA_RC_CBR | VA_RC_VBR,
     .encoder_open = lavc_encoder_open,
     .encode = lavc_encode,
     .encoder_close = lavc_close,

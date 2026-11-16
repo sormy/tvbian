@@ -29,6 +29,8 @@ settings.
       it and mpv still does not.
 - [ ] **4K in Debian's programs**: linear frames carry 1080p; 4K needs AFBC end to end, which a
       program gets only by listing the modifier at surface creation, and only Panfrost samples.
+- [ ] **VC-1 Main on Cedrus** once `linux-sunxi` `0815` ships: offered, and a sequence that allows B
+      pictures (`MAXBFRAMES` above 0) refused at its context, as the kernel refuses it.
 - [ ] **Chromium's sandbox**: every engine's device opened in `vaInitialize`, before the sandbox
       closes; today each opens at its first context.
 - [ ] **`VideoProc`**: scaling for Jellyfin's `scale_vaapi`, and NV12 to ARGB where Chromium's GL

@@ -93,6 +93,8 @@ static const struct mpp_candidate {
 };
 
 #define NUM_CANDIDATES (sizeof(mpp_candidates) / sizeof(mpp_candidates[0]))
+/* MPP's own device: its clients are reached through it */
+#define MPP_SERVICE "/dev/mpp_service"
 #define NUM_DEC_CLIENTS (sizeof(((MppSocInfo *)0)->dec_caps) / sizeof(MppDecHwCap *))
 #define NUM_ENC_CLIENTS (sizeof(((MppSocInfo *)0)->enc_caps) / sizeof(MppEncHwCap *))
 /* MPP sorts a client into one of three classes by the largest picture it takes */
@@ -154,6 +156,8 @@ static bool offer_of(const MppSocInfo *soc, const struct mpp_candidate *c, struc
         if (cap && takes_coding(cap->cap_coding, coding) && (!c->ten_bit || cap->cap_10bit))
             widen_to_class(o, cap->cap_8k, cap->cap_4k);
     }
+    if (c->entrypoint == ENC)
+        o->rate_controls = VA_RC_CQP | VA_RC_CBR | VA_RC_VBR;
     for (size_t i = 0; c->entrypoint == ENC && i < NUM_ENC_CLIENTS; i++) {
         const MppEncHwCap *cap = soc->enc_caps[i];
         if (cap && takes_coding(cap->cap_coding, coding))
@@ -166,8 +170,10 @@ static bool offer_of(const MppSocInfo *soc, const struct mpp_candidate *c, struc
 static int mpp_backend_init(struct driver *drv)
 {
     static struct offer offers[NUM_CANDIDATES];
-    const MppSocInfo *soc = mpp_get_soc_info();
     unsigned kept = 0;
+    if (access(MPP_SERVICE, F_OK))
+        return -ENODEV;
+    const MppSocInfo *soc = mpp_get_soc_info();
     /* a client's stderr gets MPP's warnings and errors, not its every step */
     mpp_set_log_level(MPP_LOG_WARN);
     for (size_t i = 0; soc && i < NUM_CANDIDATES; i++)
@@ -498,7 +504,6 @@ static int rga_copy_picture(const struct engine_picture *p, const struct backing
 
 const struct backend backend_mpp = {
     .name = "rkmpp",
-    .probe_path = "/dev/mpp_service",
     .init = mpp_backend_init,
     .uninit = mpp_backend_uninit,
     .decoder_open = mpp_decoder_open,
@@ -507,7 +512,6 @@ const struct backend backend_mpp = {
     .sync = mpp_sync,
     .copy_picture = rga_copy_picture,
     .narrows_ten_bit = true,
-    .encode_rate_controls = VA_RC_CQP | VA_RC_CBR | VA_RC_VBR,
     .encoder_open = mpp_encoder_open,
     .encode = mpp_encode,
     .encoder_close = mpp_encoder_close,

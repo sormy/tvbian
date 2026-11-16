@@ -174,3 +174,18 @@ The display nodes' names, `meson` and `sun4i-drm`, are dropped from the packages
 the driver through `meson` on `h96max-m20`, mpv's DRM output still did not, so they served nothing.
 The render nodes' names stay: `panfrost`, `lima`, and `rockchip` where the display holds
 `renderD128`.
+
+**Nothing per engine without a reason:** the backend is the first whose probe finds offers, not the
+one whose kernel driver name exists; Cedrus's 24 Mpixel JPEG cap is read from `TRY_FMT`, which
+`linux-sunxi` `0803` makes trim by area (6000×4000 and 4000×6000 decode, 6000×6000 refused, on
+`h96max-h313`); encode rate controls are the bitrate menu's. Meson's encoders list VBR alone: the
+CBR that passed there was the kernel encoding VBR. Kept, each for a reason the engine cannot be
+asked: MPP's interlaced MPEG refusal, Cedrus's interlaced MPEG-4, meson's scaled codecs, MPP's size
+classes, the 20 ms a sync waits before taking a picture for held.
+
+**Every box on its current kernel** (`h96max-m20` and `tanix-tx1-v2` on 6.18.63 from `main`, `r69-1`
+on 6.12.69): `rk35xx` and `sunxi-h616` pass the suite whole, Cedrus's H.264 encoder taking the
+bitrate menu's VBR and CBR, GStreamer's `va` elements passing. `meson-gxl` with `meson-codecs`
+`0037`: every MPEG-4 clip but the interlaced one 30 of 30 through FFmpeg's command line, 1 of 30
+before; HEVC and VP9 at 642×362 identical. Interlaced MPEG-4 at 38.7 dB and one wrong picture in
+`vc1-ap-slices` remain.
