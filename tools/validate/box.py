@@ -827,8 +827,8 @@ def bluetooth(tag: str) -> Iterator[Line]:
         )
     if have("btmgmt"):
         found = sh(
-            "timeout 20 stdbuf -oL btmgmt find", timeout=30
-        )  # killed unbuffered, it flushes nothing
+            "sleep 25 | timeout 20 stdbuf -oL btmgmt find -l", timeout=30
+        )  # it quits at stdin's end; -l: LE-only controllers refuse a dual-mode find
         yield f"{tag}.find", str(len(set(re.findall(r"dev_found: ([0-9A-F:]+)", found))))
 
 
