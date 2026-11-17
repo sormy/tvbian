@@ -1,0 +1,73 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Tue, 17 Nov 2026 07:21:01 -0500
+Subject: [PATCH] media: meson: vdec: HEVC and VP9 reference compressed pictures
+ on G12A
+
+At 3840x2160 the S905L3's VP9 decoder spends 19 ms on a picture, a
+50 fps ceiling under its 4K60 rating: an 8-bit stream's references were
+uncompressed, as only 10-bit, downscaled, compressed-CAPTURE and
+non-64-aligned pictures referenced compressed ones. On G12A and later,
+where the compressed references sit behind the decoder's MMU, they now
+always do, and the double write gives CAPTURE its uncompressed picture,
+the path those cases already take. fbc_reference=0 keeps the old rule.
+
+On the S905L3 VP9 at 3840x2160 decodes at 67 fps in place of 46, HEVC
+at 53 in place of 32, bit-identical to software.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/vdec/codec_hevc_common.h b/vdec/codec_hevc_common.h
+index 04eef3d..a975528 100644
+--- a/vdec/codec_hevc_common.h
++++ b/vdec/codec_hevc_common.h
+@@ -37,13 +37,16 @@ struct codec_hevc_common {
+ };
+ 
+ /*
+- * Returns 1 if references are compressed: 10-bit, a downscaled or a compressed CAPTURE, or a
+- * width the uncompressed write's 32-byte pitch and the references' 64-byte one disagree on
++ * Returns 1 if references are compressed: 10-bit, a downscaled or a compressed CAPTURE, a width
++ * the uncompressed write's 32-byte pitch and the references' 64-byte one disagree on, or on
++ * G12A and later always, where they take a fraction of the uncompressed ones' memory traffic
+  */
+ static inline int codec_hevc_use_fbc(struct amvdec_session *sess, int is_10bit)
+ {
+ 	return is_10bit || sess->dw_ratio > 1 || amvdec_fbc_capture(sess) ||
+-	       !IS_ALIGNED(sess->width, 64);
++	       !IS_ALIGNED(sess->width, 64) ||
++	       (amvdec_fbc_reference &&
++		sess->core->platform->revision >= VDEC_REVISION_G12A);
+ }
+ 
+ /* Returns 1 if CAPTURE gets the decoder's second, uncompressed write */
+diff --git a/vdec/vdec.c b/vdec/vdec.c
+index 2bca56a..b06b814 100644
+--- a/vdec/vdec.c
++++ b/vdec/vdec.c
+@@ -37,6 +37,11 @@ struct dummy_buf {
+ #define VDEC_FHD_PIXELS (1920 * 1088)
+ #define VDEC_MAX_BUFFERS_UHD 16
+ 
++bool amvdec_fbc_reference = true;
++module_param_named(fbc_reference, amvdec_fbc_reference, bool, 0644);
++MODULE_PARM_DESC(fbc_reference,
++		 "HEVC, VP9 on G12A and later: compressed references behind an uncompressed CAPTURE");
++
+ unsigned int amvdec_capture_max_width;
+ module_param_named(capture_max_width, amvdec_capture_max_width, uint, 0644);
+ MODULE_PARM_DESC(capture_max_width,
+diff --git a/vdec/vdec.h b/vdec/vdec.h
+index 776a628..ed7eb28 100644
+--- a/vdec/vdec.h
++++ b/vdec/vdec.h
+@@ -470,6 +470,7 @@ static inline u32 amvdec_ref_height(struct amvdec_session *sess)
+ 
+ u32 amvdec_dw_ratio(struct amvdec_session *sess, u32 width, u32 height);
+ 
++extern bool amvdec_fbc_reference;
+ extern unsigned int amvdec_capture_max_width;
+ extern unsigned int amvdec_capture_max_height;
+ 
+-- 
+2.47.3

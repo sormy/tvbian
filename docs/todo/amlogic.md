@@ -18,6 +18,9 @@ What spans the family's boards.
 - [ ] **The factory microcode our decoder does not drive**: the M20's `video_ucode.bin` also holds
       `gxl_h263` (an H.263 decoder), `gxl_xvid_multi`, `gxl_mjpeg_multi` and the AVS builds. Whether
       the multi-instance MPEG-4 decodes interlaced and quarter-pel MPEG-4 closer to software.
+- [ ] **The S905L3 decodes HEVC 4K60**, as its rating says: `ffmpeg9`'s `v4l2m2m` gets 53 fps at
+      4K30 with `0038`'s compressed references (VP9 67). Its clock is already the factory's highest,
+      667 MHz.
 - [ ] **A JPEG encoder on the S905L3**: the factory `video_ucode.bin` carries `gxl_jpeg_enc`.
 - [ ] **"Buffer N done but it doesn't exist in m2m_ctx"** still once in 15 MJPEG and MPEG-4 drains
       and restarts after `0037`: another path completes a buffer twice.
