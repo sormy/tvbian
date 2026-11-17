@@ -17,6 +17,7 @@ tools/dtcx/dtcx.py --include <base>                                    # the bas
 tools/dtcx/translate.py <source> <target> factory_board.dts > factory_board_translated.dts
 tools/dtcx/semdiff.py <old.dtb> <new.dtb>                              # what changed, by meaning
 tools/dtcx/canonical.py [--base <base>] <a.dtb> <b.dtb>               # equal except phandle numbers
+tools/dtcx/devices.py [--all] board.dtb                                # a block described twice
 tools/dtcx/upstream.py --prove board.dtb <source> <target> board.dts   # the tree as a board file
 tools/dtcx/bindings.py <kernel tree> kernel/<kernel>.conf <out dir>    # bindings with our patches
 ```
@@ -41,20 +42,20 @@ A base is `bases/<kind>-<soc>-<vendor|mainline>-<version>.conf`, for example
 `board.conf`: `_SOURCE`, the one its factory blob was built from, and `_TARGET`, the one its final
 tree compiles against.
 
-| Key       | Meaning                                                                                  |
-| --------- | ---------------------------------------------------------------------------------------- |
-| `source`  | repository, commit and include directory, written into the tree                          |
-| `url`     | where to fetch the headers from, once, into `build/dtcx/<name>/`                         |
-| `header`  | one dt-bindings header                                                                   |
-| `local`   | a header no public tree has, kept in `tools/dtcx/headers/`                               |
-| `render`  | the renderers to run                                                                     |
-| `cells`   | `<provider> <properties> <prefixes>`: name the cell after a reference; a `.h` limits it  |
-| `decimal` | vendor quantities to print in decimal; `<node>:<property>` when a name is ambiguous      |
-| `gpio`    | vendor properties holding GPIO specifiers                                                |
+| Key       | Meaning                                                                                 |
+| --------- | --------------------------------------------------------------------------------------- |
+| `source`  | repository, commit and include directory, written into the tree                         |
+| `url`     | where to fetch the headers from, once, into `build/dtcx/<name>/`                        |
+| `header`  | one dt-bindings header                                                                  |
+| `local`   | a header no public tree has, kept in `tools/dtcx/headers/`                              |
+| `render`  | the renderers to run                                                                    |
+| `cells`   | `<provider> <properties> <prefixes>`: name the cell after a reference; a `.h` limits it |
+| `decimal` | vendor quantities to print in decimal; `<node>:<property>` when a name is ambiguous     |
+| `gpio`    | vendor properties holding GPIO specifiers                                               |
 | `ref`     | vendor properties holding bare phandles                                                 |
-| `numbers` | properties holding plain numbers, never phandles; printed as read                        |
-| `mask`    | `<property> <pattern>`: print a bitmask as the OR of its one-bit names                   |
-| `rules`   | inherit another base's `decimal`, `gpio` and `ref`, except `ref`s a binding defines      |
+| `numbers` | properties holding plain numbers, never phandles; printed as read                       |
+| `mask`    | `<property> <pattern>`: print a bitmask as the OR of its one-bit names                  |
+| `rules`   | inherit another base's `decimal`, `gpio` and `ref`, except `ref`s a binding defines     |
 
 | Renderer        | Writes                                                              |
 | --------------- | ------------------------------------------------------------------- |
@@ -86,8 +87,8 @@ only the board's own decisions.
 Each vendor node is matched to a node in mainline's SoC dtsi (fetched from the conf's `soc` URL,
 with the `soc-patches` kernel conf's patches applied). Matching tries, in order: the label (only if
 the address agrees), the unit address or name under the matched parent, a unique CPU address, a
-unique name. A node whose compatible says it is another block never matches. Several vendor nodes
-at one address become one node. SoC facts come from mainline, board facts from the factory tree.
+unique name. A node whose compatible says it is another block never matches. Several vendor nodes at
+one address become one node. SoC facts come from mainline, board facts from the factory tree.
 Translation never deletes mainline content and never fixes vendor content; fixes go in the patch.
 `reg` is converted to mainline's cell counts, and `"vendor, name"` reads as `vendor,name`.
 
@@ -96,8 +97,8 @@ The conf maps every vendor token to one outcome. Syntax:
 - One rule per line: a key, then its words.
 - `#` starts a comment that explains the rules below it, up to the next blank line. `##` is a
   heading.
-- A rule that drops a token or leaves it open (`none`, `none-if-empty`, `unused-by`,
-  `supply-name`, `unsupported`, `unresolved`) needs a comment saying why.
+- A rule that drops a token or leaves it open (`none`, `none-if-empty`, `unused-by`, `supply-name`,
+  `unsupported`, `unresolved`) needs a comment saying why.
 - In patterns, `{n}` is an instance number, `{w}` a word, `*` any text. `token@scope` limits a rule
   to nodes with that vendor compatible or name (not on `node` lines).
 - The first matching rule wins; scoped rules first.
@@ -119,27 +120,27 @@ The conf maps every vendor token to one outcome. Syntax:
 | `clock`         | `<tokens…> as <provider> <cell>`: a vendor clock reference, for a built node    |
 | `also`          | `<token> <conversion> [args]`: a conversion besides the node's translation      |
 
-| Action          | Does                                                                         |
-| --------------- | ---------------------------------------------------------------------------- |
-| `same`          | keep as written                                                              |
-| `mainline`      | mainline's dtsi has it; keep only on a node without a mainline counterpart   |
-| `as`            | `<name>`: rename; quoted words go through `value`                            |
+| Action          | Does                                                                           |
+| --------------- | ------------------------------------------------------------------------------ |
+| `same`          | keep as written                                                                |
+| `mainline`      | mainline's dtsi has it; keep only on a node without a mainline counterpart     |
+| `as`            | `<name>`: rename; quoted words go through `value`                              |
 | `flag`          | `<n>:<flag> …`: a number as a flag, `-` for none; other numbers are a question |
-| `scale`         | `<name> <step> <offset> [<n>:-]`: write `n × step + offset`; `<n>:-` is unset |
-| `bits`          | `<from>:<to> …`: map each vendor bit; any other bit is a question            |
-| `gpio`          | `<high\|low> [pull]`: a sunxi GPIO as `<&pio bank pin flags>`                |
-| `pinctrl`       | `pinctrl-names` with its `pinctrl-N`: keep default, others via `state`       |
-| `alias`         | an `/aliases` path as the label of its translated node                       |
-| `opp-v2`        | `<label>`: `operating-points` as an OPP v2 table                             |
-| `opp-range`     | a supply: bound its regulator by the node's OPPs                             |
-| `bank-1v8`      | a 1.8 V host: supply its pins' bank from the 1.8 V rail                      |
-| `implies`       | `<name> <value>`: the vendor property means this mainline one                |
-| `none`          | drop it (the comment says why that is safe)                                  |
-| `none-if-empty` | `[same]`: drop when empty; keep a value with `same`, else a question         |
+| `scale`         | `<name> <step> <offset> [<n>:-]`: write `n × step + offset`; `<n>:-` is unset  |
+| `bits`          | `<from>:<to> …`: map each vendor bit; any other bit is a question              |
+| `gpio`          | `<high\|low> [pull]`: a sunxi GPIO as `<&pio bank pin flags>`                  |
+| `pinctrl`       | `pinctrl-names` with its `pinctrl-N`: keep default, others via `state`         |
+| `alias`         | an `/aliases` path as the label of its translated node                         |
+| `opp-v2`        | `<label>`: `operating-points` as an OPP v2 table                               |
+| `opp-range`     | a supply: bound its regulator by the node's OPPs                               |
+| `bank-1v8`      | a 1.8 V host: supply its pins' bank from the 1.8 V rail                        |
+| `implies`       | `<name> <value>`: the vendor property means this mainline one                  |
+| `none`          | drop it (the comment says why that is safe)                                    |
+| `none-if-empty` | `[same]`: drop when empty; keep a value with `same`, else a question           |
 | `unused-by`     | `<flag>`, on a node: drop when the vendor flag is absent or 0, else a question |
-| `supply-name`   | a supply by regulator name: drop when no vendor regulator has it             |
-| `unresolved`    | a question for the board's bring-up                                          |
-| `unsupported`   | no mainline binding exists: listed, not written                              |
+| `supply-name`   | a supply by regulator name: drop when no vendor regulator has it               |
+| `unresolved`    | a question for the board's bring-up                                            |
+| `unsupported`   | no mainline binding exists: listed, not written                                |
 
 `node` can also name a conversion from `conversions.py`, which builds the mainline node from the
 vendor's own description: `pwrseq [parent]`, `vbus`, `enable <label>`, `boot-voltage`, `leds`,
@@ -163,14 +164,23 @@ including those of its compatible-less children (LEDs, endpoints, thermal maps, 
 lists like `clocks` with `clock-names` compare by name. A node paired by path whose registers moved
 to another address is reported.
 
-- A phandle compares as the node it points at, so renumbering is not a difference and a reference
-  to another node is. Only properties `references.py` decodes, plus the base's `gpio` and `ref`
-  names; anything else compares as numbers.
+- A phandle compares as the node it points at, so renumbering is not a difference and a reference to
+  another node is. Only properties `references.py` decodes, plus the base's `gpio` and `ref` names;
+  anything else compares as numbers.
 - An alias compares as the node its path names.
 - A pin group compares only if an enabled device selects it, and so do the pin configurations it
   names.
 - Not compared: disabled blocks, layout (`reg` beyond the address, `ranges`, `#…-cells`), phandle
   numbers, and node or property order. Use `canonical.py` for trees with the same layout.
+
+## One block described twice: devices.py
+
+A tree can prove and pass every schema while it describes one block twice: each node is valid alone,
+and the kernel probes the block twice. `devices.py` reads each enabled node's register windows as
+the CPU sees them, through the buses' ranges, and fails on two nodes, neither holding the other,
+whose first windows are the same or that overlap with a compatible in common. Different devices
+sharing registers is common and works (a clock in a syscon's window, an IOMMU inside its master's);
+`--all` lists those for review without failing.
 
 ## The upstream view: upstream.py
 
@@ -180,8 +190,8 @@ then write only what the board changes, using the labels and macros `board.dts` 
 - A node the dtsi labels changes in `&label { }`; others change inside their nearest labelled
   ancestor, so no reference is a path.
 - A node the dtsi disables and the board enables gets `status = "okay"`.
-- A node disabled in both is not written. A node the board disables gets only
-  `status = "disabled"`, plus whatever keeps references valid.
+- A node disabled in both is not written. A node the board disables gets only `status = "disabled"`,
+  plus whatever keeps references valid.
 - A pin group or disabled node the board adds is dropped when nothing references it. An empty node
   the board adds on purpose is kept.
 - A dtsi device the board lacks is disabled, not deleted.
@@ -189,9 +199,9 @@ then write only what the board changes, using the labels and macros `board.dts` 
 
 The view orders properties so it compiles to the same blob: deletions first, then the dtsi's
 properties (standard before vendor), children and aliases by name, then new properties in the
-board's order, `status` last. Spellings are normalized when comparing: unit addresses and numbers
-by value, macros evaluated, aliases by the node they name. Only headers whose names the view uses
-are included. Each sunxi GPIO's pin is named in a comment (`/* PG18, PG19 */`).
+board's order, `status` last. Spellings are normalized when comparing: unit addresses and numbers by
+value, macros evaluated, aliases by the node they name. Only headers whose names the view uses are
+included. Each sunxi GPIO's pin is named in a comment (`/* PG18, PG19 */`).
 
 **`--prove`** compiles the view against the same patched dtsi and compares it with `board.dtb` using
 `canonical.py`, through one explicit projection of what a view may leave out:
@@ -205,16 +215,16 @@ are included. Each sunxi GPIO's pin is named in a comment (`/* PG18, PG19 */`).
 
 Anything else that differs fails the proof.
 
-The header lists patches the view needs beyond its base kernel (the repository and tag or commit
-the dtsi URL pins). They are found by name, so the list is best-effort: patches adding a node,
-property or label the view uses, and patches adding a vendor compatible, rc-map name or property to
-a driver or binding. A patch needed only by another listed patch is not named.
+The header lists patches the view needs beyond its base kernel (the repository and tag or commit the
+dtsi URL pins). They are found by name, so the list is best-effort: patches adding a node, property
+or label the view uses, and patches adding a vendor compatible, rc-map name or property to a driver
+or binding. A patch needed only by another listed patch is not named.
 
 The base is the `soc` named by the `.translate.conf`. A board kept on its vendor kernel uses the
 target base's `soc` and `soc-patches` instead, which may name a reference board file. A board's
 `BOARD_KERNEL_DTB_UPSTREAM` overrides both, and `--soc <url>` tries another for one run (see
-`trees.md` for choosing). The dtsi is read as cpp would splice it, with every header fetched from its
-own tree. The proof compiles with `-@`, like the board's own build.
+`trees.md` for choosing). The dtsi is read as cpp would splice it, with every header fetched from
+its own tree. The proof compiles with `-@`, like the board's own build.
 
 ## board.dts and phandles
 

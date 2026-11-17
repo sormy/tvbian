@@ -22,16 +22,18 @@ describes the revision its author had.
 3. **Semdiff against the last proven tree**: `tools/dtcx/semdiff.py <proven.dtb> <new.dtb>` (for a
    first board, against stock's dtb). Explain every line by the conf, the board's patch or a dtsi
    patch. Anything else is a bug: fix it in the tool, with a test that fails without the fix.
-4. **Prove the upstream view**: `tools/dtcx/upstream.py --prove board.dtb <source> <target>
-   board.dts` writes the board as mainline would and must show no difference from `board.dtb`
-   (`tools/dtcx/README.md` lists what a view may leave out). Read its header (the patches the board
-   needs beyond its base kernel, found by name, so best-effort) and its size: a block no board fact
-   explains is a bug.
+4. **Prove the upstream view**:
+   `tools/dtcx/upstream.py --prove board.dtb <source> <target> board.dts` writes the board as
+   mainline would and must show no difference from `board.dtb` (`tools/dtcx/README.md` lists what a
+   view may leave out). Read its header (the patches the board needs beyond its base kernel, found
+   by name, so best-effort) and its size: a block no board fact explains is a bug.
 5. **Validate against the bindings** the tree is written for: the tag of the conf's `soc` URL plus
    the kernel conf's binding patches (`tools/dtcx/bindings.py`, then `dt-mk-schema` and
    `dt-validate`). Every finding except the board's own compatible gets a `dt-bindings:` patch,
    listed ahead of the patch that adds the compatible or property, in both confs.
-6. **Deploy so a failure can recover**: a box reachable only over Wi-Fi rolls back to the previous
+6. **No block described twice**: `tools/dtcx/devices.py board.dtb`. Proof and schemas pass a block
+   described twice (a vendor root node and the dtsi's node for one SRAM); merge the two by label.
+7. **Deploy so a failure can recover**: a box reachable only over Wi-Fi rolls back to the previous
    tree by itself if the new one brings no network up (a one-shot unit checks for an address three
    minutes in). Then test both kernels, the blocks the change touched (regulator consumers, bank
    modes, MMC timing, the radio), and warm reboots.
@@ -48,8 +50,8 @@ describes the revision its author had.
   `reg` is right: the H616's GIC is `@03020000`, its registers at `0x3021000`.
 - **The vendor's template is not the board**: pin groups for blocks the box lacks, remote tables for
   remotes it never shipped with. What nothing selects configures nothing.
-- **A property the driver ignores is not worth keeping**: neither the sunxi-cir nor the AXP313 driver
-  reads `wakeup-source`. Read the driver before keeping a property.
+- **A property the driver ignores is not worth keeping**: neither the sunxi-cir nor the AXP313
+  driver reads `wakeup-source`. Read the driver before keeping a property.
 - **A line belongs on its consumer, not on a hog.** The H313's Bluetooth reset and wake lines were
   hogs until its driver took them. A control boot (no hog, no driver) shows what the chip needs: the
   AIC8800 needed neither.
@@ -57,8 +59,8 @@ describes the revision its author had.
   for 7.3 that 7.3 has already closed.
 - **A guard's check needs tools the image has**: a rollback guard that used `ping` rolled every box
   back, because the image has no `ping`.
-- **An upstream sibling is a different revision**: upstream's Tanix TX1 is the V1.0, with banks PC and
-  PG at 1.8 V; the V2.0 runs both at 3.3 V.
+- **An upstream sibling is a different revision**: upstream's Tanix TX1 is the V1.0, with banks PC
+  and PG at 1.8 V; the V2.0 runs both at 3.3 V.
 
 ## Check
 
@@ -68,4 +70,5 @@ describes the revision its author had.
 - [ ] **V3** `semdiff.py` against the last proven tree: every line explained in `dtb.md`
 - [ ] **V4** `upstream.py --prove` reports no difference
 - [ ] **V5** `dt-validate` against the patched bindings reports nothing but the board compatible
-- [ ] **V6** `regression.md` on both kernels, with the touched blocks checked
+- [ ] **V6** `devices.py` finds no block described twice
+- [ ] **V7** `regression.md` on both kernels, with the touched blocks checked

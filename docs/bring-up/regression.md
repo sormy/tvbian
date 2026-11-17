@@ -8,8 +8,8 @@ tools: a line that differs from the board's last run is a finding.
 ## Do
 
 1. **Before a tree boots**, for a translated board, `conversion.md`'s checks: `semdiff.py` against
-   the last proven tree, `upstream.py --prove`, `dt-validate` against the patched bindings. A
-   board's tree is rebuilt from its patch, `build-dtb.sh`, the patch reproducing it.
+   the last proven tree, `upstream.py --prove`, `dt-validate` against the patched bindings,
+   `devices.py`. A board's tree is rebuilt from its patch, `build-dtb.sh`, the patch reproducing it.
 2. **Run the suite on the boxes, which run it alone**:
    `tools/validate/regression.py run [--profile short|default|extended] BOARD=USER@HOST ...`
    deploys, waits, collects and reports. Deploy installs the family's kernels, the tools and the

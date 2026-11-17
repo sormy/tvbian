@@ -149,15 +149,28 @@ class Tree:
 
     def address(self, path: str) -> int | None:
         """The node's first register, as the CPU sees it through every bus's ranges."""
+        windows = self.registers(path)
+        return windows[0][0] if windows else None
+
+    def registers(self, path: str) -> list[tuple[int, int]]:
+        """The node's register windows, start and size, as the CPU sees them; none on a bus that
+        maps nothing to the CPU, as an I2C bus's."""
         reg = self.nodes[path].prop("reg")
         parent = path.rsplit("/", 1)[0] or "/"
         if reg is None or path == "/" or parent not in self.nodes:
-            return None
-        reg_cells = cells(reg.value)
+            return []
         width = self.cell_count(parent, "#address-cells")
-        if not reg_cells or len(reg_cells) < width:
-            return None
-        address = joined(reg_cells[:width])
+        size = self.cell_count(parent, "#size-cells")
+        flat = cells(reg.value)
+        windows = []
+        for i in range(0, len(flat) - width - size + 1, width + size):
+            address = self.translate(parent, joined(flat[i : i + width]))
+            if address is not None:
+                windows.append((address, joined(flat[i + width : i + width + size]) if size else 0))
+        return windows
+
+    def translate(self, parent: str, address: int) -> int | None:
+        """A child's address on the parent's bus as the CPU sees it, through every bus's ranges."""
         while parent != "/":
             ranges = self.nodes[parent].prop("ranges")
             grand = parent.rsplit("/", 1)[0] or "/"
