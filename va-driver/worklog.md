@@ -277,3 +277,7 @@ real time on Cedrus whatever the driver: about 25 fps flat out, 180 of 288 frame
   next shown one, every 12 frames. It now goes out with the next in one superframe; a show-existing
   header after it instead stopped the decode. Six clips, H.264, HEVC and VP9 at 1080p and 4K, four
   runs each: every picture exact.
+- On the H313 as a desktop user, mpv showed no 4K clip: `/dev/dma_heap/system` is root's, so a
+  surface's own memory fell back to a memfd, which is no dma-buf, and the compositor refused it. The
+  suite runs as root. The package's udev rule opens the heap to `video`; both 4K clips now play to
+  their end.

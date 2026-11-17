@@ -117,13 +117,17 @@ build_driver() {
 }
 
 # /dev/dri/va: the GPU's render node, for a program that opens only the node it is named, as
-# Chromium does. udev sees a node's platform driver, which a GPU's DRM driver shares.
+# Chromium does. udev sees a node's platform driver, which a GPU's DRM driver shares. The system
+# heap for the video group: a surface's own memory, which the driver exports to the compositor.
 write_udev_rule() {
   local rules=$1/usr/lib/udev/rules.d/70-tvb-va-driver.rules name
   mkdir -p "$(dirname "$rules")"
-  for name in $GPU_DRIVERS; do
-    echo "SUBSYSTEM==\"drm\", KERNEL==\"renderD*\", DRIVERS==\"$name\", SYMLINK+=\"dri/va\""
-  done >"$rules"
+  {
+    for name in $GPU_DRIVERS; do
+      echo "SUBSYSTEM==\"drm\", KERNEL==\"renderD*\", DRIVERS==\"$name\", SYMLINK+=\"dri/va\""
+    done
+    echo 'SUBSYSTEM=="dma_heap", KERNEL=="system", GROUP="video", MODE="0660"'
+  } >"$rules"
 }
 
 package() {

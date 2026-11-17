@@ -15,7 +15,8 @@ a box of each family known here; no image installs it yet.
   `backend_v4l2m2m.c`; `backend_lavc.c`, libavcodec, in the host's build alone.
 - **Names:** libva names a driver after the DRM driver of the render node a client opens: the
   package installs `tvb_drv_video.so` under each GPU's name in `build.sh`'s `GPU_DRIVERS`, and udev
-  links that node as `/dev/dri/va`.
+  links that node as `/dev/dri/va`. The same rule opens `/dev/dma_heap/system` to the `video` group,
+  where a desktop user's surfaces get their own memory.
 - **Linking:** libmpp is linked in statically; the driver exports `__vaDriverInit_1_22` alone, so
   the library's symbols meet no other copy in a process. `patches/mpp/` makes MPP's platform probe a
   call, made only where `/dev/mpp_service` is.
