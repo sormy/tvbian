@@ -1,0 +1,29 @@
+From 2e028b6167eba9fbfaab47373b9b168da6602fbf Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Tue, 17 Nov 2026 04:43:47 +0000
+Subject: [PATCH] media: cedrus: Run the H616's engine at its stock 624 MHz
+
+Allwinner's video library runs the H616's engine at 624 MHz: its table
+gives that rate to the H616's engine version, 0x12011, for every chip
+tag. Mainline ran it at 600 MHz.
+---
+ drivers/staging/media/sunxi/cedrus/cedrus.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus.c b/drivers/staging/media/sunxi/cedrus/cedrus.c
+index a79b80cc7..ae393526e 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus.c
+@@ -584,7 +584,8 @@ static const struct cedrus_variant cedrus_variant_sun50i_h616 = {
+ 			  CEDRUS_CAPABILITY_MPEG4_DEC |
+ 			  CEDRUS_CAPABILITY_H264_ENC |
+ 			  CEDRUS_CAPABILITY_ENC_H616,
+-	.clock_mod_rate	= 600000000,
++	/* Allwinner's video library runs it at 624 MHz */
++	.clock_mod_rate	= 624000000,
+ };
+ 
+ static const struct of_device_id cedrus_of_match[] = {
+-- 
+2.47.3
+
