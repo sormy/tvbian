@@ -73,11 +73,13 @@ class KernelsTest(unittest.TestCase):
 
 class StepsTest(unittest.TestCase):
     def test_every_profile_runs_every_step_but_short_conformance(self) -> None:
-        names = {p: [s.name for s in steps(p, "sunxi64", "plex")] for p in PROFILES}
+        names = {p: [s.name for s in steps(p, "sunxi64", "plex", "sunxi-h616")] for p in PROFILES}
         self.assertEqual(names["short"], [n for n in names["default"] if n != "conformance"])
         self.assertEqual(names["default"], names["extended"])
         self.assertIn("conformance", names["default"])
-        for check in ("throughput", "soak", "display-full", "screen", "video", "deqp", "reboots"):
+        for check in ("throughput", "soak", "display-full", "screen", "video", "va", "desktop"):
+            self.assertIn(check, names["short"])
+        for check in ("deqp", "reboots"):
             self.assertIn(check, names["short"])
         self.assertEqual(
             len(names["short"]), len(set(names["short"]))
@@ -85,7 +87,9 @@ class StepsTest(unittest.TestCase):
 
     def test_the_profile_sets_the_scope(self) -> None:
         def arg(profile: str, step: str, flag: str) -> str:
-            command = next(s for s in steps(profile, "rk35xx", "plex") if s.name == step).command
+            command = next(
+                s for s in steps(profile, "rk35xx", "plex", "rk35xx") if s.name == step
+            ).command
             return next(str(a) for a in command if str(a).startswith(flag))
 
         self.assertEqual(arg("short", "video", "--only="), "--only=-(3840x2160)$")
@@ -93,7 +97,8 @@ class StepsTest(unittest.TestCase):
             with self.assertRaises(StopIteration):
                 arg(whole, "video", "--only")
         soak = {
-            p: next(s for s in steps(p, "rk35xx", "plex") if s.name == "soak") for p in PROFILES
+            p: next(s for s in steps(p, "rk35xx", "plex", "rk35xx") if s.name == "soak")
+            for p in PROFILES
         }
         self.assertEqual(
             [soak[p].command[soak[p].command.index("--soak") + 1] for p in PROFILES],

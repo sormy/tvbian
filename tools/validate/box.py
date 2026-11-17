@@ -62,6 +62,12 @@ TEST_TOOLS = {
     "ir-keytable",
     "v4l-utils",
     "bluez",
+    # the VA suite's clients
+    "vainfo",
+    "ffmpeg",
+    "mpv",
+    "gstreamer1.0-tools",
+    "gstreamer1.0-plugins-bad",
 }
 # tree nodes that never get a driver of their own: register banks, buses' QoS, the arch timer
 DRIVERLESS = ("syscon", "qos", "timer", "opp-", "psci", "shmem", "debug")

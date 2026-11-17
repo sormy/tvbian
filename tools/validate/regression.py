@@ -62,7 +62,9 @@ from box import TEST_TOOLS
 from onbox import Step
 from gpu import GLES2, SUITE, expectations, suite_toml
 from results import Known, Verdicts, known_reason
+from va_driver import slower
 from video import worse
+import desktop
 
 ROOT = Path(__file__).resolve().parents[2]
 HERE = ROOT / "tools" / "validate"
@@ -70,6 +72,14 @@ DEBS = ROOT / "build" / "out" / "debs"
 CLIPS = ROOT / "build" / "validate" / "video" / "clips"
 KNOWN = HERE / "known.conf"
 RESULTS = ROOT / "build" / "validate" / "regression"
+# the VA suite, run against the installed driver, and the session's check, with their clips
+VA_SUITE = ROOT / "va-driver" / "tests"
+VA_FILES = ("vaapi_test.py", "headers.py")
+VA_CLIPS = ROOT / "build" / "out" / "va-driver" / "clips"
+SESSION_CHECK = ROOT / "tests" / "session_check.py"
+DRI_DIR = "/usr/lib/aarch64-linux-gnu/dri"
+# the box's clip folders a new run keeps: only changed clips are sent again
+CLIP_DIRS = {"video": CLIPS, "va-clips": VA_CLIPS, "desktop-clips": desktop.CLIPS}
 BOX_DIR = "/var/lib/tvb-regress"
 IPERF_PORT = 5201
 COMMAND_S = 600
@@ -158,6 +168,13 @@ grep -vE ',(Pass|Skip|ExpectedFail|Flake|KnownFlake)' results/failures.csv | sed
 """
 
 
+def board_family_name(board: str) -> str:
+    """The family a board's board.conf names, as the VA suite keys its engines' refusals."""
+    conf = (ROOT / "boards" / board / "board.conf").read_text()
+    found = re.search(r"^BOARD_FAMILY=(\S+)$", conf, re.MULTILINE)
+    return found.group(1) if found else ""
+
+
 def board_family(board: str) -> str:
     """The kernel family a board's board.conf names."""
     conf = (ROOT / "boards" / board / "board.conf").read_text()
@@ -199,7 +216,7 @@ def changed(old: str, new: str) -> list[str]:
     ]
 
 
-def steps(profile: str, family: str, iperf: str) -> list[Step]:
+def steps(profile: str, family: str, iperf: str, board_family_name: str) -> list[Step]:
     """The plan's steps for each kernel, in order: a name, a command run in BOX_DIR, its time.
     Every profile runs every step but short, which skips conformance; it sets how much of each."""
     soak = SOAK_SECONDS[profile]
@@ -226,6 +243,11 @@ def steps(profile: str, family: str, iperf: str) -> list[Step]:
     out.append(Step("video", video, long, ["system"]))
     if profile != "short":
         out.append(Step("conformance", [*video_box, "--suite", "conformance"], long, ["system"]))
+    va = ["python3", "vaapi_test.py", "box", "--driver-dir", DRI_DIR]
+    va += ["--clips", f"{BOX_DIR}/va-clips", "--family", board_family_name]
+    out.append(Step("va", va, long, ["system"]))
+    session = ["python3", "session_check.py", "desktop", "--box"]
+    out.append(Step("desktop", [*session, "--clips", f"{BOX_DIR}/desktop-clips"], long, ["system"]))
     out.append(Step("deqp", ["sh", "deqp/run.sh"], long, ["system", "gpu"]))
     out.append(Step("recovery", [], 0))
     out.append(Step("reboots", [], 0))
@@ -338,6 +360,9 @@ class Deployment:
             raise NotStarted(f"no linux-image package for {', '.join(missing)} in {DEBS}")
         wanted += [board.name, *[d.name for d in sorted(DEBS.glob("ffmpeg9_*_arm64.deb"))[-1:]]]
         wanted += [d.name for d in sorted(DEBS.glob("deqp_*_arm64.deb"))[-1:]]
+        # the VA driver and the GStreamer it is tested through, ours where built
+        for built in ("tvb-va-driver", "gstreamer1.0-plugins-bad", "libgstreamer-plugins-bad1.0-0"):
+            wanted += [d.name for d in sorted(DEBS.glob(f"{built}_*_arm64.deb"))[-1:]]
         tree = ROOT / "boards" / self.board / "board.dtb"
         self.inputs = [f"{n.split('_')[0]} {sha(DEBS / n)}" for n in wanted]
         self.inputs.append(f"board.dtb {sha(tree)}")
@@ -362,14 +387,23 @@ class Deployment:
         """The suite, its plan, its units and the host's checks, into BOX_DIR, replacing any
         earlier run's; its clips kept, and only those that changed sent."""
         family = board_family(self.board)
-        keep = f"sudo -n find {BOX_DIR} -mindepth 1 -maxdepth 1 ! -name video -exec rm -rf {{}} +"
+        kept = " ".join(f"! -name {d}" for d in CLIP_DIRS)
+        keep = f"sudo -n find {BOX_DIR} -mindepth 1 -maxdepth 1 {kept} -exec rm -rf {{}} +"
         self.box.run(f"sudo -n mkdir -p {BOX_DIR}/video && {keep}", check=True)
         for name in ON_BOX:
             self.box.put(f"{BOX_DIR}/{name}", (HERE / name).read_bytes())
+        for name in VA_FILES:
+            self.box.put(f"{BOX_DIR}/{name}", (VA_SUITE / name).read_bytes())
+        self.box.put(f"{BOX_DIR}/{SESSION_CHECK.name}", SESSION_CHECK.read_bytes())
+        for folder in ("va-clips", "desktop-clips"):
+            self.sync_clips(folder)
         plan = {
             "board": self.board,
             "kernels": releases,
-            "steps": [asdict(s) for s in steps(self.profile, family, self.iperf)],
+            "steps": [
+                asdict(s)
+                for s in steps(self.profile, family, self.iperf, board_family_name(self.board))
+            ],
             "reboots": REBOOTS[self.profile],
         }
         self.box.put(f"{BOX_DIR}/plan.json", json.dumps(plan, indent=1).encode())
@@ -386,6 +420,16 @@ class Deployment:
                     self.box.put(f"{BOX_DIR}/video/{name}", (CLIPS / name).read_bytes())
         self.box.put(f"{BOX_DIR}/video/manifest.json", (CLIPS / "manifest.json").read_bytes())
         self.deqp(family)
+
+    def sync_clips(self, folder: str) -> None:
+        """A clip folder on the box made like the host's: only the clips that differ sent."""
+        local = CLIP_DIRS[folder]
+        listing = f"sudo -n mkdir -p {BOX_DIR}/{folder} && cd {BOX_DIR}/{folder} && "
+        listing += "sudo -n sha256sum * 2>/dev/null || true"
+        held = dict(line.split()[::-1] for line in self.box.run(listing, check=True).splitlines())
+        for clip in sorted(local.iterdir()):
+            if held.get(clip.name) != full_sha(clip):
+                self.box.put(f"{BOX_DIR}/{folder}/{clip.name}", clip.read_bytes())
 
     def deqp(self, family: str) -> None:
         """Mesa CI's lists for the box's GPU, the suite and the script that runs it."""
@@ -452,6 +496,12 @@ def prepare(board: str) -> None:
             subprocess.run([str(ROOT / "build.sh"), "board", board], cwd=ROOT, check=True)
             stamp.write_text(made_of)
         subprocess.run([sys.executable, str(HERE / "video.py"), "clips"], cwd=ROOT, check=True)
+        subprocess.run(
+            [sys.executable, str(VA_SUITE / "vaapi_test.py"), "clips", "--out", str(VA_CLIPS)],
+            cwd=ROOT,
+            check=True,
+        )
+        desktop.make_clips()
 
 
 def board_inputs(board: str) -> str:
@@ -745,6 +795,10 @@ def report(args: argparse.Namespace) -> int:
                 since = last.parents[1].name
                 cases = worse(video_records(last), video_records(kernel_dir))
                 total.fails += [f"video: worse than {since}: {case}" for case in cases]
+            if last is not None and (last / "va.txt").exists() and (kernel_dir / "va.txt").exists():
+                since = last.parents[1].name
+                speeds = slower((last / "va.txt").read_text(), (kernel_dir / "va.txt").read_text())
+                total.fails += [f"va: slower than {since}: {speed}" for speed in speeds]
             reasons = {f: known_reason(known, board, kernel, f) for f in total.fails}
             new = [f for f, why in reasons.items() if why is None]
             expected = [f"{f}  ({why})" for f, why in reasons.items() if why is not None]

@@ -19,8 +19,9 @@ tools: a line that differs from the board's last run is a finding.
    each kernel the profile names, the family's and its `-next`, with a guard that brings the default
    back if the kernel brings no network up (`boot.md`). On each it runs every check unattended, none
    left out for what the change touched: the `box.py` phases, a soak, `display.py`, `screen.py`,
-   `video.py`'s decode suite, dEQP against Mesa CI's lists, a panic, an unpinged watchdog and warm
-   reboots. `short` samples them; `default` runs them all; `extended` soaks longer. The decode
+   `video.py`'s decode suite, the VA driver's suite through FFmpeg and GStreamer, the desktop
+   session where one is installed, dEQP against Mesa CI's lists, a panic, an unpinged watchdog and
+   warm reboots. `short` samples them; `default` runs them all; `extended` soaks longer. The decode
    suite's clips are made by the host's FFmpeg; `video.py`'s conformance streams, pinned from
    FFmpeg's FATE suite, add what its encoders never make: VC-1, slices, odd widths. Each decodes
    exact, twice alike, in a `conformance` step of its own that `short` skips.
@@ -101,5 +102,5 @@ The unattended pass proves a device answers; these need a person, a screen or a 
       `default` on one per hardware block and on each board whose tree changed, `extended` for a
       release; `report.md` on the PR, each new ❌, ❓ and moved line explained
 - [ ] **R3** `reboots.sh`, 5 on each kernel, every boot back with its radios and no MMC error
-- [ ] **R4** `video.py compare` against the last run: nothing worse
+- [ ] **R4** `video.py compare` and the VA suite's speed against the last run: nothing worse
 - [ ] **R5** The hands-on lines the change reaches, handed to the human with what to confirm
