@@ -160,7 +160,7 @@ int surface_ensure_backing(struct surface *s)
         return 0;
     unsigned pitch = ALIGN(s->width * bytes_per_sample(s->fourcc), PITCH_ALIGN);
     unsigned luma_rows = ALIGN(s->height, HEIGHT_ALIGN);
-    size_t size = (size_t)pitch * luma_rows * 3 / 2;
+    size_t size = (size_t)pitch * luma_rows * (engine && engine->decodes_into_backing ? 4 : 3) / 2;
     int fd = dmabuf_alloc(size);
     if (fd < 0)
         return -errno;

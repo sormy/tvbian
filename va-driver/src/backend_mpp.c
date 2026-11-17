@@ -3,15 +3,18 @@
  * decoded (MPP_DEC_SET_IMMEDIATE_OUT), into cacheable buffers it allocates as it needs them: a
  * picture a surface holds keeps its buffer. Encode through MPP's encoder, reading the surface's own dma-buf.
  * MPP decodes 10-bit only as NV15: a 10-bit surface exports it as it is, for display planes; an
- * 8-bit surface gets it unpacked by the CPU. The RGA copies 8-bit pictures into surfaces' memory.
+ * 8-bit surface gets it unpacked by the CPU, which also copies 8-bit pictures into surfaces' memory.
  */
 #include <errno.h>
+#include <linux/dma-buf.h>
+#include <pthread.h>
+#include <stdbool.h>
+#include <sys/ioctl.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
 #include <drm_fourcc.h>
-#include <im2d.h>
 #include <rockchip/mpp_log.h>
 #include <rockchip/rk_mpi.h>
 #include <rockchip/rk_venc_cfg.h>
@@ -20,14 +23,13 @@
 
 #include "driver.h"
 
-/* the vendor kernel's RGA; librga is not called without it, as it logs its failures to stdout */
-#define RGA_DEVICE "/dev/rga"
-#define RGA_SYNC 1
 
 #ifndef DRM_FORMAT_NV15
 #define DRM_FORMAT_NV15 fourcc_code('N', 'V', '1', '5')
 #endif
 #define OUTPUT_TIMEOUT_MS 200
+/* surfaces a context decodes into, as many as a client's pool may hold, and spares */
+#define MAX_COMMITTED 64
 /* refused packets, each after a frame wait, before a decode gives up */
 #define MAX_PUT_TRIES 10
 /* frame waits for a picture at end of stream, after MPP was told it ended */
@@ -39,11 +41,29 @@
 #define H264_PROFILE_HIGH 100
 
 /* shared with the pictures it handed out, whose buffers MPP owns: they may outlive the context */
+/* memory committed to MPP's group, all held by the driver but the one MPP is to decode the next
+ * picture into: the target surface's, or a spare where MPP still reads the target's memory, and
+ * the target then gets a copy */
+struct committed {
+    int fd;
+    size_t size;
+    MppBuffer buffer;
+    bool spare;
+};
+
 struct mpp_decoder {
     MppCtx ctx;
     MppApi *mpi;
-    /* CPU-cacheable: the CPU unpacks NV15 and copies pictures out of it */
+    /* surfaces' own memory where MPP decodes into it; else CPU-cacheable buffers MPP allocates,
+     * which the CPU unpacks NV15 and copies pictures out of */
     MppBufferGroup group;
+    bool into_surfaces;
+    struct committed committed[MAX_COMMITTED];
+    unsigned num_committed;
+    /* left free for the picture last submitted, until MPP took it */
+    struct committed *released;
+    /* MPP's pictures', as its last size change gave it: none taken before that */
+    struct backing_layout layout;
     unsigned refs;
 };
 
@@ -193,8 +213,14 @@ static void decoder_put(struct mpp_decoder *d)
         return;
     if (d->ctx)
         mpp_destroy(d->ctx);
+    for (unsigned i = 0; i < d->num_committed; i++)
+        if (&d->committed[i] != d->released)
+            mpp_buffer_put(d->committed[i].buffer);
     if (d->group)
         mpp_buffer_group_put(d->group);
+    for (unsigned i = 0; i < d->num_committed; i++)
+        if (d->committed[i].spare)
+            close(d->committed[i].fd);
     free(d);
 }
 
@@ -220,6 +246,9 @@ static int mpp_decoder_open(struct driver *drv, struct context *ctx)
         return -ENOMEM;
     d->refs = 1;
     ctx->engine = d;
+    /* 10-bit comes out as NV15, which no surface takes as it is */
+    d->into_surfaces = ctx->config->offer->profile != VAProfileVP9Profile2 &&
+                       ctx->config->offer->profile != VAProfileHEVCMain10;
     if (mpp_create(&d->ctx, &d->mpi) != MPP_OK ||
         /* read as the parser starts: before mpp_init */
         d->mpi->control(d->ctx, MPP_DEC_SET_IMMEDIATE_OUT, &immediate) != MPP_OK ||
@@ -227,7 +256,10 @@ static int mpp_decoder_open(struct driver *drv, struct context *ctx)
         d->mpi->control(d->ctx, MPP_DEC_SET_PARSER_SPLIT_MODE, &split) != MPP_OK ||
         mpp_init(d->ctx, MPP_CTX_DEC, coding_of(ctx->config->offer->profile)) != MPP_OK ||
         d->mpi->control(d->ctx, MPP_SET_OUTPUT_TIMEOUT, &timeout) != MPP_OK ||
-        mpp_buffer_group_get_internal(&d->group, MPP_BUFFER_TYPE_DRM | MPP_BUFFER_FLAGS_CACHABLE) !=
+        (d->into_surfaces
+             ? mpp_buffer_group_get_external(&d->group, MPP_BUFFER_TYPE_EXT_DMA)
+             : mpp_buffer_group_get_internal(&d->group,
+                                             MPP_BUFFER_TYPE_DRM | MPP_BUFFER_FLAGS_CACHABLE)) !=
             MPP_OK ||
         d->mpi->control(d->ctx, MPP_DEC_SET_EXT_BUF_GROUP, d->group) != MPP_OK)
         return -ENODEV;
@@ -274,6 +306,113 @@ static void set_wait(struct mpp_decoder *d, RK_S64 ms)
     d->mpi->control(d->ctx, MPP_SET_OUTPUT_TIMEOUT, &ms);
 }
 
+static void sync_dmabuf(int fd, uint64_t flags)
+{
+    struct dma_buf_sync sync = { .flags = flags };
+    ioctl(fd, DMA_BUF_IOCTL_SYNC, &sync);
+}
+
+static struct committed *committed_of(struct mpp_decoder *d, int fd)
+{
+    for (unsigned i = 0; i < d->num_committed; i++)
+        if (d->committed[i].fd == fd)
+            return &d->committed[i];
+    return NULL;
+}
+
+/* committed held, as importing leaves it */
+static struct committed *commit(struct mpp_decoder *d, int fd, size_t size, bool spare)
+{
+    if (d->num_committed == MAX_COMMITTED)
+        return NULL;
+    MppBufferInfo info = { .type = MPP_BUFFER_TYPE_EXT_DMA, .fd = fd, .size = size,
+                           .index = (RK_S32)d->num_committed };
+    struct committed *c = &d->committed[d->num_committed];
+    /* the CPU's lines from allocating it written back and dropped: evicted later, they would land
+     * on what the decoder wrote */
+    sync_dmabuf(fd, DMA_BUF_SYNC_START | DMA_BUF_SYNC_RW);
+    sync_dmabuf(fd, DMA_BUF_SYNC_END | DMA_BUF_SYNC_RW);
+    if (mpp_buffer_import_with_tag(d->group, &info, &c->buffer, "tvb", __func__) != MPP_OK)
+        return NULL;
+    *c = (struct committed){ .fd = fd, .size = size, .buffer = c->buffer, .spare = spare };
+    d->num_committed++;
+    return c;
+}
+
+/* left free unless MPP still holds it */
+static bool release(struct mpp_decoder *d, struct committed *c)
+{
+    mpp_buffer_put(c->buffer);
+    if (mpp_buffer_group_unused(d->group) > 0) {
+        d->released = c;
+        return true;
+    }
+    mpp_buffer_inc_ref(c->buffer);
+    return false;
+}
+
+static int release_spare(struct mpp_decoder *d, size_t size)
+{
+    for (unsigned i = 0; i < d->num_committed; i++)
+        if (d->committed[i].spare && d->committed[i].size >= size && release(d, &d->committed[i]))
+            return 0;
+    int fd = dmabuf_alloc(size);
+    if (fd < 0)
+        return -errno;
+    struct committed *c = commit(d, fd, size, true);
+    if (!c) {
+        close(fd);
+        return -ENOBUFS;
+    }
+    return release(d, c) ? 0 : -EBUSY;
+}
+
+/* the target's memory left alone free in MPP's group, so MPP decodes into it, where it is laid
+ * out as MPP lays out pictures */
+static int release_target(struct mpp_decoder *d, struct surface *s)
+{
+    int ret = surface_ensure_backing(s);
+    if (ret)
+        return ret;
+    const struct backing *b = s->backing;
+    if (b->pitch == d->layout.pitch && b->chroma_offset == d->layout.chroma_offset &&
+        b->size >= d->layout.size) {
+        struct committed *target = committed_of(d, b->fd);
+        if (!target && !(target = commit(d, b->fd, b->size, false)))
+            return -ENOBUFS;
+        if (release(d, target))
+            return 0;
+    }
+    return release_spare(d, d->layout.size);
+}
+
+static int take_frame(struct driver *drv, struct mpp_decoder *d, VASurfaceID wanted, bool *got);
+
+/* the target's memory released once MPP's layout is known, and held again once MPP took it, so
+ * that no later picture lands in it after MPP lets go; what came out meanwhile taken, as MPP may
+ * first want its size change acknowledged */
+static int hold_released(struct driver *drv, struct mpp_decoder *d, struct surface *s,
+                         VASurfaceID id, bool *got)
+{
+    int ret = 0;
+    for (unsigned waited = 0; ret >= 0; waited++) {
+        if (!d->released && d->layout.size && (ret = release_target(d, s)) < 0)
+            return ret;
+        if (d->released && mpp_buffer_group_unused(d->group) == 0) {
+            mpp_buffer_inc_ref(d->released->buffer);
+            d->released = NULL;
+            return ret;
+        }
+        /* not taken yet: held before the next picture's memory is released */
+        if (waited == OUTPUT_TIMEOUT_MS)
+            return 0;
+        set_wait(d, 0);
+        if ((ret = take_frame(drv, d, id, got)) == 0)
+            usleep(1000);
+    }
+    return ret;
+}
+
 /* one picture out of MPP, bound to the surface it was decoded for, got once the wanted surface's
  * came; a size change acknowledged: 1 when something came out, 0 when nothing did */
 static int take_frame(struct driver *drv, struct mpp_decoder *d, VASurfaceID wanted, bool *got)
@@ -282,6 +421,9 @@ static int take_frame(struct driver *drv, struct mpp_decoder *d, VASurfaceID wan
     if (d->mpi->decode_get_frame(d->ctx, &frame) != MPP_OK || !frame)
         return 0;
     if (mpp_frame_get_info_change(frame)) {
+        unsigned pitch = mpp_frame_get_hor_stride(frame);
+        d->layout = (struct backing_layout){ pitch, pitch * mpp_frame_get_ver_stride(frame),
+                                             mpp_frame_get_buf_size(frame) };
         mpp_frame_deinit(&frame);
         return d->mpi->control(d->ctx, MPP_DEC_SET_INFO_CHANGE_READY, NULL) == MPP_OK ? 1 : -EIO;
     }
@@ -325,6 +467,17 @@ static int mpp_decode(struct driver *drv, struct context *ctx, const struct anne
 
     if (interlaced(ctx))
         return -ENOTSUP;
+    struct surface *target = surface_of(drv, ctx->target);
+    if (d->into_surfaces) {
+        if (!target)
+            return -EINVAL;
+        if (d->released) {
+            mpp_buffer_inc_ref(d->released->buffer);
+            d->released = NULL;
+        }
+        if (d->layout.size && (ret = release_target(d, target)) < 0)
+            return ret;
+    }
     if (mpp_packet_init(&packet, au->data, au->size) != MPP_OK)
         return -ENOMEM;
     mpp_packet_set_pts(packet, ctx->target);
@@ -333,6 +486,8 @@ static int mpp_decode(struct driver *drv, struct context *ctx, const struct anne
     for (int tries = 0; ret >= 0 && d->mpi->decode_put_packet(d->ctx, packet) != MPP_OK; tries++)
         ret = tries < MAX_PUT_TRIES ? take_frame(drv, d, ctx->target, &got) : -ETIMEDOUT;
     mpp_packet_deinit(&packet);
+    if (ret >= 0 && d->into_surfaces)
+        ret = hold_released(drv, d, target, ctx->target, &got);
     /* what is out already; a picture MPP still holds is sync's to wait for */
     set_wait(d, 0);
     while (ret >= 0 && (ret = take_frame(drv, d, ctx->target, &got)) > 0)
@@ -478,28 +633,61 @@ static void mpp_encoder_close(struct context *ctx)
     ctx->engine = NULL;
 }
 
+struct row_copy {
+    uint8_t *dst;
+    const uint8_t *src;
+    unsigned dst_pitch, src_pitch, row_bytes, rows;
+};
+
+static void *copy_rows(void *arg)
+{
+    const struct row_copy *c = arg;
+    if (c->dst_pitch == c->src_pitch && c->row_bytes == c->src_pitch)
+        memcpy(c->dst, c->src, (size_t)c->src_pitch * c->rows);
+    else
+        for (unsigned row = 0; row < c->rows; row++)
+            memcpy(c->dst + (size_t)row * c->dst_pitch, c->src + (size_t)row * c->src_pitch,
+                   c->row_bytes);
+    return NULL;
+}
+
 /*
- * NV12 into an NV12 surface's memory by the RGA, which takes one base address a picture: its
- * chroma right after wstride x hstride luma. NV15 goes to the CPU's unpacking: the RK3528's RGA
- * turned VP9's NV15 into garbage.
+ * NV12 into an NV12 surface's memory by the CPU, from MPP's own mapping, unless MPP decoded into
+ * the surface's memory itself: two threads copy a 4K picture in about 8 ms. NV15 goes to the
+ * generic unpacking.
  */
-static int rga_copy_picture(const struct engine_picture *p, const struct backing *b,
+static int cpu_copy_picture(const struct engine_picture *p, const struct backing *b,
                             uint32_t fourcc, unsigned width, unsigned height)
 {
+    const struct mpp_picture *picture = (const struct mpp_picture *)p;
+    const uint8_t *src = mpp_buffer_get_ptr(mpp_frame_get_buffer(picture->frame));
     unsigned src_pitch = p->plane_pitch[0];
-    if (access(RGA_DEVICE, R_OK | W_OK) || fourcc != VA_FOURCC_NV12 || p->num_objects != 1 ||
-        p->drm_format != DRM_FORMAT_NV12 || p->plane_offset[1] % src_pitch ||
-        b->chroma_offset % b->pitch)
+    if (p->fds[0] == b->fd)
+        return 0;
+    if (!src || fourcc != VA_FOURCC_NV12 || p->drm_format != DRM_FORMAT_NV12)
         return -ENOTSUP;
-    rga_buffer_t src = wrapbuffer_fd_t(p->fds[0], width, height, src_pitch,
-                                       p->plane_offset[1] / src_pitch, RK_FORMAT_YCbCr_420_SP);
-    rga_buffer_t dst = wrapbuffer_fd_t(b->fd, width, height, b->pitch, b->chroma_offset / b->pitch,
-                                       RK_FORMAT_YCbCr_420_SP);
-    rga_buffer_t no_pattern = { 0 };
-    im_rect whole = { 0 };
-    if (imcheck_t(src, dst, no_pattern, whole, whole, whole, 0) != IM_STATUS_NOERROR)
-        return -ENOTSUP;
-    return imcopy_t(src, dst, RGA_SYNC) == IM_STATUS_SUCCESS ? 0 : -EIO;
+    /* the worker takes the top three quarters of the luma; this thread the rest and the chroma */
+    unsigned split = height * 3 / 4;
+    struct row_copy luma_top = { b->map, src, b->pitch, src_pitch, width, split };
+    struct row_copy luma_rest = { b->map + (size_t)split * b->pitch,
+                                  src + (size_t)split * src_pitch, b->pitch, src_pitch, width,
+                                  height - split };
+    struct row_copy chroma = { b->map + b->chroma_offset, src + p->plane_offset[1], b->pitch,
+                               src_pitch, width, (height + 1) / 2 };
+    pthread_t worker;
+
+    sync_dmabuf(p->fds[0], DMA_BUF_SYNC_START | DMA_BUF_SYNC_READ);
+    sync_dmabuf(b->fd, DMA_BUF_SYNC_START | DMA_BUF_SYNC_WRITE);
+    bool threaded = pthread_create(&worker, NULL, copy_rows, &luma_top) == 0;
+    if (!threaded)
+        copy_rows(&luma_top);
+    copy_rows(&luma_rest);
+    copy_rows(&chroma);
+    if (threaded)
+        pthread_join(worker, NULL);
+    sync_dmabuf(b->fd, DMA_BUF_SYNC_END | DMA_BUF_SYNC_WRITE);
+    sync_dmabuf(p->fds[0], DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ);
+    return 0;
 }
 
 const struct backend backend_mpp = {
@@ -510,7 +698,8 @@ const struct backend backend_mpp = {
     .decode = mpp_decode,
     .decoder_close = mpp_decoder_close,
     .sync = mpp_sync,
-    .copy_picture = rga_copy_picture,
+    .copy_picture = cpu_copy_picture,
+    .decodes_into_backing = true,
     .narrows_ten_bit = true,
     .encoder_open = mpp_encoder_open,
     .encode = mpp_encode,

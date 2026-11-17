@@ -132,6 +132,13 @@ struct backing {
     unsigned chroma_offset;
 };
 
+/* Where a surface's planes lie in memory of its own. */
+struct backing_layout {
+    unsigned pitch;
+    unsigned chroma_offset;
+    size_t size;
+};
+
 struct surface {
     unsigned width;
     unsigned height;
@@ -224,6 +231,8 @@ struct backend {
      * the CPU's */
     int (*copy_picture)(const struct engine_picture *picture, const struct backing *dst,
                         uint32_t fourcc, unsigned width, unsigned height);
+    /* decodes into a surface's own memory, which then holds the engine's data past the picture */
+    bool decodes_into_backing;
     /* a picture an engine still holds: what is out taken, and on the last call waited for and
      * drained; NULL where vaEndPicture always has it */
     int (*sync)(struct driver *drv, struct context *ctx, VASurfaceID id, bool last);

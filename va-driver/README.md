@@ -13,15 +13,15 @@ no image installs it yet.
 | host         | the CPU, for the tests   | `tvb_drv_video.so`                           |
 
 - **Backends:** `src/backend_request.c` and `request_*.c` for Cedrus, its stateful JPEG and encoder
-  nodes through `backend_v4l2m2m.c`; `backend_mpp.c` with libmpp and librga; `backend_v4l2m2m.c` for
+  nodes through `backend_v4l2m2m.c`; `backend_mpp.c` with libmpp; `backend_v4l2m2m.c` for
   meson; `backend_lavc.c`, libavcodec, for the host.
 - **Packages:** `tvb-va-driver-<family>`, each providing and conflicting with `tvb-va-driver`: one
   family's driver a box.
 - **Names:** libva names a driver after the DRM driver of the render node a client opens. The first
   name is the file, the others link to it. On `rk35xx`'s vendor kernel the display holds
   `renderD128`, so the file is `rockchip_drv_video.so`.
-- **Linking:** `rk35xx` links libmpp and librga in statically; every build exports
-  `__vaDriverInit_1_22` alone, so the libraries' symbols meet no other copy in a process.
+- **Linking:** `rk35xx` links libmpp in statically; every build exports `__vaDriverInit_1_22`
+  alone, so the library's symbols meet no other copy in a process.
 - **Vendor string:** `TVBian VA-API driver: <backend>`.
 - **megi's driver:** I read megi's GPL-3.0 `libva-v4l2_request` to learn how VA maps onto the
   stateless controls. None of its code is used.
@@ -78,11 +78,10 @@ Key: ✓ offered, ✗ the engine can but this driver cannot yet, ➖ the engine 
 - **H.264 High encode** is offered where the encoder's menu lists Main: a Main stream is a High one,
   and FFmpeg asks High first.
 - **`rk35xx` 10-bit, NV15:** MPP's only 10-bit output, which VA cannot name. The driver lists NV12
-  for a 10-bit config, and a surface the client makes so gets each picture unpacked by the CPU. The
-  RGA's NV15 conversion turned VP9 profile 2 into garbage on the RK3528, so the RGA copies 8-bit
-  pictures only. A client that asks for P010 surfaces gets MPP's NV15 as it is: exported as one
-  `DRM_FORMAT_NV15` layer, for display planes; their separate-layer export, derive and images go
-  through the same unpacking into P010. Lima cannot sample P010 either way.
+  for a 10-bit config, and a surface the client makes so gets each picture unpacked by the CPU. A
+  client that asks for P010 surfaces gets MPP's NV15 as it is: exported as one `DRM_FORMAT_NV15`
+  layer, for display planes; their separate-layer export, derive and images go through the same
+  unpacking into P010. Lima cannot sample P010 either way.
 - **What clients ask for (host, the CPU engine):** FFmpeg and mpv `--hwdec=vaapi-copy` take P010
   whenever a 10-bit config lists it, even second; with NV12 listed alone both decode HEVC Main 10
   and VP9 profile 2 into NV12 surfaces, FFmpeg's `hwdownload` and its automatic copy alike. Hence
@@ -223,14 +222,16 @@ VA carries none of these whole.
 - **MPP:**
   - `MPP_DEC_SET_IMMEDIATE_OUT` and parser split mode off are set before `mpp_init`: each packet is
     one whole picture, handed out once decoded.
-  - MPP allocates its own buffers as it needs them; a picture a surface holds keeps its buffer, and
-    the decoder lives until the last such picture is released.
+  - 8-bit pictures decode straight into the surface's own memory, committed to MPP's buffer group.
+    The driver holds every committed buffer but the target's, so MPP can take only that one, and
+    holds it again once MPP took it. A target MPP still reads gets a spare buffer and a CPU copy.
+    Surfaces are sized at MPP's twice-the-luma.
+  - 10-bit pictures go to buffers MPP allocates; a picture a surface holds keeps its buffer, and the
+    decoder lives until the last such picture is released.
   - A picture still held when a client syncs on it is drained by an end-of-stream packet, and MPP
     reset.
   - VP9 and VP8 are offered as `mpp_check_support_format` says.
   - Encode imports the surface's dma-buf, its strides set in MPP's preprocessing as they are.
-  - The RGA copies 8-bit pictures into a surface's own memory (`im2d`'s `imcopy`); librga prints its
-    errors to stdout, so it is not called at all without `/dev/rga`.
   - MPP's own log is set to warnings.
 - **meson:**
   - Every OUTPUT buffer is stamped with its surface.
@@ -271,7 +272,7 @@ VA carries none of these whole.
   - The picture size is the input surface's.
   - FFmpeg 7.1 lists `h264_v4l2m2m` before `h264_vaapi`, and Firefox takes the first, so on `meson`
     it may pick the stock wrapper. A driver cannot change that.
-- **VideoProc:** not supported. No engine here scales cheaply; the RK3528's RGA would need librga.
+- **VideoProc:** not supported. No engine here scales cheaply.
 
 ## Build
 
@@ -283,8 +284,8 @@ On the host, in the repo checkout:
 ```
 
 A family's driver lands in `build/out/va-driver/<family>/`, beside the probe the tests use. `check`
-also makes the clips, in `build/out/va-driver/clips/`. `rk35xx` builds libmpp and librga at the
-commits its conf pins; librga's source survives only in a mirror.
+also makes the clips, in `build/out/va-driver/clips/`. `rk35xx` builds libmpp at the commit its
+conf pins.
 
 The host's test engine links FFmpeg 9.0.2, patched with `patches/ffmpeg/`'s `0039` so its H.264
 decoder hands pictures out in decode order. The host build carries the Cedrus backend too, which

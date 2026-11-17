@@ -48,25 +48,11 @@ build_mpp() {
   cmake --install "$WORK/mpp-build" >/dev/null
 }
 
-build_rga() {
-  [ -f "$WORK/rga-prefix/lib/librga.a" ] && return 0
-  fetch "$RGA_REPO" "$RGA_COMMIT" "$WORK/rga"
-  meson setup --wipe "$WORK/rga-build" "$WORK/rga" --prefix="$WORK/rga-prefix" --libdir=lib \
-    --buildtype=release -Dlibrga_demo=false >/dev/null
-  ninja -C "$WORK/rga-build" install >/dev/null
-  # its meson.build makes a shared library only; the objects are PIC, so they archive as they are
-  local objects
-  mapfile -d '' objects < <(find "$WORK/rga-build" -path '*/librga.so*.p/*.o' -print0)
-  [ ${#objects[@]} -gt 0 ] || { echo "✗ no librga objects in $WORK/rga-build" >&2; exit 1; }
-  ar rcs "$WORK/rga-prefix/lib/librga.a" "${objects[@]}"
-}
-
-# the flags each library linked into the driver adds to its compile and link; both are C++
+# the flags libmpp, linked into the driver, adds to its compile and link; it is C++
 mpp_flags() {
   echo "-I$WORK/mpp-prefix/include -I$WORK/mpp/inc -I$WORK/mpp/osal/inc" \
     "$WORK/mpp-prefix/lib/librockchip_mpp.a -lstdc++"
 }
-rga_flags() { echo "-I$WORK/rga-prefix/include/rga $WORK/rga-prefix/lib/librga.a -lstdc++"; }
 
 build_test_ffmpeg() {
   local inputs
