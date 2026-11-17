@@ -13,6 +13,7 @@ One script a component, each run from the host or on the box as its header says;
 | `display.py`    | the display: planes, composition, pacing, colour stages, HDMI, composite  |
 | `gpu.py`        | GLES conformance: dEQP against Mesa CI's expectations, from the host      |
 | `screen.py`     | the GPU's frames at the display's mode, by writeback, against llvmpipe's  |
+| `va_driver.py`  | the VA driver's suite on a box: every clip, both clients, its speed       |
 
 ## Build the box tools
 

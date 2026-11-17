@@ -5,14 +5,19 @@ On the host, after ./build.sh va-driver check, which makes the builds and the cl
   va_driver.py --box root@<box> --family <family>
 The build, the suite and the clips go to a private directory under the box's /var/tmp, the suite
 runs as root against Debian's own clients, and the directory goes on exit. Exit 1 on any FAIL.
+
+The report is kept in build/validate/va-driver/<box>/, and its decode speed is held against the
+box's previous report: exit 1 too where a client got slower, or spent more CPU a frame.
 """
 
 from __future__ import annotations
 
 import argparse
+import re
 import subprocess
 import sys
 import tarfile
+from datetime import datetime
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
@@ -29,6 +34,13 @@ SSH = [
     "-o", "ServerAliveCountMax=3",
 ]  # fmt: skip
 SUITE_TIMEOUT = 3600
+RESULTS = REPO / "build/validate/va-driver"
+SPEED = re.compile(r"^va\.speed\.(\S+) pass: ([\d.]+) fps, ([\d.]+) ms CPU a frame$", re.M)
+# run to run noise on a quiet box: past these, a speed line is a regression
+FPS_DROP_MAX = 0.10
+CPU_RISE_MAX = 0.25
+# a copy back in costs a 4K picture 10 ms and more; below this, CPU a frame is noise
+CPU_RISE_MIN_MS = 2.0
 
 
 def remote(
@@ -49,6 +61,49 @@ def send(box: str, family: str, box_dir: str) -> None:
     untar.stdin.close()
     if untar.wait() != 0:
         sys.exit(f"could not copy the suite to {box}")
+
+
+def speeds(report: str) -> dict[str, tuple[float, float]]:
+    return {key: (float(fps), float(cpu)) for key, fps, cpu in SPEED.findall(report)}
+
+
+def slower(before: str, after: str) -> list[str]:
+    """Each speed line that lost frames a second or gained CPU a frame past the noise."""
+    was, now = speeds(before), speeds(after)
+    regressions = []
+    for key in sorted(was.keys() & now.keys()):
+        (fps0, cpu0), (fps1, cpu1) = was[key], now[key]
+        if fps1 < fps0 * (1 - FPS_DROP_MAX):
+            regressions.append(f"{key}: {fps0} to {fps1} fps")
+        if cpu1 > cpu0 * (1 + CPU_RISE_MAX) and cpu1 - cpu0 > CPU_RISE_MIN_MS:
+            regressions.append(f"{key}: {cpu0} to {cpu1} ms CPU a frame")
+    return regressions
+
+
+def run_suite(box: str, command: str) -> tuple[int, str]:
+    """The suite's lines, shown as they come and kept."""
+    suite = subprocess.Popen(SSH + [box, command], stdout=subprocess.PIPE, text=True)
+    assert suite.stdout
+    lines = []
+    for line in suite.stdout:
+        print(line, end="", flush=True)
+        lines.append(line)
+    return suite.wait(timeout=SUITE_TIMEOUT), "".join(lines)
+
+
+def compare(box: str, report: str) -> int:
+    """Keep the report; exit 1 where speed fell against the box's previous one."""
+    kept = RESULTS / box.split("@")[-1]
+    kept.mkdir(parents=True, exist_ok=True)
+    previous = sorted(kept.glob("*.log"))
+    (kept / f"{datetime.now():%Y-%m-%d-%H%M%S}.log").write_text(report)
+    if not previous:
+        print("speed: the first report of this box, nothing to compare")
+        return 0
+    regressions = slower(previous[-1].read_text(), report)
+    for regression in regressions:
+        print(f"FAIL va.speed {regression}, against {previous[-1].name}")
+    return 1 if regressions else 0
 
 
 def main() -> int:
@@ -72,7 +127,9 @@ def main() -> int:
             f"TMPDIR={box_dir} python3 {box_dir}/vaapi_test.py box --driver-dir {box_dir}/driver"
             f" --clips {box_dir}/clips --family {args.family}"
         )
-        return remote(args.box, suite, timeout=SUITE_TIMEOUT).returncode
+        rc, report = run_suite(args.box, suite)
+        regressed = compare(args.box, report)
+        return rc or regressed
     finally:
         remote(args.box, f"rm -rf -- {box_dir}", timeout=30)
 

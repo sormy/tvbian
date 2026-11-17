@@ -21,6 +21,7 @@ import hashlib
 import math
 import os
 import re
+import resource
 import shutil
 import subprocess
 import sys
@@ -194,6 +195,18 @@ HELD: dict[str, set[str]] = {
 }
 # FFmpeg's word that the VA hwaccel refused a stream or a picture
 HWACCEL_REFUSED = re.compile(r"Failed to (end picture decode|create decode context)|hwaccel init")
+# 4K clips each client decodes as fast as it can: frames a second and CPU time a frame, compared
+# run to run by tools/validate/va_driver.py
+SPEED_SIZE = "3840x2160"
+# long enough that the engine's start-up, taken off, is small beside it
+SPEED_FRAMES = 600
+# the best of these: other work on a box only ever makes a run slower
+SPEED_RUNS = 3
+SPEED_CLIPS: dict[str, Clip] = {
+    "speed-h264": Clip("H264High", "mp4", X264, size=SPEED_SIZE, frames=SPEED_FRAMES),
+    "speed-hevc": Clip("HEVCMain", "mp4", X265, size=SPEED_SIZE, frames=SPEED_FRAMES),
+    "speed-vp9": Clip("VP9Profile0", "webm", VPX9, size=SPEED_SIZE, frames=SPEED_FRAMES),
+}
 # GStreamer's va decoder for each VA profile family: it has none for MPEG-4, H.263 or VC-1
 GST_DECODERS = {
     "H264": "vah264dec",
@@ -269,7 +282,7 @@ def last_line(text: str) -> str:
 
 def make_clips(out: Path) -> Iterator[Line]:
     out.mkdir(parents=True, exist_ok=True)
-    for name, clip in CLIPS.items():
+    for name, clip in {**CLIPS, **SPEED_CLIPS}.items():
         path = out / f"{name}.{clip.container}"
         if path.exists():
             continue
@@ -719,6 +732,64 @@ def gstreamer_encode_case(setup: Setup, name: str, offers: set[str]) -> Iterator
     passed = count == frames and y >= ENCODE_FLOOR_DB
     verdict = "pass" if passed else "failed"
     yield key, f"{verdict}: {count} of {frames} frames, Y PSNR {y} dB, {out.stat().st_size} bytes"
+
+
+def child_cpu_s() -> float:
+    usage = resource.getrusage(resource.RUSAGE_CHILDREN)
+    return usage.ru_utime + usage.ru_stime
+
+
+def timed(cmd: list[str], env: dict[str, str]) -> tuple[int, str, float, float]:
+    """A command's exit, its log, and its wall and CPU seconds, its children's included."""
+    cpu, start = child_cpu_s(), time.monotonic()
+    rc, log = run(cmd, env=env)
+    return rc, log, time.monotonic() - start, child_cpu_s() - cpu
+
+
+def speed(whole: list[str], first: list[str], frames: int, env: dict[str, str]) -> str:
+    """The best rate past start-up: the whole clip's cost less its first picture's."""
+    best: tuple[float, float] | None = None
+    for _ in range(SPEED_RUNS):
+        rc, log, wall, cpu = timed(whole, env)
+        if rc != 0:
+            return f"failed: {last_line(log)}"
+        rc, log, start_wall, start_cpu = timed(first, env)
+        if rc != 0:
+            return f"failed: one picture: {last_line(log)}"
+        decoded = frames - 1
+        run = (decoded / (wall - start_wall), (cpu - start_cpu) / decoded * 1000)
+        best = run if best is None or run[0] > best[0] else best
+    assert best is not None
+    return f"pass: {best[0]:.1f} fps, {best[1]:.2f} ms CPU a frame"
+
+
+def speed_case(setup: Setup, name: str, clip: Clip, offers: set[str]) -> Iterator[Line]:
+    """Each client decodes the clip to nothing, as fast as the engine and the copies let it."""
+    path = setup.clips / f"{name}.{clip.container}"
+    codec = name.removeprefix("speed-")
+    if f"{clip.profile}/VLD" not in offers:
+        yield f"speed.ffmpeg.{codec}", "unoffered"
+        yield f"speed.gstreamer.{codec}", "unoffered"
+        return
+    if not path.exists():
+        yield f"speed.ffmpeg.{codec}", "no clip"
+        return
+    ffmpeg = ["ffmpeg", "-nostdin", "-v", "error"] + decode_args(setup) + ["-i", str(path)]
+    yield f"speed.ffmpeg.{codec}", speed(
+        ffmpeg + ["-f", "null", "-"],
+        ffmpeg + ["-frames:v", "1", "-f", "null", "-"],
+        clip.frames,
+        setup.env(),
+    )
+    element = gst_decoder(clip.profile)
+    if element is None or not gst_element(setup, element):
+        yield f"speed.gstreamer.{codec}", "not run: no GStreamer va decoder for it"
+        return
+    gst = ["gst-launch-1.0", "-q", "filesrc", f"location={path}", "!", "parsebin", "!", element]
+    sink = ["!", "fakesink", "sync=false"]
+    yield f"speed.gstreamer.{codec}", speed(
+        gst + sink, gst + ["!", "identity", "eos-after=1"] + sink, clip.frames, setup.env()
+    )
 
 
 def probe_case(setup: Setup) -> Iterator[Line]:
@@ -1268,6 +1339,9 @@ def suite(setup: Setup) -> Iterator[Line]:
         for name in ENCODES:
             yield from gstreamer_encode_case(setup, name, offers)
     yield from probe_case(setup)
+    if setup.on_box:
+        for name, clip in SPEED_CLIPS.items():
+            yield from speed_case(setup, name, clip, offers)
     if not setup.on_box:
         for name, clip in CLIPS.items():
             if clip.profile.startswith(MAPPED_PROFILES) and name != "h264-high10":
