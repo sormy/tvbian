@@ -90,14 +90,8 @@ the old owner's first release without it; `release/guard.sh` fails the release o
 the debs a run adds against the published `Contents`. A path renamed within one package needs
 neither.
 
-A board renamed keeps its installed boxes: `BOARD_RENAMED_FROM=<old>` in its `board.conf` gives the
-new package `Replaces` and `Breaks: tvb-<old> (<< 1:0)`, and the release builds a last `tvb-<old>`,
-`package/retire.sh`, in epoch 1, shipping nothing and depending on the new one: `apt upgrade`
-installs the new board and drops the old. Unversioned, the `Breaks` would match that transition too
-and apt would keep the old package back.
-
-A board taking a retired name continues its versions in the newest epoch published, above the
-transition; the old board's `Breaks` turns unversioned, and no transition is built.
+A board renamed gets no transition package: a box on the old package moves by hand, as the board's
+`board.md` says.
 
 Testing the served repo from a box, 🟡 run from a trixie container only:
 

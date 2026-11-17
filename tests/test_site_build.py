@@ -70,15 +70,6 @@ class Parse(unittest.TestCase):
         sibling = build.image_for("h96max-3518d", release)
         assert sibling is not None
         self.assertEqual(sibling.name, image_name("h96max-3518d"))
-        renamed = build.parse_release(release_json([image_name("r69"), image_name("r69-1")]))
-        current = build.image_for("r69-1", renamed, "r69")
-        assert current is not None
-        self.assertEqual(current.name, image_name("r69-1"))
-        old = build.image_for(
-            "r69-1", build.parse_release(release_json([image_name("r69")])), "r69"
-        )
-        assert old is not None
-        self.assertEqual(old.name, image_name("r69"))
 
     def test_prerelease_is_refused(self) -> None:
         with self.assertRaises(SystemExit):
@@ -143,7 +134,7 @@ class Parse(unittest.TestCase):
             self.assertIsNone(build.fetch_stars())
 
     def test_card_escapes(self) -> None:
-        card = build.Card("x", "<b>", "pcb", "rk35xx", "Rockchip", "", None, None, ())
+        card = build.Card("x", "<b>", "pcb", "rk35xx", "Rockchip", None, None, ())
         release = build.parse_release(release_json([]))
         html = build.card_html(card, release, [])
         self.assertIn("&lt;b&gt;", html)
@@ -342,16 +333,6 @@ class Discovery(unittest.TestCase):
         banner = build.terminal_html(self.root, build.load_cards(self.root), release)
         self.assertIn("Debian stable (bookworm)", banner)
         self.assertNotIn("trixie", banner)
-
-    def test_old_release_uses_board_rename_without_site_changes(self) -> None:
-        conf = self.root / "boards/new-box/board.conf"
-        conf.write_text(conf.read_text() + "BOARD_RENAMED_FROM=old-box\n")
-        release = build.parse_release(release_json([image_name("old-box")]))
-        out = self.root / "renamed"
-        build.write_site(self.root, release, out)
-        page = (out / "index.html").read_text()
-        self.assertIn('id="new-box"', page)
-        self.assertIn(image_name("old-box"), page)
 
     def test_alternate_photos_slide_in_number_order(self) -> None:
         photos = self.root / "docs/new-box"

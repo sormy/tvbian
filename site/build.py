@@ -155,7 +155,6 @@ class Card:
     pcb: str
     family_id: str
     family: str
-    previous: str
     row: Row | None
     photo: Path | None
     alternates: tuple[Path, ...]
@@ -357,7 +356,6 @@ def load_aliases(
                 conf_value(text, "BOARD_PCB"),
                 parent.family_id,
                 parent.family,
-                parent.previous,
                 row,
                 find_photo(root / "docs" / alias_id),
                 find_alternates(root / "docs" / alias_id),
@@ -402,7 +400,6 @@ def load_cards(root: Path) -> list[Card]:
                 conf_value(text, "BOARD_PCB"),
                 family,
                 FAMILY_NAME.get(family, family),
-                conf_value(text, "BOARD_RENAMED_FROM"),
                 row,
                 find_photo(root / "docs" / board_id),
                 find_alternates(root / "docs" / board_id),
@@ -417,18 +414,12 @@ def load_cards(root: Path) -> list[Card]:
     return sorted(every, key=lambda card: card.name.casefold())
 
 
-def image_for(board_id: str, release: Release, previous: str = "") -> Asset | None:
-    # a release cut before a rename still carries the old board id in the filename
-    for candidate in (board_id, previous):
-        if not candidate:
-            continue
-        pattern = re.compile(IMAGE.format(board=re.escape(candidate)))
-        found = [asset for asset in release.assets if pattern.fullmatch(asset.name)]
-        if found:
-            if len(found) > 1:
-                die(f"{board_id}: release has multiple plain images")
-            return found[0]
-    return None
+def image_for(board_id: str, release: Release) -> Asset | None:
+    pattern = re.compile(IMAGE.format(board=re.escape(board_id)))
+    found = [asset for asset in release.assets if pattern.fullmatch(asset.name)]
+    if len(found) > 1:
+        die(f"{board_id}: release has multiple plain images")
+    return found[0] if found else None
 
 
 def png_size(data: bytes) -> tuple[int, int] | None:
@@ -562,7 +553,7 @@ def card_html(card: Card, release: Release, shots: list[Shot]) -> str:
         f'<p class="spec chip">{esc(spec_line(card))}</p>' if spec_line(card) else "",
         f'<p class="spec">{esc(hardware)}</p>' if hardware else "",
     ]
-    image = image_for(card.alias_of or card.id, release, card.previous)
+    image = image_for(card.alias_of or card.id, release)
     guide = row.guide if row and row.install else ""
     links = (
         ("Download", image.url if image else "", "primary"),
@@ -598,7 +589,7 @@ def terminal_html(root: Path, cards: list[Card], release: Release | None = None)
     if not cards:
         return ""
     card = next(card for card in cards if not card.alias_of)
-    image = image_for(card.id, release, card.previous) if release else None
+    image = image_for(card.id, release) if release else None
     suite = image.name.rsplit("-", 4)[1] if image else "trixie"
     conf = (root / "boards" / card.id / "board.conf").read_text()
     hostname = conf_value(conf, "BOARD_HOSTNAME") or card.id
@@ -704,7 +695,7 @@ def coffee_html(root: Path) -> str:
 
 def write_site(root: Path, release: Release, out: Path, stars: int | None = None) -> None:
     cards = load_cards(root)
-    if not any(image_for(card.id, release, card.previous) for card in cards):
+    if not any(image_for(card.id, release) for card in cards):
         die(f"{release.tag}: no image downloads for the listed boards")
     out.mkdir(parents=True, exist_ok=True)
     media = out / "media"

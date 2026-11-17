@@ -20,7 +20,6 @@ Writes `build/out/site/index.html`, `media/` and `CNAME`. The domain is `tvbian.
 | Install guide               | Box table's install link               |
 | Product photo               | `docs/<board>/image1.*`                |
 | Image download              | Release assets                         |
-| Previous board ID           | `BOARD_RENAMED_FROM`                   |
 | Aliases, on their own cards | `boards/<id>/alias.conf`               |
 | Family filters              | Listed boards' families                |
 | Search                      | Name, PCB, alias's board, family, SoC  |

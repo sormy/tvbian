@@ -3,8 +3,9 @@
 Sold as the "R69". Its SoC reports `rk3528` — RK3518 is a variant in that family, which is what
 makes a stock ROCK 2F image the right base.
 
-Formerly `r69`. A box installed under that name upgrades from `tvb-r69` to `tvb-r69-1` and keeps its
-hostname; an image built now names the box `r69-1`.
+Formerly `r69`. A box still carrying `tvb-r69` swaps it on the box:
+`apt install tvb-r69-1 tvb-r69-`; it keeps its hostname, while an image built now names the box
+`r69-1`.
 
 Runs TVBian, migrated in place from Armbian: Debian trixie, kernel `6.1.172-tvb-rk35xx`, U-Boot
 `v2026.10`, `tvb-r69`, NetworkManager, hostname `cnc`. ✅ Wi-Fi on the out-of-tree AIC8800,

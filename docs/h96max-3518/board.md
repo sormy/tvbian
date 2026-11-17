@@ -8,7 +8,8 @@ the 3518B; this unit's is in the middle.
 
 Formerly `h96max-h313`, a name the Allwinner H313 board now holds. A box still carrying
 `tvb-h96max-h313` swaps it on the box: `apt install tvb-h96max-3518 tvb-h96max-h313-`. A box that
-took the transition runs `apt full-upgrade` once, which drops it.
+took the transition, an empty `tvb-h96max-h313` that depends on `tvb-h96max-3518`, drops it:
+`apt purge tvb-h96max-h313`.
 
 Runs TVBian, migrated in place from Armbian: Debian trixie, kernel `6.1.172-tvb-rk35xx`, U-Boot
 `v2026.10`, NetworkManager, hostname `h96max-3518`. ✅ Wi-Fi, BT, IR, CEC, the VPU nodes, Ethernet
