@@ -15,7 +15,8 @@ A Debian package rebuilt with our patches, or an upstream release beside Debian'
       `extras/<name>/build.sh` or a listed patch does, nothing else: a file the build reads from
       anywhere else changes nothing published.
 - [ ] An upstream release's own `build.sh` writes its runtime libraries into `Depends`, and adds a
-      library it links to both its build and its runtime lists.
+      library it links to both its build and its runtime lists. It stamps its second argument as
+      `X-Tvb-Inputs`, or the plan never finds it published and rebuilds it every run.
 - [ ] The plan sees it:
 
   ```sh

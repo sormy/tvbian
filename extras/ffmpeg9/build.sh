@@ -1,11 +1,12 @@
 #!/bin/bash
 # Build ffmpeg9 from FFmpeg's release with extras/ffmpeg9/extra.conf's patches, and Rockchip's MPP.
-#   build.sh <version>, from extras/build.sh
+#   build.sh <version> <inputs>, from extras/build.sh
 set -euo pipefail
 # shellcheck source=/dev/null
 . /repo/extras/ffmpeg9/extra.conf
 
 PACKAGE_VERSION=$1
+INPUTS=$2
 FFMPEG_URL=https://ffmpeg.org/releases/ffmpeg-$VERSION.tar.xz
 MPP_REPO=https://github.com/rockchip-linux/mpp.git
 MPP_TAG=1.1.0
@@ -72,6 +73,7 @@ Maintainer: TVBian <archive@tvbian.com>
 Depends: $RUN_DEPENDS
 Section: video
 Priority: optional
+X-Tvb-Inputs: $INPUTS
 Description: FFmpeg 9 with V4L2 request, mem2mem and Rockchip MPP codecs
  ffmpeg9 and ffprobe9, beside Debian's ffmpeg.
 EOF

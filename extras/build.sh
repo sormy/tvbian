@@ -12,11 +12,12 @@ EXTRA=/repo/extras/$NAME
 
 UPSTREAM_VERSION=$(bash /repo/extras/version.sh "$NAME")
 PACKAGE_VERSION=$UPSTREAM_VERSION+tvb$TVB_BUILD_REVISION
+INPUTS=$(bash /repo/release/inputs.sh extra "$NAME" "$UPSTREAM_VERSION")
 OUT=/out/debs
 # shellcheck source=/dev/null
 . /repo/build-env/ccache.sh
 
-[ ! -f "$EXTRA/build.sh" ] || exec bash "$EXTRA/build.sh" "$PACKAGE_VERSION"
+[ ! -f "$EXTRA/build.sh" ] || exec bash "$EXTRA/build.sh" "$PACKAGE_VERSION" "$INPUTS"
 
 WORK=/work/extras/$SOURCE
 LOG=$WORK/build.log
@@ -38,10 +39,9 @@ add_patches() {
 
 # into the template too where the package regenerates its control from one, as mesa does
 stamp_inputs() {
-  local inputs f
-  inputs=$(bash /repo/release/inputs.sh extra "$NAME" "$UPSTREAM_VERSION")
+  local f
   for f in debian/control debian/control.in; do
-    [ ! -f "$f" ] || sed -i "/^Package: $PACKAGE\$/a XB-X-Tvb-Inputs: $inputs" "$f"
+    [ ! -f "$f" ] || sed -i "/^Package: $PACKAGE\$/a XB-X-Tvb-Inputs: $INPUTS" "$f"
   done
   grep -q "^XB-X-Tvb-Inputs: " debian/control ||
     { echo "✗ $PACKAGE: no such package in $SOURCE" >&2; exit 1; }

@@ -1,12 +1,13 @@
 #!/bin/bash
 # Build deqp: VK-GL-CTS opengl-es-cts-<VERSION> built surfaceless, and deqp-runner, as Mesa 25.0.7's
 # CI runs them.
-#   build.sh <version>, from extras/build.sh
+#   build.sh <version> <inputs>, from extras/build.sh
 set -euo pipefail
 # shellcheck source=/dev/null
 . /repo/extras/deqp/extra.conf
 
 PACKAGE_VERSION=$1
+INPUTS=$2
 CTS_REPO=https://github.com/KhronosGroup/VK-GL-CTS.git
 CTS_TAG=opengl-es-cts-$VERSION
 RUNNER_VERSION=0.20.3
@@ -76,6 +77,7 @@ Maintainer: TVBian <archive@tvbian.com>
 Depends: $RUN_DEPENDS
 Section: misc
 Priority: optional
+X-Tvb-Inputs: $INPUTS
 Description: GLES conformance tests for TVBian validation
  VK-GL-CTS $CTS_TAG and deqp-runner $RUNNER_VERSION, as Mesa 25.0.7's CI runs them.
 EOF
