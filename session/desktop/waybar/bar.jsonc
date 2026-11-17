@@ -1,0 +1,19 @@
+// the menu bar: the launcher on the left, the status on the right
+{
+  "layer": "top",
+  "position": "top",
+  "height": 26,
+  "modules-left": ["custom/menu"],
+  "modules-center": ["clock"],
+  "modules-right": ["tray", "custom/appearance", "pulseaudio", "network"],
+  "custom/menu": { "format": "TVBian", "on-click": "fuzzel", "tooltip": false },
+  "custom/appearance": { "format": "◐", "on-click": "tvb-appearance toggle", "tooltip": false },
+  "clock": { "format": "{:%a %d %b  %H:%M}" },
+  "pulseaudio": { "format": "vol {volume}%", "format-muted": "muted", "on-click": "pavucontrol" },
+  "network": {
+    "format-wifi": "{essid}",
+    "format-ethernet": "wired",
+    "format-disconnected": "offline",
+    "on-click": "nm-connection-editor"
+  }
+}

@@ -50,6 +50,7 @@ do the tools they need: `./build.sh tool <name>` builds one from `tools/<name>/`
 ./build.sh extra deqp                   # host: deqp, Mesa CI's GLES conformance tests, for gpu.py
 ./build.sh va-driver                    # host: tvb-va-driver, every backend in one driver
 ./build.sh va-driver check              # host: the driver, then its tests on the host
+./build.sh session desktop              # host: tvb-desktop, from session/desktop/
 ./build.sh debs                         # host: all of the above, every kernel and board
 ./build.sh image h96max-m20             # host: build/out/images/, from build/out/debs/
 ./build.sh test                         # host: tests/, in the build container

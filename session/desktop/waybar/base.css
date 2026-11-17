@@ -1,0 +1,54 @@
+/* the bar and the dock; dark.css and light.css set the colours */
+* {
+  font-family: Inter, sans-serif;
+  font-size: 13px;
+}
+
+window#waybar {
+  background: @bar_bg;
+  color: @bar_fg;
+}
+
+/* waybar spans the screen's width: the dock is its centre box */
+window#waybar.dock {
+  background: transparent;
+}
+
+window#waybar.dock .modules-center {
+  background: @dock_bg;
+  border: 1px solid @dock_border;
+  border-radius: 16px;
+  padding: 0 6px;
+}
+
+#custom-menu {
+  font-weight: bold;
+  padding: 0 12px;
+}
+
+#clock,
+#tray,
+#custom-appearance,
+#pulseaudio,
+#network {
+  padding: 0 10px;
+}
+
+#image {
+  padding: 0 4px;
+}
+
+#taskbar button {
+  padding: 0 4px;
+  border-radius: 10px;
+}
+
+#taskbar button.active {
+  background: @hover_bg;
+}
+
+#image:hover,
+#taskbar button:hover {
+  background: @hover_bg;
+  border-radius: 10px;
+}

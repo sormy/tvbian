@@ -1,0 +1,7 @@
+# the session's look, dark by default: GTK 3 and 4, the portal and the browsers read it
+[org.gnome.desktop.interface]
+gtk-theme='WhiteSur-Dark'
+icon-theme='WhiteSur-dark'
+cursor-theme='WhiteSur-cursors'
+color-scheme='prefer-dark'
+font-name='Inter 10'

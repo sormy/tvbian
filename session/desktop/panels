@@ -1,0 +1,11 @@
+#!/bin/sh
+# Start the bar and the dock in the session's colour scheme, in place of any running; the user's own
+# waybar config, where there is one, instead
+set -eu
+SHARE=/usr/share/tvb-desktop/waybar
+pkill -x -u "$(id -u)" waybar || true
+[ ! -d "$HOME/.config/waybar" ] || exec waybar
+scheme=dark
+[ "$(gsettings get org.gnome.desktop.interface color-scheme)" != "'prefer-light'" ] || scheme=light
+waybar -c "$SHARE/bar.jsonc" -s "$SHARE/$scheme.css" &
+exec waybar -c "$SHARE/dock.jsonc" -s "$SHARE/$scheme.css"

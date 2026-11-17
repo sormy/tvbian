@@ -68,9 +68,8 @@ below.
 
 - [ ] **Blu-ray 3D plays in 3D on a 3D TV.** Today only its 2D view.
 
-- [ ] **Three uses on one image**: server (the minimal image), desk (`tvb-labwc-session`: labwc, a
-      macOS-like theme, 3D and video in hardware) and TV (`tvb-kodi-session`,
-      `tvb-fuseamp-session`). Its own page.
+- [ ] **Three uses on one image**: server (the minimal image), desk (`tvb-desktop`: labwc, a
+      macOS-like theme, 3D and video in hardware) and TV (`tvb-kodi`, `tvb-fuseamp`). Its own page.
 
 - [ ] **FFmpeg, Kodi and Fuseamp install as `tvb-*` packages**, Fuseamp once it is ready for
       release.

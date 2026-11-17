@@ -1,0 +1,35 @@
+#!/bin/sh
+# tvb-appearance light|dark|toggle: the session's colour scheme, in GTK, the browsers, labwc and the
+# bar. Light owns the user's labwc themerc-override.
+set -eu
+INTERFACE=org.gnome.desktop.interface
+LIGHT_THEMERC=/usr/share/themes/TVBian/labwc/themerc-light
+USER_THEMERC=${XDG_CONFIG_HOME:-$HOME/.config}/labwc/themerc-override
+PANELS=/usr/libexec/tvb-desktop/panels
+
+is_light() { [ "$(gsettings get $INTERFACE color-scheme)" = "'prefer-light'" ]; }
+
+set_scheme() {  # set_scheme <gtk theme> <icon theme> <color-scheme>
+  gsettings set $INTERFACE gtk-theme "$1"
+  gsettings set $INTERFACE icon-theme "$2"
+  gsettings set $INTERFACE color-scheme "$3"
+}
+
+mode=${1:-toggle}
+if [ "$mode" = toggle ]; then
+  if is_light; then mode=dark; else mode=light; fi
+fi
+case $mode in
+  light)
+    set_scheme WhiteSur-Light WhiteSur prefer-light
+    mkdir -p "$(dirname "$USER_THEMERC")"
+    cp "$LIGHT_THEMERC" "$USER_THEMERC"
+    ;;
+  dark)
+    set_scheme WhiteSur-Dark WhiteSur-dark prefer-dark
+    rm -f "$USER_THEMERC"
+    ;;
+  *) echo "usage: tvb-appearance light|dark|toggle" >&2; exit 2 ;;
+esac
+labwc --reconfigure
+"$PANELS" >/dev/null 2>&1 &

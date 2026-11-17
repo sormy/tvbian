@@ -1,0 +1,40 @@
+# tvb-desktop's files (mode src dest, src under session/desktop/): each where its program reads
+# system-wide defaults, which a user's own config overrides; beside Debian's, never over them.
+
+# greetd: gtkgreet under cage, starting labwc; Debian's /etc/greetd/config.toml left as it is
+0644 greetd.toml         /usr/share/tvb-desktop/greetd.toml
+0644 greeter.css         /usr/share/tvb-desktop/greeter.css
+0644 greetd.service.conf /usr/lib/systemd/system/greetd.service.d/50-tvb-desktop.conf
+0644 environments        /etc/greetd/environments
+# labwc: its system-wide config
+0644 rc.xml              /etc/xdg/labwc/rc.xml
+0644 menu.xml            /etc/xdg/labwc/menu.xml
+0755 autostart           /etc/xdg/labwc/autostart
+0644 environment         /etc/xdg/labwc/environment
+# each screen scaled to its density, at login and in the greeter
+0755 scale-outputs       /usr/libexec/tvb-desktop/scale-outputs
+# the look: WhiteSur, dark by default, light or dark by tvb-appearance
+0644 gschema.override    /usr/share/glib-2.0/schemas/50-tvb-desktop.gschema.override
+0644 labwc-theme/themerc       /usr/share/themes/TVBian/labwc/themerc
+0644 labwc-theme/themerc-light /usr/share/themes/TVBian/labwc/themerc-light
+0644 labwc-theme/close-active.svg /usr/share/themes/TVBian/labwc/close-active.svg
+0644 labwc-theme/close-inactive.svg /usr/share/themes/TVBian/labwc/close-inactive.svg
+0644 labwc-theme/iconify-active.svg /usr/share/themes/TVBian/labwc/iconify-active.svg
+0644 labwc-theme/iconify-inactive.svg /usr/share/themes/TVBian/labwc/iconify-inactive.svg
+0644 labwc-theme/max-active.svg /usr/share/themes/TVBian/labwc/max-active.svg
+0644 labwc-theme/max-inactive.svg /usr/share/themes/TVBian/labwc/max-inactive.svg
+0644 labwc-theme/max_toggled-active.svg /usr/share/themes/TVBian/labwc/max_toggled-active.svg
+0644 labwc-theme/max_toggled-inactive.svg /usr/share/themes/TVBian/labwc/max_toggled-inactive.svg
+0755 tvb-appearance      /usr/bin/tvb-appearance
+0644 wallpaper.svg       /usr/share/tvb-desktop/wallpaper.svg
+# waybar as a menu bar and a dock, beside Debian's /etc/xdg/waybar
+0755 panels              /usr/libexec/tvb-desktop/panels
+0644 waybar/bar.jsonc    /usr/share/tvb-desktop/waybar/bar.jsonc
+0644 waybar/dock.jsonc   /usr/share/tvb-desktop/waybar/dock.jsonc
+0644 waybar/base.css     /usr/share/tvb-desktop/waybar/base.css
+0644 waybar/dark.css     /usr/share/tvb-desktop/waybar/dark.css
+0644 waybar/light.css    /usr/share/tvb-desktop/waybar/light.css
+# video through the VA driver
+0644 mpv.conf            /etc/mpv/mpv.conf
+0644 firefox.js          /usr/lib/firefox-esr/defaults/pref/tvb-desktop.js
+0644 chromium            /etc/chromium.d/tvb-desktop

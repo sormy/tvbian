@@ -1,7 +1,7 @@
 #!/bin/bash
 # Print the X-Tvb-Inputs hash of one package group: what the plan compares with the published deb.
 #   inputs.sh kernel <kernel/*.conf> <ref> | board <board> | firmware <dir> | base | keyring |
-#             extra <name> <Debian's version> | va-driver
+#             extra <name> <Debian's version> | va-driver | session <name>
 # Beside the files, the versions of the tools that shape the group's bytes: none for copied files,
 # so a build image changed for another step rebuilds nothing it does not touch.
 set -euo pipefail
@@ -57,6 +57,10 @@ files() {
       # shellcheck source=/dev/null
       (. "extras/$2/extra.conf"; echo $PATCHES) ;;
     va-driver) echo va-driver/build.sh va-driver/src/* va-driver/deb/* patches/mpp/* ;;
+    session)
+      echo "session/$2/session.conf" "session/$2/package.list" package/session.sh \
+        package/install-list.sh
+      sed -E 's/#.*//' "session/$2/package.list" | awk -v d="session/$2/" 'NF && $1 != "link" {print d $2}' ;;
   esac
 }
 # settings <group> <arg>: what a conf sets, sorted, so a comment or a reordering moves nothing

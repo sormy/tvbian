@@ -1,0 +1,67 @@
+#!/usr/bin/python3
+"""Scale each output to its density, as macOS does: about 128 points an inch, in quarter steps.
+
+A screen whose EDID gives no size, and anything coarser than the target, stays at 1.
+"""
+
+import json
+import subprocess
+from dataclasses import dataclass
+from typing import TypedDict
+
+POINTS_PER_INCH = 128
+SCALE_STEP = 0.25
+MM_PER_INCH = 25.4
+
+
+class Mode(TypedDict):
+    width: int
+    current: bool
+
+
+class PhysicalSize(TypedDict):
+    width: int
+
+
+class Head(TypedDict):
+    """An output as `wlr-randr --json` lists it, the fields read here alone."""
+
+    name: str
+    enabled: bool
+    modes: list[Mode]
+    physical_size: PhysicalSize
+
+
+@dataclass
+class Output:
+    name: str
+    width_px: int
+    width_mm: int
+
+    def scale(self) -> float:
+        if self.width_mm <= 0:
+            return 1.0
+        ppi = self.width_px / (self.width_mm / MM_PER_INCH)
+        steps = round(ppi / POINTS_PER_INCH / SCALE_STEP)
+        return max(1.0, steps * SCALE_STEP)
+
+
+def enabled_outputs(heads: list[Head]) -> list[Output]:
+    return [
+        Output(head["name"], mode["width"], head["physical_size"]["width"])
+        for head in heads
+        if head["enabled"]
+        for mode in head["modes"]
+        if mode["current"]
+    ]
+
+
+def main() -> None:
+    heads: list[Head] = json.loads(subprocess.check_output(["wlr-randr", "--json"]))
+    for output in enabled_outputs(heads):
+        scale = str(output.scale())
+        subprocess.run(["wlr-randr", "--output", output.name, "--scale", scale], check=True)
+
+
+if __name__ == "__main__":
+    main()

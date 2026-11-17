@@ -39,6 +39,7 @@ our boxes. A board's key names its model (`h96max-m20`), never its SoC.
 | `package/`          | the steps building `tvb-<board>`, `tvb-firmware-<chip>`, `tvb-base` and `tvb-archive-keyring`  |
 | `extras/<package>/` | a Debian package we shadow until Debian ships the fix, or an upstream one beside Debian's      |
 | `va-driver/`        | our VA-API driver: its source, every backend in one build, the step building `tvb-va-driver`   |
+| `session/<name>/`   | a session: Debian's programs as its depends, our defaults for them, `tvb-<name>`               |
 | `image/`            | the image step, its package list, and the image's own state: locale, root's first SSH login    |
 | `release/`          | the release plan, the signed `apt` repo, and the upload to GitHub                              |
 | `site/`             | the public page and the script that builds it                                                  |

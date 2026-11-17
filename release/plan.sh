@@ -116,6 +116,11 @@ for c in extras/*/extra.conf; do
     "$debian" +tvb "$(. "$c"; echo "${SOURCE:-$PACKAGE}")"
 done
 plan va-driver - tvb-va-driver "$(bash release/inputs.sh va-driver)"
+for c in session/*/session.conf; do
+  [ -f "$c" ] || continue
+  s=$(basename "$(dirname "$c")")
+  plan session "$s" "tvb-$s" "$(bash release/inputs.sh session "$s")"
+done
 plan base - tvb-base "$(bash release/inputs.sh base)"
 plan keyring - tvb-archive-keyring "$(bash release/inputs.sh keyring)"
 cat "$REL/plan"

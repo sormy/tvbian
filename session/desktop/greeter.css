@@ -1,0 +1,10 @@
+/* gtkgreet, full screen and dark */
+window {
+  background: linear-gradient(160deg, #1b2a4a, #3b2a5a 60%, #5a2f4f);
+}
+
+box#body {
+  background: rgba(30, 30, 32, 0.7);
+  border-radius: 16px;
+  padding: 32px;
+}

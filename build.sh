@@ -9,6 +9,8 @@
 #          ./build.sh extra <name>            extras/<name>: Debian's or upstream's, our patches
 #          ./build.sh va-driver               tvb-va-driver, every backend in one driver;
 #                                             check: the driver, then the host's tests
+#          ./build.sh session <name>          tvb-<name>, from session/<name>/
+#          ./build.sh session-check <name>    that package in a clean Debian, its labwc run headless
 #          ./build.sh debs                    all of the above
 #          ./build.sh image <board>           its image, from build/out/debs/
 #          ./build.sh images                  every board's image
@@ -92,7 +94,7 @@ boards_files() {
 
 usage() { awk 'NR > 2 { if (!/^#/) exit; sub(/^# ?/, ""); print }' "$0"; exit 1; }
 case "${1:-}" in
-  kernel | uboot | board | firmware | base | keyring | extra | va-driver | test | debs | image | images | plan | repo | assemble | release) ;;
+  kernel | uboot | board | firmware | base | keyring | extra | va-driver | session | session-check | test | debs | image | images | plan | repo | assemble | release) ;;
   serve) cd "$OUT" && exec python3 -m http.server 8000 ;;
   publish) exec bash release/publish.sh ;;
   tool)
@@ -163,6 +165,7 @@ boards() {
 }
 firmwares() { for c in firmware/*/firmware.conf; do [ -f "$c" ] && basename "$(dirname "$c")"; done; return 0; }
 extras() { for c in extras/*/extra.conf; do [ -f "$c" ] && basename "$(dirname "$c")"; done; return 0; }
+sessions() { for c in session/*/session.conf; do [ -f "$c" ] && basename "$(dirname "$c")"; done; return 0; }
 
 board() {
   ! grep -q '^BOARD_UBOOT=' "boards/$1/board.conf" || [ -f "$OUT/uboot/$1/u-boot.bin" ] ||
@@ -180,6 +183,8 @@ case "$1" in
   keyring) run bash package/keyring.sh ;;
   extra) run bash extras/build.sh "${2:?usage: ./build.sh extra <name>}" ;;
   va-driver) run bash va-driver/build.sh "${2:-}" ;;
+  session) run bash package/session.sh "${2:?usage: ./build.sh session <name>}" ;;
+  session-check) run python3 tests/session_check.py "${2:?usage: ./build.sh session-check <name>}" ;;
   debs)
     for k in kernel/*.conf; do run bash kernel/build.sh "$k"; done
     for f in $(firmwares); do run bash package/firmware.sh "$f"; done
@@ -195,7 +200,8 @@ case "$1" in
     run bash package/base.sh
     run bash package/keyring.sh
     for e in $(extras); do run bash extras/build.sh "$e"; done
-    run bash va-driver/build.sh ;;
+    run bash va-driver/build.sh
+    for s in $(sessions); do run bash package/session.sh "$s"; done ;;
   image) run bash image/build.sh "${2:?usage: ./build.sh image <board>}" ;;
   images) for b in $(boards); do run bash image/build.sh "$b"; done ;;
   plan)
@@ -222,6 +228,7 @@ case "$1" in
           keyring) TVB_BUILD_REVISION=$version run bash package/keyring.sh ;;
           extra) TVB_BUILD_REVISION=${version##*+tvb} run bash extras/build.sh "$arg" ;;
           va-driver) TVB_BUILD_REVISION=$version run bash va-driver/build.sh ;;
+          session) TVB_BUILD_REVISION=$version run bash package/session.sh "$arg" ;;
         esac
       done <"$OUT/release/plan"
       if [ "${TVB_RELEASE_GUARD:-1}" = 0 ]; then

@@ -1,0 +1,10 @@
+XDG_CURRENT_DESKTOP=labwc:wlroots
+MOZ_ENABLE_WAYLAND=1
+# labwc draws its own cursor from these, not from gsettings
+XCURSOR_THEME=WhiteSur-cursors
+XCURSOR_SIZE=24
+# Firefox's decoder sandbox opens /dev/video* alone: Cedrus needs /dev/media*, MPP /dev/mpp_service
+MOZ_DISABLE_RDD_SANDBOX=1
+# GStreamer's va plugin loads a driver it does not know only so; greetd starts labwc outside the
+# user manager that /usr/lib/environment.d/ reaches
+GST_VA_ALL_DRIVERS=1

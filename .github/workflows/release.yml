@@ -24,6 +24,7 @@ on:
       - modules/**
       - extras/**
       - va-driver/**
+      - session/**
       - uboot/**
       - patches/**
       - package/**
@@ -44,6 +45,7 @@ on:
       - modules/**
       - extras/**
       - va-driver/**
+      - session/**
       - uboot/**
       - patches/**
       - package/**

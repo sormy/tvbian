@@ -1,0 +1,6 @@
+@import url("base.css");
+@define-color bar_bg rgba(30, 30, 32, 0.8);
+@define-color bar_fg #f2f2f2;
+@define-color dock_bg rgba(44, 44, 46, 0.65);
+@define-color dock_border rgba(255, 255, 255, 0.12);
+@define-color hover_bg rgba(255, 255, 255, 0.15);

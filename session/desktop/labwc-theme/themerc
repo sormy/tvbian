@@ -1,0 +1,25 @@
+# TVBian's labwc theme, dark; tvb-appearance light puts themerc-light over it
+border.width: 1
+padding.height: 6
+window.titlebar.padding.width: 6
+window.label.text.justify: center
+window.button.width: 22
+window.button.spacing: 2
+window.active.title.bg.color: #2b2b2d
+window.inactive.title.bg.color: #232325
+window.active.label.text.color: #e6e6e6
+window.inactive.label.text.color: #8a8a8d
+window.active.border.color: #3a3a3c
+window.inactive.border.color: #2e2e30
+window.active.button.unpressed.image.color: #e6e6e6
+window.inactive.button.unpressed.image.color: #6e6e72
+menu.border.width: 1
+menu.border.color: #3a3a3c
+menu.items.bg.color: #2b2b2d
+menu.items.text.color: #e6e6e6
+menu.items.active.bg.color: #0a64d6
+menu.items.active.text.color: #ffffff
+menu.separator.color: #48484a
+osd.bg.color: #2b2b2d
+osd.border.color: #3a3a3c
+osd.label.text.color: #e6e6e6

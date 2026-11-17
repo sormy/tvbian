@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<openbox_menu>
+  <menu id="root-menu" label="">
+    <item label="Terminal"><action name="Execute" command="foot" /></item>
+    <item label="Files"><action name="Execute" command="pcmanfm" /></item>
+    <item label="Firefox"><action name="Execute" command="firefox-esr" /></item>
+    <item label="Chromium"><action name="Execute" command="chromium" /></item>
+    <separator />
+    <item label="Light or dark"><action name="Execute" command="tvb-appearance toggle" /></item>
+    <item label="Lock"><action name="Execute" command="swaylock -f -c 202020" /></item>
+    <item label="Log out"><action name="Exit" /></item>
+    <item label="Restart"><action name="Execute" command="systemctl reboot" /></item>
+    <item label="Shut down"><action name="Execute" command="systemctl poweroff" /></item>
+  </menu>
+</openbox_menu>

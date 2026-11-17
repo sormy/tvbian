@@ -1,0 +1,18 @@
+# TVBian's labwc theme, light: tvb-appearance copies it to the user's themerc-override
+window.active.title.bg.color: #ececec
+window.inactive.title.bg.color: #f6f6f6
+window.active.label.text.color: #1d1d1f
+window.inactive.label.text.color: #a0a0a4
+window.active.border.color: #c8c8cc
+window.inactive.border.color: #dcdce0
+window.active.button.unpressed.image.color: #1d1d1f
+window.inactive.button.unpressed.image.color: #b0b0b4
+menu.border.color: #c8c8cc
+menu.items.bg.color: #f6f6f6
+menu.items.text.color: #1d1d1f
+menu.items.active.bg.color: #0a64d6
+menu.items.active.text.color: #ffffff
+menu.separator.color: #d8d8dc
+osd.bg.color: #f6f6f6
+osd.border.color: #c8c8cc
+osd.label.text.color: #1d1d1f

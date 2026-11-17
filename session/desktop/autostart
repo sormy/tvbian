@@ -1,0 +1,7 @@
+# labwc runs this at login
+/usr/libexec/tvb-desktop/scale-outputs
+/usr/libexec/tvb-desktop/panels >/dev/null 2>&1 &
+swaybg -i /usr/share/tvb-desktop/wallpaper.svg -m fill >/dev/null 2>&1 &
+mako >/dev/null 2>&1 &
+lxpolkit >/dev/null 2>&1 &
+swayidle -w timeout 900 'swaylock -f -c 202020' before-sleep 'swaylock -f -c 202020' >/dev/null 2>&1 &
