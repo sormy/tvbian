@@ -42,6 +42,7 @@ SIZE = "640x360"
 # not a multiple of any block size: the crop and the padding both get exercised
 ODD_SIZE = "642x362"
 LOSSY_FLOOR_DB = 50.0
+REPORT_PREFIX = "va."
 # a width whose I420 rows GStreamer writes unpadded
 RAW_WIDTH_MULTIPLE = 8
 ENCODE_FLOOR_DB = 30.0
@@ -350,18 +351,21 @@ def framemd5(cmd: list[str], env: dict[str, str]) -> tuple[list[str], str]:
 
 
 def refusal_case(setup: Setup, key: str, path: Path) -> Iterator[Line]:
-    """A clip the engine cannot decode: the driver refuses it, and no picture comes out of it."""
-    irqs = irq_count()
-    rc, log = run(
+    """A clip the engine cannot decode: the driver refuses it, and no picture comes out of it.
+
+    Judged by the pictures out, not the engine's interrupts: other work on a shared box moves those.
+    """
+    frames, log = framemd5(
         ["ffmpeg", "-nostdin", "-hide_banner", "-v", "error"]
         + decode_args(setup)
-        + ["-i", str(path), "-f", "null", "-"],
-        env=setup.env(),
+        + ["-i", str(path)],
+        setup.env(),
     )
-    decoded = setup.on_box and irq_count() > irqs
     refused = HWACCEL_REFUSED.search(log)
     yield key, (
-        "pass: refused" if refused and not decoded else f"failed: not refused: {last_line(log)}"
+        "pass: refused"
+        if refused and not frames
+        else f"failed: {len(frames)} pictures out, {'refused' if refused else 'not refused'}"
     )
 
 
@@ -1272,7 +1276,9 @@ def suite(setup: Setup) -> Iterator[Line]:
 
 def emit(lines: Iterator[Line]) -> int:
     failures = 0
-    for key, value in lines:
+    for case, value in lines:
+        # among other suites' lines in one report, these say they are the VA driver's
+        key = f"{REPORT_PREFIX}{case}"
         print(f"{key} {value}", flush=True)
         judged = verdict(value) if not key.endswith((".vendor", ".offers")) else None
         if judged:

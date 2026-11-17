@@ -308,8 +308,8 @@ box running a local Mesa build needs that build's `libglx-mesa0` installed besid
 
 ## Tests
 
-`tests/vaapi_test.py` prints `key value` lines, with `FAIL key` or `UNTESTED key` after any that
-failed or could not run.
+`tests/vaapi_test.py` prints `va.<check> value` lines, with `FAIL va.<check>` or
+`UNTESTED va.<check>` after any that failed or could not run.
 
 | Check            | What it compares                                                   |
 | ---------------- | ------------------------------------------------------------------ |
