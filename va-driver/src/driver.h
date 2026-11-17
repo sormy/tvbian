@@ -233,6 +233,9 @@ struct backend {
                         uint32_t fourcc, unsigned width, unsigned height);
     /* decodes into a surface's own memory, which then holds the engine's data past the picture */
     bool decodes_into_backing;
+    /* memory of a decoder's the surface's pictures will decode into, lent as its own before its
+     * first picture; NULL, or negative where none */
+    int (*lend_backing)(struct driver *drv, VASurfaceID id, struct surface *s);
     /* a picture an engine still holds: what is out taken, and on the last call waited for and
      * drained; NULL where vaEndPicture always has it */
     int (*sync)(struct driver *drv, struct context *ctx, VASurfaceID id, bool last);
@@ -293,6 +296,10 @@ uint32_t surface_fourcc_of(unsigned rt_format);
 /* the family's engine, whose layout and copier surfaces use */
 void surface_set_engine(const struct backend *backend);
 int surface_ensure_backing(struct surface *s);
+/* fd, laid out so, as the surface's own memory: the surface's to close from then on */
+int surface_adopt_backing(struct surface *s, int fd, const struct backing_layout *layout);
+/* its picture decoded straight into its own memory */
+void surface_mark_decoded(struct surface *s);
 uint64_t monotonic_ms(void);
 int dmabuf_alloc(size_t size);
 int surface_bind_picture(struct surface *s, struct engine_picture *picture);

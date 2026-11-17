@@ -2,35 +2,35 @@
 #define VAAPI_REQUEST_H
 
 #include <stdio.h>
+#include <sys/types.h>
 
 #include <linux/videodev2.h>
 
 #include "driver.h"
 
+/* vb2's limit on a queue's buffers */
 #define REQUEST_MAX_CAPTURES 32
-#define REQUEST_MAX_SURFACES 64
 
-/* A CAPTURE buffer, Cedrus's own, exported: kept while it holds a surface's latest picture, which
- * VA may name as a reference, and while pictures handed out hold it. */
+/* A CAPTURE buffer, one surface's for the context's life: vb2 keeps its timestamp, by which later
+ * pictures reference it. Cedrus's own memory, exported: lent to the surface as its own where the
+ * surface has none, so the picture decodes in place; else bound to the surface as a picture.
+ * Cedrus cannot take memory of the surface's: vb2 maps an imported CAPTURE buffer write-only in its
+ * IOMMU, and Cedrus reads back what it wrote. */
 struct capture_buffer {
+    VASurfaceID surface;
+    /* the export, and its inode, which a surface lent it shares */
     int fd;
+    ino_t inode;
     size_t size;
     uint64_t timestamp;
-    unsigned held;
-    bool queued;
+    /* the buffer holding the surface's latest picture: its own, the reference a repeated
+     * picture is, or -1 for none */
+    int latest;
 };
 
-/* A surface's latest picture: the buffer holding it, shared by a picture that repeats another. */
-struct latest_picture {
-    VASurfaceID surface;
-    unsigned index;
-};
-
-/* The stateless engine's session: one decoder device, the media device its requests go to.
- * Shared with the pictures it handed out, which may outlive the context. */
+/* The stateless engine's session: one decoder device, the media device its requests go to. */
 struct request_ctx {
     struct driver *drv;
-    unsigned refs;
     int video_fd;
     int media_fd;
     int request_fd;
@@ -39,8 +39,6 @@ struct request_ctx {
     struct v4l2_format capture;
     struct capture_buffer captures[REQUEST_MAX_CAPTURES];
     unsigned num_captures;
-    struct latest_picture latest[REQUEST_MAX_SURFACES];
-    unsigned num_latest;
     /* the buffer this picture decodes into, and the timestamp its requests carry */
     unsigned target;
     uint64_t last_timestamp;

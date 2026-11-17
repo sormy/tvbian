@@ -154,6 +154,17 @@ static int copy_picture_to_backing(struct surface *s, const struct engine_pictur
     return ret;
 }
 
+int surface_adopt_backing(struct surface *s, int fd, const struct backing_layout *layout)
+{
+    if (!(s->backing = backing_from_fd(fd, layout->size, layout->pitch, layout->chroma_offset))) {
+        close(fd);
+        return -ENOMEM;
+    }
+    int ret = s->picture ? copy_picture_to_backing(s, s->picture) : 0;
+    release_picture(s);
+    return ret;
+}
+
 int surface_ensure_backing(struct surface *s)
 {
     if (s->backing)
@@ -164,13 +175,22 @@ int surface_ensure_backing(struct surface *s)
     int fd = dmabuf_alloc(size);
     if (fd < 0)
         return -errno;
-    if (!(s->backing = backing_from_fd(fd, size, pitch, pitch * luma_rows))) {
-        close(fd);
-        return -ENOMEM;
-    }
-    int ret = s->picture ? copy_picture_to_backing(s, s->picture) : 0;
+    const struct backing_layout layout = { pitch, pitch * luma_rows, size };
+    return surface_adopt_backing(s, fd, &layout);
+}
+
+/* the decoder's own memory where it lends some, so its pictures need no copy */
+static int ensure_decodable_backing(struct driver *drv, VASurfaceID id, struct surface *s)
+{
+    if (!s->backing && engine && engine->lend_backing && engine->lend_backing(drv, id, s) == 0)
+        return 0;
+    return surface_ensure_backing(s);
+}
+
+void surface_mark_decoded(struct surface *s)
+{
     release_picture(s);
-    return ret;
+    s->delivered = true;
 }
 
 static uint32_t drm_format_of(uint32_t fourcc)
@@ -535,7 +555,7 @@ static VAStatus export_surface_handle(VADriverContextP ctx, VASurfaceID surface_
         export_compressed(s->picture, out);
     else if (exportable(s->picture, s->fourcc, separate))
         export_picture(s->picture, s->fourcc, separate, out);
-    else if (surface_ensure_backing(s) == 0)
+    else if (ensure_decodable_backing(drv, surface_id, s) == 0)
         export_backing(s, separate, out);
     else
         status = VA_STATUS_ERROR_ALLOCATION_FAILED;
@@ -608,7 +628,7 @@ static VAStatus derive_image(VADriverContextP ctx, VASurfaceID surface_id, VAIma
     if (is_compressed(s))
         return VA_STATUS_ERROR_UNIMPLEMENTED;
     pthread_mutex_lock(&drv->lock);
-    int ret = surface_ensure_backing(s);
+    int ret = ensure_decodable_backing(drv, surface_id, s);
     pthread_mutex_unlock(&drv->lock);
     struct va_buffer *b = ret ? NULL : calloc(1, sizeof(*b));
     if (!b)
@@ -724,7 +744,7 @@ static VAStatus put_image(VADriverContextP ctx, VASurfaceID surface_id, VAImageI
         dest_y || (image->format.fourcc == VA_FOURCC_P010) != (s->fourcc == VA_FOURCC_P010))
         return VA_STATUS_ERROR_UNIMPLEMENTED;
     pthread_mutex_lock(&drv->lock);
-    int ret = surface_ensure_backing(s);
+    int ret = ensure_decodable_backing(drv, surface_id, s);
     if (!ret) {
         struct nv12_planes src = planes_of_image(image, b->data);
         struct nv12_planes dst = planes_of_backing(s);

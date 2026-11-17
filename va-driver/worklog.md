@@ -189,3 +189,47 @@ bitrate menu's VBR and CBR, GStreamer's `va` elements passing. `meson-gxl` with 
 `0037`: every MPEG-4 clip but the interlaced one 30 of 30 through FFmpeg's command line, 1 of 30
 before; HEVC and VP9 at 642×362 identical. Interlaced MPEG-4 at 38.7 dB and one wrong picture in
 `vc1-ap-slices` remain.
+
+## 2026-11-16: Cedrus decodes into the surfaces' memory
+
+`h96max-h313` (H616, 6.18.63): GStreamer's `vah264dec` decoded 1080p at 18–22 fps with one thread
+near 85%, 79–89% of the samples `__memcpy_generic` in `surface_bind_picture`'s copy. GStreamer
+exports every surface at pool setup, or derives it for a crop copy, so every surface had memory of
+its own and every picture was copied in, read from Cedrus's write-combined buffer.
+
+**Surfaces' dma-bufs as `V4L2_MEMORY_DMABUF` CAPTURE, again:** the first picture already faulted,
+`sun50i-iommu` read fault at row 13 of the picture (640×368 at 0x2080): Cedrus's deblocking reads
+back what it wrote. vb2 maps an imported CAPTURE buffer `DMA_FROM_DEVICE` unless the driver sets
+`vb2_queue.bidirectional`, Cedrus does not, and the IOMMU maps it write-only. The CMA heap faulted
+the same. `V4L2_MEMORY_FLAG_NON_COHERENT` MMAP buffers are allocated for the same direction, so not
+those either. The worklog's reference faults of 2026-11-15 were this, not the references.
+
+**Done instead:** the other way round. Each surface decoded into gets a CAPTURE buffer of its own
+for the context's life, and a surface with no memory of its own takes that buffer's export as its
+memory: at its first picture, or at the export or derive GStreamer does first, from a decode context
+of its size and format. Pictures decode in place; references are vb2's timestamps on the surface's
+buffer, which is queued again only when its surface is decoded into. A surface with memory of its
+own (Chromium's import) or another layout (an 8-bit surface of a 10-bit stream), and AFBC, keep the
+bound picture and copy.
+
+Throughput, 288 frames each, `sync=false`, old → new:
+
+| Clip            | DMABuf export (WebKit's) | VAMemory  | system memory |
+| --------------- | ------------------------ | --------- | ------------- |
+| H.264 1080p     | 22.7 → 95.5 fps          | 96 → 95   | 21.4 → 23.8   |
+| H.264 4K        | 5.9 → 24.8               | 25 → 25   | 25 → 25       |
+| VP9 4K          | 6.2 → 34.5               | 34 → 34   | 35 → 35       |
+| HEVC 1080p      | 25.2 → 140               | 142 → 140 | 23.5 → 26.0   |
+| HEVC 4K         | 6.6 → 48.9               | 49 → 49   | 49 → 50       |
+| HEVC Main 10 4K | 3.3 → 28.0               | 28 → 28   | 28 → 28       |
+
+CPU on the export path from 78–91% to 12–56%. System memory at 1080p stays CPU-bound: GStreamer
+crops 1088 to 1080 for a sink without crop meta, `gst_video_frame_copy` reading Cedrus's uncached
+memory; no copy is the driver's.
+
+**WebKit, sandbox on:** the earlier attempt played nothing because the old driver's surface memory
+for GStreamer's export came from `/dev/dma_heap/system`, which is root's alone and absent from
+WebKit's bubblewrap sandbox: a memfd, which is no dma-buf, and the web process died at the pool's
+setup. The lent buffers need no heap: 1080p H.264 and 4K VP9 play at 24 fps. 4K H.264 cannot keep
+real time on Cedrus whatever the driver: about 25 fps flat out, 180 of 288 frames late through
+`gst-launch` with the old driver as with the new.
