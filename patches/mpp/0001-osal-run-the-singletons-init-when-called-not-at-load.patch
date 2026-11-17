@@ -1,0 +1,53 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Mon, 16 Nov 2026 00:00:00 +0000
+Subject: [PATCH] osal: run the singletons' init when called, not at load
+
+A library linked into a program that may run on other SoCs probed the
+platform as it loaded: every process read the device tree and, off
+Rockchip, logged "can not found match soc name". mpp_singleton_init() is
+now the caller's to call, once, before its first MPP call.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/osal/inc/mpp_singleton.h b/osal/inc/mpp_singleton.h
+--- a/osal/inc/mpp_singleton.h
++++ b/osal/inc/mpp_singleton.h
+@@ -68,6 +68,8 @@
+ #endif
+ 
+ rk_s32 mpp_singleton_add(MppSglnInfo *info, const char *caller);
++/* runs every registered init once: the caller's to do before the first MPP call */
++void mpp_singleton_init(void);
+ 
+ #ifdef __cplusplus
+ }
+diff --git a/osal/mpp_singleton.c b/osal/mpp_singleton.c
+--- a/osal/mpp_singleton.c
++++ b/osal/mpp_singleton.c
+@@ -3,6 +3,7 @@
+  * Copyright (c) 2024 Rockchip Electronics Co., Ltd.
+  */
+ 
++#include <pthread.h>
+ #include <stdlib.h>
+ 
+ #include "mpp_singleton.h"
+@@ -40,9 +41,15 @@
+     mpp_sgln_base_deinit(&mpp_sgln_base);
+ }
+ 
+-__attribute__((constructor(65535)))
+-static void mpp_singleton_init(void)
++static void mpp_singleton_run_init(void)
+ {
+     atexit(mpp_singleton_deinit);
+     mpp_sgln_base_run_init(&mpp_sgln_base);
+ }
++
++void mpp_singleton_init(void)
++{
++    static pthread_once_t once = PTHREAD_ONCE_INIT;
++
++    pthread_once(&once, mpp_singleton_run_init);
++}

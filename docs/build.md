@@ -48,8 +48,8 @@ do the tools they need: `./build.sh tool <name>` builds one from `tools/<name>/`
 ./build.sh extra mesa                   # host: Debian's mesa, rebuilt with patches/mesa/
 ./build.sh extra ffmpeg9                # host: ffmpeg9, FFmpeg 9 with patches/ffmpeg/, beside Debian's
 ./build.sh extra deqp                   # host: deqp, Mesa CI's GLES conformance tests, for gpu.py
-./build.sh va-driver rk35xx             # host: tvb-va-driver-rk35xx, from va-driver/rk35xx.conf
-./build.sh va-driver check              # host: every family's driver, then its tests on the host
+./build.sh va-driver                    # host: tvb-va-driver, every backend in one driver
+./build.sh va-driver check              # host: the driver, then its tests on the host
 ./build.sh debs                         # host: all of the above, every kernel and board
 ./build.sh image h96max-m20             # host: build/out/images/, from build/out/debs/
 ./build.sh test                         # host: tests/, in the build container

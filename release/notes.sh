@@ -54,10 +54,5 @@ version() { awk -v c="kernel/$1.conf" '$1 == "kernel" && $2 == c { sub(/-[0-9]+$
   echo
   next=$(for k in kernel/*-next.conf; do basename "$k" -next.conf; done | paste -sd'|')
   echo "Next kernel: \`sudo apt install linux-image-tvb-<$next>-next\`"
-  echo
-  # each family's VA-API driver, by the SoC maker the table names
-  drivers=$(for c in va-driver/*.conf; do f=$(basename "$c" .conf); echo "$(vendor "$f") \`$f\`"; done |
-    paste -sd, | sed 's/,/, /g')
-  echo "Hardware video in Debian's players and browsers (VA-API): \`sudo apt install tvb-va-driver-<family>\`, the family $drivers"
 } >"$REL/notes.md"
 echo "✓ release notes"

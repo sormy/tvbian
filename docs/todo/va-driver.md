@@ -31,16 +31,28 @@ settings.
       program gets only by listing the modifier at surface creation, and only Panfrost samples.
 - [ ] **VC-1 Main on Cedrus** once `linux-sunxi` `0815` ships: offered, and a sequence that allows B
       pictures (`MAXBFRAMES` above 0) refused at its context, as the kernel refuses it.
+- [ ] **`ffmpeg9 -hwaccel vaapi` on `rk35xx`**: device creation fails with `-12`; Debian's FFmpeg
+      opens the same driver.
+- [ ] **AV1 ranked `NONE` for the browser alone**: `tvb-va-driver` hides GStreamer's software AV1
+      box-wide, so YouTube in WebKit picks VP9, and AV1 files play in no GStreamer player; the line
+      moves to the browser's launcher once it is packaged.
+- [ ] **A resolution change mid-stream on MPP**: VP9 480p to 1080p and back, as YouTube switches,
+      fails `vaEndPicture` through FFmpeg and corrupts references on the way down through GStreamer;
+      the suite should carry the switch both ways.
+- [ ] **GStreamer in the host check**: its `va` plugin opens only a DRM render node, which the build
+      container lacks; a Linux host or CI could pass `vgem`'s node in.
+- [ ] **10-bit by capability on MPP**: `narrows_ten_bit` lists NV12 alone for every client; P010
+      where the client's GPU samples it.
+- [ ] **Held pictures detected**: `backend_v4l2m2m.c` assumes them by codec; a decoder seen holding
+      one should switch the workaround on.
+- [ ] **Standalone build**: `build.sh` reads repo paths, and the host engine needs
+      `patches/ffmpeg/0039`; a meson build of its own, and no licence yet.
 - [ ] **Chromium's sandbox**: every engine's device opened in `vaInitialize`, before the sandbox
       closes; today each opens at its first context.
 - [ ] **`VideoProc`**: scaling for Jellyfin's `scale_vaapi`, and NV12 to ARGB where Chromium's GL
       cannot import NV12.
 - [ ] **Chromium's encoder** through `tvb-va-driver`, which offers no packed headers.
 - [ ] **GStreamer on `rk35xx`**: an MPP plugin package; AirPlay mirroring (`uxplay`) needs it.
-- [ ] **Settings shipped**: Chromium's VA-API flags, `VaapiIgnoreDriverChecks` among them (it trusts
-      only Intel, AMD and NVIDIA drivers), and `LIBVA_DRIVER_NAME` in `/etc/chromium.d/`; Firefox's
-      VA-API prefs as a system prefs file; `hwdec=vaapi` in a system `mpv.conf`;
-      `GST_VA_ALL_DRIVERS=1`, without which GStreamer's `va` loads only drivers it knows.
 - [ ] **Encode** for WebRTC and screen capture, through `tvb-va-driver`'s H.264, HEVC and JPEG
       encoders in a browser.
 - [ ] **Zero copy to the screen**: a VA-API frame imported by Lima and Panfrost without a CPU copy.

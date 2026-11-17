@@ -1,30 +1,59 @@
 # tvb-va-driver: a VA-API driver for the TV boxes' video engines
 
-One VA front end with a backend per engine and a build per family, `va-driver/<family>.conf`, the
-family a board's `BOARD_FAMILY` names. Each family's package installs the driver under the names
-libva looks for on that family's render nodes. Built, packaged and tested on a box of each family;
-no image installs it yet.
+One VA front end and one build with every backend: each backend's init declines without its
+hardware, and the first that finds hardware serves. Built, packaged as `tvb-va-driver` and tested on
+a box of each family known here; no image installs it yet.
 
-| Family       | Engine                   | Installed as                                 |
-| ------------ | ------------------------ | -------------------------------------------- |
-| `sunxi-h616` | Cedrus, stateless        | `panfrost_drv_video.so`                      |
-| `rk35xx`     | MPP, RK3528 and RK3518   | `rockchip_drv_video.so`, `lima_drv_video.so` |
-| `meson-gxl`  | S905L3 decoder, encoders | `lima_drv_video.so`                          |
-| host         | the CPU, for the tests   | `tvb_drv_video.so`                           |
+| Backend        | Engine                        | Known here on                     |
+| -------------- | ----------------------------- | --------------------------------- |
+| `rkmpp`        | Rockchip's MPP                | RK3528, RK3518                    |
+| `v4l2-request` | a stateless V4L2 decoder      | Cedrus (H616, H313)               |
+| `v4l2m2m`      | a stateful V4L2 codec         | S905L3; Cedrus's JPEG and encoder |
+| `lavc`         | the CPU, for the tests, named | the host                          |
 
-- **Backends:** `src/backend_request.c` and `request_*.c` for Cedrus, its stateful JPEG and encoder
-  nodes through `backend_v4l2m2m.c`; `backend_mpp.c` with libmpp; `backend_v4l2m2m.c` for
-  meson; `backend_lavc.c`, libavcodec, for the host.
-- **Packages:** `tvb-va-driver-<family>`, each providing and conflicting with `tvb-va-driver`: one
-  family's driver a box.
-- **Names:** libva names a driver after the DRM driver of the render node a client opens. The first
-  name is the file, the others link to it. On `rk35xx`'s vendor kernel the display holds
-  `renderD128`, so the file is `rockchip_drv_video.so`.
-- **Linking:** `rk35xx` links libmpp in statically; every build exports `__vaDriverInit_1_22`
-  alone, so the library's symbols meet no other copy in a process.
+- **Backends:** `src/backend_mpp.c` with libmpp; `src/backend_request.c` and `request_*.c`;
+  `backend_v4l2m2m.c`; `backend_lavc.c`, libavcodec, in the host's build alone.
+- **Names:** libva names a driver after the DRM driver of the render node a client opens: the
+  package installs `tvb_drv_video.so` under each GPU's name in `build.sh`'s `GPU_DRIVERS`, and udev
+  links that node as `/dev/dri/va`.
+- **Linking:** libmpp is linked in statically; the driver exports `__vaDriverInit_1_22` alone, so
+  the library's symbols meet no other copy in a process. `patches/mpp/` makes MPP's platform probe a
+  call, made only where `/dev/mpp_service` is.
 - **Vendor string:** `TVBian VA-API driver: <backend>`.
 - **megi's driver:** I read megi's GPL-3.0 `libva-v4l2_request` to learn how VA maps onto the
   stateless controls. None of its code is used.
+
+## Design rules
+
+The driver serves any SoC whose kernel drivers follow the V4L2 codec specifications, or Rockchip's
+MPP, beside any GPU Mesa drives. A rule the code does not meet yet is an open todo.
+
+- **Detect, never name.** What an engine decodes and encodes, its sizes, profiles, formats and rate
+  controls are read from the kernel in `vaInitialize`. No chip, board or driver name decides a
+  behaviour.
+- **Offer what the engine shows; refuse what it cannot show.** A stream or picture the engine would
+  get wrong fails at its context or its picture; it never comes out broken.
+- **Mainline interfaces first.** Stateless controls and stateful mem2mem as the kernel documents
+  them. A control not yet upstream (MPEG-4, VC-1, Cedrus's AFBC) is detected at run time, and its
+  header names the kernel patch it needs.
+- **One build, every backend.** Each backend's init declines without its hardware; the first that
+  finds hardware serves.
+- **Capabilities decide the output.** A compressed or 10-bit format goes out when the client asks
+  for it or the GPU can sample it, never because of the GPU's name.
+- **Zero copy by default.** Pictures decode into the surfaces' memory; a copy only where a layout
+  differs, and its cost shows in the speed tests.
+- **No client is special.** Behaviour follows the VA calls, never the client's name: FFmpeg,
+  GStreamer and the browsers get the same driver.
+- **Devices are found, not numbered.** Listed in `/sys`, numbered nodes as the fallback, and opened
+  in `vaInitialize`, before a client's sandbox closes.
+- **Packaging stays outside.** The file names per GPU, the `/dev/dri/va` link and the clients'
+  environment are the distribution's; the driver's own settings are one conf file and environment
+  variables, each with a working default.
+- **Every client, against software.** FFmpeg and GStreamer decode every clip, frame by frame or by
+  luma PSNR against FFmpeg's software decode; speed is held against the box's previous run; the CPU
+  engine runs the suite on the host before any box.
+- **Standalone.** libva, libdrm, the kernel's headers and, for Rockchip, MPP: no path or tool of the
+  repo it is built in, and one exported symbol.
 
 ## What each engine offers
 
@@ -97,9 +126,10 @@ Key: ✓ offered, ✗ the engine can but this driver cannot yet, ➖ the engine 
   (`meson-codecs/0017`). Only 1/2 and 1/4 in both directions, as the decoder takes; any other size
   is refused. The other codecs run on cores without the scaler. Neither FFmpeg nor the browsers ask
   for it.
-- **4K through a client:** linear frames carry 1080p; 4K needs AFBC end to end, which only a client
-  that lists the modifier gets, and only Panfrost samples. On Lima AFBC pays on a display plane
-  alone.
+- **4K through a client:** on `sunxi-h616` WebKit plays linear 8-bit 4K VP9 and HEVC at 24 fps, the
+  pictures in Cedrus's buffers end to end; linear P010 at 4K about 8 fps, which AFBC, only for a
+  client that lists the modifier and only on Panfrost, may carry. On Lima AFBC pays on a display
+  plane alone.
 - **How clients reach it:** FFmpeg picks no hardware itself: a program asks for a decoder by name
   (`h264_rkmpp`) or opens a hwaccel device (`vaapi`, `v4l2request`). Firefox opens VA-API only.
 - **MPEG-4, H.263:** sprites and GMC S-VOPs are refused on the bitstream engines (`rk35xx`,
@@ -127,22 +157,34 @@ Key: ✓ offered, ✗ the engine can but this driver cannot yet, ➖ the engine 
   surface's latest picture. The reference lists index into it.
 - **MPEG-2:** one request a picture: sequence, picture and quantisation, with MPEG-2's default
   matrices where VA does not load one.
-- **CAPTURE buffers are Cedrus's own:**
-  - `V4L2_MEMORY_MMAP`, exported as dma-bufs, laid out as the kernel's `G_FMT` says. Four at the
-    start, more by `VIDIOC_CREATE_BUFS` as surfaces hold pictures, up to 32.
-  - Each picture gets a timestamp of its own and binds to its surface as it is.
-  - A buffer holding its surface's latest picture stays out of use until the surface is decoded into
-    again: VA may name it as a reference until then.
+- **CAPTURE buffers are Cedrus's own, lent to the surfaces:**
+  - `V4L2_MEMORY_MMAP`, exported as dma-bufs, laid out as the kernel's `G_FMT` says. One at the
+    start, more by `VIDIOC_CREATE_BUFS`, up to 32.
+  - Each surface decoded into gets a buffer of its own for the context's life; a destroyed surface's
+    goes to the next. A surface with no memory of its own takes the buffer as its own: each picture
+    decodes in place, and export, derive and images read it with no copy. A surface that already has
+    memory gets each picture copied in, as does a 10-bit picture into an 8-bit surface; an AFBC
+    picture binds as it is.
+  - A surface exported or derived before its first picture, as GStreamer's pool does, is lent its
+    buffer then, by a decode context of its size and format.
+  - Each picture gets a timestamp of its own, kept by vb2 on the surface's buffer: a buffer is
+    decoded into again only when its surface is, as VA references it until then.
   - Each request is waited for, so a picture is whole when `vaEndPicture` returns; one that fails or
     never completes stops and restarts both queues.
-  - Surfaces' own dma-bufs imported as CAPTURE broke references: Cedrus's IOMMU faulted reading
-    them.
+  - Surfaces' own dma-bufs cannot be CAPTURE: vb2 maps an imported CAPTURE buffer `DMA_FROM_DEVICE`,
+    which `sun50i-iommu` maps write-only, and Cedrus reads back the picture it writes (deblocking)
+    and its references. The same holds for `V4L2_MEMORY_FLAG_NON_COHERENT` buffers, allocated for
+    that direction. So the memory is Cedrus's coherent buffers, which the CPU reads uncached: slow
+    for a client that reads pictures, nothing for one that exports them.
 - **Formats the GPUs sample:** Cedrus's tiled NV12 (`NV12_32L32`) is read only by the display
   engine; Panfrost samples linear NV12, P010 and AFBC, Lima linear NV12.
   - On the H616, Panfrost (Mali-G31) takes all three.
   - AFBC when the client lists its modifier at surface creation, for HEVC and VP9; see above.
 - **Chromium:** a client's own buffer gets each picture copied in by the CPU; the buffer Cedrus
   decoded into stays the reference.
+- **VC-1 skipped picture:** references its forward reference's buffer, and gets that picture copied
+  into its own memory; once the reference's surface is decoded into again, a picture naming the
+  skipped one finds no buffer.
 - **HEVC:** one request per slice: SPS, PPS, scaling matrix, decode parameters, slice parameters,
   and the entry points when there are any.
   - Each slice header is read in full for what VA leaves out: the entry points,
@@ -260,8 +302,8 @@ VA carries none of these whole.
 
 ## Surfaces, encode, VideoProc
 
-- **Owned memory:** a surface gets its own dma-buf, from `/dev/dma_heap/system`, when a client needs
-  it fixed:
+- **Owned memory:** a surface gets its own dma-buf, from `/dev/dma_heap/system` or lent by Cedrus
+  (see above), when a client needs it fixed:
   - Kodi's fresh export;
   - VLC's derive and buffer handle;
   - GStreamer's pool export;
@@ -280,13 +322,12 @@ VA carries none of these whole.
 On the host, in the repo checkout:
 
 ```sh
-./build.sh va-driver rk35xx   # build/out/debs/tvb-va-driver-rk35xx_<version>_arm64.deb
-./build.sh va-driver check    # every family's driver and the CPU test engine, then the host's tests
+./build.sh va-driver          # build/out/debs/tvb-va-driver_<version>_arm64.deb
+./build.sh va-driver check    # the driver and the CPU test engine, then the host's tests
 ```
 
-A family's driver lands in `build/out/va-driver/<family>/`, beside the probe the tests use. `check`
-also makes the clips, in `build/out/va-driver/clips/`. `rk35xx` builds libmpp at the commit its
-conf pins.
+The driver lands in `build/out/va-driver/driver/`, beside the probe the tests use. `check` also
+makes the clips, in `build/out/va-driver/clips/`. libmpp is built at the commit `build.sh` pins.
 
 The host's test engine links FFmpeg 9.0.2, patched with `patches/ffmpeg/`'s `0039` so its H.264
 decoder hands pictures out in decode order. The host build carries the Cedrus backend too, which
@@ -300,11 +341,10 @@ On the host, after `./build.sh va-driver check`, with the box's SSH key in place
 python3 tools/validate/va_driver.py --box root@<box>.local --family <family>
 ```
 
-It copies the family's driver, the suite and the clips to a private directory under the box's
-`/var/tmp`, runs the suite as root, and removes the directory. The suite drives Debian's own
-clients: install `vainfo ffmpeg mpv gstreamer1.0-tools gstreamer1.0-plugins-bad` on the box first. A
-box running a local Mesa build needs that build's `libglx-mesa0` installed beside them. Exit status
-1 on any FAIL.
+It copies the driver, the suite and the clips to a private directory under the box's `/var/tmp`,
+runs the suite as root, and removes the directory. The suite drives Debian's own clients: install
+`vainfo ffmpeg mpv gstreamer1.0-tools gstreamer1.0-plugins-bad` on the box first. A box running a
+local Mesa build needs that build's `libglx-mesa0` installed beside them. Exit status 1 on any FAIL.
 
 ## Tests
 
@@ -321,6 +361,7 @@ box running a local Mesa build needs that build's `libglx-mesa0` installed besid
 | `mpv.*`          | `--hwdec=vaapi-copy`; `--hwdec=vaapi` on a display                 |
 | `gstreamer.*`    | Debian's `va` elements on every `decode.*` clip and encode         |
 | `probe.*`        | `tests/va_probe.c`: Kodi's, VLC's and Chromium's surface calls     |
+| `node.*`         | box: `/dev/dri/va` is the GPU's render node, and `renderD128`      |
 
 - **Decode** passes on identical frames, or on Y PSNR ≥ 50 dB where the engine's IDCT or a 10-bit
   picture narrowed to 8 bits differs. On a box the engine's interrupts must move. A 10-bit clip

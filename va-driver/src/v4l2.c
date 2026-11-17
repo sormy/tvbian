@@ -1,13 +1,23 @@
+/* versionsort */
+#define _GNU_SOURCE
 #include "v4l2.h"
 
+#include <dirent.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
 
 #include <linux/videodev2.h>
 
+/* the numbers tried where /sys cannot be listed */
 #define MAX_DEVICES 64
+#define VIDEO_NODES "/sys/class/video4linux"
+/* /dev/ and the longest name a directory lists */
+#define PATH_BYTES (sizeof("/dev/") + NAME_MAX)
 /* asked of TRY_FMT, which clamps it to the largest the queue takes; the other side kept small */
 #define LARGEST_ASKED 65535
 #define SMALL_SIDE 64
@@ -22,34 +32,71 @@ static enum v4l2_buf_type coded_queue(bool decode, bool mplane)
     return mplane ? V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE : V4L2_BUF_TYPE_VIDEO_CAPTURE;
 }
 
-static bool queue_takes(int fd, enum v4l2_buf_type type, uint32_t pixelformat, uint32_t *flags)
+bool v4l2_queue_takes(int fd, enum v4l2_buf_type type, uint32_t pixelformat, uint32_t *flags)
 {
     struct v4l2_fmtdesc desc = { .type = type };
     for (; !ioctl(fd, VIDIOC_ENUM_FMT, &desc); desc.index++)
-        if (desc.pixelformat == pixelformat)
-            return *flags = desc.flags, true;
+        if (desc.pixelformat == pixelformat) {
+            if (flags)
+                *flags = desc.flags;
+            return true;
+        }
     return false;
+}
+
+int v4l2_each_node(const char *sysfs_dir, const char *prefix, v4l2_node_try try, void *arg)
+{
+    struct dirent **listed;
+    char path[PATH_BYTES];
+    int fd = -1;
+    int n = scandir(sysfs_dir, &listed, NULL, versionsort);
+    if (n < 0) {
+        for (int i = 0; i < MAX_DEVICES && fd < 0; i++) {
+            snprintf(path, sizeof(path), "/dev/%s%d", prefix, i);
+            fd = try(path, arg);
+        }
+        return fd;
+    }
+    for (int i = 0; i < n; i++) {
+        if (fd < 0 && !strncmp(listed[i]->d_name, prefix, strlen(prefix))) {
+            snprintf(path, sizeof(path), "/dev/%s", listed[i]->d_name);
+            fd = try(path, arg);
+        }
+        free(listed[i]);
+    }
+    free(listed);
+    return fd;
+}
+
+struct coded_ask {
+    uint32_t pixelformat;
+    bool decode;
+    bool *mplane;
+    uint32_t *flags;
+};
+
+static int try_coded(const char *path, void *arg)
+{
+    const struct coded_ask *ask = arg;
+    struct v4l2_capability cap;
+    int fd = open(path, O_RDWR | O_NONBLOCK | O_CLOEXEC);
+    if (fd < 0)
+        return -1;
+    bool multi = !ioctl(fd, VIDIOC_QUERYCAP, &cap) && cap.device_caps & V4L2_CAP_VIDEO_M2M_MPLANE;
+    bool single = !multi && cap.device_caps & V4L2_CAP_VIDEO_M2M;
+    if ((multi || single) &&
+        v4l2_queue_takes(fd, coded_queue(ask->decode, multi), ask->pixelformat, ask->flags)) {
+        *ask->mplane = multi;
+        return fd;
+    }
+    close(fd);
+    return -1;
 }
 
 int v4l2_open_coded(uint32_t pixelformat, bool decode, bool *mplane, uint32_t *flags)
 {
-    for (int i = 0; i < MAX_DEVICES; i++) {
-        char path[32];
-        struct v4l2_capability cap;
-        snprintf(path, sizeof(path), "/dev/video%d", i);
-        int fd = open(path, O_RDWR | O_NONBLOCK | O_CLOEXEC);
-        if (fd < 0)
-            continue;
-        bool multi = !ioctl(fd, VIDIOC_QUERYCAP, &cap) &&
-                     cap.device_caps & V4L2_CAP_VIDEO_M2M_MPLANE;
-        bool single = !multi && cap.device_caps & V4L2_CAP_VIDEO_M2M;
-        if ((multi || single) && queue_takes(fd, coded_queue(decode, multi), pixelformat, flags)) {
-            *mplane = multi;
-            return fd;
-        }
-        close(fd);
-    }
-    return -1;
+    struct coded_ask ask = { pixelformat, decode, mplane, flags };
+    return v4l2_each_node(VIDEO_NODES, "video", try_coded, &ask);
 }
 
 /* the largest size the device lists for the format; false when it lists none */
@@ -128,8 +175,8 @@ static bool captures_ten_bit(int fd, bool mplane)
 {
     uint32_t flags;
     enum v4l2_buf_type type = coded_queue(false, mplane);
-    return queue_takes(fd, type, V4L2_PIX_FMT_P010, &flags) ||
-           queue_takes(fd, type, V4L2_PIX_FMT_NV15, &flags);
+    return v4l2_queue_takes(fd, type, V4L2_PIX_FMT_P010, &flags) ||
+           v4l2_queue_takes(fd, type, V4L2_PIX_FMT_NV15, &flags);
 }
 
 /* whether the device has the menu and lists the item */

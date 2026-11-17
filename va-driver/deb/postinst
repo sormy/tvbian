@@ -1,0 +1,4 @@
+#!/bin/sh
+set -e
+# /dev/dri/va on a running box, without a reboot
+[ ! -d /run/udev ] || udevadm trigger --subsystem-match=drm --action=change

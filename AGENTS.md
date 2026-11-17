@@ -38,7 +38,7 @@ our boxes. A board's key names its model (`h96max-m20`), never its SoC.
 | `uboot/`            | each U-Boot a board package ships, and each FEL loader: pin, defconfig, the step building it   |
 | `package/`          | the steps building `tvb-<board>`, `tvb-firmware-<chip>`, `tvb-base` and `tvb-archive-keyring`  |
 | `extras/<package>/` | a Debian package we shadow until Debian ships the fix, or an upstream one beside Debian's      |
-| `va-driver/`        | our VA-API driver: its source, a conf per family, the step building `tvb-va-driver-<family>`   |
+| `va-driver/`        | our VA-API driver: its source, every backend in one build, the step building `tvb-va-driver`   |
 | `image/`            | the image step, its package list, and the image's own state: locale, root's first SSH login    |
 | `release/`          | the release plan, the signed `apt` repo, and the upload to GitHub                              |
 | `site/`             | the public page and the script that builds it                                                  |
@@ -124,6 +124,7 @@ another, so nothing rots when one is rewritten.
 | `patches/meson-codecs/README.md`         | the video decoder in-tree and the encoders beside it on the GXLX2    |
 | `patches/gst-plugins-good/README.md`     | VC-1 through V4L2 on GStreamer 1.26.2: the patched plugin, by hand   |
 | `patches/gst-plugins-bad/README.md`      | the va decoders on a driver that narrows 10-bit streams              |
+| `patches/mpp/README.md`                  | Rockchip's MPP: its platform probe a call, not run at load           |
 | `patches/ffmpeg/README.md`               | FFmpeg 9.0.2: V4L2 request, mem2mem and Rockchip MPP codecs          |
 | `patches/kodi/README.md`                 | Kodi 22 on GBM: handing the screen to another program                |
 | `patches/mesa/README.md`                 | Panfrost fixes on Debian's Mesa, backported from upstream            |

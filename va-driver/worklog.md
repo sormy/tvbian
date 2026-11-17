@@ -233,3 +233,21 @@ WebKit's bubblewrap sandbox: a memfd, which is no dma-buf, and the web process d
 setup. The lent buffers need no heap: 1080p H.264 and 4K VP9 play at 24 fps. 4K H.264 cannot keep
 real time on Cedrus whatever the driver: about 25 fps flat out, 180 of 288 frames late through
 `gst-launch` with the old driver as with the new.
+
+## 2026-11-16 — one build, GStreamer as a client, speed
+
+- GStreamer's `va` elements as a second client on every clip: VP8 failed `vaRenderPicture` with
+  invalid parameter, GStreamer sizing the slice as the whole frame and offsetting it past the frame
+  header; the slice is now what the buffer holds past its offset. 10-bit failed negotiation:
+  GStreamer takes only a 10-bit format for a 10-bit stream, `rk35xx` lists NV12;
+  `patches/gst-plugins-bad` `0001` lets it narrow. Wrong turn: MPEG-2 read 23 dB until `psnr` paired
+  pictures by one timebase; MBAFF read 1 frame until raw frames replaced `y4menc`'s, which tags each
+  interlaced frame.
+- Refusals judged by pictures out, not the engine's interrupts: other work on a shared box moved
+  them, and `mpeg4-interlaced` read "not refused" twice.
+- Speed: 4K clips of 600 frames, the best of three, start-up taken off by a one-picture run. 120
+  frames and one run gave FFmpeg HEVC 160 fps, then 48, on the same driver.
+- One build: every backend, libmpp linked in, the driver under `lima`, `panfrost`, `panthor`,
+  `etnaviv`, `v3d` and `msm`. Devices listed from `/sys`, the numbered nodes the fallback. Cedrus's
+  AFBC kept where CAPTURE lists it and the client listed the modifier, in place of
+  `gpu_is_panfrost()` and HEVC and VP9 by name; the stateless backend is `v4l2-request`.

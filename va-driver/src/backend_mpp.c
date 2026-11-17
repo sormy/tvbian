@@ -18,6 +18,8 @@
 #include <rockchip/mpp_log.h>
 #include <rockchip/rk_mpi.h>
 #include <rockchip/rk_venc_cfg.h>
+
+#include "mpp_singleton.h"
 /* MPP's own per-SoC table, not installed: linked statically, at a pinned commit */
 #include <mpp_soc.h>
 
@@ -193,6 +195,8 @@ static int mpp_backend_init(struct driver *drv)
     unsigned kept = 0;
     if (access(MPP_SERVICE, F_OK))
         return -ENODEV;
+    /* MPP's platform probe, run here alone: off Rockchip it would log at every load */
+    mpp_singleton_init();
     const MppSocInfo *soc = mpp_get_soc_info();
     /* a client's stderr gets MPP's warnings and errors, not its every step */
     mpp_set_log_level(MPP_LOG_WARN);

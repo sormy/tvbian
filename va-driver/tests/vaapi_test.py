@@ -44,6 +44,10 @@ SIZE = "640x360"
 ODD_SIZE = "642x362"
 LOSSY_FLOOR_DB = 50.0
 REPORT_PREFIX = "va."
+# tvb-va-driver's udev link to the GPU's render node, and the node programs open unless told
+VA_LINK = Path("/dev/dri/va")
+DRIVER_SUFFIX = "_drv_video.so"
+FIRST_RENDER_NODE = Path("/dev/dri/renderD128")
 # a width whose I420 rows GStreamer writes unpadded
 RAW_WIDTH_MULTIPLE = 8
 ENCODE_FLOOR_DB = 30.0
@@ -338,6 +342,36 @@ def vainfo(setup: Setup, offers: set[str], log: str) -> Iterator[Line]:
         yield "vainfo.by-node-name", (
             f"pass: {found.group(1)}" if found else f"failed: {last_line(by_node)}"
         )
+
+
+def node_driver(node: Path) -> str:
+    return Path(f"/sys/class/drm/{node.name}/device/driver").resolve().name
+
+
+def node_case(setup: Setup) -> Iterator[Line]:
+    """/dev/dri/va is the render node of the GPU the driver is named for, and the first one."""
+    if not VA_LINK.is_symlink():
+        yield "node.va-link", "failed: no /dev/dri/va: tvb-va-driver's udev rule did not run"
+        return
+    node = VA_LINK.resolve()
+    driver = node_driver(node)
+    # the build links the driver under its GPU's DRM name beside its own
+    gpus = {p.name.removesuffix(DRIVER_SUFFIX) for p in setup.driver_dir.glob(f"*{DRIVER_SUFFIX}")}
+    gpus.discard(setup.driver_name)
+    if not node.name.startswith("renderD") or driver not in gpus:
+        yield "node.va-link", f"failed: {node.name} is {driver}'s, not {' or '.join(sorted(gpus))}'s"
+        return
+    rc, log = run(["vainfo", "--display", "drm", "--device", str(VA_LINK)], env=setup.env(False))
+    found = re.search(r"Driver version: (.*)", log)
+    yield "node.va-link", (
+        f"pass: {node.name}, {found.group(1)}" if found else (f"failed: {last_line(log)}")
+    )
+    first = FIRST_RENDER_NODE.resolve()
+    yield "node.first-render", (
+        "pass"
+        if first == node
+        else f"failed: {first.name} is {node_driver(first)}'s, a display driver's render node"
+    )
 
 
 # decode
@@ -886,7 +920,7 @@ def mapping_case(setup: Setup, name: str, clip: Clip) -> Iterator[Line]:
     key = f"mapping.{name}"
     path = setup.clips / f"{name}.{clip.container}"
     dump = setup.work / f"{name}.controls"
-    env = dict(setup.env(), VAAPI_ENGINE="sunxi", VAAPI_REQUEST_DUMP=str(dump))
+    env = dict(setup.env(), VAAPI_ENGINE="v4l2-request", VAAPI_REQUEST_DUMP=str(dump))
     run(
         ["ffmpeg", "-nostdin", "-v", "error"]
         + decode_args(setup)
@@ -1324,6 +1358,8 @@ def suite(setup: Setup) -> Iterator[Line]:
         return
     offers, log = offered(setup)
     yield from vainfo(setup, offers, log)
+    if setup.on_box:
+        yield from node_case(setup)
     if not offers:
         return
     for name, clip in CLIPS.items():

@@ -1,9 +1,9 @@
 #!/bin/bash
-# Build the VA-API driver inside the build container.
-#   build.sh <family>   tvb-va-driver-<family>, from va-driver/<family>.conf
-#   build.sh check      every family's build and the CPU test engine, then tests/vaapi_test.py
+# Build the VA-API driver inside the build container: one driver, every backend.
+#   build.sh            tvb-va-driver
+#   build.sh check      the driver and the CPU test engine, then tests/vaapi_test.py
 set -euo pipefail
-TARGET=${1:?usage: build.sh <family>|check}
+TARGET=${1:-package}
 
 SRC=/repo/va-driver
 WORK=/work/va-driver
@@ -12,7 +12,18 @@ CPUS=${TVB_BUILD_CPUS:-$(nproc)}
 VERSION=${TVB_BUILD_REVISION:-0~local}
 DRI_DIR=/usr/lib/aarch64-linux-gnu/dri
 BUILD_DEPENDS="pkg-config cmake meson ninja-build libdrm-dev libva-dev"
-RUN_DEPENDS=libva2
+RUN_DEPENDS="libva2, libstdc++6"
+# every backend: each one's init declines without its hardware, and the first that finds it serves
+DEFINES="-DHAVE_MPP=1 -DHAVE_REQUEST=1 -DHAVE_V4L2M2M=1"
+REQUEST_BACKEND="backend_request.c request_h264.c request_hevc.c request_vp8.c request_vp9.c
+  vp9_header.c request_mpeg2.c request_mpeg4.c request_vc1.c"
+BACKENDS="backend_mpp.c $REQUEST_BACKEND backend_v4l2m2m.c v4l2.c"
+# the GPUs' DRM drivers a client may open the driver through: libva names the file after them
+GPU_DRIVERS="lima panfrost panthor etnaviv v3d msm"
+MPP_REPO=https://github.com/rockchip-linux/mpp.git
+# its 1.1.0 release
+MPP_COMMIT=c08762ebfadeb4e986d2fed993bc7a54862d3ebe
+MPP_PATCH=/repo/patches/mpp/0001-osal-run-the-singletons-init-when-called-not-at-load.patch
 FRONT_END="driver picture surface pixels encode bitstream settings h264 hevc vp8 vp9 mpeg2 jpeg mpeg4 vc1"
 # the host's test engine: FFmpeg's release, its H.264 decoder able to hand out in decode order
 FFMPEG_VERSION=9.0.2
@@ -40,15 +51,21 @@ fetch() {
 }
 
 build_mpp() {
-  [ -f "$WORK/mpp-prefix/lib/librockchip_mpp.a" ] && return 0
+  local inputs
+  inputs=$( (echo "$MPP_COMMIT"; cat "$MPP_PATCH") | sha256sum | cut -d' ' -f1)
+  [ "$(cat "$WORK/mpp-prefix/.inputs" 2>/dev/null)" != "$inputs" ] || return 0
   fetch "$MPP_REPO" "$MPP_COMMIT" "$WORK/mpp"
+  git -C "$WORK/mpp" checkout -q -- .
+  patch -s -d "$WORK/mpp" -p1 <"$MPP_PATCH"
+  rm -rf "$WORK/mpp-build" "$WORK/mpp-prefix"
   cmake -S "$WORK/mpp" -B "$WORK/mpp-build" -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX="$WORK/mpp-prefix" >/dev/null
   cmake --build "$WORK/mpp-build" -j "$CPUS" >/dev/null
   cmake --install "$WORK/mpp-build" >/dev/null
+  echo "$inputs" >"$WORK/mpp-prefix/.inputs"
 }
 
-# the flags libmpp, linked into the driver, adds to its compile and link; it is C++
+# the flags each library linked into the driver adds to its compile and link
 mpp_flags() {
   echo "-I$WORK/mpp-prefix/include -I$WORK/mpp/inc -I$WORK/mpp/osal/inc" \
     "$WORK/mpp-prefix/lib/librockchip_mpp.a -lstdc++"
@@ -88,49 +105,53 @@ build_probe() {
     -o "$1/va_probe"
 }
 
-# build_family <family>: its driver and probe in $BUILD/<family>/
-build_family() {
-  local dir=$BUILD/$1 flags="" lib
-  # shellcheck source=/dev/null
-  (
-    . "$SRC/$1.conf"
-    rm -rf "$dir" && mkdir -p "$dir"
-    for lib in ${LIBRARIES:-}; do
-      "build_$lib"
-      flags="$flags $("${lib}_flags")"
-    done
-    compile "$dir/tvb_drv_video.so" "$DEFINES" "$BACKENDS" "$flags"
-    for name in $DRM_DRIVERS; do ln -s tvb_drv_video.so "$dir/${name}_drv_video.so"; done
-    build_probe "$dir"
-  )
+# the driver, under each GPU's name, and the probe, in $BUILD/driver/
+build_driver() {
+  local dir=$BUILD/driver name
+  build_mpp
+  rm -rf "$dir" && mkdir -p "$dir"
+  compile "$dir/tvb_drv_video.so" "$DEFINES" "$BACKENDS" "$(mpp_flags)"
+  for name in $GPU_DRIVERS; do ln -s tvb_drv_video.so "$dir/${name}_drv_video.so"; done
+  build_probe "$dir"
   echo "✓ $dir"
 }
 
-package_family() {
-  local family=$1 dir=$BUILD/$1 root=$WORK/pkg/$1 deb
-  # shellcheck source=/dev/null
-  . "$SRC/$family.conf"
-  deb=/out/debs/tvb-va-driver-${family}_${VERSION}_arm64.deb
+# /dev/dri/va: the GPU's render node, for a program that opens only the node it is named, as
+# Chromium does. udev sees a node's platform driver, which a GPU's DRM driver shares.
+write_udev_rule() {
+  local rules=$1/usr/lib/udev/rules.d/70-tvb-va-driver.rules name
+  mkdir -p "$(dirname "$rules")"
+  for name in $GPU_DRIVERS; do
+    echo "SUBSYSTEM==\"drm\", KERNEL==\"renderD*\", DRIVERS==\"$name\", SYMLINK+=\"dri/va\""
+  done >"$rules"
+}
+
+package() {
+  local dir=$BUILD/driver root=$WORK/pkg deb name
+  deb=/out/debs/tvb-va-driver_${VERSION}_arm64.deb
   rm -rf "$root" && mkdir -p "$root$DRI_DIR" "$root/DEBIAN"
-  # libva names the driver after the DRM driver of the node a client opens: one file, every name
-  local first=${DRM_DRIVERS%% *} name
-  cp "$dir/tvb_drv_video.so" "$root$DRI_DIR/${first}_drv_video.so"
-  for name in ${DRM_DRIVERS#"$first"}; do ln -s "${first}_drv_video.so" "$root$DRI_DIR/${name}_drv_video.so"; done
-  cat >"$root/DEBIAN/control" <<EOF
-Package: tvb-va-driver-$family
+  # libva names the driver after the DRM driver of the node a client opens
+  cp "$dir/tvb_drv_video.so" "$root$DRI_DIR/"
+  for name in $GPU_DRIVERS; do ln -s tvb_drv_video.so "$root$DRI_DIR/${name}_drv_video.so"; done
+  # GStreamer's va plugin passes over an unknown driver: told for the user manager and login shells
+  install -D -m 0644 "$SRC/deb/gst-va.conf" "$root/usr/lib/environment.d/50-tvb-va-driver.conf"
+  install -D -m 0644 "$SRC/deb/gst-va.sh" "$root/etc/profile.d/tvb-va-driver.sh"
+  echo /etc/profile.d/tvb-va-driver.sh >"$root/DEBIAN/conffiles"
+  write_udev_rule "$root"
+  install -m 0755 "$SRC/deb/postinst" "$root/DEBIAN/postinst"
+  cat >"$root/DEBIAN/control" <<CONTROL
+Package: tvb-va-driver
 Version: $VERSION
 Architecture: arm64
 Maintainer: TVBian <archive@tvbian.com>
-Depends: $RUN_DEPENDS${DEPENDS:+, $DEPENDS}
-Provides: tvb-va-driver
-Conflicts: tvb-va-driver
+Depends: $RUN_DEPENDS
 Section: video
 Priority: optional
-X-Tvb-Inputs: $(bash /repo/release/inputs.sh va-driver "$family")
-Description: VA-API driver for the $family video engines
- Hardware decode and encode for VA-API programs, under the name libva looks for on each of
- the family's render nodes.
-EOF
+X-Tvb-Inputs: $(bash /repo/release/inputs.sh va-driver)
+Description: VA-API driver for V4L2 and Rockchip MPP video engines
+ Hardware decode and encode for VA-API programs on a stateless or stateful V4L2 decoder, or
+ Rockchip's MPP, under the names libva looks for on the GPU's render node.
+CONTROL
   mkdir -p "$(dirname "$deb")"
   dpkg-deb --root-owner-group -Zxz -b "$root" "$deb" >/dev/null
   echo "✓ $deb"
@@ -138,13 +159,11 @@ EOF
 
 # the CPU test engine, with the Cedrus backend writing its controls out for the mapping test
 build_host() {
-  local dir=$BUILD/host request
-  # shellcheck source=/dev/null
-  request=$(. "$SRC/sunxi-h616.conf"; echo "$BACKENDS")
+  local dir=$BUILD/host
   build_test_ffmpeg
   rm -rf "$dir" && mkdir -p "$dir"
   compile "$dir/tvb_drv_video.so" "-DHAVE_LAVC=1 -DHAVE_REQUEST=1 -I$FFMPEG_PREFIX/include" \
-    "backend_lavc.c $request" \
+    "backend_lavc.c $REQUEST_BACKEND backend_v4l2m2m.c v4l2.c" \
     "$FFMPEG_PREFIX/lib/libavcodec.a $FFMPEG_PREFIX/lib/libavutil.a $(pkg-config --libs x264 x265)"
   build_probe "$dir"
 }
@@ -170,17 +189,19 @@ check() {
 }
 
 mkdir -p "$WORK"
-families() { for c in "$SRC"/*.conf; do basename "$c" .conf; done; }
-if [ "$TARGET" = check ]; then
-  # shellcheck disable=SC2086
-  install_depends $CHECK_DEPENDS
-  for f in $(families); do build_family "$f"; done
-  build_host
-  build_unit
-  check
-else
-  [ -f "$SRC/$TARGET.conf" ] || { echo "✗ no va-driver/$TARGET.conf" >&2; exit 1; }
-  install_depends
-  build_family "$TARGET"
-  package_family "$TARGET"
-fi
+case $TARGET in
+  check)
+    # shellcheck disable=SC2086
+    install_depends $CHECK_DEPENDS
+    build_driver
+    build_host
+    build_unit
+    check
+    ;;
+  package)
+    install_depends
+    build_driver
+    package
+    ;;
+  *) echo "usage: build.sh [check]" >&2; exit 1 ;;
+esac

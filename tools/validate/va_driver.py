@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""The VA-API driver on a box: its family's build and va-driver/tests/vaapi_test.py, run there.
+"""The VA-API driver on a box: its build and va-driver/tests/vaapi_test.py, run there.
 
-On the host, after ./build.sh va-driver check, which makes the builds and the clips:
+On the host, after ./build.sh va-driver check, which makes the driver and the clips:
   va_driver.py --box root@<box> --family <family>
 The build, the suite and the clips go to a private directory under the box's /var/tmp, the suite
 runs as root against Debian's own clients, and the directory goes on exit. Exit 1 on any FAIL.
@@ -49,12 +49,12 @@ def remote(
     return subprocess.run(SSH + [box, command], text=True, capture_output=capture, timeout=timeout)
 
 
-def send(box: str, family: str, box_dir: str) -> None:
+def send(box: str, box_dir: str) -> None:
     """The build as driver/, the suite, the clips, in one tar stream: the GPU's link stays a link."""
     untar = subprocess.Popen(SSH + [box, f"tar -x -C {box_dir}"], stdin=subprocess.PIPE)
     assert untar.stdin
     with tarfile.open(fileobj=untar.stdin, mode="w|") as tar:
-        tar.add(BUILD / family, "driver")
+        tar.add(BUILD / "driver", "driver")
         tar.add(BUILD / "clips", "clips")
         for name in SUITE_FILES:
             tar.add(TESTS / name, name)
@@ -111,9 +111,11 @@ def main() -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("--box", required=True, help="the box, as ssh reaches it")
-    parser.add_argument("--family", required=True, help="the box's BOARD_FAMILY")
+    parser.add_argument(
+        "--family", required=True, help="the box's BOARD_FAMILY: the clips its engine refuses"
+    )
     args = parser.parse_args()
-    for needed in (BUILD / args.family / "tvb_drv_video.so", BUILD / "clips"):
+    for needed in (BUILD / "driver/tvb_drv_video.so", BUILD / "clips"):
         if not needed.exists():
             sys.exit(f"no {needed}: ./build.sh va-driver check first")
 
@@ -122,7 +124,7 @@ def main() -> int:
     if made.returncode != 0 or not box_dir:
         sys.exit(f"could not reach {args.box}")
     try:
-        send(args.box, args.family, box_dir)
+        send(args.box, box_dir)
         suite = (
             f"TMPDIR={box_dir} python3 {box_dir}/vaapi_test.py box --driver-dir {box_dir}/driver"
             f" --clips {box_dir}/clips --family {args.family}"

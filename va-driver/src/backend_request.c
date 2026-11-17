@@ -16,7 +16,6 @@
 
 #include <drm_fourcc.h>
 #include <linux/media.h>
-#include <xf86drm.h>
 
 #include "request.h"
 #include "v4l2.h"
@@ -24,18 +23,16 @@
 #include "mpeg4-ctrls.h"
 #include "vc1-ctrls.h"
 
-#define MAX_MEDIA_DEVICES 16
+#define MEDIA_NODES "/sys/bus/media/devices"
 #define CODED_BUFFER_SIZE (4 << 20)
 #define REQUEST_TIMEOUT_MS 1000
 #define USEC_TO_NSEC 1000
 #define DUMP_ENV "VAAPI_REQUEST_DUMP"
-#define FIRST_RENDER_NODE 128
-#define MAX_RENDER_NODES 8
 #define TEN_BIT_DEPTH_MINUS8 2
 #define VP9_PROFILE_2 2
 #define TEN_BITS 10
 
-/* linux-sunxi 0058: Cedrus's AFBC, which Panfrost samples and Lima does not */
+/* linux-sunxi 0058: Cedrus's AFBC, for a client whose GPU samples it */
 #ifndef V4L2_PIX_FMT_YUV420_8_AFBC_16X16_SPLIT
 #define V4L2_PIX_FMT_YUV420_8_AFBC_16X16_SPLIT v4l2_fourcc('A', 'S', '1', '2')
 #define V4L2_PIX_FMT_YUV420_10_AFBC_16X16_SPLIT v4l2_fourcc('A', 'S', '0', '1')
@@ -150,28 +147,32 @@ void request_dump(struct request_ctx *rq, const char *name, long value)
         fprintf(rq->dump, "%u %s %ld\n", rq->dump_picture, name, value);
 }
 
+static int try_media(const char *path, void *arg)
+{
+    const struct v4l2_capability *cap = arg;
+    struct media_device_info info;
+    int fd = open(path, O_RDWR | O_NONBLOCK | O_CLOEXEC);
+    if (fd < 0)
+        return -1;
+    if (!ioctl(fd, MEDIA_IOC_DEVICE_INFO, &info) &&
+        !strncmp(info.bus_info, (const char *)cap->bus_info, sizeof(info.bus_info)))
+        return fd;
+    close(fd);
+    return -1;
+}
+
 /* the video device taking this coded format, and the media device sharing its bus */
 static int open_devices(struct request_ctx *rq, uint32_t pixelformat)
 {
     struct v4l2_capability cap;
-    char path[32];
     bool mplane;
     uint32_t flags;
     rq->video_fd = v4l2_open_coded(pixelformat, true, &mplane, &flags);
-    if (rq->video_fd >= 0 && ioctl(rq->video_fd, VIDIOC_QUERYCAP, &cap) < 0)
+    if (rq->video_fd < 0)
+        return -ENODEV;
+    if (ioctl(rq->video_fd, VIDIOC_QUERYCAP, &cap) < 0)
         return -errno;
-    for (int i = 0; i < MAX_MEDIA_DEVICES && rq->video_fd >= 0 && rq->media_fd < 0; i++) {
-        struct media_device_info info;
-        snprintf(path, sizeof(path), "/dev/media%d", i);
-        int fd = open(path, O_RDWR | O_NONBLOCK | O_CLOEXEC);
-        if (fd < 0)
-            continue;
-        if (!ioctl(fd, MEDIA_IOC_DEVICE_INFO, &info) &&
-            !strncmp(info.bus_info, (const char *)cap.bus_info, sizeof(info.bus_info)))
-            rq->media_fd = fd;
-        else
-            close(fd);
-    }
+    rq->media_fd = v4l2_each_node(MEDIA_NODES, "media", try_media, &cap);
     return rq->media_fd >= 0 ? 0 : -ENODEV;
 }
 
@@ -356,22 +357,6 @@ int request_repeat_reference(struct request_ctx *rq, VASurfaceID reference)
     return rq->repeated < 0 && !rq->dump ? -EINVAL : 0;
 }
 
-static bool gpu_is_panfrost(void)
-{
-    bool panfrost = false;
-    for (int i = 0; i < MAX_RENDER_NODES && !panfrost; i++) {
-        char path[32];
-        snprintf(path, sizeof(path), "/dev/dri/renderD%d", FIRST_RENDER_NODE + i);
-        int fd = open(path, O_RDWR | O_CLOEXEC);
-        drmVersionPtr version = fd >= 0 ? drmGetVersion(fd) : NULL;
-        panfrost = version && !strcmp(version->name, "panfrost");
-        drmFreeVersion(version);
-        if (fd >= 0)
-            close(fd);
-    }
-    return panfrost;
-}
-
 /* the side a probe holds still while the other grows */
 #define PROBE_SIDE 64
 #define PROBE_STEP 16
@@ -445,7 +430,9 @@ static void size_ten_bit(struct offer *o)
 static int request_init(struct driver *drv)
 {
     static struct offer offers[NUM_CANDIDATES];
-    drv->compressed_modifier = gpu_is_panfrost() ? CEDRUS_AFBC : 0;
+    /* the AFBC a decoder may list, as Cedrus does: kept by a context whose targets all list its
+     * modifier and whose CAPTURE lists its format */
+    drv->compressed_modifier = CEDRUS_AFBC;
     drv->offers = offers;
     drv->num_offers = v4l2_offers(request_candidates, NUM_CANDIDATES, offers);
     /* a dump without the device: the controls written are under test, not the decode */
@@ -529,6 +516,11 @@ static int open_session(struct request_ctx *rq, const struct request_codec *code
         return ret;
     if (ten_bit && (ret = announce_ten_bit(rq, codec->kind, ctx->width, ctx->height)) < 0)
         return ret;
+    /* compressed only where the decoder lists its format for this stream */
+    if (rq->compressed_modifier &&
+        !v4l2_queue_takes(rq->video_fd, V4L2_BUF_TYPE_VIDEO_CAPTURE, capture_format(rq, ten_bit),
+                          NULL))
+        rq->compressed_modifier = 0;
     uint32_t wanted = capture_format(rq, ten_bit);
     rq->capture = (struct v4l2_format){
         .type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
@@ -610,9 +602,7 @@ static int request_decoder_open(struct driver *drv, struct context *ctx)
                                 .request_fd = -1 };
     if (!(rq->codec_state = calloc(1, codec->state_size)))
         return -ENOMEM;
-    /* Cedrus writes AFBC for HEVC and VP9; only when every target listed it */
-    if (ctx->targets_take_compressed &&
-        (codec->kind == CODEC_HEVC || codec->kind == CODEC_VP9))
+    if (ctx->targets_take_compressed)
         rq->compressed_modifier = drv->compressed_modifier;
     if (dump)
         return (rq->dump = fopen(dump, "a")) ? 0 : -errno;
@@ -739,7 +729,7 @@ static void request_encoder_close(struct context *ctx)
 }
 
 const struct backend backend_request = {
-    .name = "sunxi",
+    .name = "v4l2-request",
     .init = request_init,
     .uninit = request_uninit,
     .decoder_open = request_decoder_open,

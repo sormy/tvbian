@@ -9,7 +9,7 @@ A program reaches the video hardware one of three ways:
 
 - **V4L2, through GStreamer**: Debian's GStreamer already drives the H313's decoder and the
   S905L3's, ranked above software. Nothing to install.
-- **VA-API**: what most players and browsers ask for. TVBian's driver, `tvb-va-driver-<family>`
+- **VA-API**: what most players and browsers ask for. TVBian's driver, `tvb-va-driver`
   (`va-driver/README.md`), answers it on every chip; packaged, no image installs it yet.
 - **`ffmpeg9`**: TVBian's FFmpeg, every chip, the command line.
 
@@ -105,9 +105,10 @@ decoded back.
   Its decoder sandbox opens only `/dev/video*` ([broker policy][ff-sandbox]): enough on the S905L3;
   the H313 (`/dev/media*`) and RK35xx (`/dev/mpp_service`) need `MOZ_DISABLE_RDD_SANDBOX=1`.
 - **Chromium** opens only PCI GPUs for VA-API unless given
-  `--hardware-video-device-path=/dev/dri/renderD128` ([vaapi_wrapper.cc][cr-vaapi]); a file in
-  `/etc/chromium.d/` carries the flag. Its GPU sandbox opens only `/dev/dri` ([sandbox
-  hook][cr-hook]): ❓ whether it lets the decoder's calls through.
+  `--hardware-video-device-path=/dev/dri/va` ([vaapi_wrapper.cc][cr-vaapi]), the render node
+  `tvb-va-driver`'s udev rule links for the GPU, whatever its number; a file in `/etc/chromium.d/`
+  carries the flag. Its GPU sandbox opens only `/dev/dri` ([sandbox hook][cr-hook]): ❓ whether it
+  lets the decoder's calls through.
 - **Epiphany**'s sandbox opens `/dev/video*` and `/dev/media*`, not RK35xx's `/dev/mpp_service`
   ([BubblewrapLauncher.cpp][wk-bwrap]).
 
