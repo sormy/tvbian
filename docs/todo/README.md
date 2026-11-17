@@ -25,6 +25,13 @@ below.
       merged into `boards/<board>/` beside its `board.conf` and trees, an alias's too; every link,
       the site's and the release's readers followed.
 
+- [ ] **Every board: schedutil as the CPU governor**, with the rest of the low-latency baseline
+      (`PREEMPT`, `HZ` 300). Every family defaults to ondemand, which samples load on a timer, so a
+      short burst (an app start, a page load) starts at the floor: 100 MHz on the M20. Then
+      `CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL=y` in each family's fragment and in `family.md`'s
+      baseline; `regression.py` on one box per family against its last run, soak temperatures
+      included.
+
 - [ ] **Every board: answer the TV's CEC queries.** The TV asks for the box's power status and gets
       `FEATURE_ABORT`: nothing on the box speaks CEC's follower side. The TV's remote reaches the
       box.
