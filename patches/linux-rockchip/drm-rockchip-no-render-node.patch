@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Mon, 16 Nov 2026 00:00:00 +0000
+Subject: [PATCH] drm/rockchip: register no render node, as mainline does
+
+The display controller draws nothing, yet held the first render node.
+Clients that take the first render node, or the display's, as their GPU
+device handed it to Mesa as the device for scanout buffers, where
+DRM_IOCTL_MODE_CREATE_DUMB is refused: WPE WebKit's renderer died on it.
+Without the node the GPU holds renderD128 and Mesa allocates on the
+primary node, as on mainline.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/drivers/gpu/drm/rockchip/rockchip_drm_drv.c b/drivers/gpu/drm/rockchip/rockchip_drm_drv.c
+--- a/drivers/gpu/drm/rockchip/rockchip_drm_drv.c
++++ b/drivers/gpu/drm/rockchip/rockchip_drm_drv.c
+@@ -3089,7 +3089,7 @@ static struct dma_buf *rockchip_drm_gem_prime_export(str
+ DEFINE_DRM_GEM_FOPS(rockchip_drm_driver_fops);
+ 
+ static const struct drm_driver rockchip_drm_driver = {
+-	.driver_features	= DRIVER_MODESET | DRIVER_GEM | DRIVER_ATOMIC | DRIVER_RENDER,
++	.driver_features	= DRIVER_MODESET | DRIVER_GEM | DRIVER_ATOMIC,
+ 	.postclose		= rockchip_drm_postclose,
+ 	.lastclose		= rockchip_drm_lastclose,
+ 	.open			= rockchip_drm_open,
