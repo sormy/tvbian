@@ -85,7 +85,8 @@ Key: ✓ offered, ✗ the engine can but this driver cannot yet, ➖ the engine 
 - **What clients ask for (host, the CPU engine):** FFmpeg and mpv `--hwdec=vaapi-copy` take P010
   whenever a 10-bit config lists it, even second; with NV12 listed alone both decode HEVC Main 10
   and VP9 profile 2 into NV12 surfaces, FFmpeg's `hwdownload` and its automatic copy alike. Hence
-  NV12 alone on `rk35xx`.
+  NV12 alone on `rk35xx`. GStreamer's `va` decoders take only a 10-bit format for a 10-bit stream:
+  `extras/gst-plugins-bad` carries the patch that lets them narrow too.
 - **`sunxi-h616` AFBC:** HEVC and VP9 decode into Cedrus's AFBC (`AS12`, `AS01`) when every render
   target listed `DRM_FORMAT_MOD_ARM_AFBC(16x16 | SPARSE | SPLIT)` in
   `VASurfaceAttribDRMFormatModifiers` and the render node is Panfrost's; linear otherwise, and never

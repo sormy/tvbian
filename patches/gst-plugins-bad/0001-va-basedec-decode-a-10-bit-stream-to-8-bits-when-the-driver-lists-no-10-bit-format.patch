@@ -1,0 +1,84 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Mon, 16 Nov 2026 00:00:00 +0000
+Subject: [PATCH] va: basedec: decode a 10-bit stream to 8 bits when the driver
+ lists no 10-bit format
+
+A driver may decode a 10-bit stream only to an 8-bit surface format: an
+engine whose 10-bit output no display path takes narrows it. The output
+format was looked up by the stream's chroma type alone, so negotiation
+failed with "Failed to negotiate with downstream" where FFmpeg, which
+takes any listed format, decodes. Retry the lookup with 8-bit 4:2:0
+when 10-bit 4:2:0 finds no format.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+--- a/sys/va/gstvabasedec.c
++++ b/sys/va/gstvabasedec.c
+@@ -835,6 +835,16 @@
+   return GST_VIDEO_FORMAT_UNKNOWN;
+ }
+ 
++/* a driver listing no 10-bit format for a 10-bit stream decodes it to 8 bits */
++static gboolean
++_narrow_chroma (guint * chroma_type)
++{
++  if (*chroma_type != VA_RT_FORMAT_YUV420_10)
++    return FALSE;
++  *chroma_type = VA_RT_FORMAT_YUV420;
++  return TRUE;
++}
++
+ /* ordered list of capsfeature preference */
+ enum
+ { VA, DMABUF, SYSMEM };
+@@ -851,6 +861,7 @@
+   GstIdStr sysmem = GST_ID_STR_INIT, dmabuf = GST_ID_STR_INIT, va =
+       GST_ID_STR_INIT;
+   const GstIdStr *feats[] = { &va, &dmabuf, &sysmem };
++  guint chroma_type = base->rt_format;
+ 
+   gst_id_str_set_static_str (&sysmem, GST_CAPS_FEATURE_MEMORY_SYSTEM_MEMORY);
+   gst_id_str_set_static_str (&dmabuf, GST_CAPS_FEATURE_MEMORY_DMABUF);
+@@ -869,6 +880,8 @@
+   allowed_caps = gst_pad_get_allowed_caps (GST_VIDEO_DECODER_SRC_PAD (base));
+   GST_DEBUG_OBJECT (base, "Allowed caps %" GST_PTR_FORMAT, allowed_caps);
+ 
++retry:
++
+   /* if peer caps is any, returns format according memory to system caps in
+    * allowed caps
+    *
+@@ -876,9 +889,12 @@
+    */
+   if (is_any) {
+     GstVideoFormat fmt =
+-        _caps_video_format_from_chroma (allowed_caps, base->rt_format);
++        _caps_video_format_from_chroma (allowed_caps, chroma_type);
+     features = GST_CAPS_FEATURES_MEMORY_SYSTEM_MEMORY;
+ 
++    if (fmt == GST_VIDEO_FORMAT_UNKNOWN && _narrow_chroma (&chroma_type))
++      goto retry;
++
+     if (format)
+       *format = fmt;
+     if (capsfeatures && fmt != GST_VIDEO_FORMAT_UNKNOWN)
+@@ -906,7 +922,7 @@
+       else
+         formats = gst_structure_get_value (structure, "format");
+ 
+-      fmt = _find_video_format_from_chroma (formats, base->rt_format,
++      fmt = _find_video_format_from_chroma (formats, chroma_type,
+           i == DMABUF, &mod);
+ 
+       /* if doesn't found a proper format let's try other structure */
+@@ -924,6 +940,9 @@
+     }
+   }
+ 
++  if (_narrow_chroma (&chroma_type))
++    goto retry;
++
+   /* no matching format, let's fail */
+   if (i == G_N_ELEMENTS (feats))
+     *format = GST_VIDEO_FORMAT_UNKNOWN;
