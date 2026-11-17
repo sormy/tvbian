@@ -13,8 +13,8 @@
 #include <dt-bindings/suspend/rockchip-rk3528.h>
 
 / {
-	/* The radio driver selects board NV settings from the first compatible. */
-	compatible = "h96max-m2-plus,rk3528-tvbox", "rockchip,rk3528-evb1-ddr4-v10", "rockchip,rk3528";
+	/* The radio's NV from the first; rk3528a, last, is MPP's only RK3528 with VP9, which this decodes. */
+	compatible = "h96max-m2-plus,rk3528-tvbox", "rockchip,rk3528-evb1-ddr4-v10", "rockchip,rk3528", "rockchip,rk3528a";
 	interrupt-parent = <&gic>;
 	#address-cells = <2>;
 	#size-cells = <2>;

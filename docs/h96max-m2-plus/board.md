@@ -406,7 +406,7 @@ The vendor's listing against `tools/validate/video.py`, `rkmpp`, on `6.1.172-tvb
 | H.264 8-bit      | L5.1, 4K60, 8K23   | ✅ 8192×8192      | 62  |
 | H.264 10-bit     | —                  | ✅ 8192×8192      | 55  |
 | HEVC Main/Main10 | L5.1, 4K60, 8K23   | ✅ 8192×8192      | 116 |
-| VP9              | —                  | ➖ MPP refuses    | —   |
+| VP9              | —                  | ✅ 3840×2160      | 85  |
 | VP8              | —                  | ✅ 1920×1080      | 59  |
 | MPEG-1, MPEG-2   | 1080p60            | ✅ 1920×1080      | 70  |
 | MPEG-4           | ASP L5, 1080p60    | ✅ 1920×1080      | 77  |
@@ -417,9 +417,10 @@ The vendor's listing against `tools/validate/video.py`, `rkmpp`, on `6.1.172-tvb
 | H.264 encode     | HP L4.2, 1080p60   | ✅ 8192×8192      | 53  |
 | HEVC encode      | Main L4.1, 1080p60 | 🟠 8192×8192      | 60  |
 
-Encode fps are at 1920×1080. The decoder shrinks H.264 and HEVC by ½. HEVC encode at 7680×4320
-differs run to run. Past each limit the stream is refused or decodes to no frames with an error; the
-next decode is right.
+VP9 is MPP's once the tree names `rockchip,rk3528a`; its row is `tvb-va-driver`'s, 2026-11-16, the
+largest size tried. Encode fps are at 1920×1080. The decoder shrinks H.264 and HEVC by ½. HEVC
+encode at 7680×4320 differs run to run. Past each limit the stream is refused or decodes to no
+frames with an error; the next decode is right.
 
 ## Display
 

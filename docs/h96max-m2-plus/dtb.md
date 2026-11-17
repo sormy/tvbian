@@ -15,6 +15,7 @@ Kernel binary: 6.1.118, ARMv7. U-Boot binary: 2017.09-250331-dirty.
 | ------ | -------------------------------- | -------------------------------------------- |
 | Kernel | Model                            | Identify the box                             |
 | Kernel | First compatible                 | Board NV selection                           |
+| Kernel | `rockchip,rk3528a` last          | MPP's VP9; the kernel keeps `rk3528`         |
 | Kernel | Maskrom reboot flag              | Software recovery                            |
 | Kernel | Lima clocks / IRQ names          | Mainline GPU driver                          |
 | Kernel | Esmart0 4K buffer                | 4K scanout                                   |

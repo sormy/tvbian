@@ -5,12 +5,12 @@ through FFmpeg 9.0.2 with `patches/ffmpeg/`, on TVBian's kernels. Each chip's co
 `tools/validate/video.py`'s matrix from one board of it, run again after every kernel or FFmpeg
 change:
 
-| Chip            | Die    | Engine, as FFmpeg reaches it                   |
-| --------------- | ------ | ---------------------------------------------- |
-| Allwinner H313  | H616   | Cedrus, `-hwaccel v4l2request`                 |
-| Rockchip RK3518 | RK3528 | MPP, `-c:v h264_rkmpp` and the like            |
-| Rockchip RK3528 | RK3528 | MPP, `-c:v h264_rkmpp` and the like            |
-| Amlogic S905L3  | GXLX2  | `meson_vdec`, `-c:v h264_v4l2m2m` and the like |
+| Chip             | Die    | Engine, as FFmpeg reaches it                   |
+| ---------------- | ------ | ---------------------------------------------- |
+| Allwinner H313   | H616   | Cedrus, `-hwaccel v4l2request`                 |
+| Rockchip RK3518  | RK3528 | MPP, `-c:v h264_rkmpp` and the like            |
+| Rockchip RK3528A | RK3528 | MPP, `-c:v h264_rkmpp` and the like            |
+| Amlogic S905L3   | GXLX2  | `meson_vdec`, `-c:v h264_v4l2m2m` and the like |
 
 Sizes are the largest that worked here, from a ladder of 1920×1080, 2560×1440, 3840×2160, 4096×2160,
 4096×2304, 4080×4080, 5120×2880, 6144×3456, 7680×4320, 8192×4320, 8192×8192 and 16384×8640. A file
@@ -30,26 +30,26 @@ the CPU instead, on its own.
 
 ## Hardware decode
 
-| Codec                  | H313           | RK3518       | RK3528       | S905L3          |
-| ---------------------- | -------------- | ------------ | ------------ | --------------- |
-| H.264 8-bit            | ✅ 4096×2304   | ✅ 8192×8192 | ✅ 8192×8192 | ✅ 3840×2160    |
-| H.264 10-bit           | ➖             | ✅ 8192×8192 | ✅ 8192×8192 | ➖              |
-| HEVC Main              | ✅ 8192×4320   | ✅ 8192×8192 | ✅ 8192×8192 | ✅ 4096×2304    |
-| HEVC Main10            | ✅ 6144×3456   | ✅ 8192×8192 | ✅ 8192×8192 | 🟠 3840×2160 ⁷  |
-| VP9 profile 0          | ✅ 8192×4320   | ✅ 8192×4320 | ➖           | 🟠 3840×2160 ¹⁰ |
-| VP9 profile 2 (10-bit) | ✅ 6144×3456   | ✅ 8192×4320 | ➖           | 🟠 3840×2160 ⁷  |
-| VP8                    | ✅ 4096×2304   | ✅ 1920×1080 | ✅ 1920×1080 | ➖              |
-| AV1                    | ➖             | ➖           | ➖           | ➖              |
-| MPEG-1                 | ❌ ³           | ✅ 1920×1080 | ✅ 1920×1080 | ✅ 1920×1080    |
-| MPEG-2                 | ✅ 4000×2250   | ✅ 1920×1080 | ✅ 1920×1080 | ✅ 1920×1080    |
-| MPEG-4 (DivX, Xvid)    | 🟠 4080×2160 ¹ | ✅ 1920×1080 | ✅ 1920×1080 | 🟠 1920×1080 ⁸  |
-| H.263                  | 🟠 1408×1152 ² | ✅ 1408×1152 | ✅ 1408×1152 | ❌ ⁹            |
-| VC-1 Advanced          | ✅ 1920×1080   | ❓           | ❓           | 🟠 1920×1080 ¹¹ |
-| VC-1 Simple            | 🟡 ⁴           | ❓           | ❓           | ❌ ⁹            |
-| VC-1 Main (WMV9)       | 🟠 720×576 ⁵   | ❓           | ❓           | ❌ ⁹            |
-| JPEG, MJPEG            | ✅ 24 Mpixel   | ❌ ⁶         | ❌ ⁶         | ✅ 1920×1080    |
-| AVS, AVS+              | ❌             | ❌ ⁶         | ❌ ⁶         | ❌ ⁹            |
-| RealVideo 8, 9         | ❓             | ❓           | ❓           | ❌ ⁹            |
+| Codec                  | H313           | RK3518       | RK3528A         | S905L3          |
+| ---------------------- | -------------- | ------------ | --------------- | --------------- |
+| H.264 8-bit            | ✅ 4096×2304   | ✅ 8192×8192 | ✅ 8192×8192    | ✅ 3840×2160    |
+| H.264 10-bit           | ➖             | ✅ 8192×8192 | ✅ 8192×8192    | ➖              |
+| HEVC Main              | ✅ 8192×4320   | ✅ 8192×8192 | ✅ 8192×8192    | ✅ 4096×2304    |
+| HEVC Main10            | ✅ 6144×3456   | ✅ 8192×8192 | ✅ 8192×8192    | 🟠 3840×2160 ⁷  |
+| VP9 profile 0          | ✅ 8192×4320   | ✅ 8192×4320 | ✅ 3840×2160 ¹² | 🟠 3840×2160 ¹⁰ |
+| VP9 profile 2 (10-bit) | ✅ 6144×3456   | ✅ 8192×4320 | 🟠 640×360 ⁷ ¹² | 🟠 3840×2160 ⁷  |
+| VP8                    | ✅ 4096×2304   | ✅ 1920×1080 | ✅ 1920×1080    | ➖              |
+| AV1                    | ➖             | ➖           | ➖              | ➖              |
+| MPEG-1                 | ❌ ³           | ✅ 1920×1080 | ✅ 1920×1080    | ✅ 1920×1080    |
+| MPEG-2                 | ✅ 4000×2250   | ✅ 1920×1080 | ✅ 1920×1080    | ✅ 1920×1080    |
+| MPEG-4 (DivX, Xvid)    | 🟠 4080×2160 ¹ | ✅ 1920×1080 | ✅ 1920×1080    | 🟠 1920×1080 ⁸  |
+| H.263                  | 🟠 1408×1152 ² | ✅ 1408×1152 | ✅ 1408×1152    | ❌ ⁹            |
+| VC-1 Advanced          | ✅ 1920×1080   | ❓           | ❓              | 🟠 1920×1080 ¹¹ |
+| VC-1 Simple            | 🟡 ⁴           | ❓           | ❓              | ❌ ⁹            |
+| VC-1 Main (WMV9)       | 🟠 720×576 ⁵   | ❓           | ❓              | ❌ ⁹            |
+| JPEG, MJPEG            | ✅ 24 Mpixel   | ❌ ⁶         | ❌ ⁶            | ✅ 1920×1080    |
+| AVS, AVS+              | ❌             | ❌ ⁶         | ❌ ⁶            | ❌ ⁹            |
+| RealVideo 8, 9         | ❓             | ❓           | ❓              | ❌ ⁹            |
 
 1. Files using quarter-pixel or global motion show slight differences from the CPU's picture;
    interlaced files with B-frames play on the CPU.
@@ -65,6 +65,7 @@ the CPU instead, on its own.
 10. At 3840×2160, decoding while a large file is written can freeze the box, and the first decode
     after a boot fails.
 11. A skipped picture yields none: the player shows the picture before it longer.
+12. MPP gives VP9 to the RK3528A alone: a board's tree names the chip `rockchip,rk3528a`.
 
 The S905L3's microcode decodes MJPEG into at most 4 pictures and MPEG-4 into 8, the canvas registers
 it reads: a player holding more pictures than that copies them out. Its MPEG-1/2, MPEG-4 and VC-1
@@ -78,23 +79,23 @@ and restarting the stream, which loses the references until the next keyframe.
 Frames a second through the engine alone, on a synthetic clip, with nothing shown: a ceiling for
 playback, not playback itself.
 
-| Codec         | H313 | RK3518 | RK3528 | S905L3 |
-| ------------- | ---- | ------ | ------ | ------ |
-| H.264         | 31   | 61     | 62     | 30     |
-| H.264 10-bit  | ➖   | 57     | 55     | ➖     |
-| HEVC Main     | 61   | 117    | 116    | 47     |
-| HEVC Main10   | 33   | 106    | 103    | 64 ¹   |
-| VP9 profile 0 | 43   | 76     | ➖     | 58     |
-| VP9 profile 2 | 25   | 67     | ➖     | 75 ¹   |
-| VP8           | 45   | ➖     | ➖     | ➖     |
-| MPEG-4        | 32   | ➖     | ➖     | ➖     |
-| JPEG          | 28   | ❌     | ❌     | ❓     |
+| Codec         | H313 | RK3518 | RK3528A | S905L3 |
+| ------------- | ---- | ------ | ------- | ------ |
+| H.264         | 31   | 61     | 62      | 30     |
+| H.264 10-bit  | ➖   | 57     | 55      | ➖     |
+| HEVC Main     | 61   | 117    | 116     | 47     |
+| HEVC Main10   | 33   | 106    | 103     | 64 ¹   |
+| VP9 profile 0 | 43   | 76     | 85      | 58     |
+| VP9 profile 2 | 25   | 67     | ❓      | 75 ¹   |
+| VP8           | 45   | ➖     | ➖      | ➖     |
+| MPEG-4        | 32   | ➖     | ➖      | ➖     |
+| JPEG          | 28   | ❌     | ❌      | ❓     |
 
 1. Timed as 8-bit pictures, the S905L3's plain output for a 10-bit stream.
 
 ## Hardware encode
 
-| Codec        | H313         | RK3518         | RK3528         | S905L3       |
+| Codec        | H313         | RK3518         | RK3528A        | S905L3       |
 | ------------ | ------------ | -------------- | -------------- | ------------ |
 | H.264        | ✅ 4096×4096 | ✅ 8192×8192   | ✅ 8192×8192   | ✅ 1920×1088 |
 | HEVC         | ➖           | 🟠 8192×8192 ² | 🟠 8192×8192 ² | ✅ 4096×2304 |
@@ -108,25 +109,25 @@ playback, not playback itself.
 
 Frames a second through the engine alone, the pictures from memory.
 
-| Codec | H313 | RK3518 | RK3528 | S905L3 |
-| ----- | ---- | ------ | ------ | ------ |
-| H.264 | 24   | 14     | 14     | ➖     |
-| HEVC  | ➖   | 16     | 16     | 21     |
-| JPEG  | 11   | ❌     | ❌     | ➖     |
+| Codec | H313 | RK3518 | RK3528A | S905L3 |
+| ----- | ---- | ------ | ------- | ------ |
+| H.264 | 24   | 14     | 14      | ➖     |
+| HEVC  | ➖   | 16     | 16      | 21     |
+| JPEG  | 11   | ❌     | ❌      | ➖     |
 
 ## Hardware shrinking while decoding
 
 A video larger than the screen can be shrunk by the decoder itself, which saves memory bandwidth.
 Where it cannot, the picture comes at full size, correct, for the display to shrink.
 
-| Codec        | H313    | RK3518 | RK3528 | S905L3  |
-| ------------ | ------- | ------ | ------ | ------- |
-| H.264        | ✅ ½, ¼ | ✅ ½   | ✅ ½   | ❌      |
-| HEVC, Main10 | ✅ ½, ¼ | ✅ ½   | ✅ ½   | ✅ ½, ¼ |
-| VP9          | ❌      | ✅ ½   | ➖     | ✅ ½, ¼ |
-| VP8          | ❌      | ➖ ¹   | ➖ ¹   | ➖      |
-| MPEG-2       | ❌      | ➖ ¹   | ➖ ¹   | ➖ ¹    |
-| JPEG         | ❌      | ❌     | ❌     | ❓      |
+| Codec        | H313    | RK3518 | RK3528A | S905L3  |
+| ------------ | ------- | ------ | ------- | ------- |
+| H.264        | ✅ ½, ¼ | ✅ ½   | ✅ ½    | ❌      |
+| HEVC, Main10 | ✅ ½, ¼ | ✅ ½   | ✅ ½    | ✅ ½, ¼ |
+| VP9          | ❌      | ✅ ½   | ❓      | ✅ ½, ¼ |
+| VP8          | ❌      | ➖ ¹   | ➖ ¹    | ➖      |
+| MPEG-2       | ❌      | ➖ ¹   | ➖ ¹    | ➖ ¹    |
+| JPEG         | ❌      | ❌     | ❌      | ❓      |
 
 1. The chip decodes it only to 1920×1080, with nothing to shrink.
 
@@ -135,12 +136,12 @@ Where it cannot, the picture comes at full size, correct, for the display to shr
 A decoder can write its pictures compressed, for less memory traffic to the display, the only reader
 that can take them.
 
-| Codec        | H313     | RK3518   | RK3528   | S905L3      |
+| Codec        | H313     | RK3518   | RK3528A  | S905L3      |
 | ------------ | -------- | -------- | -------- | ----------- |
 | Format       | Arm AFBC | Arm AFBC | Arm AFBC | Amlogic FBC |
 | H.264        | ❓       | 🟡 ¹     | 🟡 ¹     | ❓          |
 | HEVC, Main10 | ✅       | 🟡 ¹     | 🟡 ¹     | 🟡 ¹        |
-| VP9          | ✅       | 🟡 ¹     | ➖       | 🟡 ¹        |
+| VP9          | ✅       | 🟡 ¹     | ❓       | 🟡 ¹        |
 | Other codecs | ❓       | ➖       | ➖       | ❓          |
 
 1. The decoder writes them; nothing has been shown on a screen yet.
@@ -151,7 +152,7 @@ Where a video engine has no IOMMU, its pictures come from CMA, a contiguous pool
 that the rest of the system borrows back only for movable pages. The decoder's share at its peak,
 with the clip already in memory:
 
-| Case                                         | H313    | RK3518      | RK3528         | S905L3      |
+| Case                                         | H313    | RK3518      | RK3528A        | S905L3      |
 | -------------------------------------------- | ------- | ----------- | -------------- | ----------- |
 | Pool, `cma=` in `BOARD_CMDLINE`              | 16 MiB  | 16 MiB      | 16 MiB         | 512 MiB     |
 | Video and display IOMMU                      | yes     | yes         | yes            | no          |
@@ -159,14 +160,14 @@ with the clip already in memory:
 | 4K H.264, HEVC, VP9                          | ❓      | ❓          | 0 MiB, 8K HEVC | 291-294 MiB |
 | 4K HEVC Main10                               | ❓      | ❓          | 0 MiB, 8K      | 331 MiB     |
 | 4K Main10, compressed frames                 | ❓      | ❓          | ❓             | 139 MiB     |
-| 4K VP9, compressed frames                    | ❓      | ❓          | ➖             | 87 MiB      |
-| Seek, 4K VP9                                 | ❓      | ❓          | ➖             | 311 MiB     |
+| 4K VP9, compressed frames                    | ❓      | ❓          | ❓             | 87 MiB      |
+| Seek, 4K VP9                                 | ❓      | ❓          | ❓             | 311 MiB     |
 | Resolution change, 720p, 1080p               | ❓      | ❓          | ❓             | 90-96 MiB   |
 | A player's peak, the system's share included | 1.5 MiB | 2.3 MiB     | 3.0 MiB        | 397 MiB     |
 
 A player's peak is a 4K60 screen with a 4K video plane and the interface, flipped at a player's
 pace, while the engine decodes: on the H313 4K Main10 with AFBC frames and Wi-Fi busy, on the RK3518
-8K HEVC with AFBC frames, on the RK3528 8K HEVC 8- and 10-bit frames uncompressed, a seek and Wi-Fi
+8K HEVC with AFBC frames, on the RK3528A 8K HEVC 8- and 10-bit frames uncompressed, a seek and Wi-Fi
 busy, on the S905L3 4K60 HEVC and VP9, 8 and 10 bits, copied out. A pool is that peak plus a margin,
 29% on the S905L3 for fragmentation and a seek's reallocation. The H313's decoder allocates through
 its IOMMU from ordinary memory: a large pool starves it, and on 512 MiB a 24 Mpixel JPEG exhausted
@@ -175,15 +176,15 @@ the 1.5 GiB box. The S905L3's kernel has no CMA debugfs or sysfs: in use is `Cma
 
 ## Output and display
 
-| Feature                            | H313 | RK3518 | RK3528 | S905L3 |
-| ---------------------------------- | ---- | ------ | ------ | ------ |
-| 10-bit pictures to the display     | ✅   | 🟡 ³   | 🟡 ³   | 🟡 ³   |
-| Compressed pictures to the display | ✅   | 🟡 ³   | 🟡 ³   | 🟡 ³   |
-| The display shrinks them           | 🟠 ¹ | ❓     | ❓     | ❓     |
-| Shrunk while decoding, compressed  | ➖   | ❌ ²   | ❌ ²   | ➖     |
-| HDR signalled to the TV            | ✅   | ❓     | ❓     | ❓     |
-| 10-bit HDMI                        | ✅   | ✅     | ❓     | ❓     |
-| Decoder to display with no copy    | ✅   | 🟡 ³   | 🟡 ³   | 🟡 ³   |
+| Feature                            | H313 | RK3518 | RK3528A | S905L3 |
+| ---------------------------------- | ---- | ------ | ------- | ------ |
+| 10-bit pictures to the display     | ✅   | 🟡 ³   | 🟡 ³    | 🟡 ³   |
+| Compressed pictures to the display | ✅   | 🟡 ³   | 🟡 ³    | 🟡 ³   |
+| The display shrinks them           | 🟠 ¹ | ❓     | ❓      | ❓     |
+| Shrunk while decoding, compressed  | ➖   | ❌ ²   | ❌ ²    | ➖     |
+| HDR signalled to the TV            | ✅   | ❓     | ❓      | ❓     |
+| 10-bit HDMI                        | ✅   | ✅     | ❓      | ❓     |
+| Decoder to display with no copy    | ✅   | 🟡 ³   | 🟡 ³    | 🟡 ³   |
 
 1. Refused today, the decoder shrinking the video instead; the hardware shrinks them cleanly to
    about 1.7×.

@@ -588,10 +588,32 @@ MPP 1.1.0's `osal/mpp_soc.c`, the `rk3528` entry, against `patches/ffmpeg/`; not
 
 ## 2026-11-12 — regression, both kernels; RAM type; the upstream view
 
-- `PMUGRF_OS_REG18` `0x100064c1`: type 3, DDR3, as the K4B4G0446B marking; DMC 786 MHz. The
-  factory tree still names the DDR4 EVB1: a template, not the memory.
+- `PMUGRF_OS_REG18` `0x100064c1`: type 3, DDR3, as the K4B4G0446B marking; DMC 786 MHz. The factory
+  tree still names the DDR4 EVB1: a template, not the memory.
 - `board-upstream.dts` on EVB1, proven: 379 lines. The model reads
   `H96 Max M2 Plus (M2_P_ZX_20250328)`.
 - `validate.sh` and `reboots.sh` 5 on 6.1.172 and 6.12.69, tree `bfcbf934`: 51 lines each. Wi-Fi
   209/219 and 207/204 Mbit/s at 40 MHz HE; BLE scan 29 on both; 3921 MiB; no MMC error, failed unit
   or IOMMU fault; every reboot back. `mmc1`/`mmc2` swap numbers between the kernels.
+
+## 2026-11-16 — the desktop: browsers, render nodes, video
+
+- Firefox 153 and Chromium 156 paint in software: both need GLES 3.0, Lima has 2.0. Chromium's
+  `--disable-es3-gl-context` no longer falls back.
+- `cog` (WPE WebKit 2.48) died on `DRM_IOCTL_MODE_CREATE_DUMB` = EACCES. `strace`: the web process
+  took `renderD128`, the vendor `rockchip-drm`'s render node (`DRIVER_RENDER`, absent on mainline),
+  and Mesa's kmsro allocated scanout there. `drm-rockchip-no-render-node` on 6.1.172: Lima is
+  `renderD128`, `cog` renders through it, 3 % CPU at rest.
+- In `cog`, YouTube picked AV1 on `dav1d`: 157 % CPU. With software AV1 and VP9 ranked `NONE` the VA
+  plugin still did not load: MPP in the sandbox cannot open `/proc/device-tree/compatible`.
+- mpv, YouTube H.264 1080p60, `hwdec=vaapi`: `vo=gpu` dropped 1256 in 30 s, `--profile=fast` 1043,
+  `vo=dmabuf-wayland` 0. HEVC 4K30 3 of 600, 4K60 914 of 1200. The suite's `mpv.vaapi` fails with
+  labwc holding DRM master: `--gpu-context=drm` cannot take the display.
+- VP9: MPP gives `vdpu382` (plain RK3528) no VP9, `vdpu382a` (RK3528A) has it; this board is
+  `rockchip,rk3528`. YouTube 4K is VP9 or AV1 only.
+- VP9 decodes in hardware with `rockchip,rk3528a` appended to the root `compatible`: the vendor
+  kernel still sets `ROCKCHIP_SOC_RK3528`, checking `rk3528` first, and nothing in it reads the A
+  ID; MPP scans its table from the end and takes `rk3528a`. Factory tree, OTP (`35 28`, version 1)
+  and U-Boot name no variant. VA suite: `vp9-p0`, `-odd`, `-tools` identical, `-p2` 61.4 dB as NV12;
+  4K60 VP9 decodes at 85 fps. YouTube VP9 in mpv, output drops in 30 s: 1080p60 0, 1440p60 21,
+  2160p60 1428.
