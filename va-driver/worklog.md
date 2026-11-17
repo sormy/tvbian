@@ -251,3 +251,10 @@ real time on Cedrus whatever the driver: about 25 fps flat out, 180 of 288 frame
   `etnaviv`, `v3d` and `msm`. Devices listed from `/sys`, the numbered nodes the fallback. Cedrus's
   AFBC kept where CAPTURE lists it and the client listed the modifier, in place of
   `gpu_is_panfrost()` and HEVC and VP9 by name; the stateless backend is `v4l2-request`.
+
+## 2026-11-17 — `meson-gxl` on the single driver
+
+- The single driver offered no H.264, HEVC or VP9 on the M20: `v4l2-request` went first and took the
+  box on meson's stateful nodes alone, its MJPEG decoder and H.264 encoder. It now takes a box only
+  with a stateless decoder; the M20 gets `v4l2m2m` and its 13 decode profiles, the H313 and the M2
+  Plus their backends as before.

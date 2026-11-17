@@ -441,10 +441,14 @@ static int request_init(struct driver *drv)
              c++)
             offers[drv->num_offers++] = (struct offer){ .profile = c->profile,
                                                         .entrypoint = c->entrypoint };
-    for (unsigned i = 0; i < drv->num_offers; i++)
+    bool stateless = false;
+    for (unsigned i = 0; i < drv->num_offers; i++) {
         if (offers[i].profile == VAProfileHEVCMain10 || offers[i].profile == VAProfileVP9Profile2)
             size_ten_bit(&offers[i]);
-    return drv->num_offers ? 0 : -ENODEV;
+        stateless |= offers[i].entrypoint == VLD && offers[i].profile != VAProfileJPEGBaseline;
+    }
+    /* stateful nodes alone are the stateful backend's box */
+    return stateless ? 0 : -ENODEV;
 }
 
 static void request_uninit(struct driver *drv)
