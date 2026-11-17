@@ -27,7 +27,7 @@ import sys
 import tempfile
 import time
 import urllib.request
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -42,6 +42,8 @@ SIZE = "640x360"
 # not a multiple of any block size: the crop and the padding both get exercised
 ODD_SIZE = "642x362"
 LOSSY_FLOOR_DB = 50.0
+# a width whose I420 rows GStreamer writes unpadded
+RAW_WIDTH_MULTIPLE = 8
 ENCODE_FLOOR_DB = 30.0
 ENCODE_FRAMES = 30
 JPEG_FRAMES = 5
@@ -191,10 +193,22 @@ HELD: dict[str, set[str]] = {
 }
 # FFmpeg's word that the VA hwaccel refused a stream or a picture
 HWACCEL_REFUSED = re.compile(r"Failed to (end picture decode|create decode context)|hwaccel init")
-# the GStreamer va elements, and the clip each decodes
-GST_DECODERS = {"vah264dec": "h264-high", "vah265dec": "hevc-main", "vavp9dec": "vp9-p0"}
-# the GStreamer va encoders, and the offer each needs
-GST_ENCODERS = {"vah264enc": H264_ENCODES, "vah265enc": {"HEVCMain/EncSlice"}}
+# GStreamer's va decoder for each VA profile family: it has none for MPEG-4, H.263 or VC-1
+GST_DECODERS = {
+    "H264": "vah264dec",
+    "HEVC": "vah265dec",
+    "VP9": "vavp9dec",
+    "VP8": "vavp8dec",
+    "MPEG2": "vampeg2dec",
+    "JPEG": "vajpegdec",
+    "AV1": "vaav1dec",
+}
+# GStreamer's va encoder and parser for each of ENCODES
+GST_ENCODERS = {
+    "h264": ("vah264enc", "h264parse"),
+    "hevc": ("vah265enc", "h265parse"),
+    "jpeg": ("vajpegenc", "jpegparse"),
+}
 # the clients the suite drives, and the Debian package each comes in
 TOOLS = {
     "vainfo": "vainfo",
@@ -351,15 +365,15 @@ def refusal_case(setup: Setup, key: str, path: Path) -> Iterator[Line]:
     )
 
 
-def psnr_y(setup: Setup, clip: Path, download: str, sample: str) -> float | None:
-    graph = (
-        f"[0:v]{download},format={sample},setpts=N[a];"
-        f"[1:v]format={sample},setpts=N[b];[a][b]psnr"
-    )
+def psnr_y(setup: Setup, decoded: list[str], chain: str, clip: Path, sample: str) -> float | None:
+    """Luma PSNR of the decoded input, through the chain, against the clip's software decode."""
+    # one timebase for both, as psnr pairs pictures by time and the inputs' timebases differ
+    pace = "settb=AVTB,setpts=N"
+    graph = f"[0:v]{chain}format={sample},{pace}[a];[1:v]format={sample},{pace}[b];[a][b]psnr"
     rc, log = run(
         ["ffmpeg", "-nostdin", "-hide_banner"]
-        + decode_args(setup)
-        + ["-i", str(clip), "-i", str(clip), "-filter_complex", graph, "-f", "null", "-"],
+        + decoded
+        + ["-i", str(clip), "-filter_complex", graph, "-f", "null", "-"],
         env=setup.env(),
     )
     found = re.search(r"PSNR y:(inf|[\d.]+)", log)
@@ -381,13 +395,9 @@ def decode_case(setup: Setup, name: str, clip: Clip, offers: set[str]) -> Iterat
     if name in HELD.get(setup.family, set()):
         yield from held_case(setup, key, path)
         return
-    sample = "yuv420p10le" if clip.ten_bit else "yuv420p"
+    sample = sample_format(clip)
     base = ["ffmpeg", "-nostdin", "-hide_banner", "-v", "error"]
-    # one thread, as the test engine runs: FFmpeg's MPEG-4 decoder predicts interlaced B-VOPs
-    # otherwise when frame-threaded
-    software, _ = framemd5(
-        base + ["-threads", "1", "-i", str(path), "-pix_fmt", sample], setup.env()
-    )
+    software = software_frames(setup, path, sample)
     irqs = irq_count()
     # a 10-bit config's surfaces are P010, or NV12 on an engine that narrows
     hardware: list[str] = []
@@ -401,19 +411,50 @@ def decode_case(setup: Setup, name: str, clip: Clip, offers: set[str]) -> Iterat
         if hardware:
             break
     engine_ran = not setup.on_box or irq_count() > irqs
+    decoded = decode_args(setup) + ["-i", str(path)]
+    yield key, judged(
+        hardware,
+        software,
+        engine_ran,
+        log,
+        lambda: psnr_y(setup, decoded, f"{download},", path, sample),
+    )
+
+
+def sample_format(clip: Clip) -> str:
+    return "yuv420p10le" if clip.ten_bit else "yuv420p"
+
+
+def software_frames(setup: Setup, path: Path, sample: str) -> list[str]:
+    # one thread, as the test engine runs: FFmpeg's MPEG-4 decoder predicts interlaced B-VOPs
+    # otherwise when frame-threaded
+    frames, _ = framemd5(
+        ["ffmpeg", "-nostdin", "-hide_banner", "-v", "error", "-threads", "1"]
+        + ["-i", str(path), "-pix_fmt", sample],
+        setup.env(),
+    )
+    return frames
+
+
+def judged(
+    hardware: list[str],
+    software: list[str],
+    engine_ran: bool,
+    log: str,
+    psnr: Callable[[], float | None],
+) -> str:
+    """A decode's verdict: identical to software, or close enough by luma PSNR."""
     if not hardware:
-        yield key, f"failed: no frames: {last_line(log)}"
-    elif len(hardware) != len(software):
-        yield key, f"failed: {len(hardware)} of {len(software)} frames"
-    elif not engine_ran:
-        yield key, "failed: decoded, but the engine's interrupts did not move"
-    elif hardware == software:
-        yield key, f"pass: {len(hardware)} of {len(software)} identical"
-    else:
-        y = psnr_y(setup, path, download, sample)
-        passed = y is not None and y >= LOSSY_FLOOR_DB
-        verdict = "pass" if passed else "failed"
-        yield key, f"{verdict}: {len(hardware)} frames, Y PSNR {y} dB"
+        return f"failed: no frames: {last_line(log)}"
+    if len(hardware) != len(software):
+        return f"failed: {len(hardware)} of {len(software)} frames"
+    if not engine_ran:
+        return "failed: decoded, but the engine's interrupts did not move"
+    if hardware == software:
+        return f"pass: {len(hardware)} of {len(software)} identical"
+    y = psnr()
+    verdict = "pass" if y is not None and y >= LOSSY_FLOOR_DB else "failed"
+    return f"{verdict}: {len(hardware)} frames, Y PSNR {y} dB"
 
 
 def luma_by_pts(
@@ -579,38 +620,101 @@ def mpv_case(setup: Setup, offers: set[str]) -> Iterator[Line]:
         yield "mpv.vaapi", "pass" if zero_copy else f"failed: {last_line(log)}"
 
 
-def gstreamer_case(setup: Setup, offers: set[str]) -> Iterator[Line]:
-    env = setup.env()
-    for element, name in GST_DECODERS.items():
-        key = f"gstreamer.{element}"
-        if f"{CLIPS[name].profile}/VLD" not in offers:
-            yield key, "unoffered"
-            continue
-        rc, log = run(["gst-inspect-1.0", element], env=env)
-        if rc != 0:
-            yield key, "no element: GStreamer's va lists a driver only on a DRM render node"
-            continue
-        clip = setup.clips / f"{name}.{CLIPS[name].container}"
-        rc, log = run(
-            ["gst-launch-1.0", "-q", "filesrc", f"location={clip}", "!", "parsebin", "!"]
-            + [element, "!", "videoconvert", "!", "fakesink"],
-            env=env,
+def gst_element(setup: Setup, element: str) -> bool:
+    rc, _ = run(["gst-inspect-1.0", element], env=setup.env())
+    return rc == 0
+
+
+def gst_decoder(profile: str) -> str | None:
+    return next((e for family, e in GST_DECODERS.items() if profile.startswith(family)), None)
+
+
+def gstreamer_decode_case(setup: Setup, name: str, clip: Clip, offers: set[str]) -> Iterator[Line]:
+    """A clip through GStreamer's va decoder, against the same software decode as FFmpeg's."""
+    key = f"gstreamer.{name}"
+    path = setup.clips / f"{name}.{clip.container}"
+    element = gst_decoder(clip.profile)
+    if f"{clip.profile}/VLD" not in offers:
+        yield key, "unoffered"
+        return
+    if element is None:
+        yield key, "unoffered by GStreamer's va"
+        return
+    if not gst_element(setup, element):
+        yield key, f"no {element}: GStreamer's va lists a driver only on a DRM render node"
+        return
+    if not path.exists():
+        yield key, "no clip"
+        return
+    sample = sample_format(clip)
+    # GStreamer pads I420 rows to 4 bytes, so raw frames are packed at a width of a multiple of 8;
+    # y4menc packs the others, 8-bit progressive alone as FFmpeg reads it
+    raw = int(clip.size.split("x")[0]) % RAW_WIDTH_MULTIPLE == 0
+    out = setup.work / f"gst-{name}.{'yuv' if raw else 'y4m'}"
+    caps = f"video/x-raw,format={'I420_10LE' if clip.ten_bit else 'I420'}"
+    sink = ["filesink", f"location={out}"]
+    tail = [caps, "!"] + (sink if raw else ["y4menc", "!"] + sink)
+    out.unlink(missing_ok=True)
+    irqs = irq_count()
+    rc, log = run(
+        ["gst-launch-1.0", "-q", "filesrc", f"location={path}", "!", "parsebin", "!"]
+        + [element, "!", "videoconvert", "!"]
+        + tail,
+        env=setup.env(),
+    )
+    engine_ran = not setup.on_box or irq_count() > irqs
+    decoded = (
+        ["-f", "rawvideo", "-pix_fmt", sample, "-s", clip.size, "-i", str(out)]
+        if raw
+        else ["-i", str(out)]
+    )
+    hardware: list[str] = []
+    if rc == 0 and out.exists() and out.stat().st_size:
+        hardware, _ = framemd5(
+            ["ffmpeg", "-nostdin", "-hide_banner", "-v", "error"] + decoded + ["-pix_fmt", sample],
+            setup.env(),
         )
-        yield key, "pass" if rc == 0 else f"failed: {last_line(log)}"
-    for element, wanted in GST_ENCODERS.items():
-        if not wanted & offers:
-            yield f"gstreamer.{element}", "unoffered"
-            continue
-        rc, log = run(["gst-inspect-1.0", element], env=env)
-        if rc != 0:
-            yield f"gstreamer.{element}", "no element: none listed for this driver"
-            continue
-        rc, log = run(
-            ["gst-launch-1.0", "-q", "videotestsrc", f"num-buffers={ENCODE_FRAMES}", "!"]
-            + ["video/x-raw,format=NV12,width=640,height=360", "!", element, "!", "fakesink"],
-            env=env,
-        )
-        yield f"gstreamer.{element}", "pass" if rc == 0 else f"failed: {last_line(log)}"
+    if name in REFUSED.get(setup.family, set()):
+        yield key, "pass: refused" if not hardware else "failed: not refused"
+        return
+    software = software_frames(setup, path, sample)
+    yield key, judged(
+        hardware, software, engine_ran, log, lambda: psnr_y(setup, decoded, "", path, sample)
+    )
+
+
+def gstreamer_encode_case(setup: Setup, name: str, offers: set[str]) -> Iterator[Line]:
+    """testsrc2 through GStreamer's va encoder, decoded back by FFmpeg against its source."""
+    wanted, _, _, frames = ENCODES[name]
+    element, parser = GST_ENCODERS[name]
+    key = f"gstreamer.encode.{name}"
+    if not wanted & offers:
+        yield key, "unoffered"
+        return
+    if not gst_element(setup, element):
+        yield key, f"no {element}: none listed for this driver"
+        return
+    source = f"testsrc2=size={SIZE}:rate=30"
+    raw, out = setup.work / "gst-source.yuv", setup.work / f"gst-{name}.mkv"
+    run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", source]
+        + ["-frames:v", str(frames), "-pix_fmt", "nv12", "-f", "rawvideo", str(raw)]
+    )
+    width, height = SIZE.split("x")
+    out.unlink(missing_ok=True)
+    rc, log = run(
+        ["gst-launch-1.0", "-q", "filesrc", f"location={raw}", "!", "rawvideoparse"]
+        + [f"width={width}", f"height={height}", "format=nv12", "framerate=30/1", "!"]
+        + [element, "!", parser, "!", "matroskamux", "!", "filesink", f"location={out}"],
+        env=setup.env(),
+    )
+    if rc != 0 or not out.exists():
+        yield key, f"failed: {last_line(log)}"
+        return
+    count, y = compare_with_source(out, source, frames, setup.work)
+    passed = count == frames and y >= ENCODE_FLOOR_DB
+    verdict = "pass" if passed else "failed"
+    yield key, f"{verdict}: {count} of {frames} frames, Y PSNR {y} dB, {out.stat().st_size} bytes"
 
 
 def probe_case(setup: Setup) -> Iterator[Line]:
@@ -1155,7 +1259,10 @@ def suite(setup: Setup) -> Iterator[Line]:
     if "mpv" not in missing:
         yield from mpv_case(setup, offers)
     if "gst-launch-1.0" not in missing:
-        yield from gstreamer_case(setup, offers)
+        for name, clip in CLIPS.items():
+            yield from gstreamer_decode_case(setup, name, clip, offers)
+        for name in ENCODES:
+            yield from gstreamer_encode_case(setup, name, offers)
     yield from probe_case(setup)
     if not setup.on_box:
         for name, clip in CLIPS.items():

@@ -318,12 +318,13 @@ failed or could not run.
 | `mapping.*`      | host: the Cedrus controls against FFmpeg's or `headers.py`'s parse |
 | `encode.*`       | `*_vaapi`, decoded back: every frame, Y PSNR ≥ 30 dB, its size     |
 | `mpv.*`          | `--hwdec=vaapi-copy`; `--hwdec=vaapi` on a display                 |
-| `gstreamer.*`    | the `va` elements, `GST_VA_ALL_DRIVERS=1`                          |
+| `gstreamer.*`    | Debian's `va` elements on every `decode.*` clip and encode         |
 | `probe.*`        | `tests/va_probe.c`: Kodi's, VLC's and Chromium's surface calls     |
 
 - **Decode** passes on identical frames, or on Y PSNR ≥ 50 dB where the engine's IDCT or a 10-bit
   picture narrowed to 8 bits differs. On a box the engine's interrupts must move. A 10-bit clip
-  downloads as P010, or NV12 where the engine narrows.
+  downloads as P010, or NV12 where the engine narrows. GStreamer's frames are judged against the
+  same software decode; it has no MPEG-4, H.263 or VC-1 decoder.
 - **Rebuilds** are replayed from each clip's captured VA buffers (`VAAPI_CAPTURE`) and compared by
   FFmpeg's `trace_headers`; MPEG-4, H.263 and VC-1, which it cannot trace, by `tests/headers.py`.
   The coded data is compared byte for byte.
