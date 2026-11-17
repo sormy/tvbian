@@ -617,3 +617,5 @@ MPP 1.1.0's `osal/mpp_soc.c`, the `rk3528` entry, against `patches/ffmpeg/`; not
   and U-Boot name no variant. VA suite: `vp9-p0`, `-odd`, `-tools` identical, `-p2` 61.4 dB as NV12;
   4K60 VP9 decodes at 85 fps. YouTube VP9 in mpv, output drops in 30 s: 1080p60 0, 1440p60 21,
   2160p60 1428.
+- VP9 sizes through `tvb-va-driver`, 10 frames each: profile 0 at 8192×4320 identical to software;
+  profile 2 at 1920×1080, 3840×2160, 4096×2304 and 8192×4320, 64, 65, 62 and 58 dB as NV12.

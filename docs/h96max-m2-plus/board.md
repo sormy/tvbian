@@ -406,7 +406,7 @@ The vendor's listing against `tools/validate/video.py`, `rkmpp`, on `6.1.172-tvb
 | H.264 8-bit      | L5.1, 4K60, 8K23   | ✅ 8192×8192      | 62  |
 | H.264 10-bit     | —                  | ✅ 8192×8192      | 55  |
 | HEVC Main/Main10 | L5.1, 4K60, 8K23   | ✅ 8192×8192      | 116 |
-| VP9              | —                  | ✅ 3840×2160      | 85  |
+| VP9              | —                  | ✅ 8192×4320      | 85  |
 | VP8              | —                  | ✅ 1920×1080      | 59  |
 | MPEG-1, MPEG-2   | 1080p60            | ✅ 1920×1080      | 70  |
 | MPEG-4           | ASP L5, 1080p60    | ✅ 1920×1080      | 77  |
