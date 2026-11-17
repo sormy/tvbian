@@ -81,6 +81,10 @@ struct codec {
 extern const struct codec codec_h264, codec_hevc, codec_vp9, codec_vp8, codec_mpeg2, codec_jpeg,
     codec_mpeg4, codec_vc1;
 
+/* a hidden VP9 frame and the frame after it as one superframe, as an encoder writes them: for a
+ * decoder that takes each packet for a picture to output */
+int vp9_superframe(struct annexb *out, const struct annexb *hidden, const struct annexb *shown);
+
 #define MPEG4_MATRIX_SIZE 64
 /* ISO/IEC 14496-2's default quantiser matrices, in zigzag scan order */
 extern const uint8_t mpeg4_default_intra[MPEG4_MATRIX_SIZE], mpeg4_default_non_intra[MPEG4_MATRIX_SIZE];

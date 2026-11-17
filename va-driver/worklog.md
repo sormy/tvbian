@@ -264,3 +264,16 @@ real time on Cedrus whatever the driver: about 25 fps flat out, 180 of 288 frame
   picture came or the 200 ms ran out, and the decoder makes none without the next packet. It now
   returns once one frees: HEVC 1080p 38 to 149 fps, HEVC 4K 19 to 34, against `ffmpeg9`'s 156 and
   32; the suite fails nothing it did not before.
+
+## 2026-11-17 — mainline `rkvdec`, and what the desktop shows
+
+- The M20 checked at 4K on 7.3.5 gave VA pictures unlike software's, every codec, and as many on
+  6.18.64 and on the committed backend; `ffmpeg9`'s own decoders were exact, and the suite's short
+  clips passed. Two faults. A sync drained the decoder 40 ms into a session, as the 20 ms quiet was
+  counted from before the 80 ms CAPTURE setup, and the pictures after the drain lost their
+  references: the quiet now starts with CAPTURE, and scales with the picture, as a 4K one takes
+  longer than 20 ms; without the scaling 4K failed again. And a hidden VP9 frame, its own packet
+  once FFmpeg splits the superframe, took a CAPTURE buffer as a picture: the decoder dropped the
+  next shown one, every 12 frames. It now goes out with the next in one superframe; a show-existing
+  header after it instead stopped the decode. Six clips, H.264, HEVC and VP9 at 1080p and 4K, four
+  runs each: every picture exact.

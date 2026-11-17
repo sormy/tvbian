@@ -31,8 +31,9 @@
 #define CAPTURE_BUDGET (192u << 20)
 #define OUTPUT_WAIT_MS 200
 #define SYNC_WAIT_MS 1000
-/* a decoder hands a picture out in a few ms: one quiet for longer holds it */
+/* a decoder hands a 1080p picture out in a few ms: one quiet for longer holds it */
 #define QUIET_MS 20
+#define FULL_HD_PIXELS (1920u * 1080u)
 #define ENCODE_WAIT_MS 2000
 #define PERCENT 100
 /* a raw picture's bytesused: every plane full */
@@ -62,6 +63,9 @@ struct m2m {
     bool dynamic_resolution;
     /* CAPTURE got fewer buffers than surfaces can hold: pictures are copied out at once */
     bool copies_out;
+    /* a hidden VP9 frame, sent with the next in one superframe */
+    struct annexb hidden;
+    struct annexb joined;
     /* when the decoder last took a packet or gave anything back */
     uint64_t active_ms;
     /* opened after a drain: the old session's references are gone */
@@ -315,6 +319,8 @@ static void m2m_put(struct m2m *m)
     unmap_queue(&m->output);
     unmap_queue(&m->capture);
     close(m->fd);
+    annexb_free(&m->hidden);
+    annexb_free(&m->joined);
     free(m);
 }
 
@@ -449,7 +455,11 @@ static int setup_capture(struct m2m *m)
     m->copies_out = m->capture.count < count;
     for (unsigned i = 0; !ret && i < m->capture.count; i++)
         ret = queue_buffer(m, &m->capture, i, 0, 0);
-    return ret ? ret : stream(m->fd, &m->capture, true);
+    if (!ret)
+        ret = stream(m->fd, &m->capture, true);
+    /* the decoder starts now: the setup's own time is no quiet of its */
+    m->active_ms = monotonic_ms();
+    return ret;
 }
 
 static void release_m2m_picture(struct engine_picture *picture)
@@ -607,6 +617,17 @@ static int m2m_decode(struct driver *drv, struct context *ctx, const struct anne
     if (m->lost_references && ctx->packet.predicted && held_pictures == HELD_REFUSE)
         return -ENODATA;
     m->lost_references = false;
+    if (ctx->config->codec->kind == CODEC_VP9 && ctx->packet.hidden) {
+        m->hidden.size = 0;
+        return annexb_append_raw(&m->hidden, au->data, au->size);
+    }
+    if (m->hidden.size) {
+        ret = vp9_superframe(&m->joined, &m->hidden, au);
+        m->hidden.size = 0;
+        if (ret)
+            return ret;
+        au = &m->joined;
+    }
     while ((index = free_output(m)) < 0)
         if ((ret = service(drv, m, VA_INVALID_ID, true, OUTPUT_WAIT_MS)) < 0 ||
             (index = free_output(m)) < 0)
@@ -738,6 +759,13 @@ static int decoder_command(const struct m2m *m, uint32_t cmd)
     return ioctl(m->fd, VIDIOC_DECODER_CMD, &command) < 0 ? -errno : 0;
 }
 
+/* a larger picture takes longer: a 4K one, four times a 1080p one's */
+static uint64_t quiet_ms(const struct context *ctx)
+{
+    unsigned pictures = ctx->width * ctx->height / FULL_HD_PIXELS;
+    return QUIET_MS * (pictures > 1 ? pictures : 1);
+}
+
 /* the decoder holds pictures until later packets come, which a client waiting on one never sends:
  * once it is quiet it is drained, every picture it holds comes out, and the stream goes on in a new
  * session, its headers sent again. Meson's ends at a drain: V4L2_DEC_CMD_START does not resume it. */
@@ -749,7 +777,7 @@ static int m2m_sync(struct driver *drv, struct context *ctx, VASurfaceID id, boo
         return -ENODEV;
     if ((ret = service(drv, m, id, false, 0)) != 0)
         return ret < 0 ? ret : 0;
-    if (!last && monotonic_ms() - m->active_ms < QUIET_MS)
+    if (!last && monotonic_ms() - m->active_ms < quiet_ms(ctx))
         return 0;
     /* a decoder that cannot drain now, as Cedrus's JPEG, may still hand the picture out */
     if (decoder_command(m, V4L2_DEC_CMD_STOP) < 0)

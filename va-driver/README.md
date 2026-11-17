@@ -281,7 +281,8 @@ VA carries none of these whole.
   - Every keyframe carries its parameter sets.
   - A resolution change reallocates CAPTURE while surfaces keep their pictures on their own fds.
   - The decoder hands a picture out up to 6 packets late; a sync on one still held drains it with
-    `V4L2_DEC_CMD_STOP` once the decoder has been quiet 20 ms. Meson's session ends at a drain, so
+    `V4L2_DEC_CMD_STOP` once the decoder has been quiet 20 ms a 1080p picture's worth of pixels, 80
+    at 4K, counted from when CAPTURE starts streaming. Meson's session ends at a drain, so
     the stream goes on in a new one, its headers sent again; the old one stays while surfaces hold
     its pictures.
   - MPEG-1/2/4 and VC-1 hold their last pictures until more stream comes, and a new session has no
@@ -292,6 +293,8 @@ VA carries none of these whole.
     the default; `off`, not offered; `decoded`, every picture as it comes, wrong or not.
   - A format without `V4L2_FMT_FLAG_DYN_RESOLUTION`, as MPEG-1/2/4 and MJPEG, or a decoder without a
     source-change event, as Cedrus's JPEG node, gets CAPTURE after its first packet.
+  - A hidden VP9 frame goes out with the next in one superframe, as the encoder wrote them: sent
+    alone, it takes a CAPTURE buffer as a picture, and the decoder drops the next shown one.
   - CAPTURE holds the surfaces' pictures and 16 more, within 192 MiB. Where the kernel grants fewer,
     as MJPEG's 4 and MPEG-4's 8, each picture is copied into its surface and its buffer queued
     again.
