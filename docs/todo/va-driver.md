@@ -21,9 +21,6 @@ settings.
       gets them.
 - [ ] **`meson-gxl` VC-1 with slices refuses every wrong picture after a drain**: `vc1-ap-slices`
       lets one through at 17 dB.
-- [ ] **`meson-gxl` H.264 and HEVC at `ffmpeg9`'s rate through VA-API**: the microcode holds 2 to 6
-      pictures by design, and a sync on one drains. A client that feeds ahead avoids it; FFmpeg's
-      command line does not.
 - [ ] **`mpv --hwdec=vaapi` on the display node**: mpv's DRM output opens VA on `card0`, whose
       driver name (`meson`, `sun4i-drm`) no package installs; with it linked by hand, `vainfo` opens
       it and mpv still does not.

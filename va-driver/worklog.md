@@ -258,3 +258,9 @@ real time on Cedrus whatever the driver: about 25 fps flat out, 180 of 288 frame
   box on meson's stateful nodes alone, its MJPEG decoder and H.264 encoder. It now takes a box only
   with a stateless decoder; the M20 gets `v4l2m2m` and its 13 decode profiles, the H313 and the M2
   Plus their backends as before.
+- `meson-gxl` HEVC ran at a quarter of `ffmpeg9`'s own `v4l2m2m`: tracing the decoder's interrupts
+  showed it idle 200 ms at a time, 12 s of a 16 s run, with every input slot queued and its CAPTURE
+  buffers free. `vaEndPicture`, waiting for a free OUTPUT buffer, polled on after one freed until a
+  picture came or the 200 ms ran out, and the decoder makes none without the next packet. It now
+  returns once one frees: HEVC 1080p 38 to 149 fps, HEVC 4K 19 to 34, against `ffmpeg9`'s 156 and
+  32; the suite fails nothing it did not before.

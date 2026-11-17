@@ -530,9 +530,11 @@ static int take_pictures(struct driver *drv, struct m2m *m, VASurfaceID wanted)
 }
 
 /* events, finished OUTPUT buffers and decoded pictures: 1 once the wanted surface has its
- * picture, -EPIPE once a drain has ended, 0 when nothing came for timeout_ms. Pictures of the old
- * size come out before CAPTURE is set up for a new one. */
-static int service(struct driver *drv, struct m2m *m, VASurfaceID wanted, int timeout_ms)
+ * picture, -EPIPE once a drain has ended, 0 when nothing came for timeout_ms or, for a caller
+ * waiting to queue a packet, once an OUTPUT buffer is free. Pictures of the old size come out
+ * before CAPTURE is set up for a new one. */
+static int service(struct driver *drv, struct m2m *m, VASurfaceID wanted, bool for_output,
+                   int timeout_ms)
 {
     struct pollfd pfd = { .fd = m->fd, .events = POLLIN | POLLPRI };
     while (poll(&pfd, 1, timeout_ms) > 0) {
@@ -544,12 +546,15 @@ static int service(struct driver *drv, struct m2m *m, VASurfaceID wanted, int ti
             return -EIO;
         bool changed = pfd.revents & POLLPRI && !ioctl(m->fd, VIDIOC_DQEVENT, &event) &&
                        event.type == V4L2_EVENT_SOURCE_CHANGE;
+        bool freed = false;
         while (!dequeue_buffer(m, &m->output, &buffer, planes))
-            ;
+            freed = true;
         int ret = pfd.revents & POLLIN || changed ? take_pictures(drv, m, wanted) : 0;
         int set_up = changed ? setup_capture(m) : 0;
         if (ret || set_up < 0)
             return set_up < 0 ? set_up : ret;
+        if (for_output && freed)
+            return 0;
     }
     return 0;
 }
@@ -603,7 +608,7 @@ static int m2m_decode(struct driver *drv, struct context *ctx, const struct anne
         return -ENODATA;
     m->lost_references = false;
     while ((index = free_output(m)) < 0)
-        if ((ret = service(drv, m, VA_INVALID_ID, OUTPUT_WAIT_MS)) < 0 ||
+        if ((ret = service(drv, m, VA_INVALID_ID, true, OUTPUT_WAIT_MS)) < 0 ||
             (index = free_output(m)) < 0)
             return ret < 0 ? ret : -ETIMEDOUT;
     if (au->size > m->output.buffers[index].length[0])
@@ -616,7 +621,7 @@ static int m2m_decode(struct driver *drv, struct context *ctx, const struct anne
     if (!m->announces_size && !m->capture.streaming && (ret = setup_capture(m)) < 0)
         return ret;
     /* what is done already; a picture still held is sync's to wait for */
-    ret = service(drv, m, ctx->target, 0);
+    ret = service(drv, m, ctx->target, false, 0);
     return ret < 0 ? ret : 0;
 }
 
@@ -742,14 +747,14 @@ static int m2m_sync(struct driver *drv, struct context *ctx, VASurfaceID id, boo
     int ret;
     if (!m)
         return -ENODEV;
-    if ((ret = service(drv, m, id, 0)) != 0)
+    if ((ret = service(drv, m, id, false, 0)) != 0)
         return ret < 0 ? ret : 0;
     if (!last && monotonic_ms() - m->active_ms < QUIET_MS)
         return 0;
     /* a decoder that cannot drain now, as Cedrus's JPEG, may still hand the picture out */
     if (decoder_command(m, V4L2_DEC_CMD_STOP) < 0)
-        return (ret = service(drv, m, id, SYNC_WAIT_MS)) > 0 ? 0 : ret ? ret : -ETIMEDOUT;
-    ret = service(drv, m, VA_INVALID_ID, SYNC_WAIT_MS);
+        return (ret = service(drv, m, id, false, SYNC_WAIT_MS)) > 0 ? 0 : ret ? ret : -ETIMEDOUT;
+    ret = service(drv, m, VA_INVALID_ID, false, SYNC_WAIT_MS);
     /* the old session stays while surfaces hold its pictures */
     m2m_close(ctx);
     int reopened = m2m_decoder_open(drv, ctx);
