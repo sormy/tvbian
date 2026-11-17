@@ -20,16 +20,22 @@ static VAStatus add_slices(struct context *c, const struct va_buffer *data)
     for (unsigned i = 0; i < params->num_elements; i++) {
         const uint8_t *param = (const uint8_t *)params->data + (size_t)i * params->element_size;
         const VASliceParameterBufferBase *base = (const VASliceParameterBufferBase *)param;
+        size_t size = base->slice_data_size;
         if (base->slice_data_flag != VA_SLICE_DATA_FLAG_ALL)
             return VA_STATUS_ERROR_UNIMPLEMENTED;
-        if ((size_t)base->slice_data_offset + base->slice_data_size > data_size)
+        if (base->slice_data_offset > data_size)
+            return VA_STATUS_ERROR_INVALID_PARAMETER;
+        /* GStreamer's VP8 sizes its slice as the whole frame and offsets it past the frame header */
+        if (c->config->codec->kind == CODEC_VP8)
+            size = data_size - base->slice_data_offset;
+        if (base->slice_data_offset + size > data_size)
             return VA_STATUS_ERROR_INVALID_PARAMETER;
         if (c->pic.num_slices == MAX_SLICES)
             return VA_STATUS_ERROR_MAX_NUM_EXCEEDED;
         c->pic.slices[c->pic.num_slices++] = (struct slice){
             .param = param,
             .data = (const uint8_t *)data->data + base->slice_data_offset,
-            .size = base->slice_data_size,
+            .size = size,
         };
     }
     c->slice_params = NULL;
