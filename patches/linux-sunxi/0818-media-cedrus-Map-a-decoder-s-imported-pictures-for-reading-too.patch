@@ -1,0 +1,32 @@
+From 088b7e7e316b97c4b68272d83d7143c5c3cc953a Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Tue, 17 Nov 2026 05:09:56 +0000
+Subject: [PATCH] media: cedrus: Map a decoder's imported pictures for reading
+ too
+
+The engine reads back the pictures it writes: references, and its own
+output while it deblocks. vb2 maps an imported CAPTURE buffer for the
+device to write only, so the IOMMU faulted the first time the engine
+read one ("Page fault ... dir rd") and a client could decode only into
+Cedrus's own buffers. A decoder's CAPTURE queue is now bidirectional;
+an encoder's CAPTURE holds the bitstream the engine only writes.
+---
+ drivers/staging/media/sunxi/cedrus/cedrus_context.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_context.c b/drivers/staging/media/sunxi/cedrus/cedrus_context.c
+index 729853f4f..4c0034366 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_context.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_context.c
+@@ -702,6 +702,8 @@ static int cedrus_context_queue_init(void *private, struct vb2_queue *src_queue,
+ 	dst_queue->type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+ 	dst_queue->io_modes = VB2_MMAP | VB2_DMABUF;
+ 	dst_queue->allow_cache_hints = 1;
++	/* a decoder reads back its references and, deblocking, its output */
++	dst_queue->bidirectional = proc->role == CEDRUS_ROLE_DECODER;
+ 	dst_queue->buf_struct_size = sizeof(struct cedrus_buffer);
+ 	dst_queue->ops = &cedrus_context_queue_ops;
+ 	dst_queue->mem_ops = &vb2_dma_contig_memops;
+-- 
+2.47.3
+
