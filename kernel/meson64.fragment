@@ -7,6 +7,10 @@ CONFIG_DEBUG_INFO_NONE=y
 CONFIG_VIDEO_MESON_VDEC=m
 # a built-in KUnit suite runs on every load of the decoder
 # CONFIG_VIDEO_MESON_VDEC_KUNIT_TEST is not set
+# dma-buf heaps, as every family has: a VA driver's copied pictures, shareable with the compositor
+CONFIG_DMABUF_HEAPS=y
+CONFIG_DMABUF_HEAPS_SYSTEM=y
+CONFIG_DMABUF_HEAPS_CMA=y
 # every family: a panic reboots, and leaves its log in pstore
 CONFIG_PSTORE_RAM=y
 CONFIG_PANIC_TIMEOUT=10
