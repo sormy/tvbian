@@ -1,0 +1,92 @@
+From e709abab33180d7332f5b83f29b85dcc2dba8e84 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Tue, 17 Nov 2026 20:09:54 +0000
+Subject: [PATCH] media: cedrus: Refuse a frame larger than the negotiated
+ pictures
+
+A stream may grow at a key frame; the stateless API then wants the
+formats set anew, which sizes the pictures and the engine's buffers. A
+client that kept decoding into the old pictures had every larger frame
+overrun them: a VP9 stream switching from 854x480 to 1920x1080 took an
+IOMMU read fault and a 2 s timeout a frame. H.264 and H.265 size their
+motion vector buffers from the format too. Fail such a job before the
+engine runs, for VP9, H.264 and H.265 alike.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ drivers/staging/media/sunxi/cedrus/cedrus_context.h  | 8 ++++++++
+ drivers/staging/media/sunxi/cedrus/cedrus_dec_h264.c | 7 +++++++
+ drivers/staging/media/sunxi/cedrus/cedrus_dec_h265.c | 4 ++++
+ drivers/staging/media/sunxi/cedrus/cedrus_dec_vp9.c  | 2 ++
+ 4 files changed, 21 insertions(+)
+
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_context.h b/drivers/staging/media/sunxi/cedrus/cedrus_context.h
+index 8a02dbc05..aadf5246e 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_context.h
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_context.h
+@@ -106,6 +106,14 @@ static inline void cedrus_job_buffer_picture_dma(struct cedrus_context *ctx,
+ 	cedrus_buffer_picture_dma(ctx, buffer, luma_addr, chroma_addr);
+ }
+ 
++/* Whether a frame fits the negotiated pictures: a larger one overruns their buffers */
++static inline bool cedrus_job_picture_fits(struct cedrus_context *ctx, u32 width, u32 height)
++{
++	const struct v4l2_pix_format *pix = &ctx->v4l2.format_picture.fmt.pix;
++
++	return width <= pix->width && height <= pix->height;
++}
++
+ static inline void cedrus_job_buffer_picture_ref_dma(struct cedrus_context *ctx,
+ 						     u64 timestamp,
+ 						     dma_addr_t *luma_addr,
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec_h264.c b/drivers/staging/media/sunxi/cedrus/cedrus_dec_h264.c
+index cfd1eddae..aeaabc2ca 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_dec_h264.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec_h264.c
+@@ -719,8 +719,15 @@ static int cedrus_dec_h264_job_configure(struct cedrus_context *cedrus_ctx)
+ {
+ 	struct cedrus_device *dev = cedrus_ctx->proc->dev;
+ 	struct cedrus_dec_h264_context *h264_ctx = cedrus_ctx->engine_ctx;
++	const struct cedrus_dec_h264_job *h264_job = cedrus_ctx->engine_job;
++	const struct v4l2_ctrl_h264_sps *sps = h264_job->sps;
++	unsigned int fields = sps->flags & V4L2_H264_SPS_FLAG_FRAME_MBS_ONLY ? 1 : 2;
+ 	int ret;
+ 
++	if (!cedrus_job_picture_fits(cedrus_ctx, (sps->pic_width_in_mbs_minus1 + 1) * 16,
++				     (sps->pic_height_in_map_units_minus1 + 1) * 16 * fields))
++		return -EINVAL;
++
+ 	if (cedrus_picture_is_scaled(cedrus_ctx)) {
+ 		dma_addr_t luma_addr, chroma_addr;
+ 
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec_h265.c b/drivers/staging/media/sunxi/cedrus/cedrus_dec_h265.c
+index 63ed7b847..c6e7fd133 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_dec_h265.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec_h265.c
+@@ -608,6 +608,10 @@ static int cedrus_dec_h265_job_configure(struct cedrus_context *cedrus_ctx)
+ 	int count;
+ 	u32 value;
+ 
++	if (!cedrus_job_picture_fits(cedrus_ctx, sps->pic_width_in_luma_samples,
++				     sps->pic_height_in_luma_samples))
++		return -EINVAL;
++
+ 	cedrus_buffer_picture = cedrus_job_buffer_picture(cedrus_ctx);
+ 	h265_buffer_picture = cedrus_buffer_picture->engine_buffer;
+ 
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec_vp9.c b/drivers/staging/media/sunxi/cedrus/cedrus_dec_vp9.c
+index 17099f3c5..3c7f2a75b 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_dec_vp9.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec_vp9.c
+@@ -792,6 +792,8 @@ static int cedrus_vp9_job_configure(struct cedrus_context *ctx)
+ 
+ 	cur_w = dec->frame_width_minus_1 + 1;
+ 	cur_h = dec->frame_height_minus_1 + 1;
++	if (!cedrus_job_picture_fits(ctx, cur_w, cur_h))
++		return -EINVAL;
+ 	p010 = cedrus_picture_is_p010(ctx);
+ 	afbc = cedrus_recon_is_afbc(ctx);
+ 
+-- 
+2.47.3
+

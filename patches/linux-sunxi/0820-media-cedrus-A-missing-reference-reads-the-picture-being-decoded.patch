@@ -1,0 +1,160 @@
+From da7942f9920dcdb3258ec783b9467e923c961941 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Tue, 17 Nov 2026 20:09:06 +0000
+Subject: [PATCH] media: cedrus: A missing reference reads the picture being
+ decoded
+
+A reference whose timestamp names no queued picture was programmed at
+DMA address 0 for MPEG-2, VP8 and VP9: the engine read unmapped memory,
+the IOMMU faulted ("Page fault for 0x...020000 (master 2, dir rd)") and
+the job timed out. GStreamer's VA VP9 decoder hands timestamp 0 for every
+reference after a stream changes size, so each such picture cost a 2 s
+timeout. H.264 left such an entry of a reference list naming the frame
+list's slot 0, whatever it held, and H.265 the frame info slot of the
+picture before.
+
+Like VC-1 and MPEG-4 already did at their call sites, and like other
+stateless decoders, read the picture being decoded instead: the picture
+decodes wrong but the engine never faults. MPEG-4's own fallback is now
+the shared one.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ .../staging/media/sunxi/cedrus/cedrus_context.h   |  8 +++-----
+ .../staging/media/sunxi/cedrus/cedrus_dec_h264.c  |  5 ++++-
+ .../staging/media/sunxi/cedrus/cedrus_dec_h265.c  |  4 ++--
+ .../staging/media/sunxi/cedrus/cedrus_dec_mpeg4.c | 15 +++++----------
+ .../staging/media/sunxi/cedrus/cedrus_dec_vp9.c   |  8 +++-----
+ 5 files changed, 17 insertions(+), 23 deletions(-)
+
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_context.h b/drivers/staging/media/sunxi/cedrus/cedrus_context.h
+index 5c7a41de5..8a02dbc05 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_context.h
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_context.h
+@@ -116,11 +116,9 @@ static inline void cedrus_job_buffer_picture_ref_dma(struct cedrus_context *ctx,
+ 	struct cedrus_buffer *cedrus_buffer;
+ 
+ 	vb2_buffer = vb2_find_buffer(queue, timestamp);
+-	if (!vb2_buffer) {
+-		*luma_addr = 0;
+-		*chroma_addr = 0;
+-		return;
+-	}
++	/* A reference no longer queued reads the picture being decoded, never address 0 */
++	if (!vb2_buffer)
++		vb2_buffer = &ctx->job.buffer_picture->vb2_buf;
+ 
+ 	cedrus_buffer = container_of(vb2_buffer, struct cedrus_buffer,
+ 				     m2m_buffer.vb.vb2_buf);
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec_h264.c b/drivers/staging/media/sunxi/cedrus/cedrus_dec_h264.c
+index b52b8f1d6..cfd1eddae 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_dec_h264.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec_h264.c
+@@ -411,6 +411,7 @@ static void _cedrus_write_ref_list(struct cedrus_context *ctx,
+ 	struct cedrus_dec_h264_job *h264_job = ctx->engine_job;
+ 	const struct v4l2_ctrl_h264_decode_params *decode =
+ 		h264_job->decode_params;
++	const struct cedrus_dec_h264_buffer *h264_buffer_picture = cedrus_job_engine_buffer(ctx);
+ 	u8 sram_array[CEDRUS_DEC_H264_MAX_REF_IDX];
+ 	unsigned int i;
+ 	size_t size;
+@@ -423,6 +424,8 @@ static void _cedrus_write_ref_list(struct cedrus_context *ctx,
+ 		const struct v4l2_h264_dpb_entry *dpb;
+ 		u8 dpb_idx;
+ 
++		/* An entry naming no queued picture reads the one being decoded */
++		sram_array[i] = h264_buffer_picture->position << 1;
+ 		dpb_idx = ref_list[i].index;
+ 		if (dpb_idx >= V4L2_H264_NUM_DPB_ENTRIES)
+ 			continue;
+@@ -439,7 +442,7 @@ static void _cedrus_write_ref_list(struct cedrus_context *ctx,
+ 
+ 		h264_buffer_ref = cedrus_buffer_ref->engine_buffer;
+ 
+-		sram_array[i] |= h264_buffer_ref->position << 1;
++		sram_array[i] = h264_buffer_ref->position << 1;
+ 		if (ref_list[i].fields == V4L2_H264_BOTTOM_FIELD_REF)
+ 			sram_array[i] |= BIT(0);
+ 	}
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec_h265.c b/drivers/staging/media/sunxi/cedrus/cedrus_dec_h265.c
+index 3f8df6e24..63ed7b847 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_dec_h265.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec_h265.c
+@@ -327,12 +327,12 @@ cedrus_dec_h265_frame_info_write_dpb(struct cedrus_context *ctx,
+ 		struct cedrus_buffer *buffer =
+ 			cedrus_buffer_picture_find(ctx, dpb[i].timestamp);
+ 
+-		/* a stream with a gap names references the queue no longer holds */
++		/* a reference the queue no longer holds reads the picture being decoded */
+ 		if (!buffer) {
+ 			dev_dbg_ratelimited(ctx->proc->dev->dev,
+ 					    "reference %llu not queued\n",
+ 					    dpb[i].timestamp);
+-			continue;
++			buffer = cedrus_job_buffer_picture(ctx);
+ 		}
+ 
+ 		cedrus_dec_h265_frame_info_write_single(ctx, buffer, i,
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec_mpeg4.c b/drivers/staging/media/sunxi/cedrus/cedrus_dec_mpeg4.c
+index f633e8bce..7e7a2bc34 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_dec_mpeg4.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec_mpeg4.c
+@@ -416,8 +416,7 @@ static int cedrus_dec_mpeg4_reference_update(struct cedrus_context *ctx,
+ }
+ 
+ static void cedrus_dec_mpeg4_reference_write(struct cedrus_context *ctx,
+-					     u64 timestamp, dma_addr_t luma,
+-					     dma_addr_t chroma, u32 luma_reg,
++					     u64 timestamp, u32 luma_reg,
+ 					     u32 chroma_reg)
+ {
+ 	struct cedrus_device *dev = ctx->proc->dev;
+@@ -425,10 +424,6 @@ static void cedrus_dec_mpeg4_reference_write(struct cedrus_context *ctx,
+ 
+ 	cedrus_job_buffer_picture_ref_dma(ctx, timestamp, &ref_luma,
+ 					  &ref_chroma);
+-	if (!ref_luma) {
+-		ref_luma = luma;
+-		ref_chroma = chroma;
+-	}
+ 
+ 	cedrus_write(dev, luma_reg, ref_luma);
+ 	cedrus_write(dev, chroma_reg, ref_chroma);
+@@ -642,11 +637,11 @@ static int cedrus_dec_mpeg4_job_configure(struct cedrus_context *ctx)
+ 	cedrus_write(dev, VE_DEC_MPEG_REC_LUMA, luma_addr);
+ 	cedrus_write(dev, VE_DEC_MPEG_REC_CHROMA, chroma_addr);
+ 
+-	cedrus_dec_mpeg4_reference_write(ctx, vop->forward_ref_ts, luma_addr,
+-					 chroma_addr, VE_DEC_MPEG_FWD_REF_LUMA_ADDR,
++	cedrus_dec_mpeg4_reference_write(ctx, vop->forward_ref_ts,
++					 VE_DEC_MPEG_FWD_REF_LUMA_ADDR,
+ 					 VE_DEC_MPEG_FWD_REF_CHROMA_ADDR);
+-	cedrus_dec_mpeg4_reference_write(ctx, vop->backward_ref_ts, luma_addr,
+-					 chroma_addr, VE_DEC_MPEG_BWD_REF_LUMA_ADDR,
++	cedrus_dec_mpeg4_reference_write(ctx, vop->backward_ref_ts,
++					 VE_DEC_MPEG_BWD_REF_LUMA_ADDR,
+ 					 VE_DEC_MPEG_BWD_REF_CHROMA_ADDR);
+ 
+ 	/* Coded buffer. */
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec_vp9.c b/drivers/staging/media/sunxi/cedrus/cedrus_dec_vp9.c
+index 5103c19aa..17099f3c5 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_dec_vp9.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec_vp9.c
+@@ -305,11 +305,9 @@ static void cedrus_vp9_picture_dma(struct cedrus_context *ctx,
+ 				   dma_addr_t *luma_addr,
+ 				   dma_addr_t *chroma_addr)
+ {
+-	if (!buffer) {
+-		*luma_addr = 0;
+-		*chroma_addr = 0;
+-		return;
+-	}
++	/* A reference no longer queued reads the picture being decoded, never address 0 */
++	if (!buffer)
++		buffer = container_of(ctx->job.buffer_picture, struct cedrus_buffer, m2m_buffer.vb);
+ 
+ 	cedrus_buffer_picture_dma(ctx, buffer, luma_addr, chroma_addr);
+ }
+-- 
+2.47.3
+
