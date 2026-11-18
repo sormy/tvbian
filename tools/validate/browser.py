@@ -6,8 +6,8 @@ On the host:
   browser.py run --box root@<box> [--only REGEX] [--falkon-root DIR] [--user NAME]
 The clips are made once by the host's FFmpeg into build/validate/browser/clips; this script and the
 clips go to a private directory under the box's /var/tmp, which goes on exit. Firefox and Chromium
-run only on a GPU with GLES 3. Each browser runs in a headless cage at 1920x1080, as the user
-logged into the box unless --user names one. Exit 1 on any FAIL.
+run only on a GPU with GLES 3. Each browser runs in a headless labwc, the desktop's compositor, at
+1920x1080, as the user logged into the box unless --user names one. Exit 1 on any FAIL.
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ import io
 import json
 import os
 import re
+import shlex
 import shutil
 import signal
 import tempfile
@@ -232,18 +233,18 @@ def browsers(profiles: Path, falkon_root: Path | None) -> list[Browser]:
         command += ["--autoplay-policy=no-user-gesture-required"]
         found.append(Browser("chromium", command, {}))
     if falkon_root:
-        local = falkon_root / "usr/local"
-        libs = f"{local}/lib:{local}/lib/aarch64-linux-gnu"
+        usr = falkon_root / "usr"
+        libs = f"{usr}/lib:{usr}/lib/aarch64-linux-gnu"
         env = {
             "QT_QPA_PLATFORM": "wayland",
             "LD_LIBRARY_PATH": libs,
-            "FALKON_PLUGIN_PATH": f"{local}/lib/aarch64-linux-gnu/plugins/falkon",
-            "XDG_DATA_DIRS": f"{local}/share:/usr/share",
+            "FALKON_PLUGIN_PATH": f"{usr}/lib/aarch64-linux-gnu/qt6/plugins/falkon",
+            "XDG_DATA_DIRS": f"{usr}/share:/usr/share",
             "XDG_CONFIG_HOME": str(profiles / "falkon/config"),
             "XDG_DATA_HOME": str(profiles / "falkon/data"),
             "XDG_CACHE_HOME": str(profiles / "falkon/cache"),
         }
-        found.append(Browser("falkon-wpe", [f"{local}/bin/falkon", "--no-remote"], env))
+        found.append(Browser("falkon-wpe", [f"{usr}/bin/falkon", "--no-remote"], env))
     return found
 
 
@@ -284,12 +285,11 @@ def play(server: Server, user: str, home: Path, browser: Browser, clip: Path) ->
     shell = f'[ -f {VA_PROFILE} ] && . {VA_PROFILE}; exec "$@"'
     command = ["runuser", "-u", user, "--", "env", "-u", "DBUS_SESSION_BUS_ADDRESS"]
     command += [f"{k}={v}" for k, v in env.items()]
-    command += ["sh", "-c", shell, "sh", "dbus-run-session", "--", "cage", "-s", "--"]
+    command += ["sh", "-c", shell, "sh", "dbus-run-session", "--", "labwc", "-s"]
+    command += [shlex.join(browser.command + [url])]
     log = (home / f"{tag}.log").open("w")
     irqs = irq_count()
-    process = subprocess.Popen(
-        command + browser.command + [url], stdout=log, stderr=log, start_new_session=True
-    )
+    process = subprocess.Popen(command, stdout=log, stderr=log, start_new_session=True)
     try:
         reported = wait_for(
             lambda: tag in server.reports, LOAD_TIMEOUT_S + WARMUP_S + WINDOW_S + RESULT_MARGIN_S
@@ -298,7 +298,7 @@ def play(server: Server, user: str, home: Path, browser: Browser, clip: Path) ->
         stop(process)
         log.close()
     if not reported:
-        return "failed: the page never reported"
+        return f"failed: the page never reported; {last_line(home / f'{tag}.log')}"
     report = server.reports[tag]
     if "error" in report:
         return f"failed: {report['error']}"
@@ -309,6 +309,11 @@ def play(server: Server, user: str, home: Path, browser: Browser, clip: Path) ->
     if fps < clip_rate(clip) * PASS_SHARE or media < PASS_SHARE:
         return f"failed: {measured}"
     return f"pass: {measured}"
+
+
+def last_line(log: Path) -> str:
+    lines = log.read_text(errors="replace").strip().splitlines()
+    return lines[-1] if lines else "the browser printed nothing"
 
 
 def stop(process: subprocess.Popen[bytes]) -> None:
@@ -406,7 +411,11 @@ def main() -> int:
     for name in ("run", "box"):
         p = sub.add_parser(name)
         p.add_argument("--only", default="", help="a regex over <codec>-<size>")
-        p.add_argument("--falkon-root", type=Path, help="Falkon-WPE's install root on the box")
+        p.add_argument(
+            "--falkon-root",
+            type=Path,
+            help="Falkon-WPE's install root on the box, its files under usr/",
+        )
         p.add_argument("--user", help="who runs the browsers: by default, who is logged in")
     sub.choices["run"].add_argument("--box", required=True, help="the box, as ssh reaches it")
     sub.choices["box"].add_argument("--dir", required=True)
