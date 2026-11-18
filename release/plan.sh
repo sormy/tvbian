@@ -96,13 +96,20 @@ for c in extras/*/extra.conf; do
   [ -f "$c" ] || continue
   e=$(basename "$(dirname "$c")")
   debian=$(bash extras/version.sh "$e")
+  if [ "$(bash extras/separator.sh "$e")" = "~tvb" ]; then
+    suite=$(bash extras/version.sh --suite "$e")
+    if dpkg --compare-versions "$suite" ge "$debian" && bash extras/carried.sh "$e" "$suite"; then
+      echo "extra $e retired: Debian's $TVB_BUILD_SUITE has $suite, the backport's $debian, and its patches; delete extras/$e/" >>"$REL/plan"
+      continue
+    fi
+  fi
   if bash extras/carried.sh "$e" "$debian"; then
     echo "extra $e retired: Debian's $debian carries its patches; delete extras/$e/" >>"$REL/plan"
     continue
   fi
   # shellcheck source=/dev/null
   plan extra "$e" "$(. "$c"; echo "$PACKAGE")" "$(bash release/inputs.sh extra "$e" "$debian")" \
-    "$debian" +tvb "$(. "$c"; echo "${SOURCE:-$PACKAGE}")"
+    "$debian" "$(bash extras/separator.sh "$e")" "$(. "$c"; echo "${SOURCE:-$PACKAGE}")"
 done
 plan va-driver - tvb-va-driver "$(bash release/inputs.sh va-driver)"
 for c in session/*/session.conf; do

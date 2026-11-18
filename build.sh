@@ -234,7 +234,7 @@ case "$1" in
           firmware) TVB_BUILD_REVISION=$version run bash package/firmware.sh "$arg" ;;
           base) TVB_BUILD_REVISION=$version run bash package/base.sh ;;
           keyring) TVB_BUILD_REVISION=$version run bash package/keyring.sh ;;
-          extra) TVB_BUILD_REVISION=${version##*+tvb} run bash extras/build.sh "$arg" ;;
+          extra) TVB_BUILD_REVISION=${version##*[+~]tvb} run bash extras/build.sh "$arg" ;;
           va-driver) TVB_BUILD_REVISION=$version run bash va-driver/build.sh ;;
           session) TVB_BUILD_REVISION=$version run bash package/session.sh "$arg" ;;
         esac

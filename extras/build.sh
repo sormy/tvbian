@@ -1,7 +1,8 @@
 #!/bin/bash
 # Build an extra: Debian's own source package with our patches over it, every binary it makes,
-# versioned <Debian's version>+tvb<revision> so apt prefers it over the version it rebuilds; or an
-# upstream release beside Debian's, by the extra's own build.sh, at <VERSION>+tvb<revision>.
+# versioned <Debian's version>+tvb<revision> so apt prefers it over the version it rebuilds, or
+# ~tvb<revision> for a backport from SOURCE_SUITE, so Debian's own of that version replaces it; or
+# an upstream release beside Debian's, by the extra's own build.sh, at <VERSION>+tvb<revision>.
 #   build.sh <name>, from extras/<name>/extra.conf
 set -euo pipefail
 
@@ -11,7 +12,7 @@ EXTRA=/repo/extras/$NAME
 . "$EXTRA/extra.conf"
 
 UPSTREAM_VERSION=$(bash /repo/extras/version.sh "$NAME")
-PACKAGE_VERSION=$UPSTREAM_VERSION+tvb$TVB_BUILD_REVISION
+PACKAGE_VERSION=$UPSTREAM_VERSION$(bash /repo/extras/separator.sh "$NAME")$TVB_BUILD_REVISION
 INPUTS=$(bash /repo/release/inputs.sh extra "$NAME" "$UPSTREAM_VERSION")
 OUT=/out/debs
 # shellcheck source=/dev/null

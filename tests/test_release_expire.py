@@ -51,6 +51,8 @@ def versions(package: str, *each: str) -> Kept:
 
 DEFAULT, NEXT = "linux-image-tvb-rk35xx", "linux-image-tvb-rk35xx-next"
 R69 = "tvb-r69"
+WPE = "libwpewebkit-2.0-1"  # a backport
+MESA = "mesa-libgallium"  # an overlay
 CASES: list[tuple[str, list[Stanza], Kept]] = [
     ("a single version older than the window stays", [deb(R69, "1", OLD)], versions(R69, "1")),
     (
@@ -157,6 +159,23 @@ class ExpireTest(unittest.TestCase):
         index = [deb(R69, v, OLD) for v in ("1", "2", "3")]
         out = expire.expire(index, TODAY, KEEP_DAYS, frozenset({"tvb-r69_1.deb"}))
         self.assertEqual(kept(out), versions(R69, "1", "3"))
+
+    def test_a_backport_stays_while_a_run_ships_it(self) -> None:
+        index = [deb(WPE, v, OLD) for v in ("2.54.2-1~tvb1", "2.54.2-1~tvb2")]
+        out = expire.expire(
+            index, TODAY, KEEP_DAYS, frozenset({"libwpewebkit-2.0-1_2.54.2-1~tvb2.deb"})
+        )
+        self.assertEqual(kept(out), versions(WPE, "2.54.2-1~tvb2"))
+
+    def test_a_backport_no_run_ships_leaves_the_repo(self) -> None:
+        index = [deb(WPE, v, OLD) for v in ("2.54.2-1~tvb1", "2.54.2-1~tvb2")] + [
+            deb(R69, "1", OLD)
+        ]
+        self.assertEqual(kept(expire.expire(index, TODAY, KEEP_DAYS)), versions(R69, "1"))
+
+    def test_a_patched_rebuild_keeps_its_newest_unshipped(self) -> None:
+        index = [deb(MESA, "25.0.7-2+deb13u1+tvb1", OLD)]
+        self.assertEqual(kept(expire.expire(index, TODAY, KEEP_DAYS)), kept(index))
 
     def test_no_window_keeps_every_version(self) -> None:
         index = [deb(R69, v, OLD) for v in ("1", "2", "3")] + kernel(DEFAULT, "6.1.170", "1", OLD)

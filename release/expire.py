@@ -2,10 +2,11 @@
 """Merge the published index with this run's new debs, expiring what the repo no longer needs.
 
 A package's newest version stays; an older one stays TVB_APT_KEEP_DAYS after a newer one was
-published, so going back stays possible that long after an upgrade. A package named for a kernel
-release (linux-image-6.1.172-tvb-rk35xx, its headers, its drivers) stays while what it serves
-stays: by a kept package's Depends, or beside a kept package of the same release and version. A deb
-this run built or reused always stays: the images are made of them.
+published, so going back stays possible that long after an upgrade. A backport (~tvb) stays only
+while runs ship it: once the plan retires it, Debian's suite has its version and replaces it. A
+package named for a kernel release (linux-image-6.1.172-tvb-rk35xx, its headers, its drivers) stays
+while what it serves stays: by a kept package's Depends, or beside a kept package of the same
+release and version. A deb this run built or reused always stays: the images are made of them.
 
   Usage: expire.py [--keep-all] <release dir> <debs dir> <repo dir>   (inside the build container)
   --keep-all: a run that publishes nothing expires nothing; it only merges
@@ -24,6 +25,7 @@ import sys
 from pathlib import Path
 
 PUBLISHED = "X-Tvb-Published"
+BACKPORT = "~tvb"
 KERNEL_RELEASE = re.compile(r"-(\d+\.\d+\S*?-tvb-[\w.+-]+)$")
 DEPENDENCY = re.compile(r"^([^\s(]+)(?:\s*\((<<|<=|=|>=|>>)\s*([^)]+)\))?$")
 
@@ -90,6 +92,8 @@ def expire(
     kept = {id(s): s for s in index if s.filename in shipped}
     for package in {s.package for s in index if not s.release}:
         versions = [s for s in index if s.package == package]  # oldest first
+        if BACKPORT in versions[-1].version and versions[-1].filename not in shipped:
+            continue  # retired: the suite has its version
         kept[id(versions[-1])] = versions[-1]
         for older, newer in zip(versions, versions[1:]):
             if newer.published >= cutoff:  # replaced inside the window

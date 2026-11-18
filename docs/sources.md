@@ -64,10 +64,27 @@ Host tools carry our patches and touch boards directly; they move by hand.
 
 ## Extras
 
+Three kinds, told apart by `extra.conf`, each with its own lifecycle:
+
+| Kind        | Conf                        | Names    | Version             | Rebuilt when                      | Retired when                      |
+| ----------- | --------------------------- | -------- | ------------------- | --------------------------------- | --------------------------------- |
+| New package | `VERSION`, upstream's       | our own  | `<upstream>+tvb<n>` | we bump `VERSION`                 | we drop it                        |
+| Overlay     | `SOURCE`                    | Debian's | `<Debian's>+tvb<n>` | the suite updates its source      | Debian's version carries our fix  |
+| Backport    | `SOURCE` and `SOURCE_SUITE` | Debian's | `<Debian's>~tvb<n>` | `SOURCE_SUITE` updates its source | the suite has its version and fix |
+
+A retired backport leaves the repo at the next publish (`release/expire.py`); an overlay's or new
+package's newest stays.
+
+No backport has retired yet: `wpewebkit`, the one backport, carries patches upstream does not have
+(see `patches/wpewebkit/README.md`), and a backport retires only once all of its patches are
+upstream.
+
 A fix Debian does not ship yet ships as an extra, shadowing Debian's package:
 `extras/<package>/extra.conf` names the Debian source, the package the plan tracks, our patches.
 `./build.sh extra <package>` rebuilds Debian's newest version of that source with the patches over
-it, every binary it makes, versioned `<Debian's>+tvb<n>`, so apt takes ours. A newer Debian version
+it, every binary it makes, versioned `<Debian's>+tvb<n>`, so apt takes ours. A backport, a newer
+version from another suite (`SOURCE_SUITE`), is `<Debian's>~tvb<n>` instead: still newer than the
+suite's, and replaced by Debian's own build once the suite has that version. A newer Debian version
 moves the plan's inputs, and the next release rebuilds the extra on it; until then Debian's wins, so
 a security update is never held back. Each patch is upstream's commit, backported, or written to go
 upstream as it is. Once every patch applies in reverse to Debian's newest source
