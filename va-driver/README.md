@@ -306,6 +306,8 @@ VA carries none of these whole.
 - **Late binding:** both engines choose their own CAPTURE buffer, so a picture binds to its surface
   late. It is exported in place when the surface has no memory of its own and the layout is the
   surface's, and copied by the CPU when it has, or when it is read in another layout.
+- **A context closed** first drains the pictures its surfaces still wait for: FFmpeg closes one at a
+  size change, and a site's player switches size mid-stream.
 
 ## Surfaces, encode, VideoProc
 

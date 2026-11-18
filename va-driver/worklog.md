@@ -287,3 +287,7 @@ real time on Cedrus whatever the driver: about 25 fps flat out, 180 of 288 frame
   exports one surface at the start and takes its layout for every surface's, so a surface derived
   and let go was not enough to keep. Re-laid now for VP9 alone, and never once a surface was
   exported; FFmpeg only derives one to test. VP9 1080p 326 fps, the suite as before.
+- `vp9-switch` lost the last picture before each size change through FFmpeg on `rk35xx`: FFmpeg
+  closes the context at a change, and the MPP decoder went with that picture still in it, so its
+  sync failed. A context now drains every picture its surfaces wait for before it closes:
+  `vp9-switch` decodes 90 of 90 identical on `rk35xx`.

@@ -269,8 +269,12 @@ static void free_context(struct driver *drv, struct context *c)
     pthread_mutex_lock(&drv->lock);
     for (unsigned i = 0; i < drv->surfaces.capacity; i++) {
         struct surface *s = drv->surfaces.items[i];
-        if (s && s->context == c)
-            s->context = NULL;
+        if (!s || s->context != c)
+            continue;
+        /* a picture still in the engine drained into its surface, which outlives the context */
+        if (c->engine && drv->backend->sync && s->submitted && !s->delivered && !s->hidden)
+            drv->backend->sync(drv, c, (VASurfaceID)(i + 1), true);
+        s->context = NULL;
     }
     pthread_mutex_unlock(&drv->lock);
     if (is_encode(c->config->offer->entrypoint))
