@@ -18,9 +18,23 @@ What spans the family's boards.
 - [ ] **The factory microcode our decoder does not drive**: the M20's `video_ucode.bin` also holds
       `gxl_h263` (an H.263 decoder), `gxl_xvid_multi`, `gxl_mjpeg_multi` and the AVS builds. Whether
       the multi-instance MPEG-4 decodes interlaced and quarter-pel MPEG-4 closer to software.
-- [ ] **The S905L3 decodes HEVC 4K60**, as its rating says: `ffmpeg9`'s `v4l2m2m` gets 53 fps at
-      4K30 with `0038`'s compressed references (VP9 67). Its clock is already the factory's highest,
-      667 MHz.
+- [ ] **7.3 decodes 4K slower than 6.18 outside the decoder**: `ffmpeg9`'s `v4l2m2m` on the M20 gets
+      VP9 4K 15.6 fps without `0038`'s compressed references (6.18: 46) at the same 19 ms a picture
+      in the decoder, and HEVC 4K 47 with them (6.18: 53).
+- [ ] **The S905L3 decodes HEVC 4K60 for a CPU reader**: 62 fps when the reader skips the CAPTURE
+      cache syncs (`V4L2_BUF_FLAG_NO_CACHE_INVALIDATE`, `_CLEAN`), 53 with them (`ffmpeg9`'s
+      `v4l2m2m`): the 12 MB invalidate runs in the interrupt thread while the decoder waits. Moved
+      to DQBUF it waits on the queue lock instead; completing pictures from a worker would hide it.
+- [ ] **Pictures in decode order on request**, so GStreamer's va decoders run on the M20:
+      `V4L2_CID_MPEG_VIDEO_DEC_DISPLAY_DELAY` 0 in `codec_hevc`'s and `codec_h264_g12a`'s output,
+      which the driver decides. H.264 on the GXLX2 runs the legacy microcode, whose DPB reorders by
+      itself: it first needs the multi-instance one the factory `amvdec_mh264.ko` drove.
+- [ ] **A VP9 picture out once decoded**, not at the next one's header: `codec_vp9` handles only
+      `VP9_HEAD_PARSER_DONE`, so `codec_vp9_show_frame` returns picture N when packet N+1 arrives. A
+      client that waits for each picture before the next packet, as GStreamer's `vavp9dec` does,
+      stalls: "No dst buffer available", then a dropped frame. The vendor's VP9 driver ends a
+      picture on `HEVC_DECPIC_DATA_DONE`; whether this microcode raises it on a stream is to be
+      found.
 - [ ] **A JPEG encoder on the S905L3**: the factory `video_ucode.bin` carries `gxl_jpeg_enc`.
 - [ ] **"Buffer N done but it doesn't exist in m2m_ctx"** still once in 15 MJPEG and MPEG-4 drains
       and restarts after `0037`: another path completes a buffer twice.

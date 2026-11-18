@@ -23,5 +23,7 @@
 
 - [ ] **H616: 4K H.264 and VP8 on the screen**, linear frames as their decoder writes them: count
       underflows and frames shown, then settle the READMEs' "to 4K" mark.
+- [ ] **H616: H.264 4K60**: the engine takes 24 ms a 4K picture, a 41 fps ceiling, with linear
+      references; stock's `libawh264` has no compressed ones to follow, as H.265 and VP9 had.
 - [ ] **VC-1 Main's B pictures on Cedrus** decode exact: SMPTE's SMM0005 gives them at 37 to 58 dB,
       I and P bit-exact, so `0815` refuses a Main sequence with B pictures. Its P pictures use 4MV.
