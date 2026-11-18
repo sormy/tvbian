@@ -1,0 +1,113 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Tue, 17 Nov 2026 15:03:38 -0500
+Subject: [PATCH] media: meson: vdec: CAPTURE buffers as many as CMA holds
+
+0014 capped CAPTURE at 16 buffers above 1080p, so that the decoder's
+workspace still fit the 384 MiB CMA pool it was written for. The cap
+is the codec's own minimum for VP9, leaving a client none spare: a VA
+driver showing a picture while the decoder fills the rest must copy
+every 4K picture out.
+
+Size the cap from the free CMA instead, less 32 MiB for what the decoder
+takes when it starts (HEVC at 4K takes 25), never below the codec's
+minimum. With cma=512M a 4K VP9 or HEVC stream gets the 24 a client asks
+for, bit-identical to software; a smaller pool gets fewer, as before.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/vdec/vdec.c b/vdec/vdec.c
+index b06b814af..664058acb 100644
+--- a/vdec/vdec.c
++++ b/vdec/vdec.c
+@@ -4,6 +4,7 @@
+  * Author: Maxime Jourdan <mjourdan@baylibre.com>
+  */
+ 
++#include <linux/mm.h>
+ #include <linux/of.h>
+ #include <linux/clk.h>
+ #include <linux/io.h>
+@@ -34,8 +35,8 @@ struct dummy_buf {
+ /* 16 MiB for parsed bitstream swap exchange */
+ #define SIZE_VIFIFO SZ_16M
+ #define VDEC_INACTIVE_TIMEOUT_MS 1000
+-#define VDEC_FHD_PIXELS (1920 * 1088)
+-#define VDEC_MAX_BUFFERS_UHD 16
++/* what the decoder takes from CMA when it starts, beside CAPTURE: HEVC at 4K, 25 MiB */
++#define VDEC_START_CMA SZ_32M
+ 
+ bool amvdec_fbc_reference = true;
+ module_param_named(fbc_reference, amvdec_fbc_reference, bool, 0644);
+@@ -586,10 +587,18 @@ static const struct v4l2_m2m_ops vdec_m2m_ops = {
+ 	.job_abort = vdec_m2m_job_abort,
+ };
+ 
++/* Buffers of this size the free CMA holds beside what the decoder takes when it starts */
++static unsigned int vdec_cma_buffers(unsigned long size)
++{
++	unsigned long free = global_zone_page_state(NR_FREE_CMA_PAGES) << PAGE_SHIFT;
++
++	return free > VDEC_START_CMA ? (free - VDEC_START_CMA) / size : 0;
++}
++
+ static void process_num_buffers(struct vb2_queue *q,
+ 				struct amvdec_session *sess,
+ 				unsigned int *num_buffers,
+-				bool is_reqbufs)
++				bool is_reqbufs, unsigned long size)
+ {
+ 	const struct amvdec_format *fmt_out = sess->fmt_out;
+ 	unsigned int q_num_bufs = vb2_get_num_buffers(q);
+@@ -600,9 +609,9 @@ static void process_num_buffers(struct vb2_queue *q,
+ 	if (is_reqbufs)
+ 		buffers_total = max(buffers_total, fmt_out->min_buffers);
+ 	buffers_total = min(buffers_total, fmt_out->max_buffers);
+-	/* past 1080p, more leaves the CMA pool short of the decoder's workspace */
+-	if (amvdec_ref_width(sess) * amvdec_ref_height(sess) > VDEC_FHD_PIXELS)
+-		buffers_total = min(buffers_total, VDEC_MAX_BUFFERS_UHD);
++	/* as many as CMA holds and the decoder still starts, never below the codec's minimum */
++	buffers_total = min(buffers_total,
++			    max(q_num_bufs + vdec_cma_buffers(size), fmt_out->min_buffers));
+ 	*num_buffers = buffers_total - q_num_bufs;
+ 
+ 	/* We need to program the complete CAPTURE buffer list
+@@ -614,6 +623,16 @@ static void process_num_buffers(struct vb2_queue *q,
+ 	q->min_queued_buffers = max(fmt_out->min_buffers, sess->num_dst_bufs);
+ }
+ 
++static unsigned long vdec_buffer_size(unsigned int num_planes, const unsigned int sizes[])
++{
++	unsigned long size = 0;
++	unsigned int plane;
++
++	for (plane = 0; plane < num_planes; plane++)
++		size += sizes[plane];
++	return size;
++}
++
+ static int vdec_queue_setup(struct vb2_queue *q, unsigned int *num_buffers,
+ 			    unsigned int *num_planes, unsigned int sizes[],
+ 			    struct device *alloc_devs[])
+@@ -658,7 +677,8 @@ static int vdec_queue_setup(struct vb2_queue *q, unsigned int *num_buffers,
+ 				return -EINVAL;
+ 			}
+ 
+-			process_num_buffers(q, sess, num_buffers, false);
++			process_num_buffers(q, sess, num_buffers, false,
++					    vdec_buffer_size(*num_planes, sizes));
+ 			break;
+ 		}
+ 
+@@ -696,7 +716,8 @@ static int vdec_queue_setup(struct vb2_queue *q, unsigned int *num_buffers,
+ 			return -EINVAL;
+ 		}
+ 
+-		process_num_buffers(q, sess, num_buffers, true);
++		process_num_buffers(q, sess, num_buffers, true,
++				    vdec_buffer_size(*num_planes, sizes));
+ 		break;
+ 	default:
+ 		return -EINVAL;
+-- 
+2.47.3
