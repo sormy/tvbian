@@ -1,8 +1,10 @@
 # Building TVBian
 
 `./build.sh` runs every step in one container image, `build-env/Containerfile` on Debian stable.
-Outputs land in `build/out/`; the kernel tree and caches in the `tvb-work` volume. A tree deleted
-from the volume frees nothing on a macOS host until the volume is trimmed:
+Outputs land in `build/out/`; the kernel tree and caches in the `tvb-work` volume. Builds share its
+tree, so one runs at a time: each container is labelled `project=tvbian` and `tvbian.work=tvb-work`,
+and a step refuses to start while another holds the volume. A tree deleted from the volume frees
+nothing on a macOS host until the volume is trimmed:
 
 ```sh
 container run --rm --cap-add CAP_SYS_ADMIN -v tvb-work:/work debian:trixie fstrim -v /work   # host

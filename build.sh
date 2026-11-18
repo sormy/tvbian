@@ -133,21 +133,38 @@ if [ "$RT" = container ] && ! container system status >/dev/null 2>&1; then
   exit 1
 fi
 
+work_holder() {  # the running container labelled with the work volume, if any
+  if [ "$RT" = podman ]; then
+    podman ps --filter "label=tvbian.work=$WORK" --format '{{.Names}}'
+  else
+    container list --format json | python3 -c '
+import json, sys
+for c in json.load(sys.stdin):
+    if c["configuration"].get("labels", {}).get("tvbian.work") == sys.argv[1]:
+        print(c["configuration"]["id"])' "$WORK"
+  fi
+}
+
 run() {  # run a command inside the image, the repo read-only at /repo
   local rel="" ccache=()
   "$RT" image inspect "$IMAGE" >/dev/null 2>&1 ||
     "$RT" build ${PLATFORM:+"$PLATFORM"} --build-arg SUITE="$SUITE" -t "$IMAGE" -f build-env/Containerfile build-env
   mkdir -p "$OUT/debs"
   [ "$RT" = podman ] && rel=",Z"   # SELinux hosts relabel bind mounts; a no-op elsewhere
-  "$RT" volume create "$WORK" >/dev/null 2>&1 || true
+  "$RT" volume create --label project=tvbian "$WORK" >/dev/null 2>&1 || true
   if [ -n "${TVB_BUILD_CCACHE_DIR:-}" ]; then
     mkdir -p "$TVB_BUILD_CCACHE_DIR"
     ccache=(-v "$TVB_BUILD_CCACHE_DIR:/ccache${rel:+:${rel#,}}" -e CCACHE_DIR=/ccache)
   fi
+  # builds share the volume's tree: one at a time
+  local holder
+  holder=$(work_holder)
+  [ -z "$holder" ] || { echo "$holder is building in $WORK: wait for it" >&2; exit 1; }
   # Apple container does not forward a signal to the container: stop it by name
   local name=tvb-$$
   trap '"$RT" stop "$name" >/dev/null 2>&1; exit 130' INT TERM
-  "$RT" run ${PLATFORM:+"$PLATFORM"} --rm --name "$name" --cpus "$CPUS" --memory "$MEMORY" -e TVB_BUILD_CPUS="$CPUS" -e TVB_BUILD_REVISION="${TVB_BUILD_REVISION:-0~local}" \
+  "$RT" run ${PLATFORM:+"$PLATFORM"} --rm --name "$name" -l project=tvbian -l tvbian.work="$WORK" \
+    --cpus "$CPUS" --memory "$MEMORY" -e TVB_BUILD_CPUS="$CPUS" -e TVB_BUILD_REVISION="${TVB_BUILD_REVISION:-0~local}" \
     -e TVB_BUILD_CACHE="${TVB_BUILD_CACHE:-1}" -e TVB_BUILD_CCACHE_SIZE="${TVB_BUILD_CCACHE_SIZE:-5G}" \
     -e TVB_BUILD_SUITE="$SUITE" -e TVB_APT_KEEP_DAYS="${TVB_APT_KEEP_DAYS:-183}" \
     -v "$WORK:/work" -v "$PWD:/repo:ro$rel" -v "$PWD/$OUT:/out${rel:+:${rel#,}}" ${ccache[@]+"${ccache[@]}"} \

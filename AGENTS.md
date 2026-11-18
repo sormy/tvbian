@@ -68,6 +68,9 @@ at once with `./build.sh boards`. **From the host:** a container runtime, on mac
 for a board whose image carries a FAT boot partition. **On the box:** `evtest`, `fio`, `stress-ng`,
 `iw`, `bluez`.
 
+**Every container and volume a session makes is labelled `project=tvbian`**, as `./build.sh`'s are:
+an unlabelled one is stray, deleted once its owner says so.
+
 **`e2tools`** (`./build.sh tool e2tools`) — edit a box's ext4 rootfs on an SD card or USB stick from
 a Mac, which cannot mount ext4; the stock one corrupts an image on delete.
 
