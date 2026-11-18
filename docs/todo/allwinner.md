@@ -25,5 +25,3 @@
       underflows and frames shown, then settle the READMEs' "to 4K" mark.
 - [ ] **VC-1 Main's B pictures on Cedrus** decode exact: SMPTE's SMM0005 gives them at 37 to 58 dB,
       I and P bit-exact, so `0815` refuses a Main sequence with B pictures. Its P pictures use 4MV.
-
-- [ ] **`0816` to `0819` on 7.3** (sunxi64-next).
