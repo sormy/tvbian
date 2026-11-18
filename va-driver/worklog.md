@@ -297,3 +297,10 @@ real time on Cedrus whatever the driver: about 25 fps flat out, 180 of 288 frame
   told `-noautoscale`, so 30 frames read as wrong on every codec. A switch is a context each in
   FFmpeg, so its rebuilt headers and mapped controls are no longer compared: the host checks pass
   whole.
+- FFmpeg through the driver on `sunxi-h616` fell to 55% of the engine's rate, 1080p and 4K alike,
+  with twice the CPU; GStreamer kept its rate. Not heat and not the kernel: 6.18.63 and 6.18.64 both
+  read 16.3 s, cool. FFmpeg derives one surface's image at start, to see whether it can, and a
+  surface derived once had become seen for good, so that one kept its own memory and each picture
+  decoded into it was copied. A surface is seen again while its derived images are open; GStreamer
+  keeps the layout of an export, which the driver-wide flag covers. HEVC 1080p 127 to 173 fps,
+  `rk35xx` VP9 1080p still 335.

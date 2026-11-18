@@ -346,7 +346,9 @@ static VAStatus destroy_context(VADriverContextP ctx, VAContextID context_id)
 
 static void free_buffer(struct va_buffer *b)
 {
-    if (b && !b->derived_from)
+    if (b && b->derived_from)
+        b->derived_from->images--;
+    else if (b)
         free(b->data);
     free(b);
 }

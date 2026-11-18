@@ -189,7 +189,7 @@ static int ensure_decodable_backing(struct driver *drv, VASurfaceID id, struct s
 
 void surface_drop_unseen_backing(struct surface *s)
 {
-    if (s->backing && !s->exported && !s->derived) {
+    if (s->backing && !s->exported && !s->images) {
         backing_free(s->backing);
         s->backing = NULL;
     }
@@ -646,7 +646,7 @@ static VAStatus derive_image(VADriverContextP ctx, VASurfaceID surface_id, VAIma
     const struct backing *backing = s->backing;
     *b = (struct va_buffer){ .type = VAImageBufferType, .element_size = backing->size,
                              .num_elements = 1, .data = backing->map, .derived_from = s };
-    s->derived = true;
+    s->images++;
     *image = (VAImage){
         .format = s->fourcc == VA_FOURCC_P010 ? image_formats[1] : image_formats[0],
         .width = s->width,
@@ -657,8 +657,10 @@ static VAStatus derive_image(VADriverContextP ctx, VASurfaceID surface_id, VAIma
         .offsets = { 0, backing->chroma_offset },
     };
     VAStatus status = add_image(drv, image, b);
-    if (status != VA_STATUS_SUCCESS)
+    if (status != VA_STATUS_SUCCESS) {
+        s->images--;
         free(b);
+    }
     return status;
 }
 
@@ -669,7 +671,9 @@ static VAStatus destroy_image(VADriverContextP ctx, VAImageID image_id)
     if (!image)
         return VA_STATUS_ERROR_INVALID_IMAGE;
     struct va_buffer *b = handle_take(drv, &drv->buffers, image->buf);
-    if (b && !b->derived_from)
+    if (b && b->derived_from)
+        b->derived_from->images--;
+    else if (b)
         free(b->data);
     free(b);
     free(image);

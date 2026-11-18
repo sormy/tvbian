@@ -150,9 +150,9 @@ struct surface {
     /* bound late: exported as is while the surface has no backing of its own */
     struct engine_picture *picture;
     struct backing *backing;
-    /* the client has seen its memory, and may still use its layout: exported, or derived */
+    /* the client sees its memory: exported once, or through the derived images still open */
     bool exported;
-    bool derived;
+    unsigned images;
     bool submitted;
     /* its picture came, held as is or copied into its own memory */
     bool delivered;
