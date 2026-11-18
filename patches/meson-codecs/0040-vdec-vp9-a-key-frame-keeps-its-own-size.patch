@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Wed, 18 Nov 2026 01:30:00 -0500
+Subject: [PATCH] media: meson: vdec: vp9: a key frame keeps its own size
+
+An inter frame may take its size from a reference, which the decoder
+reads from the header's same_frame_size bits. It read them on every
+frame, but a key or intra-only frame codes its own size and those bits
+are stale: a key frame at a new resolution took the old size, no source
+change was raised, and every picture after it decoded into buffers of
+the old size.
+
+Take a reference's size only for an inter frame. A stream switching
+854x480, 1920x1080, 854x480 at key frames now decodes bit-identical to
+software, 90 of 90 frames; before, the 1080p part was wrong throughout.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/vdec/codec_vp9.c b/vdec/codec_vp9.c
+index 9cfb9ba..2dc311e 100644
+--- a/vdec/codec_vp9.c
++++ b/vdec/codec_vp9.c
+@@ -1488,6 +1488,13 @@ static void codec_vp9_fetch_rpm(struct amvdec_session *sess)
+ 			vp9->rpm_param.l.data[i + j] = rpm_vaddr[i + 3 - j];
+ }
+ 
++/* intra_only is coded only for a frame not shown */
++static bool codec_vp9_is_intra(const union rpm_param *param)
++{
++	return param->p.frame_type == KEY_FRAME ||
++	       (!param->p.show_frame && param->p.intra_only);
++}
++
+ static int codec_vp9_process_rpm(struct codec_vp9 *vp9)
+ {
+ 	union rpm_param *param = &vp9->rpm_param;
+@@ -1498,9 +1505,10 @@ static int codec_vp9_process_rpm(struct codec_vp9 *vp9)
+ 
+ 	/*
+ 	 * setup_frame_size_with_refs(): an inter frame may take its size
+-	 * from a reference; the ucode then leaves width/height at 0.
++	 * from a reference; the ucode then leaves width/height at 0. A key or
++	 * intra-only frame codes its own size, and same_frame_size is stale.
+ 	 */
+-	for (i = 0; i < REFS_PER_FRAME; ++i) {
++	for (i = 0; i < REFS_PER_FRAME && !codec_vp9_is_intra(param); ++i) {
+ 		int ref = (param->p.ref_info >>
+ 			   (((REFS_PER_FRAME - i - 1) * 4) + 1)) & 0x7;
+ 		struct vp9_frame *frame;
