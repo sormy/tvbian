@@ -67,6 +67,9 @@ MPEG2 = ["-c:v", "mpeg2video", "-q:v", "3", "-bf", "2"]
 MPEG4 = ["-c:v", "mpeg4", "-q:v", "3"]
 H263_SIZE = "352x288"
 FATE = "https://fate-suite.ffmpeg.org/"
+# up and down, as a site's player switches; widths whose I420 rows GStreamer writes unpadded, so
+# its checksums meet FFmpeg's
+SWITCH_SIZES = ("640x360", "1280x720", "640x360")
 
 
 @dataclass(frozen=True)
@@ -82,6 +85,9 @@ class Clip:
     # a FATE sample, its path in the suite and its SHA-256, in place of an encode
     fate: str = ""
     sha256: str = ""
+    # sizes the clip changes to mid-stream, a key frame and its frames each: a context each in
+    # FFmpeg, so its decode is judged, not its rebuilt headers or mapped controls
+    switch: tuple[str, ...] = ()
 
 
 CLIPS: dict[str, Clip] = {
@@ -109,6 +115,9 @@ CLIPS: dict[str, Clip] = {
     "vp9-p2": Clip("VP9Profile2", "webm", VPX9 + ["-profile:v", "2"], ten_bit=True),
     # hidden alt-refs, compound prediction, segmentation, two tile columns
     "vp9-tools": Clip("VP9Profile0", "webm", VPX9_TOOLS, size="1280x720"),
+    "vp9-switch": Clip("VP9Profile0", "ivf", VPX9, switch=SWITCH_SIZES),
+    "h264-switch": Clip("H264High", "h264", X264 + ["-bf", "2"], switch=SWITCH_SIZES),
+    "hevc-switch": Clip("HEVCMain", "hevc", X265, switch=SWITCH_SIZES),
     "vp8": Clip("VP8Version0_3", "webm", VPX8),
     "vp8-odd": Clip("VP8Version0_3", "webm", VPX8, size=ODD_SIZE),
     "mpeg2": Clip("MPEG2Main", "mpg", MPEG2),
@@ -293,6 +302,9 @@ def make_clips(out: Path) -> Iterator[Line]:
         if clip.fate:
             yield f"clip.{name}", fetch(FATE + clip.fate, clip.sha256, path)
             continue
+        if clip.switch:
+            yield f"clip.{name}", make_switch(clip, path)
+            continue
         pix_fmt = "yuv420p10le" if clip.ten_bit else "yuvj420p" if name == "jpeg" else "yuv420p"
         rc, log = run(
             ["ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi"]
@@ -302,6 +314,28 @@ def make_clips(out: Path) -> Iterator[Line]:
             + [str(path)]
         )
         yield f"clip.{name}", "made" if rc == 0 else f"failed: {last_line(log)}"
+
+
+def make_switch(clip: Clip, path: Path) -> str:
+    """Each size's frames encoded apart, a key frame first, then joined in one stream: IVF's
+    frames, or a raw stream's bytes, each part opening with its own parameter sets."""
+    frames: list[bytes] = []
+    for i, size in enumerate(clip.switch):
+        part = path.with_suffix(f".{i}.{clip.container}")
+        rc, log = run(
+            ["ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi"]
+            + ["-i", f"testsrc2=size={size}:rate=30", "-frames:v", str(clip.frames)]
+            + ["-pix_fmt", "yuv420p"]
+            + clip.encoder
+            + [str(part)]
+        )
+        if rc != 0:
+            return f"failed: {last_line(log)}"
+        frames += ivf_frames(part) if clip.container == "ivf" else [part.read_bytes()]
+        part.unlink()
+    joined = ivf(frames, b"VP90", clip.switch[0]) if clip.container == "ivf" else b"".join(frames)
+    path.write_bytes(joined)
+    return "made"
 
 
 def fetch(url: str, sha256: str, path: Path) -> str:
@@ -456,7 +490,9 @@ def decode_case(setup: Setup, name: str, clip: Clip, offers: set[str]) -> Iterat
     for surface_format in TEN_BIT_SURFACES if clip.ten_bit else ["nv12"]:
         download = f"hwdownload,format={surface_format}"
         hardware, log = framemd5(
-            base + decode_args(setup) + ["-i", str(path), "-vf", f"{download},format={sample}"],
+            base
+            + decode_args(setup)
+            + ["-i", str(path), "-vf", f"{download},format={sample}", "-noautoscale"],
             setup.env(),
         )
         if hardware:
@@ -479,9 +515,10 @@ def sample_format(clip: Clip) -> str:
 def software_frames(setup: Setup, path: Path, sample: str) -> list[str]:
     # one thread, as the test engine runs: FFmpeg's MPEG-4 decoder predicts interlaced B-VOPs
     # otherwise when frame-threaded
+    # -noautoscale: each picture at its own size, as a switch clip changes it
     frames, _ = framemd5(
         ["ffmpeg", "-nostdin", "-hide_banner", "-v", "error", "-threads", "1"]
-        + ["-i", str(path), "-pix_fmt", sample],
+        + ["-i", str(path), "-pix_fmt", sample, "-noautoscale"],
         setup.env(),
     )
     return frames
@@ -697,6 +734,9 @@ def gstreamer_decode_case(setup: Setup, name: str, clip: Clip, offers: set[str])
     if not path.exists():
         yield key, "no clip"
         return
+    if clip.switch:
+        yield key, gstreamer_switch(setup, element, path)
+        return
     sample = sample_format(clip)
     # GStreamer pads I420 rows to 4 bytes, so raw frames are packed at a width of a multiple of 8;
     # y4menc packs the others, 8-bit progressive alone as FFmpeg reads it
@@ -732,6 +772,32 @@ def gstreamer_decode_case(setup: Setup, name: str, clip: Clip, offers: set[str])
     yield key, judged(
         hardware, software, engine_ran, log, lambda: psnr_y(setup, decoded, "", path, sample)
     )
+
+
+def gst_checksums(setup: Setup, decoder: str, path: Path) -> tuple[list[str], str]:
+    """Each picture's MD5, at its own size, as the decoder hands it out: FFmpeg's framemd5's."""
+    rc, log = run(
+        ["gst-launch-1.0", "-q", "filesrc", f"location={path}", "!", "parsebin", "!", decoder]
+        + ["!", "videoconvert", "!", "video/x-raw,format=I420", "!", "checksumsink", "hash=md5"],
+        env=setup.env(),
+    )
+    return re.findall(r"\b([0-9a-f]{32})\b", log), log
+
+
+def gstreamer_switch(setup: Setup, element: str, path: Path) -> str:
+    """A size change mid-stream: the va decoder's pictures against FFmpeg's software decode."""
+    software = software_frames(setup, path, "yuv420p")
+    irqs = irq_count()
+    hardware, log = gst_checksums(setup, element, path)
+    engine_ran = not setup.on_box or irq_count() > irqs
+    if not hardware:
+        return f"failed: no frames: {last_line(log)}"
+    if len(hardware) != len(software):
+        return f"failed: {len(hardware)} of {len(software)} frames"
+    if not engine_ran:
+        return "failed: decoded, but the engine's interrupts did not move"
+    differ = sum(h != s for h, s in zip(hardware, software))
+    return f"pass: {len(hardware)} identical" if not differ else f"failed: {differ} frames differ"
 
 
 def gstreamer_encode_case(setup: Setup, name: str, offers: set[str]) -> Iterator[Line]:
@@ -1336,7 +1402,8 @@ def unit_suite(setup: Setup, unit_dir: Path) -> Iterator[Line]:
         if rc != 0 and not any("failed" in line for line in reported):
             yield f"unit.{test.name[5:]}", f"failed: {last_line(log)}"
     for name, clip in CLIPS.items():
-        yield from rebuild_case(setup, unit_dir, name, clip)
+        if not clip.switch:
+            yield from rebuild_case(setup, unit_dir, name, clip)
 
 
 # verdicts
@@ -1380,7 +1447,11 @@ def suite(setup: Setup) -> Iterator[Line]:
             yield from speed_case(setup, name, clip, offers)
     if not setup.on_box:
         for name, clip in CLIPS.items():
-            if clip.profile.startswith(MAPPED_PROFILES) and name != "h264-high10":
+            if (
+                clip.profile.startswith(MAPPED_PROFILES)
+                and name != "h264-high10"
+                and not clip.switch
+            ):
                 yield from mapping_case(setup, name, clip)
 
 

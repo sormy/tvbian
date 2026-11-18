@@ -376,6 +376,10 @@ local Mesa build needs that build's `libglx-mesa0` installed beside them. Exit s
   picture narrowed to 8 bits differs. On a box the engine's interrupts must move. A 10-bit clip
   downloads as P010, or NV12 where the engine narrows. GStreamer's frames are judged against the
   same software decode; it has no MPEG-4, H.263 or VC-1 decoder.
+- **A size change mid-stream** (`vp9-switch`, `h264-switch`, `hevc-switch`): 360p, 720p, 360p, a
+  key frame each, at widths GStreamer writes unpadded. FFmpeg's pictures and GStreamer's, which
+  change size as they come, against FFmpeg's software decode, each picture at its own size. A switch
+  is a context each in FFmpeg, so its rebuilt headers and mapped controls are not compared.
 - **Rebuilds** are replayed from each clip's captured VA buffers (`VAAPI_CAPTURE`) and compared by
   FFmpeg's `trace_headers`; MPEG-4, H.263 and VC-1, which it cannot trace, by `tests/headers.py`.
   The coded data is compared byte for byte.

@@ -291,3 +291,9 @@ real time on Cedrus whatever the driver: about 25 fps flat out, 180 of 288 frame
   closes the context at a change, and the MPP decoder went with that picture still in it, so its
   sync failed. A context now drains every picture its surfaces wait for before it closes:
   `vp9-switch` decodes 90 of 90 identical on `rk35xx`.
+- A browser switches size on every codec, so the suite gained `h264-switch` and `hevc-switch`, and
+  every switch clip went to 360p, 720p, 360p: at 854 wide GStreamer pads its rows, and its
+  checksums could not meet FFmpeg's. FFmpeg scales every picture to the first one's size unless
+  told `-noautoscale`, so 30 frames read as wrong on every codec. A switch is a context each in
+  FFmpeg, so its rebuilt headers and mapped controls are no longer compared: the host checks pass
+  whole.
