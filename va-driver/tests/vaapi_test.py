@@ -754,8 +754,10 @@ def gstreamer_decode_case(setup: Setup, name: str, clip: Clip, offers: set[str])
         env=setup.env(),
     )
     engine_ran = not setup.on_box or irq_count() > irqs
+    # raw frames carry no range: a JPEG's are full, as FFmpeg reads the clip's
+    written = "yuvj420p" if clip.profile.startswith("JPEG") else sample
     decoded = (
-        ["-f", "rawvideo", "-pix_fmt", sample, "-s", clip.size, "-i", str(out)]
+        ["-f", "rawvideo", "-pix_fmt", written, "-s", clip.size, "-i", str(out)]
         if raw
         else ["-i", str(out)]
     )

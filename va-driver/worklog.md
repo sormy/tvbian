@@ -308,3 +308,6 @@ real time on Cedrus whatever the driver: about 25 fps flat out, 180 of 288 frame
   change, and MPP's own resize lost some on the way. A VP9 key frame of another size now gets a
   decoder anew, as the stateless backend's does: all three switch clips 90 of 90 identical through
   FFmpeg and GStreamer.
+- GStreamer's JPEG on `sunxi-h616` read 28.7 dB, and FFmpeg's pictures through the driver were the
+  same bytes: the suite read GStreamer's raw frames as limited range against a full-range JPEG. Read
+  as full range, 77 dB, as FFmpeg's.
