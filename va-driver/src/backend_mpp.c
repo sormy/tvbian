@@ -48,7 +48,7 @@
  * the target then gets a copy */
 struct committed {
     int fd;
-    size_t size;
+    struct backing_layout layout;
     MppBuffer buffer;
     bool spare;
 };
@@ -60,6 +60,8 @@ struct mpp_decoder {
      * which the CPU unpacks NV15 and copies pictures out of */
     MppBufferGroup group;
     bool into_surfaces;
+    /* VP9's rows padded to an odd multiple of 256 bytes, which no surface's pitch is */
+    bool pads_rows;
     struct committed committed[MAX_COMMITTED];
     unsigned num_committed;
     /* left free for the picture last submitted, until MPP took it */
@@ -253,6 +255,7 @@ static int mpp_decoder_open(struct driver *drv, struct context *ctx)
     /* 10-bit comes out as NV15, which no surface takes as it is */
     d->into_surfaces = ctx->config->offer->profile != VAProfileVP9Profile2 &&
                        ctx->config->offer->profile != VAProfileHEVCMain10;
+    d->pads_rows = coding_of(ctx->config->offer->profile) == MPP_VIDEO_CodingVP9;
     if (mpp_create(&d->ctx, &d->mpi) != MPP_OK ||
         /* read as the parser starts: before mpp_init */
         d->mpi->control(d->ctx, MPP_DEC_SET_IMMEDIATE_OUT, &immediate) != MPP_OK ||
@@ -325,8 +328,10 @@ static struct committed *committed_of(struct mpp_decoder *d, int fd)
 }
 
 /* committed held, as importing leaves it */
-static struct committed *commit(struct mpp_decoder *d, int fd, size_t size, bool spare)
+static struct committed *commit(struct mpp_decoder *d, int fd, const struct backing_layout *layout,
+                                bool spare)
 {
+    size_t size = layout->size;
     if (d->num_committed == MAX_COMMITTED)
         return NULL;
     MppBufferInfo info = { .type = MPP_BUFFER_TYPE_EXT_DMA, .fd = fd, .size = size,
@@ -338,9 +343,17 @@ static struct committed *commit(struct mpp_decoder *d, int fd, size_t size, bool
     sync_dmabuf(fd, DMA_BUF_SYNC_END | DMA_BUF_SYNC_RW);
     if (mpp_buffer_import_with_tag(d->group, &info, &c->buffer, "tvb", __func__) != MPP_OK)
         return NULL;
-    *c = (struct committed){ .fd = fd, .size = size, .buffer = c->buffer, .spare = spare };
+    *c = (struct committed){ .fd = fd, .layout = *layout, .buffer = c->buffer, .spare = spare };
     d->num_committed++;
     return c;
+}
+
+/* MPP takes it for a picture as its last size change lays pictures out; a spare is copied from */
+static bool fits(const struct mpp_decoder *d, const struct committed *c)
+{
+    return c->layout.size >= d->layout.size &&
+           (c->spare || (c->layout.pitch == d->layout.pitch &&
+                         c->layout.chroma_offset == d->layout.chroma_offset));
 }
 
 /* left free unless MPP still holds it */
@@ -358,12 +371,13 @@ static bool release(struct mpp_decoder *d, struct committed *c)
 static int release_spare(struct mpp_decoder *d, size_t size)
 {
     for (unsigned i = 0; i < d->num_committed; i++)
-        if (d->committed[i].spare && d->committed[i].size >= size && release(d, &d->committed[i]))
+        if (d->committed[i].spare && fits(d, &d->committed[i]) && release(d, &d->committed[i]))
             return 0;
     int fd = dmabuf_alloc(size);
     if (fd < 0)
         return -errno;
-    struct committed *c = commit(d, fd, size, true);
+    const struct backing_layout any = { .size = size };
+    struct committed *c = commit(d, fd, &any, true);
     if (!c) {
         close(fd);
         return -ENOBUFS;
@@ -371,22 +385,42 @@ static int release_spare(struct mpp_decoder *d, size_t size)
     return release(d, c) ? 0 : -EBUSY;
 }
 
+static bool laid_out_as_mpp(const struct mpp_decoder *d, const struct backing *b)
+{
+    return b->size >= d->layout.size && b->pitch == d->layout.pitch &&
+           b->chroma_offset == d->layout.chroma_offset;
+}
+
+/* where MPP pads rows, memory the client has not seen is laid out again as MPP decodes, so the
+ * picture lands in it and needs no copy; none once a surface was exported, as a client may take
+ * that layout for every surface's */
+static int ensure_mpp_backing(const struct driver *drv, const struct mpp_decoder *d,
+                              struct surface *s)
+{
+    if (!d->pads_rows || !d->layout.size || drv->layout_seen)
+        return surface_ensure_backing(s);
+    if (s->backing && !laid_out_as_mpp(d, s->backing))
+        surface_drop_unseen_backing(s);
+    if (s->backing)
+        return surface_ensure_backing(s);
+    int fd = dmabuf_alloc(d->layout.size);
+    return fd < 0 ? -errno : surface_adopt_backing(s, fd, &d->layout);
+}
+
 /* the target's memory left alone free in MPP's group, so MPP decodes into it, where it is laid
  * out as MPP lays out pictures */
-static int release_target(struct mpp_decoder *d, struct surface *s)
+static int release_target(const struct driver *drv, struct mpp_decoder *d, struct surface *s)
 {
-    int ret = surface_ensure_backing(s);
+    int ret = ensure_mpp_backing(drv, d, s);
     if (ret)
         return ret;
     const struct backing *b = s->backing;
-    if (b->pitch == d->layout.pitch && b->chroma_offset == d->layout.chroma_offset &&
-        b->size >= d->layout.size) {
-        struct committed *target = committed_of(d, b->fd);
-        if (!target && !(target = commit(d, b->fd, b->size, false)))
-            return -ENOBUFS;
-        if (release(d, target))
-            return 0;
-    }
+    const struct backing_layout layout = { b->pitch, b->chroma_offset, b->size };
+    struct committed *target = committed_of(d, b->fd);
+    if (!target && !(target = commit(d, b->fd, &layout, false)))
+        return -ENOBUFS;
+    if (fits(d, target) && release(d, target))
+        return 0;
     return release_spare(d, d->layout.size);
 }
 
@@ -400,7 +434,12 @@ static int hold_released(struct driver *drv, struct mpp_decoder *d, struct surfa
 {
     int ret = 0;
     for (unsigned waited = 0; ret >= 0; waited++) {
-        if (!d->released && d->layout.size && (ret = release_target(d, s)) < 0)
+        /* left free before a size change MPP then announced, and too small for it */
+        if (d->released && !fits(d, d->released)) {
+            mpp_buffer_inc_ref(d->released->buffer);
+            d->released = NULL;
+        }
+        if (!d->released && d->layout.size && (ret = release_target(drv, d, s)) < 0)
             return ret;
         if (d->released && mpp_buffer_group_unused(d->group) == 0) {
             mpp_buffer_inc_ref(d->released->buffer);
@@ -479,7 +518,7 @@ static int mpp_decode(struct driver *drv, struct context *ctx, const struct anne
             mpp_buffer_inc_ref(d->released->buffer);
             d->released = NULL;
         }
-        if (d->layout.size && (ret = release_target(d, target)) < 0)
+        if (d->layout.size && (ret = release_target(drv, d, target)) < 0)
             return ret;
     }
     if (mpp_packet_init(&packet, au->data, au->size) != MPP_OK)

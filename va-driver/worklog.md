@@ -281,3 +281,9 @@ real time on Cedrus whatever the driver: about 25 fps flat out, 180 of 288 frame
   surface's own memory fell back to a memfd, which is no dma-buf, and the compositor refused it. The
   suite runs as root. The package's udev rule opens the heap to `video`; both 4K clips now play to
   their end.
+- `rk35xx` VP9 1080p ran at 185 fps against MPP's 349: MPP pads a VP9 row to an odd multiple of 256
+  bytes, so no picture landed in a surface's memory and each was copied. Memory laid out again as
+  MPP decodes reached 336, but broke GStreamer's odd-size H.264, then its VP9 at 9 dB: GStreamer
+  exports one surface at the start and takes its layout for every surface's, so a surface derived
+  and let go was not enough to keep. Re-laid now for VP9 alone, and never once a surface was
+  exported; FFmpeg only derives one to test. VP9 1080p 326 fps, the suite as before.

@@ -150,6 +150,9 @@ struct surface {
     /* bound late: exported as is while the surface has no backing of its own */
     struct engine_picture *picture;
     struct backing *backing;
+    /* the client has seen its memory, and may still use its layout: exported, or derived */
+    bool exported;
+    bool derived;
     bool submitted;
     /* its picture came, held as is or copied into its own memory */
     bool delivered;
@@ -262,6 +265,8 @@ struct driver {
     struct handle_table contexts;
     struct handle_table buffers;
     struct handle_table images;
+    /* a surface was exported: a client may take its layout for every surface's */
+    bool layout_seen;
 };
 
 #define DRIVER(ctx) ((struct driver *)(ctx)->pDriverData)
@@ -302,6 +307,8 @@ void surface_set_engine(const struct backend *backend);
 int surface_ensure_backing(struct surface *s);
 /* fd, laid out so, as the surface's own memory: the surface's to close from then on */
 int surface_adopt_backing(struct surface *s, int fd, const struct backing_layout *layout);
+/* memory of its own the client has not seen, given up so an engine's buffer can stand in */
+void surface_drop_unseen_backing(struct surface *s);
 /* its picture decoded straight into its own memory */
 void surface_mark_decoded(struct surface *s);
 uint64_t monotonic_ms(void);

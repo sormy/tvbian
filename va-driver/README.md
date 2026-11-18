@@ -270,6 +270,9 @@ VA carries none of these whole.
     The driver holds every committed buffer but the target's, so MPP can take only that one, and
     holds it again once MPP took it. A target MPP still reads gets a spare buffer and a CPU copy.
     Surfaces are sized at MPP's twice-the-luma.
+  - VP9's rows are padded to an odd multiple of 256 bytes, which no surface's pitch is: a surface's
+    memory no client has seen is laid out again as MPP decodes, none once any surface was exported,
+    as GStreamer takes one export's layout for every surface's.
   - 10-bit pictures go to buffers MPP allocates; a picture a surface holds keeps its buffer, and the
     decoder lives until the last such picture is released.
   - A picture still held when a client syncs on it is drained by an end-of-stream packet, and MPP

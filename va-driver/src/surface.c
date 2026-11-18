@@ -187,6 +187,14 @@ static int ensure_decodable_backing(struct driver *drv, VASurfaceID id, struct s
     return surface_ensure_backing(s);
 }
 
+void surface_drop_unseen_backing(struct surface *s)
+{
+    if (s->backing && !s->exported && !s->derived) {
+        backing_free(s->backing);
+        s->backing = NULL;
+    }
+}
+
 void surface_mark_decoded(struct surface *s)
 {
     release_picture(s);
@@ -503,9 +511,10 @@ static void export_picture(const struct engine_picture *p, uint32_t fourcc, bool
     fill_layers(out, fourcc, p->drm_format, separate, planes);
 }
 
-static void export_backing(const struct surface *s, bool separate, VADRMPRIMESurfaceDescriptor *out)
+static void export_backing(struct surface *s, bool separate, VADRMPRIMESurfaceDescriptor *out)
 {
     const struct backing *b = s->backing;
+    s->exported = true;
     const struct plane_layout planes[2] = { { 0, 0, b->pitch }, { 0, b->chroma_offset, b->pitch } };
     out->num_objects = 1;
     out->objects[0].fd = dup(b->fd);
@@ -549,6 +558,7 @@ static VAStatus export_surface_handle(VADriverContextP ctx, VASurfaceID surface_
     out->width = s->width;
     out->height = s->height;
     pthread_mutex_lock(&drv->lock);
+    drv->layout_seen = true;
     if (is_compressed(s) && separate)
         status = VA_STATUS_ERROR_UNIMPLEMENTED;
     else if (is_compressed(s))
@@ -636,6 +646,7 @@ static VAStatus derive_image(VADriverContextP ctx, VASurfaceID surface_id, VAIma
     const struct backing *backing = s->backing;
     *b = (struct va_buffer){ .type = VAImageBufferType, .element_size = backing->size,
                              .num_elements = 1, .data = backing->map, .derived_from = s };
+    s->derived = true;
     *image = (VAImage){
         .format = s->fourcc == VA_FOURCC_P010 ? image_formats[1] : image_formats[0],
         .width = s->width,
