@@ -277,6 +277,8 @@ VA carries none of these whole.
     decoder lives until the last such picture is released.
   - A picture still held when a client syncs on it is drained by an end-of-stream packet, and MPP
     reset.
+  - A VP9 key frame of another size in one context, as GStreamer keeps it, gets a decoder anew,
+    the pictures still in MPP taken first.
   - VP9 and VP8 are offered as `mpp_check_support_format` says.
   - Encode imports the surface's dma-buf, its strides set in MPP's preprocessing as they are.
   - MPP's own log is set to warnings.

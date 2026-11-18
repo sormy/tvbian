@@ -304,3 +304,7 @@ real time on Cedrus whatever the driver: about 25 fps flat out, 180 of 288 frame
   decoded into it was copied. A surface is seen again while its derived images are open; GStreamer
   keeps the layout of an export, which the driver-wide flag covers. HEVC 1080p 127 to 173 fps,
   `rk35xx` VP9 1080p still 335.
+- On `rk35xx`, GStreamer's VP9 switch gave 65 of 90 pictures: it keeps one context through a size
+  change, and MPP's own resize lost some on the way. A VP9 key frame of another size now gets a
+  decoder anew, as the stateless backend's does: all three switch clips 90 of 90 identical through
+  FFmpeg and GStreamer.

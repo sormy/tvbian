@@ -501,6 +501,17 @@ static bool interlaced(const struct context *ctx)
     }
 }
 
+static int mpp_sync(struct driver *drv, struct context *ctx, VASurfaceID id, bool last);
+
+/* a VP9 key frame of another size in one context, as GStreamer keeps it: the pictures in MPP taken,
+ * and a decoder anew at it, as a new context gets */
+static bool resized(const struct context *ctx)
+{
+    const VADecPictureParameterBufferVP9 *pp = ctx->pic.picture_param;
+    return ctx->config->codec->kind == CODEC_VP9 && pp && !pp->pic_fields.bits.frame_type &&
+           (pp->frame_width != ctx->width || pp->frame_height != ctx->height);
+}
+
 static int mpp_decode(struct driver *drv, struct context *ctx, const struct annexb *au)
 {
     struct mpp_decoder *d = ctx->engine;
@@ -510,6 +521,16 @@ static int mpp_decode(struct driver *drv, struct context *ctx, const struct anne
 
     if (interlaced(ctx))
         return -ENOTSUP;
+    if (resized(ctx)) {
+        const VADecPictureParameterBufferVP9 *pp = ctx->pic.picture_param;
+        mpp_sync(drv, ctx, VA_INVALID_ID, true);
+        mpp_decoder_close(ctx);
+        ctx->width = pp->frame_width;
+        ctx->height = pp->frame_height;
+        if ((ret = mpp_decoder_open(drv, ctx)) < 0)
+            return ret;
+        d = ctx->engine;
+    }
     struct surface *target = surface_of(drv, ctx->target);
     if (d->into_surfaces) {
         if (!target)
