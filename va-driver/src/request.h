@@ -52,6 +52,8 @@ struct request_ctx {
     int media_fd;
     /* the decoder's queues multi-planar, as rkvdec's and Hantro's are; Cedrus's are single */
     bool mplane;
+    /* the engine keeps a picture across requests, one a slice; else each request is a picture */
+    bool holds_capture;
     /* the profile the client asked for: VA carries no profile_idc, which some engines program */
     VAProfile profile;
     /* the context the session is for, to set it up again */

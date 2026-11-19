@@ -21,8 +21,16 @@ settings.
 - [ ] **`ffmpeg9 -hwaccel vaapi` on `meson-gxl` ends MPEG-2 and MPEG-4 with every picture**: the
       last 2 are lost at the end of the stream, at any `-hwaccel_output_delay`; Debian's FFmpeg 7.1
       gets them.
+- [ ] **`meson-gxl` MPEG-4 Simple now and then wrong**: `mpeg4-sp` gives one picture at 22.8 dB in
+      about one run in three, on either driver build.
 - [ ] **`meson-gxl` VC-1 with slices refuses every wrong picture after a drain**: `vc1-ap-slices`
       lets one through at 17 dB.
+- [ ] **Every family at `ffmpeg9`'s native rate through VA-API**, decoding only, frames left on the
+      GPU: `rk35xx` HEVC Main 10 at 88 to 89%, each picture narrowed by the CPU.
+- [ ] **`meson-gxl` VP9 4K without a copy**: the decoder grants only the 16 CAPTURE buffers it holds
+      itself, so every picture is copied out for the surfaces to hold.
+- [ ] **The suite times VA against `ffmpeg9`'s native path**, clip by clip, not only against the
+      box's last run.
 - [ ] **`mpv --hwdec=vaapi` on the display node**: mpv's DRM output opens VA on `card0`, whose
       driver name (`meson`, `sun4i-drm`) no package installs; with it linked by hand, `vainfo` opens
       it and mpv still does not.
@@ -30,16 +38,33 @@ settings.
       program gets only by listing the modifier at surface creation, and only Panfrost samples.
 - [ ] **VC-1 Main on Cedrus** once `linux-sunxi` `0815` ships: offered, and a sequence that allows B
       pictures (`MAXBFRAMES` above 0) refused at its context, as the kernel refuses it.
-- [ ] **`ffmpeg9 -hwaccel vaapi` on `rk35xx`**: device creation fails with `-12`; Debian's FFmpeg
-      opens the same driver.
 - [ ] **AV1 ranked `NONE` for the browser alone**: `tvb-va-driver` hides GStreamer's software AV1
       box-wide, so YouTube in WebKit picks VP9, and AV1 files play in no GStreamer player; the line
       moves to the browser's launcher once it is packaged.
-- [ ] **A resolution change mid-stream on MPP**: VP9 480p to 1080p and back, as YouTube switches,
-      fails `vaEndPicture` through FFmpeg and corrupts references on the way down through GStreamer;
-      the suite should carry the switch both ways.
+- [ ] **GStreamer's `va` decoders on `meson-gxl`**: H.264 and VP9 time out with no frame, HEVC comes
+      out at 6 dB; FFmpeg decodes the same clips through the same driver. GStreamer maps each
+      picture in the thread that feeds the decoder, and meson holds it until later packets: every
+      sync drains, its references lost. H.264's legacy microcode reorders by DPB fullness alone;
+      HEVC's and VP9's drivers could output in decode order behind
+      `V4L2_CID_MPEG_VIDEO_DEC_DISPLAY_DELAY`. VP9's driver hands a picture out only on the next
+      packet's header, a lag VA cannot cover: the driver has no next packet at a sync.
+- [ ] **4K H.264 and HEVC read back on `meson-gxl`**: FFmpeg reads a picture after its own reorder
+      delay, which meson's DPB exceeds at 4K, so the sync drains and the stream ends after 1 to 9
+      pictures; 1080p and 4K left on the GPU decode whole.
+- [ ] **A sync on one VP9 picture on `meson-gxl`**: reading a picture back drains, and the drain
+      ends the stream with an internal decoding error.
+- [ ] **No decode waits forever**: on an RK3518, FFmpeg sat two days in a futex, every thread
+      asleep, decoding `vp9-tools` through MPP with a driver build of 2026-11-15.
+- [ ] **The suite leaves no process behind**: that FFmpeg outlived its run and its directory.
+- [ ] **`mpv --hwdec=vaapi` on `rk35xx`**: "Errors when loading file", where `vaapi-copy` plays.
+- [ ] **`va_probe` in `tvb-va-driver`**: the suite's initialize check is UNTESTED on a box without
+      it.
 - [ ] **GStreamer in the host check**: its `va` plugin opens only a DRM render node, which the build
       container lacks; a Linux host or CI could pass `vgem`'s node in.
+- [ ] **A readback on `rk35xx-next2` at its memory's speed**: `rkvdec`'s and Hantro's CAPTURE take
+      no cache hints, so a picture read back is read uncached: 8-bit 1080p 42 fps.
+- [ ] **HEVC 1080p60 in WebKit on `rk35xx-next2` now and then decodes nothing**: one Falkon file run
+      of several, the others at full rate.
 - [ ] **10-bit by capability on MPP**: `narrows_ten_bit` lists NV12 alone for every client; P010
       where the client's GPU samples it.
 - [ ] **Held pictures detected**: `backend_v4l2m2m.c` assumes them by codec; a decoder seen holding
@@ -50,7 +75,14 @@ settings.
       closes; today each opens at its first context.
 - [ ] **`VideoProc`**: scaling for Jellyfin's `scale_vaapi`, and NV12 to ARGB where Chromium's GL
       cannot import NV12.
-- [ ] **Chromium's encoder** through `tvb-va-driver`, which offers no packed headers.
+- [ ] **CBR from the first second on `sunxi-h616`**: Cedrus-enc's first frame is ten times its
+      share, its first second 2.7 times the target.
+- [ ] **CBR on `meson-gxl`**: its encoder lists VBR alone, and WebKit asks for CBR.
+- [ ] **Constrained Baseline on `meson-gxl`**: its encoder lists Main and High alone, and WebKit's
+      call asks for Constrained Baseline.
+- [ ] **Chromium's call on the box's encoder**: its VA encoder runs, but WebRTC drops to software
+      below 360p, where a 3.5 fps canvas sends it.
+- [ ] **Firefox's calls on the box's encoder**: ESR 153's FFmpeg encoder opens `libx264` alone.
 - [ ] **GStreamer on `rk35xx`**: an MPP plugin package; AirPlay mirroring (`uxplay`) needs it.
 - [ ] **Encode** for WebRTC and screen capture, through `tvb-va-driver`'s H.264, HEVC and JPEG
       encoders in a browser.

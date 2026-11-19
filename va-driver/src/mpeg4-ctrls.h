@@ -83,7 +83,9 @@ struct v4l2_ctrl_mpeg4_vop {
 	__u8	intra_dc_vlc_thr;
 	__u8	vop_fcode_forward;
 	__u8	vop_fcode_backward;
-	__u8	reserved[4];
+	__u16	vop_time_increment_resolution;
+	__u8	last_ref_coding_type;
+	__u8	reserved;
 };
 
 /* Zigzag order; read only with V4L2_MPEG4_VOL_FLAG_QUANT_TYPE */

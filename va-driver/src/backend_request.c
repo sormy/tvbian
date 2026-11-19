@@ -29,6 +29,14 @@
 #define USEC_TO_NSEC 1000
 #define DUMP_ENV "VAAPI_REQUEST_DUMP"
 #define TEN_BIT_DEPTH_MINUS8 2
+#define CHROMA_420 1
+#define MB_SIZE 16
+#ifndef V4L2_PIX_FMT_NV15
+#define V4L2_PIX_FMT_NV15 v4l2_fourcc('N', 'V', '1', '5')
+#endif
+#ifndef DRM_FORMAT_NV15
+#define DRM_FORMAT_NV15 fourcc_code('N', 'V', '1', '5')
+#endif
 #define VP9_PROFILE_2 2
 #define TEN_BITS 10
 
@@ -70,6 +78,7 @@ static const struct v4l2_candidate request_candidates[] = {
     { VAProfileVC1Simple, VLD, V4L2_PIX_FMT_VC1_SLICE, 0, 0, false },
     { VAProfileVC1Advanced, VLD, V4L2_PIX_FMT_VC1_SLICE, 0, 0, false },
     { VAProfileJPEGBaseline, VLD, V4L2_PIX_FMT_MJPEG, 0, 0, false },
+    { VAProfileJPEGBaseline, VLD, V4L2_PIX_FMT_JPEG, 0, 0, false },
     { VAProfileH264ConstrainedBaseline, VAEntrypointEncSlice, V4L2_PIX_FMT_H264, H264_PROFILE,
       V4L2_MPEG_VIDEO_H264_PROFILE_CONSTRAINED_BASELINE, false },
     { VAProfileH264Main, VAEntrypointEncSlice, V4L2_PIX_FMT_H264, H264_PROFILE,
@@ -299,6 +308,7 @@ static int assign_capture(struct request_ctx *rq, VASurfaceID surface)
             index = i;
     if (index < 0) {
         struct v4l2_create_buffers create = { .count = 1, .memory = V4L2_MEMORY_MMAP,
+                                              .flags = V4L2_MEMORY_FLAG_NON_COHERENT,
                                               .format = rq->capture };
         if (rq->num_captures == REQUEST_MAX_CAPTURES)
             return -ENOBUFS;
@@ -378,6 +388,8 @@ static int queue_capture(struct request_ctx *rq)
 {
     struct v4l2_plane plane;
     struct v4l2_buffer buffer = buffer_of(rq, capture_type(rq), rq->target, &plane);
+    /* a picture goes to the GPU unread; a CPU read syncs the dma-buf itself */
+    buffer.flags = V4L2_BUF_FLAG_NO_CACHE_INVALIDATE | V4L2_BUF_FLAG_NO_CACHE_CLEAN;
     return ioctl(rq->video_fd, VIDIOC_QBUF, &buffer) < 0 ? -errno : 0;
 }
 
@@ -391,7 +403,8 @@ static int submit_request(struct request_ctx *rq, struct request_slot *slot,
     struct v4l2_plane plane;
     struct v4l2_buffer output = buffer_of(rq, output_type(rq), (unsigned)(slot - rq->slots), &plane);
     output.timestamp.tv_usec = rq->captures[rq->target].timestamp;
-    output.flags = V4L2_BUF_FLAG_REQUEST_FD | (last ? 0 : V4L2_BUF_FLAG_M2M_HOLD_CAPTURE_BUF);
+    output.flags = V4L2_BUF_FLAG_REQUEST_FD |
+                   (last || !rq->holds_capture ? 0 : V4L2_BUF_FLAG_M2M_HOLD_CAPTURE_BUF);
     output.request_fd = slot->request_fd;
     if (rq->mplane)
         plane.bytesused = data->size;
@@ -628,29 +641,47 @@ static void request_uninit(struct driver *drv)
 {
 }
 
-/* the stream's depth, before CAPTURE's format: Cedrus lists 10-bit formats only once told */
-static int announce_ten_bit(struct request_ctx *rq, enum codec_kind kind, unsigned width,
-                            unsigned height)
+/* the stream's size and depth as the device's own value, before its buffers: Cedrus lists 10-bit
+ * formats only once told, and rkvdec sets its buffers up from it and takes a new one only with
+ * none, so an SPS of the same format at the first picture frees no buffer a surface holds */
+static int announce_format(struct request_ctx *rq, enum codec_kind kind, unsigned width,
+                           unsigned height, bool ten_bit)
 {
-    struct v4l2_ctrl_hevc_sps sps = {
+    unsigned depth_minus8 = ten_bit ? TEN_BIT_DEPTH_MINUS8 : 0;
+    struct v4l2_ctrl_hevc_sps hevc = {
         .pic_width_in_luma_samples = width,
         .pic_height_in_luma_samples = height,
-        .bit_depth_luma_minus8 = TEN_BIT_DEPTH_MINUS8,
-        .bit_depth_chroma_minus8 = TEN_BIT_DEPTH_MINUS8,
-        .chroma_format_idc = 1,
+        .bit_depth_luma_minus8 = depth_minus8,
+        .bit_depth_chroma_minus8 = depth_minus8,
+        .chroma_format_idc = CHROMA_420,
     };
-    struct v4l2_ctrl_vp9_frame frame = {
+    struct v4l2_ctrl_h264_sps h264 = {
+        .pic_width_in_mbs_minus1 = (width + MB_SIZE - 1) / MB_SIZE - 1,
+        .pic_height_in_map_units_minus1 = (height + MB_SIZE - 1) / MB_SIZE - 1,
+        .bit_depth_luma_minus8 = depth_minus8,
+        .bit_depth_chroma_minus8 = depth_minus8,
+        .chroma_format_idc = CHROMA_420,
+        .flags = V4L2_H264_SPS_FLAG_FRAME_MBS_ONLY,
+    };
+    struct v4l2_ctrl_vp9_frame vp9 = {
         .frame_width_minus_1 = width - 1,
         .frame_height_minus_1 = height - 1,
         .bit_depth = TEN_BITS,
         .profile = VP9_PROFILE_2,
         .flags = V4L2_VP9_FRAME_FLAG_X_SUBSAMPLING | V4L2_VP9_FRAME_FLAG_Y_SUBSAMPLING,
     };
-    struct v4l2_ext_control control = kind == CODEC_HEVC
-        ? (struct v4l2_ext_control){ .id = V4L2_CID_STATELESS_HEVC_SPS, .size = sizeof(sps),
-                                     .ptr = &sps }
-        : (struct v4l2_ext_control){ .id = V4L2_CID_STATELESS_VP9_FRAME, .size = sizeof(frame),
-                                     .ptr = &frame };
+    struct v4l2_ext_control control;
+    if (kind == CODEC_HEVC)
+        control = (struct v4l2_ext_control){ .id = V4L2_CID_STATELESS_HEVC_SPS,
+                                             .size = sizeof(hevc), .ptr = &hevc };
+    else if (kind == CODEC_H264)
+        control = (struct v4l2_ext_control){ .id = V4L2_CID_STATELESS_H264_SPS,
+                                             .size = sizeof(h264), .ptr = &h264 };
+    else if (kind == CODEC_VP9 && ten_bit)
+        control = (struct v4l2_ext_control){ .id = V4L2_CID_STATELESS_VP9_FRAME,
+                                             .size = sizeof(vp9), .ptr = &vp9 };
+    else
+        return 0;
     struct v4l2_ext_controls set = { .which = V4L2_CTRL_WHICH_CUR_VAL, .count = 1,
                                      .controls = &control };
     return ioctl(rq->video_fd, VIDIOC_S_EXT_CTRLS, &set) < 0 ? -errno : 0;
@@ -661,7 +692,13 @@ static uint32_t capture_format(const struct request_ctx *rq, bool ten_bit)
     if (rq->compressed_modifier)
         return ten_bit ? V4L2_PIX_FMT_YUV420_10_AFBC_16X16_SPLIT
                        : V4L2_PIX_FMT_YUV420_8_AFBC_16X16_SPLIT;
-    return ten_bit ? V4L2_PIX_FMT_P010 : V4L2_PIX_FMT_NV12;
+    if (!ten_bit)
+        return V4L2_PIX_FMT_NV12;
+    /* Cedrus writes P010, rkvdec NV15 */
+    uint32_t flags;
+    return v4l2_queue_takes(rq->video_fd, capture_type(rq), V4L2_PIX_FMT_P010, &flags)
+               ? V4L2_PIX_FMT_P010
+               : V4L2_PIX_FMT_NV15;
 }
 
 /* a request of its own and OUTPUT buffer i, mapped */
@@ -692,7 +729,10 @@ static int configure_session(struct request_ctx *rq, const struct request_codec 
     unsigned targets = ctx->num_targets > 0 ? (unsigned)ctx->num_targets : 1;
     struct v4l2_requestbuffers captures = {
         .count = targets < REQUEST_MAX_CAPTURES ? targets : REQUEST_MAX_CAPTURES,
-        .type = capture_type(rq), .memory = V4L2_MEMORY_MMAP };
+        .type = capture_type(rq), .memory = V4L2_MEMORY_MMAP,
+        /* cached where the queue allows it: a CPU read of uncached memory costs a 1080p frame
+         * 30 ms on Cedrus */
+        .flags = V4L2_MEMORY_FLAG_NON_COHERENT };
     struct v4l2_pix_format set;
     bool ten_bit = ctx->config->rt_format == VA_RT_FORMAT_YUV420_10;
     int ret;
@@ -704,7 +744,8 @@ static int configure_session(struct request_ctx *rq, const struct request_codec 
     /* a size past the engine's comes back clamped */
     if (set.width < width || set.height < height)
         return -ERANGE;
-    if (ten_bit && (ret = announce_ten_bit(rq, codec->kind, width, height)) < 0)
+    /* a 10-bit stream needs it; to an 8-bit one it is a hint an engine may refuse */
+    if ((ret = announce_format(rq, codec->kind, width, height, ten_bit)) < 0 && ten_bit)
         return ret;
     /* compressed only where the decoder lists its format for this stream */
     if (rq->compressed_modifier &&
@@ -728,6 +769,7 @@ static int configure_session(struct request_ctx *rq, const struct request_codec 
         ioctl(rq->video_fd, VIDIOC_REQBUFS, &captures) < 0 ||
         outputs.count < REQUEST_SLOTS)
         return outputs.count < REQUEST_SLOTS ? -ENOBUFS : -errno;
+    rq->holds_capture = outputs.capabilities & V4L2_BUF_CAP_SUPPORTS_M2M_HOLD_CAPTURE_BUF;
     for (unsigned i = 0; i < captures.count; i++)
         if ((ret = setup_capture(rq, i)) < 0)
             return ret;
@@ -852,7 +894,7 @@ static struct engine_picture *picture_of(struct request_ctx *rq, unsigned index)
     const struct v4l2_pix_format *f = &rq->picture;
     const struct capture_buffer *c = &rq->captures[index];
     struct engine_picture *p = calloc(1, sizeof(*p));
-    bool ten_bit = f->pixelformat == V4L2_PIX_FMT_P010 ||
+    bool ten_bit = f->pixelformat == V4L2_PIX_FMT_P010 || f->pixelformat == V4L2_PIX_FMT_NV15 ||
                    f->pixelformat == V4L2_PIX_FMT_YUV420_10_AFBC_16X16_SPLIT;
     if (!p)
         return NULL;
@@ -868,7 +910,9 @@ static struct engine_picture *picture_of(struct request_ctx *rq, unsigned index)
         p->drm_format = ten_bit ? DRM_FORMAT_YUV420_10BIT : DRM_FORMAT_YUV420_8BIT;
         p->modifier = rq->compressed_modifier;
     } else {
-        p->drm_format = ten_bit ? DRM_FORMAT_P010 : DRM_FORMAT_NV12;
+        p->drm_format = f->pixelformat == V4L2_PIX_FMT_NV15 ? DRM_FORMAT_NV15
+                        : ten_bit                              ? DRM_FORMAT_P010
+                                                               : DRM_FORMAT_NV12;
         p->modifier = DRM_FORMAT_MOD_LINEAR;
         p->plane_offset[1] = f->bytesperline * f->height;
         p->plane_pitch[0] = p->plane_pitch[1] = f->bytesperline;
@@ -993,6 +1037,68 @@ static void request_encoder_close(struct context *ctx)
     backend_v4l2m2m.encoder_close(ctx);
 }
 
+/* the layout the decoder writes a picture of this size in, asked of the device on a handle of its
+ * own with OUTPUT at that size: a client may read one surface's layout and take it for all */
+static bool plan_request_layout(VAProfile decoding, uint32_t fourcc, unsigned width,
+                                unsigned height, struct backing_layout *out)
+{
+    static struct {
+        VAProfile profile;
+        unsigned width, height;
+        struct backing_layout layout;
+    } last = { .profile = VAProfileNone };
+    if (fourcc != VA_FOURCC_NV12 || decoding == VAProfileNone)
+        return false;
+    if (last.profile == decoding && last.width == width && last.height == height) {
+        *out = last.layout;
+        return last.layout.size != 0;
+    }
+    uint32_t coded = 0;
+    for (size_t i = 0; i < sizeof(request_candidates) / sizeof(request_candidates[0]); i++)
+        if (request_candidates[i].profile == decoding && request_candidates[i].entrypoint == VLD)
+            coded = request_candidates[i].pixelformat;
+    bool mplane;
+    uint32_t flags;
+    int fd = coded ? v4l2_open_coded(coded, true, &mplane, &flags) : -1;
+    struct backing_layout layout = { 0 };
+    if (fd >= 0) {
+        struct v4l2_format output = { .type = mplane ? V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE
+                                                     : V4L2_BUF_TYPE_VIDEO_OUTPUT };
+        struct v4l2_format capture = { .type = mplane ? V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE
+                                                      : V4L2_BUF_TYPE_VIDEO_CAPTURE };
+        if (mplane) {
+            output.fmt.pix_mp = (struct v4l2_pix_format_mplane){
+                .width = width, .height = height, .pixelformat = coded, .num_planes = 1 };
+            capture.fmt.pix_mp = (struct v4l2_pix_format_mplane){
+                .width = width, .height = height, .pixelformat = V4L2_PIX_FMT_NV12,
+                .num_planes = 1 };
+        } else {
+            output.fmt.pix = (struct v4l2_pix_format){ .width = width, .height = height,
+                                                       .pixelformat = coded };
+            capture.fmt.pix = (struct v4l2_pix_format){ .width = width, .height = height,
+                                                        .pixelformat = V4L2_PIX_FMT_NV12 };
+        }
+        if (!ioctl(fd, VIDIOC_S_FMT, &output) && !ioctl(fd, VIDIOC_TRY_FMT, &capture)) {
+            unsigned pitch = mplane ? capture.fmt.pix_mp.plane_fmt[0].bytesperline
+                                    : capture.fmt.pix.bytesperline;
+            unsigned rows = mplane ? capture.fmt.pix_mp.height : capture.fmt.pix.height;
+            unsigned size = mplane ? capture.fmt.pix_mp.plane_fmt[0].sizeimage
+                                   : capture.fmt.pix.sizeimage;
+            bool nv12 = (mplane ? capture.fmt.pix_mp.pixelformat : capture.fmt.pix.pixelformat) ==
+                        V4L2_PIX_FMT_NV12;
+            if (nv12 && rows >= height && pitch >= width)
+                layout = (struct backing_layout){ pitch, pitch * rows, size };
+        }
+        close(fd);
+    }
+    last.profile = decoding;
+    last.width = width;
+    last.height = height;
+    last.layout = layout;
+    *out = layout;
+    return layout.size != 0;
+}
+
 const struct backend backend_request = {
     .name = "v4l2-request",
     .init = request_init,
@@ -1001,6 +1107,7 @@ const struct backend backend_request = {
     .decode_picture = request_decode_picture,
     .decoder_close = request_decoder_close,
     .lend_backing = request_lend_backing,
+    .plan_layout = plan_request_layout,
     .sync = request_sync,
     /* Cedrus's H.264 encoder takes a fixed quantiser only */
     .encoder_open = request_encoder_open,

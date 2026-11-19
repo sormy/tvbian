@@ -280,7 +280,6 @@ real time on Cedrus whatever the driver: about 25 fps flat out, 180 of 288 frame
   with the Mali-450 at 95% load and its top clock, whatever mpv's pool or output.
 - The M20's CAPTURE budget is 288 MiB, two dozen 4K pictures, as the kernel now grants what CMA
   holds; 192 MiB left 4K at the decoder's minimum, copying every picture.
-
 - The M20 checked at 4K on 7.3.5 gave VA pictures unlike software's, every codec, and as many on
   6.18.64 and on the committed backend; `ffmpeg9`'s own decoders were exact, and the suite's short
   clips passed. Two faults. A sync drained the decoder 40 ms into a session, as the 20 ms quiet was
@@ -303,14 +302,20 @@ real time on Cedrus whatever the driver: about 25 fps flat out, 180 of 288 frame
   exported; FFmpeg only derives one to test. VP9 1080p 326 fps, the suite as before.
 - `vp9-switch` lost the last picture before each size change through FFmpeg on `rk35xx`: FFmpeg
   closes the context at a change, and the MPP decoder went with that picture still in it, so its
-  sync failed. A context now drains every picture its surfaces wait for before it closes:
-  `vp9-switch` decodes 90 of 90 identical on `rk35xx`.
+  sync failed. A context now drains every picture its surfaces wait for before it closes. The suite
+  gained `h264-switch` and `hevc-switch`, as a site's player switches on every codec; all three
+  decode 90 of 90 identical on `rk35xx` and `sunxi-h616`.
 - A browser switches size on every codec, so the suite gained `h264-switch` and `hevc-switch`, and
-  every switch clip went to 360p, 720p, 360p: at 854 wide GStreamer pads its rows, and its
-  checksums could not meet FFmpeg's. FFmpeg scales every picture to the first one's size unless
-  told `-noautoscale`, so 30 frames read as wrong on every codec. A switch is a context each in
-  FFmpeg, so its rebuilt headers and mapped controls are no longer compared: the host checks pass
-  whole.
+  every switch clip went to 360p, 720p, 360p: at 854 wide GStreamer pads its rows, and its checksums
+  could not meet FFmpeg's. FFmpeg scales every picture to the first one's size unless told
+  `-noautoscale`, so 30 frames read as wrong on every codec. Through GStreamer on `sunxi-h616`, VP9
+  back down to 360p came out as garbage or stopped: GStreamer keeps one context through a VP9 size
+  change, and the session set up again in place broke on the way down. It is now closed and opened
+  anew, as a new context's is: all three switch clips 90 of 90 identical through FFmpeg and
+  GStreamer, three runs each.
+- GStreamer's JPEG on `sunxi-h616` read 28.7 dB, and FFmpeg's pictures through the driver were the
+  same bytes: the suite read GStreamer's raw frames as limited range against a full-range JPEG. Read
+  as full range, 77 dB, as FFmpeg's.
 - FFmpeg through the driver on `sunxi-h616` fell to 55% of the engine's rate, 1080p and 4K alike,
   with twice the CPU; GStreamer kept its rate. Not heat and not the kernel: 6.18.63 and 6.18.64 both
   read 16.3 s, cool. FFmpeg derives one surface's image at start, to see whether it can, and a
@@ -322,6 +327,7 @@ real time on Cedrus whatever the driver: about 25 fps flat out, 180 of 288 frame
   change, and MPP's own resize lost some on the way. A VP9 key frame of another size now gets a
   decoder anew, as the stateless backend's does: all three switch clips 90 of 90 identical through
   FFmpeg and GStreamer.
+
 - GStreamer through the driver on `meson-gxl` stalled after 9 to 131 of 600 pictures: GStreamer
   syncs a picture before sending the next packet, and meson's decoder hands one out only after later
   packets, so the driver drains, and a drain ends meson's session and its references. The microcode
@@ -346,6 +352,26 @@ real time on Cedrus whatever the driver: about 25 fps flat out, 180 of 288 frame
   `VAConfigAttribEncJPEG` for how many Huffman tables it may send, and the driver answered nothing.
   It now reports baseline JPEG as its writer makes it, three components in one scan, two of each
   table: GStreamer's JPEG encode 36 dB on `rk35xx`, 39 dB on `sunxi-h616`.
+
+- HEVC on `rk35xx-next2`: `rkvdec` decodes a frame at a time and parses each slice header itself,
+  reading the SPS's short-term sets from controls VA has nothing to fill. The stateful path's
+  rebuild already writes each set inline against an SPS that names none, so `rkvdec` takes those
+  slices, parameter sets left out, as FFmpeg's own path sends them. Every picture failed until the
+  SPS was set as the device's own value before buffers, as with H.264. The suite's engine count
+  missed mainline's `video-codec` interrupts. HEVC 1080p 97%, 4K 99 to 100% of `ffmpeg9`'s rate;
+  every HEVC, H.264 and VP9 clip identical.
+- JPEG on `rk35xx-next2`: `rockchip-jpegd` lists its coded format as `JPEG`, Cedrus's as `MJPG`, and
+  the driver looked for `MJPG` alone. Either is taken now, and a profile two candidates match is
+  offered once: 76 dB, 1080p MJPEG at 280 fps; the H313's and M20's offers unchanged.
+- HEVC Main 10 on `rk35xx-next2`: `rkvdec` writes NV15, and lists it only once the device's SPS says
+  10 bits, so the probe tells it first, and CAPTURE takes NV15 where P010 is not listed; the picture
+  is unpacked by the CPU when read. Main 10 identical; Cedrus's P010 as before. Every decoder the
+  RK3528 has now runs through the driver on mainline.
+- GStreamer into system memory on `sunxi-h616` ran 1080p60 at 28 fps, `va` and GStreamer's own
+  `v4l2sl` decoders alike, 33 ms of CPU a frame: Cedrus's pictures were uncached, and each was read
+  out by the CPU. Its CAPTURE queue takes cache hints, so its buffers are now asked for
+  non-coherent, with V4L2's own cache upkeep skipped as a CPU read syncs the dma-buf: H.264 130 fps,
+  VP9 112; FFmpeg on the GPU path as before, the suite unchanged.
 - WebKit's WebRTC encodes through `vah264enc` alone. Its settings, CBR, `target-usage=1`, a GOP, no
   B frames, AVC out of `h264parse`, hold on every family: key frames exactly at `key-int-max` 15 and
   60, no B frames. CBR holds within 10% a second on `rk35xx`; `sunxi-h616` overshoots its first
@@ -385,6 +411,7 @@ real time on Cedrus whatever the driver: about 25 fps flat out, 180 of 288 frame
   narrowing against the packed samples.
 - The narrowing split across two cores, the luma's top half on a helper thread: HEVC Main 10 1080p
   from 228 to 258 fps, 86% of MPP's rate; 4K 70 fps, as before, bound elsewhere.
+
 - `meson-gxl`'s suite with the cached-capture, GOP and profile changes: 52 pass as before. Two
   checks flip run to run on either build, `mpeg4-sp` and GStreamer's `hevc-odd`.
 - `rk35xx` against `ffmpeg9`'s MPP decoders, the current build: H.264 98%, VP9 96 to 97%, HEVC 92 to
@@ -402,18 +429,59 @@ real time on Cedrus whatever the driver: about 25 fps flat out, 180 of 288 frame
   before, the suite unchanged.
 - The narrowing on four cores, a band each: HEVC Main 10 1080p 253 fps against two cores' 246, 4K 69
   as before. Bound by memory, not the cores: two kept.
+- `rk35xx-next2`'s candidate with the VOP IOMMU on: H.264 98 to 99%, HEVC 97 to 99%, VP9 98 to 100%,
+  HEVC Main 10 93% at 1080p and 100% at 4K, of `ffmpeg9`'s `v4l2request` rate. The kernel adds
+  `rockchip,rk3528-vpu-dec`, so VP8, MPEG-2, MPEG-4 and H.263 are offered; MPEG-4 and H.263 give no
+  picture through the driver and leave the VPU stalled
+  (`rk_iommu ... Enable stall request timed out`), VP8 and MPEG-2 dead after them through
+  `ffmpeg9`'s own path too, which decodes MPEG-4 on a fresh boot. No `/dev/dma_heap/system`.
+  GStreamer's `vp9-switch` differs from the first size change on.
+- MPEG-4 on `rk3528-vpu-dec` hung the VPU: `linux-sunxi` `0805`'s VOP control gained the VOL's
+  `vop_time_increment_resolution` and the latest reference's coding type in its reserved bytes, and
+  the driver's copy of the header still sent zeros. VDPU2 parses video packet headers by that
+  resolution; Cedrus ignores both. The driver fills them now; the host's checks pass.
+- On a clean boot of the next build, MPEG-4 through the driver with the resolution filled still
+  stalls `rk3528-vpu-dec` at its first picture (`rk_iommu ... Disable paging request timed out`),
+  and the VPU stays dead after; interlaced MPEG-2 alone is refused. VP8 and progressive MPEG-2
+  decode identical before it, through FFmpeg and GStreamer. Something else in the request differs
+  from `ffmpeg9`'s own.
 - The RGA for the 10-bit narrowing, dropped untried: RGA2-enhance reads NV15, but librga upstream
   ships binaries alone, and nothing shows RGA2 beats two cores where memory already bounds 4K. The
   narrowing in NEON instead, 16 samples a step from four groups by one table lookup and two per-lane
   shifts; `tests/unit/test_pixels.c` covers rows long enough for several steps.
+- The MPEG-4 stall on `rk3528-vpu-dec` was the zero resolution alone: on a clean boot every MPEG-4
+  and H.263 clip decodes at 68 to 73 dB, VP8 and MPEG-2 after them. Hantro holds CAPTURE across
+  requests, so it gets the per-packet requests Cedrus does; a queue that does not advertise
+  `V4L2_BUF_CAP_SUPPORTS_M2M_HOLD_CAPTURE_BUF` gets the whole VOP in one request, and no request is
+  marked to hold where the queue cannot.
+- A 10-bit readback on `rk35xx-next2` ran at 3 fps: the CAPTURE memory is uncached, and the
+  narrowing's overlapping loads read it several times over. Each row is copied whole into cached
+  memory first: 1080p 38 fps, 4K 10.5, an 8-bit readback 42 fps for the same uncached reason.
 - `rk35xx-next2` with Hantro beside `rkvdec`: GStreamer names a second node's stateless decoders for
   the node, `v4l2slvideo6h264dec`, which the generator did not rank out, so WebKit took it over
   `vah264dec`. The generator now ranks out every node's. HEVC through `vah265dec` outside WebKit:
   1080p 298 fps, the suite exact; FFmpeg 97% of `ffmpeg9`'s own.
+- H.264 and HEVC in WebKit on `rk35xx-next2` decoded at 3 to 9 a second, VP9 at full rate.
+  GStreamer's DMABuf path names no render targets and exports every surface first, each lent a
+  CAPTURE buffer; at the first picture `rkvdec` refused the SPS with buffers allocated, the session
+  was set up again, and the exported surfaces kept the freed buffers' memory, so each picture was
+  copied, uncached. The stream's size and depth are now the device's SPS before its buffers, for
+  H.264 and HEVC at any depth: GStreamer into DMABuf H.264 1080p 47 to 342 fps, HEVC 46 to 344, 4K
+  93; every H.264 and HEVC clip identical.
+- Falkon on `rk35xx-next2` with the SPS set before buffers: H.264 files at the clip's rate at
+  1080p60, 4K30 and 4K60, HEVC at 4K30 and 4K60, from 0.9 times at best. One HEVC 1080p60 run
+  decoded nothing.
+- GStreamer's `vp9-switch` on `rk35xx-next2`: luma is identical in every picture, chroma wrong from
+  the first size change on. In GStreamer's 720p NV12 the right chroma sits at row 768, `rkvdec`'s
+  64-aligned height, where 720 is read; the buffer is the size of a surface's own memory at the
+  plain layout. CAPTURE reports 1280x768 on a reopen as on a fresh open, so the stale offset is the
+  surface's, not the session's.
+- GStreamer's `vp9-switch` on `rk35xx-next2`: GStreamer reads one fresh surface's layout at each new
+  size and takes it for all, before the decoder reopens there, and `rkvdec` writes 720p at 768 rows.
+  A new surface is now laid out as the decoder writes its size, asked of the device on a handle of
+  its own with OUTPUT at that size (`TRY_FMT`), once a profile and size: all three switch clips 90
+  of 90 identical through FFmpeg and GStreamer, DMABuf decode at full rate.
 - The NEON narrowing on `rk35xx`'s vendor kernel, on the R69-1: HEVC Main 10 1080p 274 fps against
   MPP's 312 (88%), 4K 72 against 81 (89%), two points over the C loop's on the M2 Plus: memory
   bounds it there; it earns its place on `next2`'s readback. GStreamer's HEVC 1080p60 into DMABuf on
   `next2`, 20 runs: every one whole in 3.5 s, no kernel line.
-- GStreamer's JPEG on `sunxi-h616` read 28.7 dB, and FFmpeg's pictures through the driver were the
-  same bytes: the suite read GStreamer's raw frames as limited range against a full-range JPEG. Read
-  as full range, 77 dB, as FFmpeg's.

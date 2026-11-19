@@ -184,9 +184,24 @@ Key: ✓ offered, ✗ the engine can but this driver cannot yet, ➖ the engine 
     or never completes stops and restarts both queues, and the pictures in flight are lost.
   - Surfaces' own dma-bufs cannot be CAPTURE: vb2 maps an imported CAPTURE buffer `DMA_FROM_DEVICE`,
     which `sun50i-iommu` maps write-only, and Cedrus reads back the picture it writes (deblocking)
-    and its references. The same holds for `V4L2_MEMORY_FLAG_NON_COHERENT` buffers, allocated for
-    that direction. So the memory is Cedrus's coherent buffers, which the CPU reads uncached: slow
-    for a client that reads pictures, nothing for one that exports them.
+    and its references. So the memory is Cedrus's own buffers, asked for non-coherent where the
+    queue takes cache hints: the CPU reads them cached, each read syncing the dma-buf, and the suite
+    decodes as with coherent ones. `rkvdec` and Hantro take no cache hints, so a picture read back
+    there is read uncached.
+  - A new surface is laid out as the decoder writes its size, asked on a handle of its own with
+    OUTPUT at that size (`TRY_FMT` on CAPTURE): a client reads one surface's layout and takes it for
+    all, `rkvdec`'s 720p VP9 is 768 rows high, and a size change would otherwise leave it reading
+    chroma 48 rows early.
+  - The stream's size and depth are the device's H.264 or HEVC SPS before its buffers, from the
+    context: `rkvdec` refuses a new SPS while it has buffers, and setting it later would free those
+    a client was lent.
+  - A request carries one slice where the queue advertises
+    `V4L2_BUF_CAP_SUPPORTS_M2M_HOLD_CAPTURE_BUF` (Cedrus, Hantro); elsewhere MPEG-4 and H.263 go a
+    VOP a request, from the 64-bit word holding the first macroblock. The VOP carries the VOL's
+    `vop_time_increment_resolution`, which VDPU2 parses packet headers by.
+  - 10-bit comes as P010 on Cedrus and NV15 on `rkvdec`, which lists NV15 only once its SPS says 10
+    bits; an NV15 picture read back is narrowed or widened by the CPU, each row copied into cached
+    memory first.
 - **Formats the GPUs sample:** Cedrus's tiled NV12 (`NV12_32L32`) is read only by the display
   engine; Panfrost samples linear NV12, P010 and AFBC, Lima linear NV12.
   - On the H616, Panfrost (Mali-G31) takes all three.
@@ -397,10 +412,15 @@ local Mesa build needs that build's `libglx-mesa0` installed beside them. Exit s
   picture narrowed to 8 bits differs. On a box the engine's interrupts must move. A 10-bit clip
   downloads as P010, or NV12 where the engine narrows. GStreamer's frames are judged against the
   same software decode; it has no MPEG-4, H.263 or VC-1 decoder.
-- **A size change mid-stream** (`vp9-switch`, `h264-switch`, `hevc-switch`): 360p, 720p, 360p, a
-  key frame each, at widths GStreamer writes unpadded. FFmpeg's pictures and GStreamer's, which
-  change size as they come, against FFmpeg's software decode, each picture at its own size. A switch
-  is a context each in FFmpeg, so its rebuilt headers and mapped controls are not compared.
+- **A size change mid-stream** (`vp9-switch`, `h264-switch`, `hevc-switch`): 360p, 720p, 360p, a key
+  frame each, at widths GStreamer writes unpadded. FFmpeg's pictures and GStreamer's, which change
+  size as they come, against FFmpeg's software decode, each picture at its own size. A switch is a
+  context each in FFmpeg, so its rebuilt headers and mapped controls are not compared.
+- **Frame-based HEVC**, as `rkvdec` takes it: one request a picture, its slices as the stateful path
+  rebuilds them, each short-term set inline, and an SPS that names none, set as the device's own
+  value before buffers, as `rkvdec` sets its pictures up from it.
+- **A VP9 key frame of another size in one context**, as GStreamer keeps it: the stateless session
+  is closed and opened anew at it, as a new context's is.
 - **Rebuilds** are replayed from each clip's captured VA buffers (`VAAPI_CAPTURE`) and compared by
   FFmpeg's `trace_headers`; MPEG-4, H.263 and VC-1, which it cannot trace, by `tests/headers.py`.
   The coded data is compared byte for byte.

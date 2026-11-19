@@ -188,11 +188,20 @@ static void fill_vol(struct v4l2_ctrl_mpeg4_vol *vol, const VAPictureParameterBu
             vol->flags |= flags[i].flag;
 }
 
+/* the coding type of the context's latest reference VOP: a B-VOP's backward reference */
+struct mpeg4_state {
+    uint8_t last_ref_coding_type;
+};
+
 static void fill_vop(const struct request_ctx *rq, struct v4l2_ctrl_mpeg4_vop *vop,
                      const VAPictureParameterBufferMPEG4 *pp)
 {
     const typeof(pp->vop_fields.bits) *f = &pp->vop_fields.bits;
+    struct mpeg4_state *st = rq->codec_state;
     *vop = (struct v4l2_ctrl_mpeg4_vop){
+        /* VDPU2 parses video packet headers by it */
+        .vop_time_increment_resolution = pp->vop_time_increment_resolution,
+        .last_ref_coding_type = st->last_ref_coding_type,
         .trb = pp->TRB,
         .trd = pp->TRD,
         .vop_coding_type = f->vop_coding_type,
@@ -200,6 +209,8 @@ static void fill_vop(const struct request_ctx *rq, struct v4l2_ctrl_mpeg4_vop *v
         .vop_fcode_forward = pp->vop_fcode_forward,
         .vop_fcode_backward = pp->vop_fcode_backward,
     };
+    if (f->vop_coding_type != VOP_B)
+        st->last_ref_coding_type = f->vop_coding_type;
     if (f->vop_coding_type != VOP_I)
         vop->forward_ref_ts = request_timestamp(rq, pp->forward_reference_picture);
     if (f->vop_coding_type == VOP_B)
@@ -252,6 +263,29 @@ static int submit_run(struct request_ctx *rq, struct v4l2_ext_control *controls,
     return ret;
 }
 
+/* the whole VOP in one request, from the 64-bit word holding its first macroblock: an engine that
+ * keeps no picture across requests, as VDPU2, reads its packet and GOB headers itself */
+static int submit_vop(struct request_ctx *rq, struct v4l2_ext_control *controls,
+                      struct v4l2_ctrl_mpeg4_slice *slice, const struct slice *s,
+                      const struct run *first, unsigned macroblocks)
+{
+    size_t byte = first->first_bit / 8, back = byte % sizeof(uint64_t), from = byte - back;
+    struct annexb data = { 0 };
+    if (coded_size(s) <= byte)
+        return -EINVAL;
+    int ret = annexb_append_raw(&data, s->data + from, coded_size(s) - from);
+    *slice = (struct v4l2_ctrl_mpeg4_slice){
+        .bit_size = data.size * 8,
+        .data_bit_offset = back * 8 + first->first_bit % 8,
+        .num_macroblocks = macroblocks,
+        .quant_scale = first->quant,
+    };
+    if (!ret)
+        ret = request_queue(rq, controls, NUM_CONTROLS, &data, true, true);
+    annexb_free(&data);
+    return ret;
+}
+
 static int mpeg4_submit(struct request_ctx *rq, const struct picture *pic)
 {
     const VAPictureParameterBufferMPEG4 *pp = pic->picture_param;
@@ -293,6 +327,9 @@ static int mpeg4_submit(struct request_ctx *rq, const struct picture *pic)
           .ptr = &quantisation },
         { .id = V4L2_CID_STATELESS_MPEG4_SLICE, .size = sizeof(slice), .ptr = &slice },
     };
+    /* the host's dump records Cedrus's requests */
+    if (!rq->holds_capture && !rq->dump)
+        return submit_vop(rq, controls, &slice, s, &runs[0], macroblocks);
     for (unsigned i = 0; i < count && !ret; i++) {
         unsigned next = i + 1 < count ? runs[i + 1].macroblock : macroblocks;
         ret = submit_run(rq, controls, &slice, s, &runs[i], next, i == 0, i + 1 == count);
@@ -303,6 +340,6 @@ static int mpeg4_submit(struct request_ctx *rq, const struct picture *pic)
 const struct request_codec request_mpeg4 = {
     .kind = CODEC_MPEG4,
     .pixelformat = V4L2_PIX_FMT_MPEG4_SLICE,
-    .state_size = 1,
+    .state_size = sizeof(struct mpeg4_state),
     .submit = mpeg4_submit,
 };

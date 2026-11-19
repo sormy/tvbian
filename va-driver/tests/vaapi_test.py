@@ -66,7 +66,7 @@ ENCODE_FRAMES = 30
 JPEG_FRAMES = 5
 MPV_USING = "Using hardware decoding (vaapi-copy)"
 # per engine, the interrupts that prove the hardware decoded
-ENGINE_IRQS = r"cedrus|vdpu|rkvdec|vdec|esparser"
+ENGINE_IRQS = r"cedrus|vdpu|rkvdec|vdec|esparser|jpegd|video-codec"
 
 X264 = ["-c:v", "libx264", "-preset", "veryfast"]
 X265 = ["-c:v", "libx265", "-preset", "ultrafast", "-x265-params", "log-level=0"]
