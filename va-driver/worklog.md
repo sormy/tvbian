@@ -485,3 +485,18 @@ real time on Cedrus whatever the driver: about 25 fps flat out, 180 of 288 frame
   MPP's 312 (88%), 4K 72 against 81 (89%), two points over the C loop's on the M2 Plus: memory
   bounds it there; it earns its place on `next2`'s readback. GStreamer's HEVC 1080p60 into DMABuf on
   `next2`, 20 runs: every one whole in 3.5 s, no kernel line.
+
+## 2026-11-19 — the GPU's alignment, and mpv on Wayland
+
+- YouTube in Falkon on `sunxi-h616` failed at its small sizes: Panfrost logged "rejecting image due
+  to unsupported offset or stride alignment" for each picture. Cedrus pads an NV12 row to 32 bytes,
+  854 wide to 864, and Panfrost imports a linear plane only at whole 64 bytes; the decoder's buffer
+  was lent, planned and exported at its own pitch. It now is only where pitch and plane offsets are
+  64-byte aligned; elsewhere the surface keeps its own aligned memory and gets each picture copied
+  in. mpv on a headless `labwc`, VP9 854x480, 426x240 and 642x362, H.264 854x480: 61 pictures
+  refused before, none now.
+- `mpv --hwdec=vaapi` failed in every suite run: its DRM output finds "no primary DRM device" where
+  the display and the GPU are two devices, as on the H313; the driver was never reached. Through
+  Wayland, as on the desktop, H.264, VP9 and HEVC decode through VA and import with no copy. The
+  suite's `mpv.vaapi` now plays the odd-size clip on a headless `labwc` and fails on a refused
+  picture.

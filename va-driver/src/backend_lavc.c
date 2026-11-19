@@ -17,7 +17,6 @@
 #include "driver.h"
 #include "pixels.h"
 
-#define PITCH_ALIGN 64
 /* libavcodec's encoders take a fixed QP and both bitrate modes */
 #define EVERY_RATE_CONTROL (VA_RC_CQP | VA_RC_CBR | VA_RC_VBR)
 #define MAX_JPEG_QUALITY 100
@@ -197,7 +196,8 @@ static struct engine_picture *picture_of(const AVFrame *f)
 {
     bool ten_bit = f->format == AV_PIX_FMT_YUV420P10;
     struct source src = { .layout = ten_bit ? LAYOUT_I010 : LAYOUT_I420 };
-    unsigned pitch = (f->width * (ten_bit ? 2 : 1) + PITCH_ALIGN - 1) / PITCH_ALIGN * PITCH_ALIGN;
+    unsigned row = f->width * (ten_bit ? 2 : 1);
+    unsigned pitch = (row + GPU_PLANE_ALIGN - 1) / GPU_PLANE_ALIGN * GPU_PLANE_ALIGN;
     size_t luma_size = (size_t)pitch * f->height;
     size_t size = luma_size + pitch * ((f->height + 1) / 2);
     struct engine_picture *p = calloc(1, sizeof(*p));

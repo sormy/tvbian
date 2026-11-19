@@ -342,6 +342,11 @@ static uint32_t surface_fourcc_of_capture(const struct request_ctx *rq)
 
 /* the buffer as the surface's own memory, where it has none and takes the layout; whether the
  * buffer is the surface's memory now */
+static bool gpu_imports(unsigned pitch, size_t chroma_offset)
+{
+    return pitch % GPU_PLANE_ALIGN == 0 && chroma_offset % GPU_PLANE_ALIGN == 0;
+}
+
 static int lend_capture(struct request_ctx *rq, const struct capture_buffer *c, struct surface *s)
 {
     const struct v4l2_pix_format *f = &rq->picture;
@@ -350,6 +355,7 @@ static int lend_capture(struct request_ctx *rq, const struct capture_buffer *c, 
     int ret;
     surface_drop_unseen_backing(s);
     if (!s->backing && s->fourcc == surface_fourcc_of_capture(rq) &&
+        gpu_imports(layout.pitch, layout.chroma_offset) &&
         (ret = surface_adopt_backing(s, dup(c->fd), &layout)) < 0)
         return ret;
     return s->backing && !fstat(s->backing->fd, &st) && st.st_ino == c->inode;
@@ -1086,7 +1092,7 @@ static bool plan_request_layout(VAProfile decoding, uint32_t fourcc, unsigned wi
                                    : capture.fmt.pix.sizeimage;
             bool nv12 = (mplane ? capture.fmt.pix_mp.pixelformat : capture.fmt.pix.pixelformat) ==
                         V4L2_PIX_FMT_NV12;
-            if (nv12 && rows >= height && pitch >= width)
+            if (nv12 && rows >= height && pitch >= width && gpu_imports(pitch, pitch * rows))
                 layout = (struct backing_layout){ pitch, pitch * rows, size };
         }
         close(fd);

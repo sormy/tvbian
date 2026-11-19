@@ -65,6 +65,12 @@ ENCODE_FLOOR_DB = 30.0
 ENCODE_FRAMES = 30
 JPEG_FRAMES = 5
 MPV_USING = "Using hardware decoding (vaapi-copy)"
+MPV_ZERO_COPY = "Using hardware decoding (vaapi)"
+# Mesa's words for a dma-buf it will not import
+GPU_REJECTED = "rejecting image"
+# the desktop's compositor, run headless for a client that needs a display
+COMPOSITOR = "labwc"
+COMPOSITOR_START_S = 10
 # per engine, the interrupts that prove the hardware decoded
 ENGINE_IRQS = r"cedrus|vdpu|rkvdec|vdec|esparser|jpegd|video-codec"
 
@@ -708,11 +714,31 @@ def compare_with_source(encoded: Path, source: str, frames: int, work: Path) -> 
 # clients
 
 
-def display_connected() -> bool:
-    return any(
-        status.read_text().strip() == "connected"
-        for status in Path("/sys/class/drm").glob("card*-*/status")
-    )
+@contextlib.contextmanager
+def headless_wayland() -> Iterator[dict[str, str] | None]:
+    """A headless labwc, the desktop's compositor, and the environment a client needs to reach it;
+    None where labwc is not installed or does not come up."""
+    if not shutil.which(COMPOSITOR):
+        yield None
+        return
+    with tempfile.TemporaryDirectory(prefix="tvb-wayland-") as runtime:
+        os.chmod(runtime, 0o700)
+        env = dict(os.environ, XDG_RUNTIME_DIR=runtime, WLR_BACKENDS="headless")
+        compositor = subprocess.Popen(
+            [COMPOSITOR, "-s", "true"],
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        try:
+            deadline = time.monotonic() + COMPOSITOR_START_S
+            while time.monotonic() < deadline and not list(Path(runtime).glob("wayland-[0-9]")):
+                time.sleep(0.1)
+            sockets = sorted(p.name for p in Path(runtime).glob("wayland-[0-9]"))
+            yield dict(XDG_RUNTIME_DIR=runtime, WAYLAND_DISPLAY=sockets[0]) if sockets else None
+        finally:
+            compositor.terminate()
+            compositor.wait()
 
 
 def mpv_case(setup: Setup, offers: set[str]) -> Iterator[Line]:
@@ -728,16 +754,23 @@ def mpv_case(setup: Setup, offers: set[str]) -> Iterator[Line]:
         env=setup.env(),
     )
     yield "mpv.vaapi-copy", "pass" if rc == 0 and MPV_USING in log else f"failed: {last_line(log)}"
-    if setup.on_box and not display_connected():
-        yield "mpv.vaapi", "not run: no display connected, which mpv's DRM output needs"
-    elif setup.on_box:
+    if not setup.on_box:
+        return
+    with headless_wayland() as wayland:
+        if wayland is None:
+            yield "mpv.vaapi", f"not run: no {COMPOSITOR} to show it on"
+            return
+        # an odd size: Cedrus pads its rows to a pitch the GPU may not import
         rc, log = run(
-            ["mpv", "--no-config", "--hwdec=vaapi", "--vo=gpu", "--gpu-context=drm", "--ao=null"]
-            + [str(clip)],
-            env=setup.env(),
+            ["mpv", "--no-config", "--hwdec=vaapi", "--vo=gpu", "--gpu-context=wayland", "--ao=null"]
+            + ["-v", str(setup.clips / "h264-odd.mp4")],
+            env=dict(setup.env(), **wayland),
         )
-        zero_copy = "Using hardware decoding (vaapi)" in log and rc == 0
-        yield "mpv.vaapi", "pass" if zero_copy else f"failed: {last_line(log)}"
+    rejected = log.count(GPU_REJECTED)
+    if rc != 0 or MPV_ZERO_COPY not in log:
+        yield "mpv.vaapi", f"failed: {last_line(log)}"
+    else:
+        yield "mpv.vaapi", "pass" if not rejected else f"failed: the GPU refused {rejected} pictures"
 
 
 def gst_element(setup: Setup, element: str) -> bool:

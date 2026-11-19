@@ -205,6 +205,9 @@ Key: ✓ offered, ✗ the engine can but this driver cannot yet, ➖ the engine 
 - **Formats the GPUs sample:** Cedrus's tiled NV12 (`NV12_32L32`) is read only by the display
   engine; Panfrost samples linear NV12, P010 and AFBC, Lima linear NV12.
   - On the H616, Panfrost (Mali-G31) takes all three.
+  - Panfrost imports a plane only at a pitch and offset of whole 64 bytes; Cedrus pads a row to 32,
+    so a decoder's buffer is lent or exported only where it is so aligned, and a surface laid out
+    otherwise gets each picture copied in: YouTube's 854 and 426 wide among them.
   - AFBC when the client lists its modifier at surface creation, for HEVC and VP9; see above.
 - **Chromium:** a client's own buffer gets each picture copied in by the CPU; the buffer Cedrus
   decoded into stays the reference.
@@ -402,7 +405,7 @@ local Mesa build needs that build's `libglx-mesa0` installed beside them. Exit s
 | `decode.*`       | ffmpeg through VA against its software decode, frame by frame      |
 | `mapping.*`      | host: the Cedrus controls against FFmpeg's or `headers.py`'s parse |
 | `encode.*`       | `*_vaapi`, decoded back: every frame, Y PSNR ≥ 30 dB, its size     |
-| `mpv.*`          | `--hwdec=vaapi-copy`; `--hwdec=vaapi` on a display                 |
+| `mpv.*`          | `--hwdec=vaapi-copy`; `--hwdec=vaapi` on a headless `labwc`        |
 | `gstreamer.*`    | Debian's `va` elements on every `decode.*` clip and encode         |
 | `probe.*`        | `tests/va_probe.c`: Kodi's, VLC's and Chromium's surface calls     |
 | `node.*`         | box: `/dev/dri/va` is the GPU's render node, and `renderD128`      |
@@ -453,5 +456,5 @@ one wrong picture through after a drain, open. Every other offer passes, decode 
 - **`meson-gxl` held pictures:** FFmpeg's command line syncs each picture before the next packet;
   with `meson-codecs` `0037` every MPEG-2 and MPEG-4 clip but the interlaced one comes out whole.
 - **Clients:** `mpv --hwdec=vaapi-copy` and GStreamer's `va` decoders and encoders on `rk35xx` and
-  `sunxi-h616`; `mpv --hwdec=vaapi` fails on `meson-gxl` and is untested on the others, which had no
-  display connected.
+  `sunxi-h616`; `mpv --hwdec=vaapi` through Wayland on `sunxi-h616`, the picture imported by the GPU
+  with no copy.

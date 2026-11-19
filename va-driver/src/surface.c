@@ -18,7 +18,6 @@
 #include "pixels.h"
 
 #define DMA_HEAP "/dev/dma_heap/system"
-#define PITCH_ALIGN 64
 /* how long a sync waits for a held picture, looking every SYNC_POLL_MS */
 #define SYNC_PATIENCE_MS 1000
 #define SYNC_POLL_MS 5
@@ -181,7 +180,7 @@ int surface_ensure_backing(struct surface *s)
         int fd = dmabuf_alloc(s->planned.size);
         return fd < 0 ? -errno : surface_adopt_backing(s, fd, &s->planned);
     }
-    unsigned pitch = ALIGN(s->width * bytes_per_sample(s->fourcc), PITCH_ALIGN);
+    unsigned pitch = ALIGN(s->width * bytes_per_sample(s->fourcc), GPU_PLANE_ALIGN);
     unsigned luma_rows = ALIGN(s->height, HEIGHT_ALIGN);
     size_t size = (size_t)pitch * luma_rows * (engine && engine->decodes_into_backing ? 4 : 3) / 2;
     /* the whole pages the heap gives: an encoder asks a little past the picture */
@@ -507,8 +506,13 @@ static void fill_layers(VADRMPRIMESurfaceDescriptor *out, uint32_t fourcc, uint3
 static bool exportable(const struct engine_picture *p, uint32_t fourcc, bool separate)
 {
     bool nv15 = p && p->drm_format == DRM_FORMAT_NV15 && fourcc == VA_FOURCC_P010 && !separate;
-    return p && (p->drm_format == drm_format_of(fourcc) || nv15) &&
-           p->modifier == DRM_FORMAT_MOD_LINEAR;
+    if (!p || !(p->drm_format == drm_format_of(fourcc) || nv15) ||
+        p->modifier != DRM_FORMAT_MOD_LINEAR)
+        return false;
+    for (unsigned i = 0; i < PICTURE_PLANES; i++)
+        if (p->plane_pitch[i] % GPU_PLANE_ALIGN || p->plane_offset[i] % GPU_PLANE_ALIGN)
+            return false;
+    return true;
 }
 
 static void export_picture(const struct engine_picture *p, uint32_t fourcc, bool separate,
@@ -618,7 +622,7 @@ static VAStatus create_image(VADriverContextP ctx, VAImageFormat *format, int wi
 {
     if (format->fourcc != VA_FOURCC_NV12 && format->fourcc != VA_FOURCC_P010)
         return VA_STATUS_ERROR_INVALID_IMAGE_FORMAT;
-    unsigned pitch = ALIGN(width * bytes_per_sample(format->fourcc), PITCH_ALIGN);
+    unsigned pitch = ALIGN(width * bytes_per_sample(format->fourcc), GPU_PLANE_ALIGN);
     unsigned luma_size = pitch * height;
     struct va_buffer *b = calloc(1, sizeof(*b));
 

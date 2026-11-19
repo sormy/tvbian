@@ -56,7 +56,8 @@ settings.
 - [ ] **No decode waits forever**: on an RK3518, FFmpeg sat two days in a futex, every thread
       asleep, decoding `vp9-tools` through MPP with a driver build of 2026-11-15.
 - [ ] **The suite leaves no process behind**: that FFmpeg outlived its run and its directory.
-- [ ] **`mpv --hwdec=vaapi` on `rk35xx`**: "Errors when loading file", where `vaapi-copy` plays.
+- [ ] **`mpv --hwdec=vaapi` on `rk35xx` and `meson-gxl`**: through Wayland, as on `sunxi-h616`;
+      mpv's DRM output finds no primary node where the display and the GPU are two devices.
 - [ ] **`va_probe` in `tvb-va-driver`**: the suite's initialize check is UNTESTED on a box without
       it.
 - [ ] **GStreamer in the host check**: its `va` plugin opens only a DRM render node, which the build

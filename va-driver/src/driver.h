@@ -138,6 +138,9 @@ struct backing {
 };
 
 /* Where a surface's planes lie in memory of its own. */
+/* a plane the GPU imports: Panfrost takes a linear pitch and plane offset of whole 64 bytes */
+#define GPU_PLANE_ALIGN 64
+
 struct backing_layout {
     unsigned pitch;
     unsigned chroma_offset;
