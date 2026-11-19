@@ -316,6 +316,24 @@ real time on Cedrus whatever the driver: about 25 fps flat out, 180 of 288 frame
   change, and MPP's own resize lost some on the way. A VP9 key frame of another size now gets a
   decoder anew, as the stateless backend's does: all three switch clips 90 of 90 identical through
   FFmpeg and GStreamer.
+- GStreamer through the driver on `meson-gxl` stalled after 9 to 131 of 600 pictures: GStreamer
+  syncs a picture before sending the next packet, and meson's decoder hands one out only after later
+  packets, so the driver drains, and a drain ends meson's session and its references. The microcode
+  has no low-latency mode. GStreamer's own `v4l2h264dec`, `v4l2h265dec` and `v4l2vp9dec` decode all
+  600, so the package's generator no longer tells GStreamer to load the driver where the meson
+  decoder is.
+- GStreamer finds the `va` encoders on `meson-gxl` too: the generator loads the driver everywhere
+  and ranks only the `va` decoders out there.
+- A call in the browsers, on `sunxi-h616`: GStreamer ranks its `va` encoders out, so WebKit picked
+  `openh264enc`; the generator ranks them first now, and WebKit builds `vah264enc`. Chromium 156
+  takes the encoder with `AcceleratedVideoEncoder`: its VA encoder initializes and encodes at 360p
+  and 540p, but the call's canvas gives it 3.5 fps, WebRTC drops below 360p, and Chromium encodes
+  that in software. Firefox ESR 153 has no VA encoder: its FFmpeg encoder opens `libx264`, so its
+  encode prefs are not shipped.
+- `rk35xx-next2` with Hantro beside `rkvdec`: GStreamer names a second node's stateless decoders for
+  the node, `v4l2slvideo6h264dec`, which the generator did not rank out, so WebKit took it over
+  `vah264dec`. The generator now ranks out every node's. HEVC through `vah265dec` outside WebKit:
+  1080p 298 fps, the suite exact; FFmpeg 97% of `ffmpeg9`'s own.
 - GStreamer's JPEG on `sunxi-h616` read 28.7 dB, and FFmpeg's pictures through the driver were the
   same bytes: the suite read GStreamer's raw frames as limited range against a full-range JPEG. Read
   as full range, 77 dB, as FFmpeg's.

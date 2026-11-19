@@ -1,4 +1,4 @@
-# GStreamer's va plugin loads a driver it does not know only so
-export GST_VA_ALL_DRIVERS=1
-# no box here decodes AV1 in hardware, nor fast enough on its CPU: unlisted, browsers ask for VP9
-export GST_PLUGIN_FEATURE_RANK=av1dec:NONE,dav1ddec:NONE,avdec_av1:NONE,avdec_libdav1d:NONE
+# what the user manager's generator gives a session, for a login shell
+tvb_va_environment=$(/usr/lib/systemd/user-environment-generators/60-tvb-va-driver)
+[ -z "$tvb_va_environment" ] || export $tvb_va_environment
+unset tvb_va_environment

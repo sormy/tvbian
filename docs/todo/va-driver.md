@@ -6,6 +6,8 @@ settings.
 
 ## Open
 
+- [ ] **Firefox's VA environment in `tvb-va-driver`**: `MOZ_ENABLE_WAYLAND` and
+      `MOZ_DISABLE_RDD_SANDBOX` where every session reads them, a greetd-started `labwc` included.
 - [ ] **Survey, one box a family**: what Debian's GStreamer and FFmpeg 7.1 already decode; whether
       Debian's arm64 Chromium is built with VA-API; whether Firefox and Chromium list modifiers at
       surface creation.

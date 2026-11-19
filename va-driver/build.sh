@@ -138,9 +138,13 @@ package() {
   cp "$dir/tvb_drv_video.so" "$root$DRI_DIR/"
   for name in $GPU_DRIVERS; do ln -s tvb_drv_video.so "$root$DRI_DIR/${name}_drv_video.so"; done
   # GStreamer's va plugin passes over an unknown driver: told for the user manager and login shells
-  install -D -m 0644 "$SRC/deb/gst-va.conf" "$root/usr/lib/environment.d/50-tvb-va-driver.conf"
+  install -D -m 0755 "$SRC/deb/gst-va-generator" \
+    "$root/usr/lib/systemd/user-environment-generators/60-tvb-va-driver"
   install -D -m 0644 "$SRC/deb/gst-va.sh" "$root/etc/profile.d/tvb-va-driver.sh"
-  echo /etc/profile.d/tvb-va-driver.sh >"$root/DEBIAN/conffiles"
+  # the browsers leave VA off unless told
+  install -D -m 0644 "$SRC/deb/firefox.js" "$root/usr/lib/firefox-esr/defaults/pref/tvb-va-driver.js"
+  install -D -m 0644 "$SRC/deb/chromium" "$root/etc/chromium.d/tvb-va-driver"
+  printf '%s\n' /etc/profile.d/tvb-va-driver.sh /etc/chromium.d/tvb-va-driver >"$root/DEBIAN/conffiles"
   write_udev_rule "$root"
   install -m 0755 "$SRC/deb/postinst" "$root/DEBIAN/postinst"
   cat >"$root/DEBIAN/control" <<CONTROL

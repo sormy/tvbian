@@ -16,7 +16,13 @@ a box of each family known here; no image installs it yet.
 - **Names:** libva names a driver after the DRM driver of the render node a client opens: the
   package installs `tvb_drv_video.so` under each GPU's name in `build.sh`'s `GPU_DRIVERS`, and udev
   links that node as `/dev/dri/va`. The same rule opens `/dev/dma_heap/system` to the `video` group,
-  where a desktop user's surfaces get their own memory.
+  where a desktop user's surfaces get their own memory. A user-environment generator has GStreamer's
+  `va` plugin load the driver (`GST_VA_ALL_DRIVERS`), ranks GStreamer's own stateless decoders out,
+  every node's, and on meson ranks the `va` decoders out: meson's holds each picture until later
+  packets, which GStreamer, syncing each first, never sends; GStreamer's own V4L2 decoders feed
+  ahead there, and the `va` encoders stay, ranked first, as GStreamer ranks them out. It ships the
+  browsers' VA defaults too, each leaving VA off unless told: Firefox's decode, Chromium's decode
+  and encode.
 - **Linking:** libmpp is linked in statically; the driver exports `__vaDriverInit_1_22` alone, so
   the library's symbols meet no other copy in a process. `patches/mpp/` makes MPP's platform probe a
   call, made only where `/dev/mpp_service` is.
@@ -377,6 +383,7 @@ local Mesa build needs that build's `libglx-mesa0` installed beside them. Exit s
 | `gstreamer.*`    | Debian's `va` elements on every `decode.*` clip and encode         |
 | `probe.*`        | `tests/va_probe.c`: Kodi's, VLC's and Chromium's surface calls     |
 | `node.*`         | box: `/dev/dri/va` is the GPU's render node, and `renderD128`      |
+| `package.*`      | box: the heap open to `video`; the browsers' VA defaults           |
 
 - **Decode** passes on identical frames, or on Y PSNR ≥ 50 dB where the engine's IDCT or a 10-bit
   picture narrowed to 8 bits differs. On a box the engine's interrupts must move. A 10-bit clip

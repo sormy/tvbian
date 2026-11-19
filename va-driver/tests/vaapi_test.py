@@ -17,12 +17,14 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import grp
 import hashlib
 import math
 import os
 import re
 import resource
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -48,6 +50,15 @@ REPORT_PREFIX = "va."
 VA_LINK = Path("/dev/dri/va")
 DRIVER_SUFFIX = "_drv_video.so"
 FIRST_RENDER_NODE = Path("/dev/dri/renderD128")
+# where a desktop user's surfaces get their own memory, opened to this group by the udev rule
+SYSTEM_HEAP = Path("/dev/dma_heap/system")
+HEAP_GROUP = "video"
+HEAP_MODE = 0o660
+# the browsers' VA defaults the package ships, each with a setting it must carry
+BROWSER_DEFAULTS = {
+    Path("/usr/lib/firefox-esr/defaults/pref/tvb-va-driver.js"): "media.ffmpeg.vaapi.enabled",
+    Path("/etc/chromium.d/tvb-va-driver"): "--hardware-video-device-path=/dev/dri/va",
+}
 # a width whose I420 rows GStreamer writes unpadded
 RAW_WIDTH_MULTIPLE = 8
 ENCODE_FLOOR_DB = 30.0
@@ -406,6 +417,27 @@ def node_case(setup: Setup) -> Iterator[Line]:
         if first == node
         else f"failed: {first.name} is {node_driver(first)}'s, a display driver's render node"
     )
+
+
+def package_case() -> Iterator[Line]:
+    """What the installed package sets up beside the driver: the heap, the browsers' defaults."""
+    if not SYSTEM_HEAP.exists():
+        yield "package.heap", "unsupported: no system heap"
+    else:
+        info = SYSTEM_HEAP.stat()
+        group = grp.getgrgid(info.st_gid).gr_name
+        mode = stat.S_IMODE(info.st_mode)
+        yield "package.heap", (
+            "pass"
+            if group == HEAP_GROUP and mode & HEAP_MODE == HEAP_MODE
+            else f"failed: {group} {mode:o}, not {HEAP_GROUP} {HEAP_MODE:o}"
+        )
+    for path, setting in BROWSER_DEFAULTS.items():
+        key = f"package.{path.name}"
+        if not path.exists():
+            yield key, f"failed: no {path}"
+        else:
+            yield key, "pass" if setting in path.read_text() else f"failed: no {setting}"
 
 
 # decode
@@ -1429,6 +1461,7 @@ def suite(setup: Setup) -> Iterator[Line]:
     yield from vainfo(setup, offers, log)
     if setup.on_box:
         yield from node_case(setup)
+        yield from package_case()
     if not offers:
         return
     for name, clip in CLIPS.items():

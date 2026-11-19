@@ -1,0 +1,3 @@
+# video decode and encode through the VA driver: Chromium opens VA-API on a non-PCI GPU only on
+# the node it is named, which this package links as /dev/dri/va
+export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --hardware-video-device-path=/dev/dri/va --enable-features=VaapiVideoDecoder,AcceleratedVideoEncoder,VaapiIgnoreDriverChecks,VaapiVideoDecodeLinuxGL,AcceleratedVideoDecodeLinuxGL"
