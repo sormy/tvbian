@@ -2,10 +2,15 @@
 #include "pixels.h"
 
 #include <errno.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+
+#if defined(__aarch64__)
+#include <arm_neon.h>
+#endif
 
 #include <drm_fourcc.h>
 #include <linux/dma-buf.h>
@@ -104,6 +109,109 @@ static void widen_row(uint16_t *dst, const uint8_t *narrow, unsigned count)
         dst[i] = (uint16_t)(narrow[i] << 8);
 }
 
+/* NV15 samples first.. to 8-bit, their high 8 bits: four from each group's five bytes at once */
+#if defined(__aarch64__)
+/* 16 samples from four groups' 20 bytes: each the high byte of one group byte shifted right and the
+ * next shifted left; the 32-byte load needs 28 samples left */
+#define NEON_SAMPLES 16
+#define NEON_READ_SAMPLES 28
+
+static unsigned narrow_nv15_neon(uint8_t *dst, const uint8_t *src, unsigned i, unsigned end)
+{
+    static const uint8_t low_bytes[16] = { 0, 1, 2, 4, 5, 6, 7, 9, 10, 11, 12, 14, 15, 16, 17, 19 };
+    static const uint8_t high_bytes[16] = { 1,  2,  3,  0xff, 6,  7,  8,  0xff,
+                                            11, 12, 13, 0xff, 16, 17, 18, 0xff };
+    static const int8_t right[16] = { -2, -4, -6, 0, -2, -4, -6, 0, -2, -4, -6, 0, -2, -4, -6, 0 };
+    static const int8_t left[16] = { 6, 4, 2, 0, 6, 4, 2, 0, 6, 4, 2, 0, 6, 4, 2, 0 };
+    const uint8x16_t lows = vld1q_u8(low_bytes), highs = vld1q_u8(high_bytes);
+    const int8x16_t shift_right = vld1q_s8(right), shift_left = vld1q_s8(left);
+    for (; i + NEON_READ_SAMPLES <= end; i += NEON_SAMPLES, dst += NEON_SAMPLES) {
+        uint8x16x2_t in = vld1q_u8_x2(src + i / NV15_SAMPLES_PER_GROUP * NV15_BYTES_PER_GROUP);
+        uint8x16_t low = vshlq_u8(vqtbl2q_u8(in, lows), shift_right);
+        uint8x16_t high = vshlq_u8(vqtbl2q_u8(in, highs), shift_left);
+        vst1q_u8(dst, vorrq_u8(low, high));
+    }
+    return i;
+}
+#endif
+
+static void narrow_nv15_row(uint8_t *dst, const uint8_t *src, unsigned first, unsigned count)
+{
+    unsigned i = first, end = first + count;
+    uint16_t sample;
+    for (; i < end && i % NV15_SAMPLES_PER_GROUP; i++) {
+        nv15_unpack(&sample, src, i, 1);
+        *dst++ = (uint8_t)(sample >> 8);
+    }
+#if defined(__aarch64__)
+    unsigned from = i;
+    i = narrow_nv15_neon(dst, src, i, end);
+    dst += i - from;
+#endif
+    for (; i + NV15_SAMPLES_PER_GROUP <= end; i += NV15_SAMPLES_PER_GROUP) {
+        const uint8_t *g = src + i / NV15_SAMPLES_PER_GROUP * NV15_BYTES_PER_GROUP;
+        dst[0] = (uint8_t)(g[0] >> 2 | g[1] << 6);
+        dst[1] = (uint8_t)(g[1] >> 4 | g[2] << 4);
+        dst[2] = (uint8_t)(g[2] >> 6 | g[3] << 2);
+        dst[3] = g[4];
+        dst += NV15_SAMPLES_PER_GROUP;
+    }
+    for (; i < end; i++) {
+        nv15_unpack(&sample, src, i, 1);
+        *dst++ = (uint8_t)(sample >> 8);
+    }
+}
+
+/* NV15 rows to 8-bit, as one plane's share */
+struct nv15_rows {
+    uint8_t *dst;
+    unsigned dst_pitch;
+    const uint8_t *src;
+    ptrdiff_t src_pitch;
+    unsigned first, count, rows;
+};
+
+/* each row copied whole into cached memory first: an engine's picture may be uncached, where the
+ * narrowing's overlapping loads read it several times over */
+static void *narrow_nv15_rows(void *arg)
+{
+    const struct nv15_rows *r = arg;
+    size_t bytes = (size_t)(r->first + r->count + NV15_SAMPLES_PER_GROUP - 1) /
+                   NV15_SAMPLES_PER_GROUP * NV15_BYTES_PER_GROUP;
+    uint8_t *row_copy = malloc(bytes);
+    for (unsigned row = 0; row < r->rows; row++) {
+        const uint8_t *src = r->src + row * r->src_pitch;
+        if (row_copy)
+            src = memcpy(row_copy, src, bytes);
+        narrow_nv15_row(r->dst + (size_t)row * r->dst_pitch, src, r->first, r->count);
+    }
+    free(row_copy);
+    return NULL;
+}
+
+/* the luma's top half on a second core, the rest here: a 4K picture is 12 MB to narrow */
+static void narrow_nv15(const struct source *s, unsigned x, unsigned y, const struct nv12_planes *d)
+{
+    unsigned top = d->height / 2, pairs = (d->width + 1) / 2;
+    struct nv15_rows upper = { d->luma, d->luma_pitch, s->data[0] + (ptrdiff_t)y * s->pitch[0],
+                               s->pitch[0], x, d->width, top };
+    struct nv15_rows lower = upper;
+    lower.dst += (size_t)top * d->luma_pitch;
+    lower.src += (ptrdiff_t)top * s->pitch[0];
+    lower.rows = d->height - top;
+    struct nv15_rows chroma = { d->chroma, d->chroma_pitch,
+                                s->data[1] + (ptrdiff_t)(y / 2) * s->pitch[1], s->pitch[1],
+                                x / 2 * 2, 2 * pairs, (d->height + 1) / 2 };
+    pthread_t helper;
+    bool helped = !pthread_create(&helper, NULL, narrow_nv15_rows, &upper);
+    if (!helped)
+        narrow_nv15_rows(&upper);
+    narrow_nv15_rows(&lower);
+    narrow_nv15_rows(&chroma);
+    if (helped)
+        pthread_join(helper, NULL);
+}
+
 /* a row as the source wrote it into staging, then to the destination's depth */
 static void convert_row(uint8_t *out, const uint8_t *staged, unsigned count, bool narrow)
 {
@@ -118,6 +226,10 @@ int pixels_copy(const struct source *s, unsigned x, unsigned y, const struct nv1
     bool narrow = is_ten_bit(s->layout) && !dst->ten_bit;
     bool convert = is_ten_bit(s->layout) != dst->ten_bit;
     unsigned pairs = (dst->width + 1) / 2;
+    if (narrow && s->layout == LAYOUT_NV15) {
+        narrow_nv15(s, x, y, dst);
+        return 0;
+    }
     uint8_t *staged = convert ? malloc(2 * pairs * sizeof(uint16_t)) : NULL;
     if (convert && !staged)
         return -ENOMEM;

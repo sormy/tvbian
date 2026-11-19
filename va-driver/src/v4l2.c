@@ -73,21 +73,41 @@ struct coded_ask {
     bool decode;
     bool *mplane;
     uint32_t *flags;
+    /* the node kept so far and the size it takes */
+    int fd;
+    unsigned long area;
 };
 
+static bool largest_size(int fd, uint32_t pixelformat, unsigned *width, unsigned *height);
+
+/* every node taking the format looked at, the one taking the largest size kept, as two engines
+ * may decode one codec */
 static int try_coded(const char *path, void *arg)
 {
-    const struct coded_ask *ask = arg;
+    struct coded_ask *ask = arg;
     struct v4l2_capability cap;
     int fd = open(path, O_RDWR | O_NONBLOCK | O_CLOEXEC);
     if (fd < 0)
         return -1;
     bool multi = !ioctl(fd, VIDIOC_QUERYCAP, &cap) && cap.device_caps & V4L2_CAP_VIDEO_M2M_MPLANE;
     bool single = !multi && cap.device_caps & V4L2_CAP_VIDEO_M2M;
+    unsigned width, height;
+    uint32_t flags = 0;
     if ((multi || single) &&
-        v4l2_queue_takes(fd, coded_queue(ask->decode, multi), ask->pixelformat, ask->flags)) {
-        *ask->mplane = multi;
-        return fd;
+        v4l2_queue_takes(fd, coded_queue(ask->decode, multi), ask->pixelformat, &flags)) {
+        unsigned long area = largest_size(fd, ask->pixelformat, &width, &height)
+                                 ? (unsigned long)width * height
+                                 : 1;
+        if (area > ask->area) {
+            if (ask->fd >= 0)
+                close(ask->fd);
+            *ask->mplane = multi;
+            if (ask->flags)
+                *ask->flags = flags;
+            ask->fd = fd;
+            ask->area = area;
+            return -1;
+        }
     }
     close(fd);
     return -1;
@@ -95,8 +115,9 @@ static int try_coded(const char *path, void *arg)
 
 int v4l2_open_coded(uint32_t pixelformat, bool decode, bool *mplane, uint32_t *flags)
 {
-    struct coded_ask ask = { pixelformat, decode, mplane, flags };
-    return v4l2_each_node(VIDEO_NODES, "video", try_coded, &ask);
+    struct coded_ask ask = { pixelformat, decode, mplane, flags, -1, 0 };
+    v4l2_each_node(VIDEO_NODES, "video", try_coded, &ask);
+    return ask.fd;
 }
 
 /* the largest size the device lists for the format; false when it lists none */
@@ -167,16 +188,38 @@ static void size_limit(int fd, bool decode, bool mplane, uint32_t pixelformat, s
         o->max_pixels = pixels;
 }
 
+/* an SPS small and plain enough for any decoder, but 10 bits deep */
+#define PROBE_SIZE 64
+#define TEN_BIT_DEPTH_MINUS8 2
+#define CHROMA_420 1
+
 #ifndef V4L2_PIX_FMT_NV15
 #define V4L2_PIX_FMT_NV15 v4l2_fourcc('N', 'V', '1', '5')
 #endif
 
-static bool captures_ten_bit(int fd, bool mplane)
+static bool lists_ten_bit(int fd, enum v4l2_buf_type type)
 {
     uint32_t flags;
-    enum v4l2_buf_type type = coded_queue(false, mplane);
     return v4l2_queue_takes(fd, type, V4L2_PIX_FMT_P010, &flags) ||
            v4l2_queue_takes(fd, type, V4L2_PIX_FMT_NV15, &flags);
+}
+
+/* a 10-bit format listed, at once or once the device's SPS says 10 bits, as rkvdec's HEVC wants */
+static bool captures_ten_bit(int fd, bool mplane, uint32_t pixelformat)
+{
+    enum v4l2_buf_type type = coded_queue(false, mplane);
+    if (lists_ten_bit(fd, type) || pixelformat != V4L2_PIX_FMT_HEVC_SLICE)
+        return lists_ten_bit(fd, type);
+    struct v4l2_ctrl_hevc_sps sps = { .pic_width_in_luma_samples = PROBE_SIZE,
+                                      .pic_height_in_luma_samples = PROBE_SIZE,
+                                      .bit_depth_luma_minus8 = TEN_BIT_DEPTH_MINUS8,
+                                      .bit_depth_chroma_minus8 = TEN_BIT_DEPTH_MINUS8,
+                                      .chroma_format_idc = CHROMA_420 };
+    struct v4l2_ext_control control = { .id = V4L2_CID_STATELESS_HEVC_SPS, .size = sizeof(sps),
+                                        .ptr = &sps };
+    struct v4l2_ext_controls set = { .which = V4L2_CTRL_WHICH_CUR_VAL, .count = 1,
+                                     .controls = &control };
+    return !ioctl(fd, VIDIOC_S_EXT_CTRLS, &set) && lists_ten_bit(fd, type);
 }
 
 /* whether the device has the menu and lists the item */
@@ -211,17 +254,28 @@ static bool menu_lists(int fd, uint32_t id, unsigned item)
            !ioctl(fd, VIDIOC_QUERYMENU, &entry);
 }
 
+static bool offered(const struct offer *offers, unsigned count, const struct v4l2_candidate *c)
+{
+    for (unsigned i = 0; i < count; i++)
+        if (offers[i].profile == c->profile && offers[i].entrypoint == c->entrypoint)
+            return true;
+    return false;
+}
+
+/* a profile once, from the first candidate a node takes: JPEG comes as MJPG or JPEG */
 unsigned v4l2_offers(const struct v4l2_candidate *candidates, unsigned count, struct offer *out)
 {
     unsigned kept = 0;
     for (unsigned i = 0; i < count; i++) {
         const struct v4l2_candidate *c = &candidates[i];
+        if (offered(out, kept, c))
+            continue;
         bool mplane, decode = c->entrypoint == VAEntrypointVLD;
         uint32_t flags;
         int fd = v4l2_open_coded(c->pixelformat, decode, &mplane, &flags);
         if (fd < 0)
             continue;
-        if (menu_lists(fd, c->menu, c->item) && (!c->ten_bit || captures_ten_bit(fd, mplane))) {
+        if (menu_lists(fd, c->menu, c->item) && (!c->ten_bit || captures_ten_bit(fd, mplane, c->pixelformat))) {
             out[kept] = (struct offer){ .profile = c->profile, .entrypoint = c->entrypoint };
             if (!decode)
                 out[kept].rate_controls = rate_controls(fd);

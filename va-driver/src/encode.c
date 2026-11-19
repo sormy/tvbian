@@ -22,6 +22,10 @@
 #define IJG_LUMA_SUM 3688
 #define IJG_HALF_SCALE 5000
 #define ONE_L0_REFERENCE 1
+/* baseline JPEG as written here: Y, Cb and Cr in one interleaved scan, a luma and a chroma table */
+#define JPEG_COMPONENTS 3
+#define JPEG_SCANS 1
+#define JPEG_TABLE_PAIRS 2
 
 struct rational {
     unsigned num;
@@ -67,6 +71,15 @@ unsigned encode_attribute(const struct backend *b, const struct config *config,
         return jpeg ? VA_ATTRIB_NOT_SUPPORTED : ONE_L0_REFERENCE;
     case VAConfigAttribEncMaxSlices:
         return jpeg ? VA_ATTRIB_NOT_SUPPORTED : 1;
+    case VAConfigAttribEncJPEG: {
+        VAConfigAttribValEncJPEG baseline = { .bits = {
+                                                  .max_num_components = JPEG_COMPONENTS,
+                                                  .max_num_scans = JPEG_SCANS,
+                                                  .max_num_huffman_tables = JPEG_TABLE_PAIRS,
+                                                  .max_num_quantization_tables = JPEG_TABLE_PAIRS,
+                                              } };
+        return jpeg ? baseline.value : VA_ATTRIB_NOT_SUPPORTED;
+    }
     default:
         return VA_ATTRIB_NOT_SUPPORTED;
     }

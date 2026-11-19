@@ -68,10 +68,11 @@ static unsigned bytes_per_sample(uint32_t fourcc)
 
 static struct nv12_planes planes_of_backing(const struct surface *s)
 {
-    const struct backing *b = s->backing;
+    struct backing *b = s->backing;
+    uint8_t *map = backing_map(b);
     return (struct nv12_planes){
-        .luma = b->map,
-        .chroma = b->map + b->chroma_offset,
+        .luma = map,
+        .chroma = map ? map + b->chroma_offset : NULL,
         .luma_pitch = b->pitch,
         .chroma_pitch = b->pitch,
         .width = s->width,
@@ -111,19 +112,24 @@ static struct backing *backing_from_fd(int fd, size_t size, unsigned pitch, unsi
     if (!b)
         return NULL;
     *b = (struct backing){ .fd = fd, .size = size, .pitch = pitch, .chroma_offset = chroma_offset };
-    b->map = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    if (b->map == MAP_FAILED) {
-        free(b);
-        return NULL;
-    }
     return b;
+}
+
+uint8_t *backing_map(struct backing *b)
+{
+    if (!b->map) {
+        void *map = mmap(NULL, b->size, PROT_READ | PROT_WRITE, MAP_SHARED, b->fd, 0);
+        b->map = map == MAP_FAILED ? NULL : map;
+    }
+    return b->map;
 }
 
 static void backing_free(struct backing *b)
 {
     if (!b)
         return;
-    munmap(b->map, b->size);
+    if (b->map)
+        munmap(b->map, b->size);
     close(b->fd);
     free(b);
 }
@@ -148,6 +154,8 @@ static int copy_picture_to_backing(struct surface *s, const struct engine_pictur
     if (engine && engine->copy_picture &&
         engine->copy_picture(picture, s->backing, s->fourcc, dst.width, dst.height) == 0)
         return 0;
+    if (!dst.luma)
+        return -ENOMEM;
     sync_backing(s->backing, DMA_BUF_SYNC_START);
     int ret = pixels_from_engine(picture, 0, 0, &dst);
     sync_backing(s->backing, DMA_BUF_SYNC_END);
@@ -169,9 +177,15 @@ int surface_ensure_backing(struct surface *s)
 {
     if (s->backing)
         return 0;
+    if (s->planned.size) {
+        int fd = dmabuf_alloc(s->planned.size);
+        return fd < 0 ? -errno : surface_adopt_backing(s, fd, &s->planned);
+    }
     unsigned pitch = ALIGN(s->width * bytes_per_sample(s->fourcc), PITCH_ALIGN);
     unsigned luma_rows = ALIGN(s->height, HEIGHT_ALIGN);
     size_t size = (size_t)pitch * luma_rows * (engine && engine->decodes_into_backing ? 4 : 3) / 2;
+    /* the whole pages the heap gives: an encoder asks a little past the picture */
+    size = ALIGN(size, (size_t)sysconf(_SC_PAGESIZE));
     int fd = dmabuf_alloc(size);
     if (fd < 0)
         return -errno;
@@ -351,6 +365,8 @@ static VAStatus create_surfaces2(VADriverContextP ctx, unsigned format, unsigned
                                    .fourcc = c.fourcc,
                                    .takes_linear = takes_linear,
                                    .takes_compressed = takes_compressed };
+            if (!c.external && engine && engine->plan_layout)
+                engine->plan_layout(DRIVER(ctx)->decoding, c.fourcc, width, height, &s->planned);
             if (c.memory_type == VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME)
                 s->backing = import_external(c.external, i);
             else if (c.memory_type == VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2)
@@ -640,12 +656,13 @@ static VAStatus derive_image(VADriverContextP ctx, VASurfaceID surface_id, VAIma
     pthread_mutex_lock(&drv->lock);
     int ret = ensure_decodable_backing(drv, surface_id, s);
     pthread_mutex_unlock(&drv->lock);
-    struct va_buffer *b = ret ? NULL : calloc(1, sizeof(*b));
+    uint8_t *map = ret ? NULL : backing_map(s->backing);
+    struct va_buffer *b = map ? calloc(1, sizeof(*b)) : NULL;
     if (!b)
         return VA_STATUS_ERROR_ALLOCATION_FAILED;
     const struct backing *backing = s->backing;
     *b = (struct va_buffer){ .type = VAImageBufferType, .element_size = backing->size,
-                             .num_elements = 1, .data = backing->map, .derived_from = s };
+                             .num_elements = 1, .data = map, .derived_from = s };
     s->images++;
     *image = (VAImage){
         .format = s->fourcc == VA_FOURCC_P010 ? image_formats[1] : image_formats[0],
@@ -717,7 +734,7 @@ static VAStatus get_image(VADriverContextP ctx, VASurfaceID surface_id, int x, i
         dst.width = min_of(min_of(width, dst.width), s->width - x);
         dst.height = min_of(min_of(height, dst.height), s->height - y);
         sync_backing(s->backing, DMA_BUF_SYNC_START);
-        if (src.ten_bit == dst.ten_bit) {
+        if (src.luma && src.ten_bit == dst.ten_bit) {
             unsigned bytes = dst.width * bytes_per_sample(s->fourcc);
             for (unsigned row = 0; row < dst.height; row++)
                 memcpy(dst.luma + (size_t)row * dst.luma_pitch,
@@ -760,6 +777,8 @@ static VAStatus put_image(VADriverContextP ctx, VASurfaceID surface_id, VAImageI
         return VA_STATUS_ERROR_UNIMPLEMENTED;
     pthread_mutex_lock(&drv->lock);
     int ret = ensure_decodable_backing(drv, surface_id, s);
+    if (!ret && !backing_map(s->backing))
+        ret = -ENOMEM;
     if (!ret) {
         struct nv12_planes src = planes_of_image(image, b->data);
         struct nv12_planes dst = planes_of_backing(s);

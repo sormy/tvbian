@@ -333,7 +333,7 @@ static int lavc_encode(struct context *ctx, struct surface *input, bool idr, str
 {
     struct lavc *l = ctx->engine;
     AVFrame *f = l->frame;
-    const struct backing *b = input->backing;
+    struct backing *b = input->backing;
     int ret;
 
     av_frame_unref(f);
@@ -342,8 +342,11 @@ static int lavc_encode(struct context *ctx, struct surface *input, bool idr, str
     f->height = l->avctx->height;
     if ((ret = av_frame_get_buffer(f, 0)) < 0)
         return ret;
-    const struct nv12_planes src = { b->map, b->map + b->chroma_offset, b->pitch, b->pitch,
-                                     f->width, f->height, false };
+    uint8_t *map = backing_map(b);
+    if (!map)
+        return -ENOMEM;
+    const struct nv12_planes src = { map, map + b->chroma_offset, b->pitch, b->pitch, f->width,
+                                     f->height, false };
     if (f->format == AV_PIX_FMT_NV12) {
         const struct source nv12 = { LAYOUT_NV12, { src.luma, src.chroma }, { b->pitch, b->pitch } };
         const struct nv12_planes dst = { f->data[0], f->data[1], f->linesize[0], f->linesize[1],

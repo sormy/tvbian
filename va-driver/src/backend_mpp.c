@@ -110,10 +110,12 @@ static const struct mpp_candidate {
     { VAProfileMPEG4Simple, VLD, false },
     { VAProfileMPEG4AdvancedSimple, VLD, false },
     { VAProfileH263Baseline, VLD, false },
+    { VAProfileJPEGBaseline, VLD, false },
     { VAProfileH264ConstrainedBaseline, ENC, false },
     { VAProfileH264Main, ENC, false },
     { VAProfileH264High, ENC, false },
     { VAProfileHEVCMain, ENC, false },
+    { VAProfileJPEGBaseline, VAEntrypointEncPicture, false },
 };
 
 #define NUM_CANDIDATES (sizeof(mpp_candidates) / sizeof(mpp_candidates[0]))
@@ -122,12 +124,23 @@ static const struct mpp_candidate {
 #define NUM_DEC_CLIENTS (sizeof(((MppSocInfo *)0)->dec_caps) / sizeof(MppDecHwCap *))
 #define NUM_ENC_CLIENTS (sizeof(((MppSocInfo *)0)->enc_caps) / sizeof(MppEncHwCap *))
 /* MPP sorts a client into one of three classes by the largest picture it takes */
+/* the quality factors MPP's JPEG encoder takes */
+#define JPEG_QUALITY_MIN 1
+#define JPEG_QUALITY_MAX 99
+/* MPP's JPEG pictures: rows and lines padded to 16, room for 4:2:2 before the NV12 it is told */
+#define JPEG_ALIGN 16
+#define JPEG_BYTES_PER_PIXEL 2
 #define CLASS_8K_WIDTH 8192
 #define CLASS_8K_HEIGHT 4320
 #define CLASS_4K_WIDTH 4096
 #define CLASS_4K_HEIGHT 2304
 #define CLASS_1080P_WIDTH 1920
 #define CLASS_1080P_HEIGHT 1088
+
+static unsigned align_up(unsigned value, unsigned alignment)
+{
+    return (value + alignment - 1) & ~(alignment - 1);
+}
 
 static MppCodingType coding_of(VAProfile profile)
 {
@@ -148,6 +161,8 @@ static MppCodingType coding_of(VAProfile profile)
         return MPP_VIDEO_CodingMPEG4;
     case VAProfileH263Baseline:
         return MPP_VIDEO_CodingH263;
+    case VAProfileJPEGBaseline:
+        return MPP_VIDEO_CodingMJPEG;
     default:
         return MPP_VIDEO_CodingAVC;
     }
@@ -180,9 +195,10 @@ static bool offer_of(const MppSocInfo *soc, const struct mpp_candidate *c, struc
         if (cap && takes_coding(cap->cap_coding, coding) && (!c->ten_bit || cap->cap_10bit))
             widen_to_class(o, cap->cap_8k, cap->cap_4k);
     }
-    if (c->entrypoint == ENC)
+    bool encode = c->entrypoint != VLD;
+    if (encode)
         o->rate_controls = VA_RC_CQP | VA_RC_CBR | VA_RC_VBR;
-    for (size_t i = 0; c->entrypoint == ENC && i < NUM_ENC_CLIENTS; i++) {
+    for (size_t i = 0; encode && i < NUM_ENC_CLIENTS; i++) {
         const MppEncHwCap *cap = soc->enc_caps[i];
         if (cap && takes_coding(cap->cap_coding, coding))
             widen_to_class(o, cap->cap_8k, cap->cap_4k);
@@ -254,7 +270,8 @@ static int mpp_decoder_open(struct driver *drv, struct context *ctx)
     ctx->engine = d;
     /* 10-bit comes out as NV15, which no surface takes as it is */
     d->into_surfaces = ctx->config->offer->profile != VAProfileVP9Profile2 &&
-                       ctx->config->offer->profile != VAProfileHEVCMain10;
+                       ctx->config->offer->profile != VAProfileHEVCMain10 &&
+                       ctx->config->offer->profile != VAProfileJPEGBaseline;
     d->pads_rows = coding_of(ctx->config->offer->profile) == MPP_VIDEO_CodingVP9;
     if (mpp_create(&d->ctx, &d->mpi) != MPP_OK ||
         /* read as the parser starts: before mpp_init */
@@ -270,6 +287,11 @@ static int mpp_decoder_open(struct driver *drv, struct context *ctx)
             MPP_OK ||
         d->mpi->control(d->ctx, MPP_DEC_SET_EXT_BUF_GROUP, d->group) != MPP_OK)
         return -ENODEV;
+    /* a JPEG's 4:2:2 or 4:4:4 converted by the engine to the NV12 a surface takes */
+    MppFrameFormat nv12 = MPP_FMT_YUV420SP;
+    if (ctx->config->codec->kind == CODEC_JPEG &&
+        d->mpi->control(d->ctx, MPP_DEC_SET_OUTPUT_FORMAT, &nv12) != MPP_OK)
+        return -ENOTSUP;
     return 0;
 }
 
@@ -383,6 +405,39 @@ static int release_spare(struct mpp_decoder *d, size_t size)
         return -ENOBUFS;
     }
     return release(d, c) ? 0 : -EBUSY;
+}
+
+/* MPP's VP9 picture: rows an odd multiple of 256 bytes, 8 aligned in height, and a buffer of 1.8
+ * times the luma */
+#define VP9_PITCH_UNIT 256
+#define VP9_ROW_ALIGN 8
+#define VP9_SIZE_NUM 9
+#define VP9_SIZE_DEN 5
+
+/* a JPEG as jpegd writes NV12, 16 aligned, in room for the 4:2:2 it may decode first */
+static struct backing_layout jpeg_layout(unsigned width, unsigned height)
+{
+    unsigned pitch = align_up(width, JPEG_ALIGN);
+    unsigned luma = pitch * align_up(height, JPEG_ALIGN);
+    return (struct backing_layout){ pitch, luma, (size_t)luma * JPEG_BYTES_PER_PIXEL };
+}
+
+static bool plan_mpp_layout(VAProfile decoding, uint32_t fourcc, unsigned width, unsigned height,
+                            struct backing_layout *out)
+{
+    if (fourcc != VA_FOURCC_NV12)
+        return false;
+    if (decoding == VAProfileJPEGBaseline) {
+        *out = jpeg_layout(width, height);
+        return true;
+    }
+    if (decoding != VAProfileVP9Profile0)
+        return false;
+    unsigned units = (width + VP9_PITCH_UNIT - 1) / VP9_PITCH_UNIT;
+    unsigned pitch = (units | 1) * VP9_PITCH_UNIT;
+    unsigned luma = pitch * align_up(height, VP9_ROW_ALIGN);
+    *out = (struct backing_layout){ pitch, luma, (size_t)luma * VP9_SIZE_NUM / VP9_SIZE_DEN };
+    return true;
 }
 
 static bool laid_out_as_mpp(const struct mpp_decoder *d, const struct backing *b)
@@ -503,6 +558,77 @@ static bool interlaced(const struct context *ctx)
 
 static int mpp_sync(struct driver *drv, struct context *ctx, VASurfaceID id, bool last);
 
+/* MPP's JPEG decoder takes the packet in a buffer of its own and writes a buffer handed it, through
+ * the task API: the picture comes back with the task, bound to its surface at once */
+static int decode_jpeg(struct driver *drv, struct mpp_decoder *d, const struct context *ctx,
+                       const struct annexb *au)
+{
+    const struct backing_layout layout = jpeg_layout(ctx->width, ctx->height);
+    struct surface *s = surface_of(drv, ctx->target);
+    MppPacket packet = NULL;
+    MppFrame frame = NULL, out = NULL;
+    MppBuffer coded = NULL, buffer = NULL;
+    MppTask task = NULL;
+    int ret = -EIO;
+    if (!s || mpp_buffer_get(d->group, &coded, au->size) != MPP_OK)
+        return -ENOMEM;
+    memcpy(mpp_buffer_get_ptr(coded), au->data, au->size);
+    if (mpp_packet_init_with_buffer(&packet, coded) != MPP_OK)
+        goto done;
+    mpp_packet_set_length(packet, au->size);
+    /* into the surface's own memory where it is laid out as jpegd writes, else a copy after */
+    bool in_place = !surface_ensure_backing(s) && s->backing->pitch == layout.pitch &&
+                    s->backing->chroma_offset == layout.chroma_offset &&
+                    s->backing->size >= layout.size;
+    if (in_place) {
+        MppBufferInfo info = { .type = MPP_BUFFER_TYPE_EXT_DMA, .fd = s->backing->fd,
+                               .size = s->backing->size };
+        sync_dmabuf(info.fd, DMA_BUF_SYNC_START | DMA_BUF_SYNC_RW);
+        sync_dmabuf(info.fd, DMA_BUF_SYNC_END | DMA_BUF_SYNC_RW);
+        if (mpp_buffer_import(&buffer, &info) != MPP_OK)
+            goto done;
+    } else if (mpp_buffer_get(d->group, &buffer, layout.size) != MPP_OK) {
+        goto done;
+    }
+    if (mpp_frame_init(&frame) != MPP_OK)
+        goto done;
+    mpp_frame_set_buffer(frame, buffer);
+    if (d->mpi->poll(d->ctx, MPP_PORT_INPUT, MPP_POLL_BLOCK) != MPP_OK ||
+        d->mpi->dequeue(d->ctx, MPP_PORT_INPUT, &task) != MPP_OK || !task)
+        goto done;
+    mpp_task_meta_set_packet(task, KEY_INPUT_PACKET, packet);
+    mpp_task_meta_set_frame(task, KEY_OUTPUT_FRAME, frame);
+    if (d->mpi->enqueue(d->ctx, MPP_PORT_INPUT, task) != MPP_OK ||
+        d->mpi->poll(d->ctx, MPP_PORT_OUTPUT, MPP_POLL_BLOCK) != MPP_OK ||
+        d->mpi->dequeue(d->ctx, MPP_PORT_OUTPUT, &task) != MPP_OK || !task)
+        goto done;
+    mpp_task_meta_get_frame(task, KEY_OUTPUT_FRAME, &out);
+    d->mpi->enqueue(d->ctx, MPP_PORT_OUTPUT, task);
+    if (out != frame || mpp_frame_get_errinfo(frame) || mpp_frame_get_discard(frame))
+        goto done;
+    if (in_place) {
+        surface_mark_decoded(s);
+        ret = 0;
+        goto done;
+    }
+    struct engine_picture *p = picture_of(d, frame, false);
+    if (!p) {
+        ret = -ENOMEM;
+        goto done;
+    }
+    frame = NULL;
+    ret = surface_bind_picture(s, p);
+done:
+    if (frame)
+        mpp_frame_deinit(&frame);
+    if (buffer)
+        mpp_buffer_put(buffer);
+    if (packet)
+        mpp_packet_deinit(&packet);
+    mpp_buffer_put(coded);
+    return ret;
+}
+
 /* a VP9 key frame of another size in one context, as GStreamer keeps it: the pictures in MPP taken,
  * and a decoder anew at it, as a new context gets */
 static bool resized(const struct context *ctx)
@@ -521,6 +647,8 @@ static int mpp_decode(struct driver *drv, struct context *ctx, const struct anne
 
     if (interlaced(ctx))
         return -ENOTSUP;
+    if (ctx->config->codec->kind == CODEC_JPEG)
+        return decode_jpeg(drv, d, ctx, au);
     if (resized(ctx)) {
         const VADecPictureParameterBufferVP9 *pp = ctx->pic.picture_param;
         mpp_sync(drv, ctx, VA_INVALID_ID, true);
@@ -609,7 +737,17 @@ static int mpp_encoder_open(struct driver *drv, struct context *ctx, const struc
     mpp_enc_cfg_set_s32(e->cfg, "rc:fps_out_num", p->frame_rate_num);
     mpp_enc_cfg_set_s32(e->cfg, "rc:fps_out_denom", p->frame_rate_den);
     mpp_enc_cfg_set_s32(e->cfg, "rc:gop", p->intra_period ? (int)p->intra_period : INT32_MAX);
-    if (p->rate_control & VA_RC_CQP) {
+    if (p->codec == CODEC_JPEG) {
+        /* a JPEG's quality is its quantiser: fixed, MPP's factor the client's quality */
+        int quality = p->jpeg_quality < JPEG_QUALITY_MIN   ? JPEG_QUALITY_MIN
+                      : p->jpeg_quality > JPEG_QUALITY_MAX ? JPEG_QUALITY_MAX
+                                                           : (int)p->jpeg_quality;
+        mpp_enc_cfg_set_s32(e->cfg, "rc:mode", MPP_ENC_RC_MODE_FIXQP);
+        for (const char *const *key =
+                 (const char *const[]){ "jpeg:q_factor", "jpeg:qf_min", "jpeg:qf_max", NULL };
+             *key; key++)
+            mpp_enc_cfg_set_s32(e->cfg, *key, quality);
+    } else if (p->rate_control & VA_RC_CQP) {
         mpp_enc_cfg_set_s32(e->cfg, "rc:mode", MPP_ENC_RC_MODE_FIXQP);
         for (const char *const *key = (const char *const[]){ "rc:qp_init", "rc:qp_min", "rc:qp_max",
                                                              "rc:qp_min_i", "rc:qp_max_i", NULL };
@@ -720,8 +858,8 @@ static void *copy_rows(void *arg)
  * the surface's memory itself: two threads copy a 4K picture in about 8 ms. NV15 goes to the
  * generic unpacking.
  */
-static int cpu_copy_picture(const struct engine_picture *p, const struct backing *b,
-                            uint32_t fourcc, unsigned width, unsigned height)
+static int cpu_copy_picture(const struct engine_picture *p, struct backing *b, uint32_t fourcc,
+                            unsigned width, unsigned height)
 {
     const struct mpp_picture *picture = (const struct mpp_picture *)p;
     const uint8_t *src = mpp_buffer_get_ptr(mpp_frame_get_buffer(picture->frame));
@@ -730,13 +868,16 @@ static int cpu_copy_picture(const struct engine_picture *p, const struct backing
         return 0;
     if (!src || fourcc != VA_FOURCC_NV12 || p->drm_format != DRM_FORMAT_NV12)
         return -ENOTSUP;
+    uint8_t *map = backing_map(b);
+    if (!map)
+        return -ENOMEM;
     /* the worker takes the top three quarters of the luma; this thread the rest and the chroma */
     unsigned split = height * 3 / 4;
-    struct row_copy luma_top = { b->map, src, b->pitch, src_pitch, width, split };
-    struct row_copy luma_rest = { b->map + (size_t)split * b->pitch,
+    struct row_copy luma_top = { map, src, b->pitch, src_pitch, width, split };
+    struct row_copy luma_rest = { map + (size_t)split * b->pitch,
                                   src + (size_t)split * src_pitch, b->pitch, src_pitch, width,
                                   height - split };
-    struct row_copy chroma = { b->map + b->chroma_offset, src + p->plane_offset[1], b->pitch,
+    struct row_copy chroma = { map + b->chroma_offset, src + p->plane_offset[1], b->pitch,
                                src_pitch, width, (height + 1) / 2 };
     pthread_t worker;
 
@@ -763,6 +904,7 @@ const struct backend backend_mpp = {
     .decoder_close = mpp_decoder_close,
     .sync = mpp_sync,
     .copy_picture = cpu_copy_picture,
+    .plan_layout = plan_mpp_layout,
     .decodes_into_backing = true,
     .narrows_ten_bit = true,
     .encoder_open = mpp_encoder_open,

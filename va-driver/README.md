@@ -280,15 +280,19 @@ VA carries none of these whole.
     The driver holds every committed buffer but the target's, so MPP can take only that one, and
     holds it again once MPP took it. A target MPP still reads gets a spare buffer and a CPU copy.
     Surfaces are sized at MPP's twice-the-luma.
-  - VP9's rows are padded to an odd multiple of 256 bytes, which no surface's pitch is: a surface's
-    memory no client has seen is laid out again as MPP decodes, none once any surface was exported,
-    as GStreamer takes one export's layout for every surface's.
+  - VP9's rows are padded to an odd multiple of 256 bytes: a surface made after a VP9 decode config
+    is laid out so from the start, and one made before is laid out again while no client has seen
+    it, none once any surface was exported, as GStreamer takes one export's layout for every
+    surface's.
   - 10-bit pictures go to buffers MPP allocates; a picture a surface holds keeps its buffer, and the
     decoder lives until the last such picture is released.
   - A picture still held when a client syncs on it is drained by an end-of-stream packet, and MPP
     reset.
-  - A VP9 key frame of another size in one context, as GStreamer keeps it, gets a decoder anew,
-    the pictures still in MPP taken first.
+  - A VP9 key frame of another size in one context, as GStreamer keeps it, gets a decoder anew, the
+    pictures still in MPP taken first.
+  - JPEG goes through MPP's task API: the coded picture in an MPP buffer, an output buffer handed
+    with it, NV12 asked of the engine whatever the JPEG's sampling.
+  - JPEG encode at a fixed quantiser, MPP's quality factor the client's quality.
   - VP9 and VP8 are offered as `mpp_check_support_format` says.
   - Encode imports the surface's dma-buf, its strides set in MPP's preprocessing as they are.
   - MPP's own log is set to warnings.
@@ -298,9 +302,9 @@ VA carries none of these whole.
   - A resolution change reallocates CAPTURE while surfaces keep their pictures on their own fds.
   - The decoder hands a picture out up to 6 packets late; a sync on one still held drains it with
     `V4L2_DEC_CMD_STOP` once the decoder has been quiet 20 ms a 1080p picture's worth of pixels, 80
-    at 4K, counted from when CAPTURE starts streaming. Meson's session ends at a drain, so
-    the stream goes on in a new one, its headers sent again; the old one stays while surfaces hold
-    its pictures.
+    at 4K, counted from when CAPTURE starts streaming. Meson's session ends at a drain, so the
+    stream goes on in a new one, its headers sent again; the old one stays while surfaces hold its
+    pictures.
   - MPEG-1/2/4 and VC-1 hold their last pictures until more stream comes, and a new session has no
     references: after a drain mid-stream, a predicted picture is refused until the next intra one. A
     client that syncs each picture before sending the next, as FFmpeg's command line, gets missing
@@ -311,7 +315,7 @@ VA carries none of these whole.
     source-change event, as Cedrus's JPEG node, gets CAPTURE after its first packet.
   - A hidden VP9 frame goes out with the next in one superframe, as the encoder wrote them: sent
     alone, it takes a CAPTURE buffer as a picture, and the decoder drops the next shown one.
-  - CAPTURE holds the surfaces' pictures and 16 more, within 192 MiB. Where the kernel grants fewer,
+  - CAPTURE holds the surfaces' pictures and 16 more, within 288 MiB. Where the kernel grants fewer,
     as MJPEG's 4 and MPEG-4's 8, each picture is copied into its surface and its buffer queued
     again.
   - MJPEG writes three planes (`YUV420M`), taken as they are and interleaved when read.
@@ -323,6 +327,8 @@ VA carries none of these whole.
 
 ## Surfaces, encode, VideoProc
 
+- **Mapped on first use:** a surface's memory is mmapped only when the CPU reads or writes it; a
+  picture the engine decodes into and a client never reads costs no mapping.
 - **Owned memory:** a surface gets its own dma-buf, from `/dev/dma_heap/system` or lent by Cedrus
   (see above), when a client needs it fixed:
   - Kodi's fresh export;
@@ -332,8 +338,10 @@ VA carries none of these whole.
 - **Import:** Chromium's `DRM_PRIME` and `DRM_PRIME_2` buffers come in linear, one object.
 - **Encode:**
   - One L0 reference, no B-frames, no packed headers; the rate controls the engine lists.
-  - A client's IDR request becomes the engine's forced key frame.
+  - A client's IDR request becomes the engine's forced key frame; the GOP is the client's alone.
+  - The client's H.264 profile is the stream's.
   - The picture size is the input surface's.
+  - A V4L2 encoder taking dma-bufs reads a surface laid out as it reads in place; others get a copy.
   - FFmpeg 7.1 lists `h264_v4l2m2m` before `h264_vaapi`, and Firefox takes the first, so on `meson`
     it may pick the stock wrapper. A driver cannot change that.
 - **VideoProc:** not supported. No engine here scales cheaply.

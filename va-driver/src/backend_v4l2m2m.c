@@ -15,6 +15,7 @@
 #include <unistd.h>
 
 #include <drm_fourcc.h>
+#include <linux/dma-buf.h>
 #include <linux/videodev2.h>
 
 #include "driver.h"
@@ -27,8 +28,8 @@
 /* pictures surfaces hold beyond the decoder's own: VA has no call that hands one back, so a
  * picture stays bound to its surface until the surface is decoded into again */
 #define EXTRA_CAPTURE 16
-/* what those pictures may take in all, at 4K a dozen of them */
-#define CAPTURE_BUDGET (192u << 20)
+/* what those pictures may take in all, at 4K two dozen of them */
+#define CAPTURE_BUDGET (288u << 20)
 #define OUTPUT_WAIT_MS 200
 #define SYNC_WAIT_MS 1000
 /* a decoder hands a 1080p picture out in a few ms: one quiet for longer holds it */
@@ -48,6 +49,7 @@ struct m2m_buffer {
 
 struct m2m_queue {
     enum v4l2_buf_type type;
+    enum v4l2_memory memory;
     struct v4l2_format format;
     struct m2m_buffer buffers[MAX_BUFFERS];
     unsigned count;
@@ -61,7 +63,7 @@ struct m2m {
     bool mplane;
     /* the decoder tells its picture size by event; one that cannot has it read after a packet */
     bool dynamic_resolution;
-    /* CAPTURE got fewer buffers than surfaces can hold: pictures are copied out at once */
+    /* CAPTURE got no buffer past the decoder's own: pictures are copied out at once */
     bool copies_out;
     /* a hidden VP9 frame, sent with the next in one superframe */
     struct annexb hidden;
@@ -71,6 +73,8 @@ struct m2m {
     /* opened after a drain: the old session's references are gone */
     bool lost_references;
     bool announces_size;
+    /* the encoder takes dma-bufs: a surface laid out as it reads goes in as it is */
+    bool imports_input;
     unsigned refs;
     unsigned generation;
     int num_targets;
@@ -115,6 +119,7 @@ static const struct v4l2_candidate m2m_candidates[] = {
     { VAProfileMPEG2Simple, VLD, V4L2_PIX_FMT_MPEG2, 0, 0, false },
     { VAProfileMPEG2Main, VLD, V4L2_PIX_FMT_MPEG2, 0, 0, false },
     { VAProfileJPEGBaseline, VLD, V4L2_PIX_FMT_MJPEG, 0, 0, false },
+    { VAProfileJPEGBaseline, VLD, V4L2_PIX_FMT_JPEG, 0, 0, false },
     { VAProfileMPEG4Simple, VLD, V4L2_PIX_FMT_MPEG4, 0, 0, false },
     { VAProfileMPEG4AdvancedSimple, VLD, V4L2_PIX_FMT_MPEG4, 0, 0, false },
     { VAProfileVC1Advanced, VLD, V4L2_PIX_FMT_VC1_ANNEX_G, 0, 0, false },
@@ -234,6 +239,7 @@ static int setup_queue(const struct m2m *m, struct m2m_queue *q, unsigned count,
                                            .memory = V4L2_MEMORY_MMAP };
     if (ioctl(fd, VIDIOC_REQBUFS, &request) < 0)
         return -errno;
+    q->memory = V4L2_MEMORY_MMAP;
     q->count = request.count < MAX_BUFFERS ? request.count : MAX_BUFFERS;
     for (unsigned i = 0; i < q->count; i++) {
         struct v4l2_plane planes[VIDEO_MAX_PLANES] = { 0 };
@@ -272,6 +278,9 @@ static int queue_buffer(const struct m2m *m, struct m2m_queue *q, unsigned index
     struct v4l2_buffer buffer = { .index = index, .type = q->type, .memory = V4L2_MEMORY_MMAP,
                                   .timestamp = { .tv_usec = timestamp } };
     const struct m2m_buffer *b = &q->buffers[index];
+    /* a picture goes to the GPU unread; a CPU read syncs the dma-buf itself */
+    if (q == &m->capture)
+        buffer.flags = V4L2_BUF_FLAG_NO_CACHE_INVALIDATE | V4L2_BUF_FLAG_NO_CACHE_CLEAN;
     if (m->mplane) {
         buffer.length = planes_used;
         buffer.m.planes = planes;
@@ -290,7 +299,7 @@ static int queue_buffer(const struct m2m *m, struct m2m_queue *q, unsigned index
 static int dequeue_buffer(const struct m2m *m, struct m2m_queue *q, struct v4l2_buffer *buffer,
                           struct v4l2_plane *planes)
 {
-    *buffer = (struct v4l2_buffer){ .type = q->type, .memory = V4L2_MEMORY_MMAP };
+    *buffer = (struct v4l2_buffer){ .type = q->type, .memory = q->memory };
     if (m->mplane) {
         buffer->length = VIDEO_MAX_PLANES;
         buffer->m.planes = planes;
@@ -452,7 +461,7 @@ static int setup_capture(struct m2m *m)
                                                              : 1);
     count = count < MAX_BUFFERS ? count : MAX_BUFFERS;
     ret = setup_queue(m, &m->capture, count, true);
-    m->copies_out = m->capture.count < count;
+    m->copies_out = m->capture.count <= (unsigned)min_buffers.value;
     for (unsigned i = 0; !ret && i < m->capture.count; i++)
         ret = queue_buffer(m, &m->capture, i, 0, 0);
     if (!ret)
@@ -518,6 +527,8 @@ static int deliver(struct driver *drv, struct m2m *m, const struct v4l2_buffer *
     if (!bytesused || buffer->flags & V4L2_BUF_FLAG_ERROR || !s)
         return queue_buffer(m, &m->capture, buffer->index, 0, 0);
     struct engine_picture *p = picture_of(m, buffer->index);
+    if (!m->copies_out)
+        surface_drop_unseen_backing(s);
     int ret = p ? surface_bind_picture(s, p) : -ENOMEM;
     return ret || !m->copies_out ? ret : surface_ensure_backing(s);
 }
@@ -575,6 +586,24 @@ static void set_control(int fd, uint32_t id, int value)
     ioctl(fd, VIDIOC_S_CTRL, &control);
 }
 
+/* the client's H.264 profile, which the device writes into the SPS: its default is its own */
+static void h264_profile(int fd, VAProfile profile)
+{
+    for (unsigned i = 0; i < sizeof(m2m_candidates) / sizeof(m2m_candidates[0]); i++)
+        if (m2m_candidates[i].profile == profile && m2m_candidates[i].entrypoint != VLD &&
+            m2m_candidates[i].menu == H264_PROFILE)
+            set_control(fd, H264_PROFILE, m2m_candidates[i].item);
+}
+
+/* the longest GOP the device takes: the client marks every IDR it wants, and a forced key frame
+ * resets no device's own count */
+static void client_gop(int fd)
+{
+    struct v4l2_queryctrl gop = { .id = V4L2_CID_MPEG_VIDEO_GOP_SIZE };
+    if (!ioctl(fd, VIDIOC_QUERYCTRL, &gop))
+        set_control(fd, V4L2_CID_MPEG_VIDEO_GOP_SIZE, gop.maximum);
+}
+
 static int m2m_decoder_open(struct driver *drv, struct context *ctx)
 {
     uint32_t pixelformat = coded_format(ctx->config->codec->kind);
@@ -584,7 +613,10 @@ static int m2m_decoder_open(struct driver *drv, struct context *ctx)
         return -ENOMEM;
     *m = (struct m2m){ .refs = 1, .num_targets = ctx->num_targets };
     ctx->engine = m;
-    if ((m->fd = open_device(m, true, pixelformat)) < 0)
+    /* a JPEG decoder lists MJPG, as Cedrus's, or JPEG, as Rockchip's jpegd */
+    if ((m->fd = open_device(m, true, pixelformat)) < 0 && pixelformat == V4L2_PIX_FMT_MJPEG)
+        m->fd = open_device(m, true, pixelformat = V4L2_PIX_FMT_JPEG);
+    if (m->fd < 0)
         return m->fd;
     set_format(m, &m->output, pixelformat, ctx->width, ctx->height, CODED_BUFFER_SIZE);
     if (ioctl(m->fd, VIDIOC_S_FMT, &m->output.format) < 0)
@@ -661,6 +693,38 @@ static void m2m_close(struct context *ctx)
     ctx->engine = NULL;
 }
 
+/* OUTPUT as dma-bufs, each with memory of our own for a surface laid out otherwise; false where
+ * the device takes none, or two planes */
+static bool setup_imported_input(struct m2m *m)
+{
+    struct m2m_queue *q = &m->output;
+    struct v4l2_requestbuffers request = { .count = OUTPUT_BUFFERS, .type = q->type,
+                                           .memory = V4L2_MEMORY_DMABUF };
+    if (m->mplane || ioctl(m->fd, VIDIOC_REQBUFS, &request) < 0)
+        return false;
+    q->memory = V4L2_MEMORY_DMABUF;
+    q->count = request.count < MAX_BUFFERS ? request.count : MAX_BUFFERS;
+    size_t size = q->format.fmt.pix.sizeimage;
+    for (unsigned i = 0; i < q->count; i++) {
+        struct m2m_buffer *b = &q->buffers[i];
+        b->fds[0] = dmabuf_alloc(size);
+        if (b->fds[0] < 0)
+            return false;
+        b->length[0] = size;
+        b->map[0] = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, b->fds[0], 0);
+        if (b->map[0] == MAP_FAILED)
+            return b->map[0] = NULL, false;
+    }
+    return true;
+}
+
+static void release_input(struct m2m *m)
+{
+    struct v4l2_requestbuffers none = { .type = m->output.type, .memory = m->output.memory };
+    unmap_queue(&m->output);
+    ioctl(m->fd, VIDIOC_REQBUFS, &none);
+}
+
 static int m2m_encoder_open(struct driver *drv, struct context *ctx, const struct encode_params *p)
 {
     uint32_t pixelformat = coded_format(p->codec);
@@ -686,7 +750,8 @@ static int m2m_encoder_open(struct driver *drv, struct context *ctx, const struc
         set_control(m->fd, V4L2_CID_JPEG_COMPRESSION_QUALITY, p->jpeg_quality);
     } else {
         bool cqp = p->rate_control & VA_RC_CQP;
-        set_control(m->fd, V4L2_CID_MPEG_VIDEO_GOP_SIZE, p->intra_period);
+        client_gop(m->fd);
+        h264_profile(m->fd, p->profile);
         set_control(m->fd, V4L2_CID_MPEG_VIDEO_FRAME_RC_ENABLE, !cqp);
         set_control(m->fd, V4L2_CID_MPEG_VIDEO_BITRATE_MODE,
                     p->rate_control & VA_RC_CBR ? V4L2_MPEG_VIDEO_BITRATE_MODE_CBR
@@ -700,7 +765,10 @@ static int m2m_encoder_open(struct driver *drv, struct context *ctx, const struc
         set_control(m->fd, hevc ? V4L2_CID_MPEG_VIDEO_HEVC_P_FRAME_QP
                                 : V4L2_CID_MPEG_VIDEO_H264_P_FRAME_QP, p->qp);
     }
-    int ret = setup_queue(m, &m->output, OUTPUT_BUFFERS, false);
+    m->imports_input = setup_imported_input(m);
+    if (!m->imports_input)
+        release_input(m);
+    int ret = m->imports_input ? 0 : setup_queue(m, &m->output, OUTPUT_BUFFERS, false);
     if (!ret)
         ret = setup_queue(m, &m->capture, OUTPUT_BUFFERS, false);
     for (unsigned i = 0; !ret && i < m->capture.count; i++)
@@ -711,7 +779,7 @@ static int m2m_encoder_open(struct driver *drv, struct context *ctx, const struc
 }
 
 /* the surface's NV12 into the encoder's buffer, plane for plane at its stride */
-static void copy_input(const struct m2m *m, unsigned index, const struct backing *b,
+static int copy_input(const struct m2m *m, unsigned index, struct backing *b,
                        unsigned height)
 {
     const struct m2m_queue *q = &m->output;
@@ -722,11 +790,47 @@ static void copy_input(const struct m2m *m, unsigned index, const struct backing
     uint8_t *chroma = two_planes ? dst->map[1] : luma + (size_t)pitch * format_height(m, q);
     unsigned chroma_pitch = bytes_per_line(m, q, two_planes);
     unsigned bytes = pitch < b->pitch ? pitch : b->pitch;
+    const uint8_t *map = backing_map(b);
+    if (!map)
+        return -ENOMEM;
     for (unsigned row = 0; row < height; row++)
-        memcpy(luma + (size_t)row * pitch, b->map + (size_t)row * b->pitch, bytes);
+        memcpy(luma + (size_t)row * pitch, map + (size_t)row * b->pitch, bytes);
     for (unsigned row = 0; row < (height + 1) / 2; row++)
-        memcpy(chroma + (size_t)row * chroma_pitch,
-               b->map + b->chroma_offset + (size_t)row * b->pitch, bytes);
+        memcpy(chroma + (size_t)row * chroma_pitch, map + b->chroma_offset + (size_t)row * b->pitch,
+               bytes);
+    return 0;
+}
+
+static bool laid_out_as_input(const struct m2m *m, const struct backing *b)
+{
+    unsigned pitch = bytes_per_line(m, &m->output, 0);
+    return b->pitch == pitch && b->chroma_offset == (size_t)pitch * format_height(m, &m->output) &&
+           b->size >= m->output.format.fmt.pix.sizeimage;
+}
+
+/* the surface's memory itself where it is laid out as the encoder reads, else a copy in ours */
+static int queue_imported_input(struct m2m *m, unsigned index, struct backing *b, unsigned height)
+{
+    struct m2m_buffer *own = &m->output.buffers[index];
+    int fd = b->fd;
+    if (!laid_out_as_input(m, b)) {
+        struct dma_buf_sync sync = { .flags = DMA_BUF_SYNC_START | DMA_BUF_SYNC_WRITE };
+        ioctl(own->fds[0], DMA_BUF_IOCTL_SYNC, &sync);
+        int ret = copy_input(m, index, b, height);
+        sync.flags = DMA_BUF_SYNC_END | DMA_BUF_SYNC_WRITE;
+        ioctl(own->fds[0], DMA_BUF_IOCTL_SYNC, &sync);
+        if (ret < 0)
+            return ret;
+        fd = own->fds[0];
+    }
+    struct v4l2_buffer buffer = { .index = index, .type = m->output.type,
+                                  .memory = V4L2_MEMORY_DMABUF, .m.fd = fd,
+                                  .length = (unsigned)(fd == b->fd ? b->size : own->length[0]),
+                                  .bytesused = m->output.format.fmt.pix.sizeimage };
+    if (ioctl(m->fd, VIDIOC_QBUF, &buffer) < 0)
+        return -errno;
+    own->queued = true;
+    return 0;
 }
 
 static int m2m_encode(struct context *ctx, struct surface *input, bool idr, struct annexb *out)
@@ -741,11 +845,15 @@ static int m2m_encode(struct context *ctx, struct surface *input, bool idr, stru
         index = buffer.index;
     if (index < 0)
         return -EAGAIN;
-    copy_input(m, index, input->backing, input->height);
     if (idr)
         set_control(m->fd, V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME, 1);
-    if ((ret = queue_buffer(m, &m->output, index, WHOLE_PLANES, 0)) < 0)
+    if (m->imports_input) {
+        if ((ret = queue_imported_input(m, index, input->backing, input->height)) < 0)
+            return ret;
+    } else if ((ret = copy_input(m, index, input->backing, input->height)) < 0 ||
+               (ret = queue_buffer(m, &m->output, index, WHOLE_PLANES, 0)) < 0) {
         return ret;
+    }
     if (poll(&pfd, 1, ENCODE_WAIT_MS) <= 0 || dequeue_buffer(m, &m->capture, &buffer, planes))
         return -ETIMEDOUT;
     ret = annexb_append_raw(out, m->capture.buffers[buffer.index].map[0], planes[0].bytesused);

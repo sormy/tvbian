@@ -15,6 +15,9 @@ enum {
     NAL_IDR_N_LP = 20,
     NAL_IRAP_LAST = 23,
     NAL_HEADER_SIZE = 2,
+    NAL_TYPE_MASK = 0x3f,
+    /* the first non-VCL type: VPS, then SPS and PPS */
+    NAL_VPS = 32,
     TEMPORAL_ID_MASK = 7,
     SLICE_B = 0,
     SLICE_P = 1,
@@ -28,6 +31,7 @@ static const uint8_t start_code[] = { 0, 0, 1 };
 struct hevc_state {
     int decode_mode;
     int start_code;
+    struct v4l2_ctrl_hevc_sps current_sps;
     uint32_t entry_points[MAX_ENTRY_POINTS];
 };
 
@@ -367,7 +371,8 @@ static unsigned collect_set(const VAPictureParameterBufferHEVC *pp, uint32_t fla
     return count;
 }
 
-static void fill_decode_params(struct v4l2_ctrl_hevc_decode_params *dp,
+static void fill_decode_params(const struct request_ctx *rq,
+                               struct v4l2_ctrl_hevc_decode_params *dp,
                                const VAPictureParameterBufferHEVC *pp, const struct slice_header *sh)
 {
     *dp = (struct v4l2_ctrl_hevc_decode_params){
@@ -380,7 +385,7 @@ static void fill_decode_params(struct v4l2_ctrl_hevc_decode_params *dp,
         if (ref->picture_id == VA_INVALID_SURFACE || ref->flags & VA_PICTURE_HEVC_INVALID)
             continue;
         dp->dpb[i] = (struct v4l2_hevc_dpb_entry){
-            .timestamp = request_timestamp(ref->picture_id),
+            .timestamp = request_timestamp(rq, ref->picture_id),
             .flags = ref->flags & VA_PICTURE_HEVC_LONG_TERM_REFERENCE
                          ? V4L2_HEVC_DPB_ENTRY_LONG_TERM_REFERENCE
                          : 0,
@@ -491,11 +496,76 @@ static int hevc_init(struct request_ctx *rq)
         st->decode_mode = V4L2_STATELESS_HEVC_DECODE_MODE_SLICE_BASED;
     if (request_get_control(rq, V4L2_CID_STATELESS_HEVC_START_CODE, &st->start_code) < 0)
         st->start_code = V4L2_STATELESS_HEVC_START_CODE_NONE;
-    /* one request a slice: the frame-based engines take a slice array this does not build */
-    return st->decode_mode == V4L2_STATELESS_HEVC_DECODE_MODE_SLICE_BASED ? 0 : -ENOTSUP;
+    bool frame_based = st->decode_mode == V4L2_STATELESS_HEVC_DECODE_MODE_FRAME_BASED;
+    /* a frame-based engine parses the slice headers itself, from the stream's start codes */
+    return !frame_based || st->start_code == V4L2_STATELESS_HEVC_START_CODE_ANNEX_B ? 0
+                                                                                     : -ENOTSUP;
 }
 
-static int hevc_submit(struct request_ctx *rq, const struct picture *pic, VASurfaceID target)
+/* a frame-based engine's SPS: its slices name no short-term set of it, each written inline */
+static void frame_sps(struct v4l2_ctrl_hevc_sps *sps, const VAPictureParameterBufferHEVC *pp)
+{
+    fill_sps(sps, pp);
+    sps->num_short_term_ref_pic_sets = 0;
+}
+
+/* the VCL NAL units of an Annex B access unit, each with its start code */
+static int slices_only(const struct annexb *in, struct annexb *out)
+{
+    size_t start = 0;
+    out->size = 0;
+    while (start + sizeof(start_code) < in->size) {
+        size_t nal = start + sizeof(start_code), end = nal;
+        while (end + sizeof(start_code) <= in->size &&
+               memcmp(in->data + end, start_code, sizeof(start_code)))
+            end++;
+        if (end + sizeof(start_code) > in->size)
+            end = in->size;
+        unsigned type = (in->data[nal] >> 1) & NAL_TYPE_MASK;
+        int ret = type < NAL_VPS ? annexb_append_nal(out, in->data + nal, end - nal) : 0;
+        if (ret)
+            return ret;
+        start = end;
+    }
+    return 0;
+}
+
+/* a frame-based engine: the whole picture in one request, its slices as the stateful path rebuilds
+ * them, each short-term set inline, so the SPS names none */
+static int submit_frame(struct request_ctx *rq, const struct picture *pic,
+                        const struct slice_header *first)
+{
+    const VAPictureParameterBufferHEVC *pp = pic->picture_param;
+    const struct context *ctx = rq->ctx;
+    struct v4l2_ctrl_hevc_sps sps;
+    struct v4l2_ctrl_hevc_pps pps;
+    struct v4l2_ctrl_hevc_scaling_matrix scaling = { 0 };
+    struct v4l2_ctrl_hevc_decode_params decode;
+    struct packet_info info;
+    struct annexb built = { 0 }, data = { 0 };
+    int ret = ctx->config->codec->build_packet(ctx->codec_state, pic, &built, &info);
+    if (!ret)
+        ret = slices_only(&built, &data);
+    annexb_free(&built);
+    if (ret)
+        return annexb_free(&data), ret;
+    frame_sps(&sps, pp);
+    fill_pps(&pps, pp);
+    if (pic->iq_matrix)
+        fill_scaling(&scaling, pic->iq_matrix);
+    fill_decode_params(rq, &decode, pp, first);
+    struct v4l2_ext_control controls[] = {
+        { .id = V4L2_CID_STATELESS_HEVC_SPS, .size = sizeof(sps), .ptr = &sps },
+        { .id = V4L2_CID_STATELESS_HEVC_PPS, .size = sizeof(pps), .ptr = &pps },
+        { .id = V4L2_CID_STATELESS_HEVC_SCALING_MATRIX, .size = sizeof(scaling), .ptr = &scaling },
+        { .id = V4L2_CID_STATELESS_HEVC_DECODE_PARAMS, .size = sizeof(decode), .ptr = &decode },
+    };
+    ret = request_queue(rq, controls, sizeof(controls) / sizeof(controls[0]), &data, true, true);
+    annexb_free(&data);
+    return ret;
+}
+
+static int hevc_submit(struct request_ctx *rq, const struct picture *pic)
 {
     struct hevc_state *st = rq->codec_state;
     const VAPictureParameterBufferHEVC *pp = pic->picture_param;
@@ -527,9 +597,11 @@ static int hevc_submit(struct request_ctx *rq, const struct picture *pic, VASurf
                                 : 0;
         if (!raw_offset || !parse_slice_header(pp, sp, rbsp, header, &sh, st->entry_points))
             return -EINVAL;
+        if (st->decode_mode == V4L2_STATELESS_HEVC_DECODE_MODE_FRAME_BASED)
+            return submit_frame(rq, pic, &sh);
         bool annex_b = st->start_code == V4L2_STATELESS_HEVC_START_CODE_ANNEX_B;
         size_t prefix = annex_b ? sizeof(start_code) : 0;
-        fill_decode_params(&decode, pp, &sh);
+        fill_decode_params(rq, &decode, pp, &sh);
         fill_slice_params(&slice, pp, sp, &sh, s->size + prefix, raw_offset + prefix);
         dump_slice(rq, &sh, &slice);
         dump_entry_points(rq, st->entry_points, sh.num_entry_points);
@@ -548,10 +620,28 @@ static int hevc_submit(struct request_ctx *rq, const struct picture *pic, VASurf
               .size = sh.num_entry_points * sizeof(uint32_t), .ptr = st->entry_points },
         };
         unsigned count = sh.num_entry_points ? NUM_CONTROLS : NUM_CONTROLS - 1;
-        ret = request_queue(rq, controls, count, &data, target, !i, i + 1 == pic->num_slices);
+        ret = request_queue(rq, controls, count, &data, !i, i + 1 == pic->num_slices);
     }
     annexb_free(&data);
     return ret;
+}
+
+/* a frame-based engine's SPS as its own value too: rkvdec sets its decoded pictures up from it, not
+ * from a request's, and takes a new one only with no buffers */
+static int hevc_prepare(struct request_ctx *rq, const struct picture *pic)
+{
+    struct hevc_state *st = rq->codec_state;
+    const VAPictureParameterBufferHEVC *pp = pic->picture_param;
+    struct v4l2_ctrl_hevc_sps sps;
+    if (!pp)
+        return -EINVAL;
+    if (st->decode_mode != V4L2_STATELESS_HEVC_DECODE_MODE_FRAME_BASED)
+        return 0;
+    frame_sps(&sps, pp);
+    if (!memcmp(&sps, &st->current_sps, sizeof(sps)))
+        return 0;
+    st->current_sps = sps;
+    return request_set_compound(rq, V4L2_CID_STATELESS_HEVC_SPS, &sps, sizeof(sps));
 }
 
 const struct request_codec request_hevc = {
@@ -560,4 +650,5 @@ const struct request_codec request_hevc = {
     .state_size = sizeof(struct hevc_state),
     .init = hevc_init,
     .submit = hevc_submit,
+    .prepare = hevc_prepare,
 };

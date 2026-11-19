@@ -225,6 +225,8 @@ static VAStatus create_config(VADriverContextP ctx, VAProfile profile, VAEntrypo
         free(config);
         return VA_STATUS_ERROR_ALLOCATION_FAILED;
     }
+    if (entrypoint == VAEntrypointVLD)
+        DRIVER(ctx)->decoding = profile;
     return VA_STATUS_SUCCESS;
 }
 
@@ -245,6 +247,7 @@ static VAStatus query_config_attributes(VADriverContextP ctx, VAConfigID config_
                                                    VAConfigAttribRateControl,
                                                    VAConfigAttribEncPackedHeaders,
                                                    VAConfigAttribEncMaxRefFrames,
+                                                   VAConfigAttribEncJPEG,
                                                    VAConfigAttribDecProcessing,
                                                    VAConfigAttribMaxPictureWidth,
                                                    VAConfigAttribMaxPictureHeight };
@@ -724,6 +727,7 @@ VA_INIT_NAME(VA_MAJOR_VERSION, VA_MINOR_VERSION)(VADriverContextP ctx)
 
     if (!drv)
         return VA_STATUS_ERROR_ALLOCATION_FAILED;
+    drv->decoding = VAProfileNone;
     drv->backend = backend_open(drv);
     if (!drv->backend) {
         free(drv);

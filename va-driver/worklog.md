@@ -274,6 +274,12 @@ real time on Cedrus whatever the driver: about 25 fps flat out, 180 of 288 frame
   buffers, streaming or not. The SPS is now set before a picture's buffer is chosen, the session
   rebuilt once if refused. H.264 and VP9, 1080p and 4K, decode bit-exact at 91 to 98% of `ffmpeg9`'s
   rate; Cedrus decodes as before.
+- The desktop check on the M2 Plus dropped frames at 4K60 in mpv: H.264 270 of 600, HEVC 54, VP9
+  363, and as many on the real 2256x1504 screen. Not the driver: MPP decodes the 25 Mbit/s H.264
+  clip at 43 fps natively, VA at 42; HEVC and VP9 reach 88 and 71 fps through VA, mpv 46 untimed
+  with the Mali-450 at 95% load and its top clock, whatever mpv's pool or output.
+- The M20's CAPTURE budget is 288 MiB, two dozen 4K pictures, as the kernel now grants what CMA
+  holds; 192 MiB left 4K at the decoder's minimum, copying every picture.
 
 - The M20 checked at 4K on 7.3.5 gave VA pictures unlike software's, every codec, and as many on
   6.18.64 and on the committed backend; `ffmpeg9`'s own decoders were exact, and the suite's short
@@ -322,18 +328,92 @@ real time on Cedrus whatever the driver: about 25 fps flat out, 180 of 288 frame
   has no low-latency mode. GStreamer's own `v4l2h264dec`, `v4l2h265dec` and `v4l2vp9dec` decode all
   600, so the package's generator no longer tells GStreamer to load the driver where the meson
   decoder is.
+- `sunxi-h616` VP9 ran at 71% of the engine's rate at 1080p and 81% at 4K, a fixed cost a picture,
+  with 1.9 ms more kernel time a frame than `ffmpeg9`'s own path. Counting the syscalls through an
+  `LD_PRELOAD` shim found it: fewer ioctls than FFmpeg's own, but an `mmap` and `munmap` a frame,
+  each surface's memory mapped whole as an engine buffer was lent to it, which no client read. A
+  surface's memory is now mapped on first use: VP9 1080p 98%, 4K 100%, HEVC 1080p 100% of
+  `ffmpeg9`'s rate.
+- `rk35xx` offered no JPEG. MPP's JPEG decoder runs only through its task API: an output buffer
+  handed with each packet, and the packet itself in an MPP buffer; plain memory failed every picture
+  with "check buffer found NULL pointer". The suite's engine count missed `jpegd`'s interrupt. JPEG
+  now decodes through VA at 76 dB, FFmpeg and GStreamer, and 1080p MJPEG at 145 fps against
+  software's 61 on four threads.
+- `rk35xx` JPEG encode through MPP's JPEG encoder, offered on `VAEntrypointEncPicture` beside the
+  slice encoders: 40 dB at the default quality, H.264 and HEVC encodes unchanged. GStreamer's
+  `vajpegenc` does not preroll here either, as on `sunxi-h616`.
+- GStreamer's `vajpegenc` never prerolled, on `sunxi-h616` and `rk35xx` alike: it reads
+  `VAConfigAttribEncJPEG` for how many Huffman tables it may send, and the driver answered nothing.
+  It now reports baseline JPEG as its writer makes it, three components in one scan, two of each
+  table: GStreamer's JPEG encode 36 dB on `rk35xx`, 39 dB on `sunxi-h616`.
+- WebKit's WebRTC encodes through `vah264enc` alone. Its settings, CBR, `target-usage=1`, a GOP, no
+  B frames, AVC out of `h264parse`, hold on every family: key frames exactly at `key-int-max` 15 and
+  60, no B frames. CBR holds within 10% a second on `rk35xx`; `sunxi-h616` overshoots its first
+  second 2.7 times; `meson-gxl` offers no CBR. A key frame asked for mid-stream, as on a peer's PLI,
+  came at once, but Cedrus-enc kept its own GOP count beside the client's, giving extra key frames
+  on the old cadence: the V4L2 encoders now take the longest GOP the device allows, and every IDR
+  the client marks is forced.
 - GStreamer finds the `va` encoders on `meson-gxl` too: the generator loads the driver everywhere
   and ranks only the `va` decoders out there.
+- GStreamer into system memory through MPP runs at 45% of its rate in `VAMemory`: GStreamer's own
+  copy of each frame, for a sink taking no `GstVideoMeta`; WebKit takes it.
+- GStreamer's VP9 through MPP ran 1080p at 138 fps, 60% of it in the driver's copy: GStreamer
+  exports its surfaces before the first picture, so they kept the plain layout and MPP's padded rows
+  could not land in them. A surface made after a VP9 decode config, as FFmpeg and GStreamer make
+  theirs, is now laid out as MPP writes VP9 from the start, the rule read from MPP at five sizes:
+  GStreamer 264 fps, FFmpeg 283; 4K, whose rows MPP does not pad, as before. Every VP9 clip
+  identical through both, switch clips included.
 - A call in the browsers, on `sunxi-h616`: GStreamer ranks its `va` encoders out, so WebKit picked
   `openh264enc`; the generator ranks them first now, and WebKit builds `vah264enc`. Chromium 156
   takes the encoder with `AcceleratedVideoEncoder`: its VA encoder initializes and encodes at 360p
   and 540p, but the call's canvas gives it 3.5 fps, WebRTC drops below 360p, and Chromium encodes
   that in software. Firefox ESR 153 has no VA encoder: its FFmpeg encoder opens `libx264`, so its
   encode prefs are not shipped.
+- WebKit's call on `sunxi-h616` failed `not-negotiated`: it asks for Constrained Baseline, and
+  Cedrus-enc wrote Main, its default, as the V4L2 encoders never set the profile control. The
+  client's profile is set now: the stream says Constrained Baseline, Main or Main for High, as
+  asked; the suite's encodes unchanged. `meson-gxl`'s encoder lists no Constrained Baseline.
+- MJPEG through MPP spent half its time copying each picture out of MPP's buffer into the surface. A
+  surface made after a JPEG config is now laid out as `jpegd` writes NV12, and decoded into in
+  place: FFmpeg 1080p from 154 to 189 fps, a third of the CPU; GStreamer as before, at 134; JPEG
+  still 76 dB through both.
+- 10-bit through MPP ran at half its native rate, every picture narrowed from NV15 to NV12 by the
+  CPU a sample at a time, staged at 16 bits: MPP's HEVC decoder takes its pixel format from the
+  stream alone, so the engine cannot narrow it. Four 8-bit samples now come straight from each
+  five-byte group: HEVC Main 10 1080p from 152 to 225 fps, 4K from 36 to 69 against MPP's 79; the
+  10-bit clips as before, through FFmpeg and GStreamer. `tests/unit/test_pixels.c` checks the
+  narrowing against the packed samples.
+- The narrowing split across two cores, the luma's top half on a helper thread: HEVC Main 10 1080p
+  from 228 to 258 fps, 86% of MPP's rate; 4K 70 fps, as before, bound elsewhere.
+- `meson-gxl`'s suite with the cached-capture, GOP and profile changes: 52 pass as before. Two
+  checks flip run to run on either build, `mpeg4-sp` and GStreamer's `hevc-odd`.
+- `rk35xx` against `ffmpeg9`'s MPP decoders, the current build: H.264 98%, VP9 96 to 97%, HEVC 92 to
+  94%, HEVC Main 10 86 to 88%. HEVC's remainder is the stream parsed twice, by FFmpeg for VA and by
+  MPP again; no copy of the driver's stands out.
+- `meson-gxl` against `ffmpeg9`'s V4L2 decoders, frames left on the GPU: H.264 1080p 100%, HEVC
+  1080p 134%, VP9 1080p 92%, 4K 99%. Read back, 4K H.264 and HEVC stop after 1 and 9 pictures, on
+  today's builds and the installed one alike: FFmpeg syncs a picture meson's DPB still holds, and
+  the drain ends the session.
+- The V4L2 encoders copied each input picture into their own buffer. Where the device takes dma-bufs
+  on a single-plane OUTPUT, as Cedrus-enc behind the IOMMU does, a surface laid out as it reads now
+  goes in as it is, and one laid out otherwise is copied into memory of ours. Cedrus-enc asks a row
+  past the picture, which the heap's whole pages hold, so a surface's memory is now counted as those
+  pages. 720p `vah264enc` on `sunxi-h616`: 8% less CPU, 52 to 55 fps; the encodes byte for byte as
+  before, the suite unchanged.
+- The narrowing on four cores, a band each: HEVC Main 10 1080p 253 fps against two cores' 246, 4K 69
+  as before. Bound by memory, not the cores: two kept.
+- The RGA for the 10-bit narrowing, dropped untried: RGA2-enhance reads NV15, but librga upstream
+  ships binaries alone, and nothing shows RGA2 beats two cores where memory already bounds 4K. The
+  narrowing in NEON instead, 16 samples a step from four groups by one table lookup and two per-lane
+  shifts; `tests/unit/test_pixels.c` covers rows long enough for several steps.
 - `rk35xx-next2` with Hantro beside `rkvdec`: GStreamer names a second node's stateless decoders for
   the node, `v4l2slvideo6h264dec`, which the generator did not rank out, so WebKit took it over
   `vah264dec`. The generator now ranks out every node's. HEVC through `vah265dec` outside WebKit:
   1080p 298 fps, the suite exact; FFmpeg 97% of `ffmpeg9`'s own.
+- The NEON narrowing on `rk35xx`'s vendor kernel, on the R69-1: HEVC Main 10 1080p 274 fps against
+  MPP's 312 (88%), 4K 72 against 81 (89%), two points over the C loop's on the M2 Plus: memory
+  bounds it there; it earns its place on `next2`'s readback. GStreamer's HEVC 1080p60 into DMABuf on
+  `next2`, 20 runs: every one whole in 3.5 s, no kernel line.
 - GStreamer's JPEG on `sunxi-h616` read 28.7 dB, and FFmpeg's pictures through the driver were the
   same bytes: the suite read GStreamer's raw frames as limited range against a full-range JPEG. Read
   as full range, 77 dB, as FFmpeg's.

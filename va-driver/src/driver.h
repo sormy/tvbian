@@ -131,6 +131,7 @@ struct engine_picture {
 struct backing {
     int fd;
     size_t size;
+    /* mapped on first use: a picture the engine decodes into is seldom read by the CPU */
     uint8_t *map;
     unsigned pitch;
     unsigned chroma_offset;
@@ -162,6 +163,8 @@ struct surface {
     /* the modifiers the client listed at creation, of those an engine writes */
     bool takes_linear;
     bool takes_compressed;
+    /* the engine's layout for its first memory; size 0 where it has none */
+    struct backing_layout planned;
 };
 
 /* What a client's encode parameters ask, whatever the codec. */
@@ -236,10 +239,14 @@ struct backend {
     void (*decoder_close)(struct context *ctx);
     /* a whole picture into a surface's own memory by the engine's copier; NULL or -ENOTSUP for
      * the CPU's */
-    int (*copy_picture)(const struct engine_picture *picture, const struct backing *dst,
+    int (*copy_picture)(const struct engine_picture *picture, struct backing *dst,
                         uint32_t fourcc, unsigned width, unsigned height);
     /* decodes into a surface's own memory, which then holds the engine's data past the picture */
     bool decodes_into_backing;
+    /* a new surface's layout as the engine writes the profile the client last set up to decode,
+     * so its pictures land in place even in memory the client sees; false where none */
+    bool (*plan_layout)(VAProfile decoding, uint32_t fourcc, unsigned width, unsigned height,
+                        struct backing_layout *out);
     /* memory of a decoder's the surface's pictures will decode into, lent as its own before its
      * first picture; NULL, or negative where none */
     int (*lend_backing)(struct driver *drv, VASurfaceID id, struct surface *s);
@@ -267,6 +274,8 @@ struct driver {
     struct handle_table images;
     /* a surface was exported: a client may take its layout for every surface's */
     bool layout_seen;
+    /* the profile of the newest decode config, which surfaces made next are for */
+    VAProfile decoding;
 };
 
 #define DRIVER(ctx) ((struct driver *)(ctx)->pDriverData)
@@ -313,6 +322,8 @@ void surface_drop_unseen_backing(struct surface *s);
 void surface_mark_decoded(struct surface *s);
 uint64_t monotonic_ms(void);
 int dmabuf_alloc(size_t size);
+/* the memory mapped for the CPU; NULL where it cannot be */
+uint8_t *backing_map(struct backing *b);
 int surface_bind_picture(struct surface *s, struct engine_picture *picture);
 void surface_free(struct surface *s);
 void surface_vtable(struct VADriverVTable *vt);
