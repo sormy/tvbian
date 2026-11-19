@@ -24,6 +24,8 @@ enum {
     MODIFICATION_END = 3,
     MMCO_END = 0,
     LEVEL_5_1 = 51,
+    PROFILE_BASELINE = 66,
+    PROFILE_MAIN = 77,
     PROFILE_HIGH = 100,
     PROFILE_HIGH10 = 110,
     NUM_CONTROLS = 6,
@@ -40,6 +42,8 @@ struct h264_state {
     uint8_t num_ref_idx_l1_default[MAX_PPS];
     /* learned from a slice that does not override; before that no slice reads it */
     bool l0_default_known[MAX_PPS];
+    /* the SPS last set outside a request */
+    struct v4l2_ctrl_h264_sps current_sps;
 };
 
 /* what the slice header holds and VA does not pass on */
@@ -195,11 +199,23 @@ static bool parse_slice_header(const VAPictureParameterBufferH264 *pp,
 }
 
 /* High or High 10, a superset of the syntax VA delivers */
-static void fill_sps(struct v4l2_ctrl_h264_sps *sps, const VAPictureParameterBufferH264 *pp)
+static unsigned profile_idc_of(VAProfile profile, const VAPictureParameterBufferH264 *pp)
+{
+    if (pp->bit_depth_luma_minus8)
+        return PROFILE_HIGH10;
+    return profile == VAProfileH264ConstrainedBaseline ? PROFILE_BASELINE
+           : profile == VAProfileH264Main              ? PROFILE_MAIN
+                                                       : PROFILE_HIGH;
+}
+
+static void fill_sps(struct v4l2_ctrl_h264_sps *sps, const VAPictureParameterBufferH264 *pp,
+                     VAProfile profile)
 {
     unsigned frame_mbs_only = pp->seq_fields.bits.frame_mbs_only_flag;
     *sps = (struct v4l2_ctrl_h264_sps){
-        .profile_idc = pp->bit_depth_luma_minus8 ? PROFILE_HIGH10 : PROFILE_HIGH,
+        .profile_idc = profile_idc_of(profile, pp),
+        .constraint_set_flags =
+            profile == VAProfileH264ConstrainedBaseline ? V4L2_H264_SPS_CONSTRAINT_SET1_FLAG : 0,
         .level_idc = LEVEL_5_1,
         .chroma_format_idc = pp->seq_fields.bits.chroma_format_idc,
         .bit_depth_luma_minus8 = pp->bit_depth_luma_minus8,
@@ -411,6 +427,9 @@ static int h264_init(struct request_ctx *rq)
         st->decode_mode = V4L2_STATELESS_H264_DECODE_MODE_SLICE_BASED;
     if (request_get_control(rq, V4L2_CID_STATELESS_H264_START_CODE, &st->start_code) < 0)
         st->start_code = V4L2_STATELESS_H264_START_CODE_NONE;
+    /* set as read: an engine with no such controls takes slices bare, the others the mode set */
+    request_set_control(rq, V4L2_CID_STATELESS_H264_DECODE_MODE, st->decode_mode);
+    request_set_control(rq, V4L2_CID_STATELESS_H264_START_CODE, st->start_code);
     return 0;
 }
 
@@ -456,7 +475,7 @@ static int h264_submit(struct request_ctx *rq, const struct picture *pic)
         if (!sh.overrides_num_ref_idx && sh.slice_type == SLICE_B)
             st->num_ref_idx_l1_default[sh.pps_id] = sp->num_ref_idx_l1_active_minus1;
     }
-    fill_sps(&sps, pp);
+    fill_sps(&sps, pp, rq->profile);
     fill_pps(&pps, st, &first, pp, iq != NULL);
     if (iq)
         fill_scaling(&scaling, iq);
@@ -501,10 +520,29 @@ static int h264_submit(struct request_ctx *rq, const struct picture *pic)
     return ret;
 }
 
+/* the SPS as the device's own value too: rkvdec sets its decoded pictures up from it, not from a
+ * request's, and takes a new one only with no buffers */
+static int h264_prepare(struct request_ctx *rq, const struct picture *pic)
+{
+    struct h264_state *st = rq->codec_state;
+    const VAPictureParameterBufferH264 *pp = pic->picture_param;
+    struct v4l2_ctrl_h264_sps sps;
+    if (!pp)
+        return -EINVAL;
+    fill_sps(&sps, pp, rq->profile);
+    if (!memcmp(&sps, &st->current_sps, sizeof(sps)))
+        return 0;
+    st->current_sps = sps;
+    int ret = request_set_compound(rq, V4L2_CID_STATELESS_H264_SPS, &sps, sizeof(sps));
+    /* an engine with no such current value takes the request's alone */
+    return ret == -EINVAL ? 0 : ret;
+}
+
 const struct request_codec request_h264 = {
     .kind = CODEC_H264,
     .pixelformat = V4L2_PIX_FMT_H264_SLICE,
     .state_size = sizeof(struct h264_state),
     .init = h264_init,
     .submit = h264_submit,
+    .prepare = h264_prepare,
 };

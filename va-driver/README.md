@@ -163,15 +163,19 @@ Key: ✓ offered, ✗ the engine can but this driver cannot yet, ➖ the engine 
     start, more by `VIDIOC_CREATE_BUFS`, up to 32.
   - Each surface decoded into gets a buffer of its own for the context's life; a destroyed surface's
     goes to the next. A surface with no memory of its own takes the buffer as its own: each picture
-    decodes in place, and export, derive and images read it with no copy. A surface that already has
-    memory gets each picture copied in, as does a 10-bit picture into an 8-bit surface; an AFBC
-    picture binds as it is.
+    decodes in place, and export, derive and images read it with no copy. Memory of its own that the
+    client no longer sees, as from a `vaDeriveImage` before the context, is given up for the buffer.
+    A surface whose memory the client sees gets each picture copied in, as does a 10-bit picture
+    into an 8-bit surface; an AFBC picture binds as it is.
   - A surface exported or derived before its first picture, as GStreamer's pool does, is lent its
     buffer then, by a decode context of its size and format.
   - Each picture gets a timestamp of its own, kept by vb2 on the surface's buffer: a buffer is
     decoded into again only when its surface is, as VA references it until then.
-  - Each request is waited for, so a picture is whole when `vaEndPicture` returns; one that fails or
-    never completes stops and restarts both queues.
+  - Up to four requests are in flight, each with an OUTPUT buffer of its own: `vaEndPicture` queues
+    and returns, and the engine decodes while the client readies the next picture. Requests finish
+    in order, when their slot is wanted again, when a buffer they write is decoded into again, and
+    in `vaSyncSurface` up to the surface asked for; a picture's last one delivers it. One that fails
+    or never completes stops and restarts both queues, and the pictures in flight are lost.
   - Surfaces' own dma-bufs cannot be CAPTURE: vb2 maps an imported CAPTURE buffer `DMA_FROM_DEVICE`,
     which `sun50i-iommu` maps write-only, and Cedrus reads back the picture it writes (deblocking)
     and its references. The same holds for `V4L2_MEMORY_FLAG_NON_COHERENT` buffers, allocated for

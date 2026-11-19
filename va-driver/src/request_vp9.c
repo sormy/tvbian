@@ -64,9 +64,18 @@ static int vp9_submit(struct request_ctx *rq, const struct picture *pic)
     return ret;
 }
 
+static void vp9_picture_size(const struct picture *pic, unsigned *width, unsigned *height)
+{
+    const VADecPictureParameterBufferVP9 *pp = pic->picture_param;
+    bool key = pp && pp->pic_fields.bits.frame_type == 0;
+    *width = key ? pp->frame_width : 0;
+    *height = key ? pp->frame_height : 0;
+}
+
 const struct request_codec request_vp9 = {
     .kind = CODEC_VP9,
     .pixelformat = V4L2_PIX_FMT_VP9_FRAME,
     .state_size = sizeof(struct vp9_persistent),
     .submit = vp9_submit,
+    .picture_size = vp9_picture_size,
 };

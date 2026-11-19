@@ -367,8 +367,7 @@ static unsigned collect_set(const VAPictureParameterBufferHEVC *pp, uint32_t fla
     return count;
 }
 
-static void fill_decode_params(const struct request_ctx *rq,
-                               struct v4l2_ctrl_hevc_decode_params *dp,
+static void fill_decode_params(struct v4l2_ctrl_hevc_decode_params *dp,
                                const VAPictureParameterBufferHEVC *pp, const struct slice_header *sh)
 {
     *dp = (struct v4l2_ctrl_hevc_decode_params){
@@ -381,7 +380,7 @@ static void fill_decode_params(const struct request_ctx *rq,
         if (ref->picture_id == VA_INVALID_SURFACE || ref->flags & VA_PICTURE_HEVC_INVALID)
             continue;
         dp->dpb[i] = (struct v4l2_hevc_dpb_entry){
-            .timestamp = request_timestamp(rq, ref->picture_id),
+            .timestamp = request_timestamp(ref->picture_id),
             .flags = ref->flags & VA_PICTURE_HEVC_LONG_TERM_REFERENCE
                          ? V4L2_HEVC_DPB_ENTRY_LONG_TERM_REFERENCE
                          : 0,
@@ -496,7 +495,7 @@ static int hevc_init(struct request_ctx *rq)
     return st->decode_mode == V4L2_STATELESS_HEVC_DECODE_MODE_SLICE_BASED ? 0 : -ENOTSUP;
 }
 
-static int hevc_submit(struct request_ctx *rq, const struct picture *pic)
+static int hevc_submit(struct request_ctx *rq, const struct picture *pic, VASurfaceID target)
 {
     struct hevc_state *st = rq->codec_state;
     const VAPictureParameterBufferHEVC *pp = pic->picture_param;
@@ -530,7 +529,7 @@ static int hevc_submit(struct request_ctx *rq, const struct picture *pic)
             return -EINVAL;
         bool annex_b = st->start_code == V4L2_STATELESS_HEVC_START_CODE_ANNEX_B;
         size_t prefix = annex_b ? sizeof(start_code) : 0;
-        fill_decode_params(rq, &decode, pp, &sh);
+        fill_decode_params(&decode, pp, &sh);
         fill_slice_params(&slice, pp, sp, &sh, s->size + prefix, raw_offset + prefix);
         dump_slice(rq, &sh, &slice);
         dump_entry_points(rq, st->entry_points, sh.num_entry_points);
@@ -549,7 +548,7 @@ static int hevc_submit(struct request_ctx *rq, const struct picture *pic)
               .size = sh.num_entry_points * sizeof(uint32_t), .ptr = st->entry_points },
         };
         unsigned count = sh.num_entry_points ? NUM_CONTROLS : NUM_CONTROLS - 1;
-        ret = request_queue(rq, controls, count, &data, !i, i + 1 == pic->num_slices);
+        ret = request_queue(rq, controls, count, &data, target, !i, i + 1 == pic->num_slices);
     }
     annexb_free(&data);
     return ret;

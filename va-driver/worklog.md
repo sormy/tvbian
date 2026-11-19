@@ -267,6 +267,14 @@ real time on Cedrus whatever the driver: about 25 fps flat out, 180 of 288 frame
 
 ## 2026-11-17 — mainline `rkvdec`, and what the desktop shows
 
+- The M2 Plus on `rk35xx-next2`: the stateless backend handled single-planar nodes alone, and
+  `rkvdec` is multi-planar; it now takes either, the node with the largest size. H.264 P frames
+  still broke. An ioctl trace beside `ffmpeg9`'s own request path found it: `rkvdec` lays its
+  pictures out from the device's current SPS, and refuses a new one with `EBUSY` while it has
+  buffers, streaming or not. The SPS is now set before a picture's buffer is chosen, the session
+  rebuilt once if refused. H.264 and VP9, 1080p and 4K, decode bit-exact at 91 to 98% of `ffmpeg9`'s
+  rate; Cedrus decodes as before.
+
 - The M20 checked at 4K on 7.3.5 gave VA pictures unlike software's, every codec, and as many on
   6.18.64 and on the committed backend; `ffmpeg9`'s own decoders were exact, and the suite's short
   clips passed. Two faults. A sync drained the decoder 40 ms into a session, as the 20 ms quiet was

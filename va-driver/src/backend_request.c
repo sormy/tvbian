@@ -170,6 +170,7 @@ static int open_devices(struct request_ctx *rq, uint32_t pixelformat)
     rq->video_fd = v4l2_open_coded(pixelformat, true, &mplane, &flags);
     if (rq->video_fd < 0)
         return -ENODEV;
+    rq->mplane = mplane;
     if (ioctl(rq->video_fd, VIDIOC_QUERYCAP, &cap) < 0)
         return -errno;
     rq->media_fd = v4l2_each_node(MEDIA_NODES, "media", try_media, &cap);
@@ -188,15 +189,88 @@ int request_get_control(struct request_ctx *rq, uint32_t id, int *value)
     return 0;
 }
 
+int request_set_control(struct request_ctx *rq, uint32_t id, int value)
+{
+    struct v4l2_ext_control control = { .id = id, .value = value };
+    struct v4l2_ext_controls controls = { .count = 1, .controls = &control };
+    if (rq->dump)
+        return 0;
+    return ioctl(rq->video_fd, VIDIOC_S_EXT_CTRLS, &controls) < 0 ? -errno : 0;
+}
+
 static int stream(int fd, enum v4l2_buf_type type, bool on)
 {
     return ioctl(fd, on ? VIDIOC_STREAMON : VIDIOC_STREAMOFF, &type) < 0 ? -errno : 0;
 }
 
+static enum v4l2_buf_type output_type(const struct request_ctx *rq)
+{
+    return rq->mplane ? V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE : V4L2_BUF_TYPE_VIDEO_OUTPUT;
+}
+
+static enum v4l2_buf_type capture_type(const struct request_ctx *rq)
+{
+    return rq->mplane ? V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE : V4L2_BUF_TYPE_VIDEO_CAPTURE;
+}
+
+static void stream_both(const struct request_ctx *rq, bool on)
+{
+    stream(rq->video_fd, output_type(rq), on);
+    stream(rq->video_fd, capture_type(rq), on);
+}
+
+/* a format to set, in the queue's API: one plane where it is multi-planar */
+static struct v4l2_format format_of(const struct request_ctx *rq, enum v4l2_buf_type type,
+                                    uint32_t pixelformat, unsigned width, unsigned height,
+                                    unsigned sizeimage)
+{
+    struct v4l2_format f = { .type = type };
+    if (rq->mplane)
+        f.fmt.pix_mp = (struct v4l2_pix_format_mplane){
+            .width = width, .height = height, .pixelformat = pixelformat, .num_planes = 1,
+            .plane_fmt = { { .sizeimage = sizeimage } }
+        };
+    else
+        f.fmt.pix = (struct v4l2_pix_format){ .width = width, .height = height,
+                                              .pixelformat = pixelformat, .sizeimage = sizeimage };
+    return f;
+}
+
+/* a format as set, as one plane; -ENOTSUP for a layout of more */
+static int one_plane(const struct request_ctx *rq, const struct v4l2_format *f,
+                     struct v4l2_pix_format *out)
+{
+    const struct v4l2_pix_format_mplane *mp = &f->fmt.pix_mp;
+    if (!rq->mplane) {
+        *out = f->fmt.pix;
+        return 0;
+    }
+    if (mp->num_planes != 1)
+        return -ENOTSUP;
+    *out = (struct v4l2_pix_format){ .width = mp->width, .height = mp->height,
+                                     .pixelformat = mp->pixelformat,
+                                     .bytesperline = mp->plane_fmt[0].bytesperline,
+                                     .sizeimage = mp->plane_fmt[0].sizeimage };
+    return 0;
+}
+
+/* a buffer of the queue, its one plane given where the queue is multi-planar */
+static struct v4l2_buffer buffer_of(const struct request_ctx *rq, enum v4l2_buf_type type,
+                                    unsigned index, struct v4l2_plane *plane)
+{
+    struct v4l2_buffer b = { .index = index, .type = type, .memory = V4L2_MEMORY_MMAP };
+    if (rq->mplane) {
+        *plane = (struct v4l2_plane){ 0 };
+        b.m.planes = plane;
+        b.length = 1;
+    }
+    return b;
+}
+
 /* CAPTURE buffer index exported, for no surface yet */
 static int setup_capture(struct request_ctx *rq, unsigned index)
 {
-    struct v4l2_exportbuffer exported = { .type = V4L2_BUF_TYPE_VIDEO_CAPTURE, .index = index,
+    struct v4l2_exportbuffer exported = { .type = capture_type(rq), .index = index,
                                           .flags = O_RDWR | O_CLOEXEC };
     struct capture_buffer *c = &rq->captures[index];
     struct stat st;
@@ -246,7 +320,7 @@ static int assign_capture(struct request_ctx *rq, VASurfaceID surface)
 
 static uint32_t surface_fourcc_of_capture(const struct request_ctx *rq)
 {
-    switch (rq->capture.fmt.pix.pixelformat) {
+    switch (rq->picture.pixelformat) {
     case V4L2_PIX_FMT_NV12:
         return VA_FOURCC_NV12;
     case V4L2_PIX_FMT_P010:
@@ -260,10 +334,11 @@ static uint32_t surface_fourcc_of_capture(const struct request_ctx *rq)
  * buffer is the surface's memory now */
 static int lend_capture(struct request_ctx *rq, const struct capture_buffer *c, struct surface *s)
 {
-    const struct v4l2_pix_format *f = &rq->capture.fmt.pix;
+    const struct v4l2_pix_format *f = &rq->picture;
     const struct backing_layout layout = { f->bytesperline, f->bytesperline * f->height, c->size };
     struct stat st;
     int ret;
+    surface_drop_unseen_backing(s);
     if (!s->backing && s->fourcc == surface_fourcc_of_capture(rq) &&
         (ret = surface_adopt_backing(s, dup(c->fd), &layout)) < 0)
         return ret;
@@ -277,10 +352,11 @@ static int wait_request(int request_fd)
     return ready > 0 ? 0 : ready ? -errno : -ETIMEDOUT;
 }
 
-static int dequeue(int fd, enum v4l2_buf_type type)
+static int dequeue(const struct request_ctx *rq, enum v4l2_buf_type type)
 {
-    struct v4l2_buffer buffer = { .type = type, .memory = V4L2_MEMORY_MMAP };
-    if (ioctl(fd, VIDIOC_DQBUF, &buffer) < 0)
+    struct v4l2_plane plane;
+    struct v4l2_buffer buffer = buffer_of(rq, type, 0, &plane);
+    if (ioctl(rq->video_fd, VIDIOC_DQBUF, &buffer) < 0)
         return -errno;
     return buffer.flags & V4L2_BUF_FLAG_ERROR ? -EIO : 0;
 }
@@ -289,51 +365,144 @@ static int dequeue(int fd, enum v4l2_buf_type type)
  * started again; the pictures already decoded keep their buffers */
 static void reset_queues(struct request_ctx *rq)
 {
-    stream(rq->video_fd, V4L2_BUF_TYPE_VIDEO_OUTPUT, false);
-    stream(rq->video_fd, V4L2_BUF_TYPE_VIDEO_CAPTURE, false);
-    ioctl(rq->request_fd, MEDIA_REQUEST_IOC_REINIT);
-    stream(rq->video_fd, V4L2_BUF_TYPE_VIDEO_OUTPUT, true);
-    stream(rq->video_fd, V4L2_BUF_TYPE_VIDEO_CAPTURE, true);
+    stream_both(rq, false);
+    for (unsigned i = 0; i < REQUEST_SLOTS; i++) {
+        ioctl(rq->slots[i].request_fd, MEDIA_REQUEST_IOC_REINIT);
+        rq->slots[i].busy = false;
+    }
+    rq->oldest_slot = rq->next_slot;
+    stream_both(rq, true);
 }
 
 static int queue_capture(struct request_ctx *rq)
 {
-    struct v4l2_buffer buffer = { .index = rq->target, .type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
-                                  .memory = V4L2_MEMORY_MMAP };
+    struct v4l2_plane plane;
+    struct v4l2_buffer buffer = buffer_of(rq, capture_type(rq), rq->target, &plane);
     return ioctl(rq->video_fd, VIDIOC_QBUF, &buffer) < 0 ? -errno : 0;
 }
 
-static int submit_request(struct request_ctx *rq, struct v4l2_ext_control *controls,
-                          unsigned count, const struct annexb *data, bool first, bool last)
+static int submit_request(struct request_ctx *rq, struct request_slot *slot,
+                          struct v4l2_ext_control *controls, unsigned count,
+                          const struct annexb *data, bool first, bool last)
 {
     struct v4l2_ext_controls set = { .which = V4L2_CTRL_WHICH_REQUEST_VAL,
-                                     .request_fd = rq->request_fd, .count = count,
+                                     .request_fd = slot->request_fd, .count = count,
                                      .controls = controls };
-    struct v4l2_buffer output = {
-        .index = 0,
-        .type = V4L2_BUF_TYPE_VIDEO_OUTPUT,
-        .memory = V4L2_MEMORY_MMAP,
-        .bytesused = data->size,
-        .timestamp = { .tv_usec = rq->captures[rq->target].timestamp },
-        .flags = V4L2_BUF_FLAG_REQUEST_FD | (last ? 0 : V4L2_BUF_FLAG_M2M_HOLD_CAPTURE_BUF),
-        .request_fd = rq->request_fd,
-    };
+    struct v4l2_plane plane;
+    struct v4l2_buffer output = buffer_of(rq, output_type(rq), (unsigned)(slot - rq->slots), &plane);
+    output.timestamp.tv_usec = rq->captures[rq->target].timestamp;
+    output.flags = V4L2_BUF_FLAG_REQUEST_FD | (last ? 0 : V4L2_BUF_FLAG_M2M_HOLD_CAPTURE_BUF);
+    output.request_fd = slot->request_fd;
+    if (rq->mplane)
+        plane.bytesused = data->size;
+    else
+        output.bytesused = data->size;
     int ret;
-    memcpy(rq->output_map, data->data, data->size);
+    memcpy(slot->map, data->data, data->size);
     if ((count && ioctl(rq->video_fd, VIDIOC_S_EXT_CTRLS, &set) < 0) ||
         ioctl(rq->video_fd, VIDIOC_QBUF, &output) < 0)
         return -errno;
     if (first && (ret = queue_capture(rq)) < 0)
         return ret;
-    if (ioctl(rq->request_fd, MEDIA_REQUEST_IOC_QUEUE) < 0)
+    if (ioctl(slot->request_fd, MEDIA_REQUEST_IOC_QUEUE) < 0)
         return -errno;
-    if ((ret = wait_request(rq->request_fd)) < 0 ||
-        (ret = dequeue(rq->video_fd, V4L2_BUF_TYPE_VIDEO_OUTPUT)) < 0)
-        return ret;
-    return last ? dequeue(rq->video_fd, V4L2_BUF_TYPE_VIDEO_CAPTURE) : 0;
+    *slot = (struct request_slot){ .request_fd = slot->request_fd, .map = slot->map,
+                                   .length = slot->length, .busy = true, .last = last,
+                                   .surface = VA_INVALID_ID, .capture = rq->target,
+                                   .timestamp = rq->captures[rq->target].timestamp };
+    return 0;
 }
 
-/* synchronous: each request waited for, so a picture is whole when vaEndPicture returns */
+static struct engine_picture *picture_of(struct request_ctx *rq, unsigned index);
+
+/* a picture whose last request is done, onto its surface, unless the surface's buffer has a newer
+ * picture coming */
+static void deliver(struct request_ctx *rq, const struct request_slot *slot)
+{
+    const struct capture_buffer *c = &rq->captures[slot->capture];
+    struct surface *s = surface_of(rq->drv, slot->surface);
+    if (!s || c->surface != slot->surface || c->timestamp != slot->timestamp)
+        return;
+    if (slot->picture < 0) {
+        surface_mark_decoded(s);
+        return;
+    }
+    struct engine_picture *p = picture_of(rq, (unsigned)slot->picture);
+    if (p)
+        surface_bind_picture(s, p);
+}
+
+/* the oldest request in flight waited for, and its picture delivered if it ends one */
+static int complete_oldest(struct request_ctx *rq)
+{
+    struct request_slot *slot = &rq->slots[rq->oldest_slot];
+    int ret = wait_request(slot->request_fd);
+    if (!ret)
+        ret = dequeue(rq, output_type(rq));
+    if (!ret && slot->last)
+        ret = dequeue(rq, capture_type(rq));
+    if (ret < 0) {
+        reset_queues(rq);
+        return ret;
+    }
+    ioctl(slot->request_fd, MEDIA_REQUEST_IOC_REINIT);
+    slot->busy = false;
+    rq->oldest_slot = (rq->oldest_slot + 1) % REQUEST_SLOTS;
+    if (slot->last)
+        deliver(rq, slot);
+    return 0;
+}
+
+/* every request in flight that writes this buffer done, and those before it */
+static int complete_capture(struct request_ctx *rq, unsigned capture)
+{
+    int newest = -1;
+    for (unsigned i = 0; i < REQUEST_SLOTS; i++) {
+        const struct request_slot *slot = &rq->slots[(rq->oldest_slot + i) % REQUEST_SLOTS];
+        if (slot->busy && slot->capture == capture)
+            newest = (int)i;
+    }
+    int ret = 0;
+    for (int done = 0; !ret && done <= newest; done++)
+        ret = complete_oldest(rq);
+    return ret;
+}
+
+static int complete_all(struct request_ctx *rq)
+{
+    int ret = 0;
+    while (!ret && rq->slots[rq->oldest_slot].busy)
+        ret = complete_oldest(rq);
+    return ret;
+}
+
+static void release_buffers(struct request_ctx *rq);
+static int configure_session(struct request_ctx *rq, const struct request_codec *codec,
+                             const struct context *ctx, unsigned width, unsigned height);
+
+static int set_compound(const struct request_ctx *rq, uint32_t id, const void *value, uint32_t size)
+{
+    struct v4l2_ext_control control = { .id = id, .size = size, .ptr = (void *)value };
+    struct v4l2_ext_controls controls = { .count = 1, .controls = &control };
+    return ioctl(rq->video_fd, VIDIOC_S_EXT_CTRLS, &controls) < 0 ? -errno : 0;
+}
+
+int request_set_compound(struct request_ctx *rq, uint32_t id, const void *value, uint32_t size)
+{
+    if (rq->dump)
+        return 0;
+    int ret = set_compound(rq, id, value, size);
+    if (ret != -EBUSY)
+        return ret;
+    release_buffers(rq);
+    if ((ret = set_compound(rq, id, value, size)) < 0)
+        return ret;
+    return configure_session(rq, codec_for(rq->ctx->config->codec->kind), rq->ctx, rq->width,
+                             rq->height);
+}
+
+/* queued without waiting: the engine decodes while the client readies the next picture, which
+ * vaSyncSurface waits for */
 int request_queue(struct request_ctx *rq, struct v4l2_ext_control *controls, unsigned count,
                   const struct annexb *data, bool first, bool last)
 {
@@ -341,14 +510,18 @@ int request_queue(struct request_ctx *rq, struct v4l2_ext_control *controls, uns
         request_dump(rq, "request_bytes", data->size);
         return 0;
     }
-    if (data->size > rq->output_length)
-        return -E2BIG;
-    int ret = submit_request(rq, controls, count, data, first, last);
+    struct request_slot *slot = &rq->slots[rq->next_slot];
+    int ret = slot->busy ? complete_oldest(rq) : 0;
     if (ret < 0)
+        return ret;
+    if (data->size > slot->length)
+        return -E2BIG;
+    if ((ret = submit_request(rq, slot, controls, count, data, first, last)) < 0) {
         reset_queues(rq);
-    else
-        ioctl(rq->request_fd, MEDIA_REQUEST_IOC_REINIT);
-    return ret;
+        return ret;
+    }
+    rq->next_slot = (rq->next_slot + 1) % REQUEST_SLOTS;
+    return 0;
 }
 
 int request_repeat_reference(struct request_ctx *rq, VASurfaceID reference)
@@ -491,68 +664,115 @@ static uint32_t capture_format(const struct request_ctx *rq, bool ten_bit)
     return ten_bit ? V4L2_PIX_FMT_P010 : V4L2_PIX_FMT_NV12;
 }
 
-static int open_session(struct request_ctx *rq, const struct request_codec *codec,
-                        const struct context *ctx)
+/* a request of its own and OUTPUT buffer i, mapped */
+static int setup_slot(struct request_ctx *rq, unsigned i)
 {
-    struct v4l2_format output = {
-        .type = V4L2_BUF_TYPE_VIDEO_OUTPUT,
-        .fmt.pix = { .pixelformat = codec->pixelformat, .width = ctx->width,
-                     .height = ctx->height, .sizeimage = CODED_BUFFER_SIZE },
-    };
-    struct v4l2_requestbuffers outputs = { .count = 1, .type = V4L2_BUF_TYPE_VIDEO_OUTPUT,
+    struct request_slot *slot = &rq->slots[i];
+    struct v4l2_plane plane;
+    struct v4l2_buffer mapped = buffer_of(rq, output_type(rq), i, &plane);
+    if (ioctl(rq->video_fd, VIDIOC_QUERYBUF, &mapped) < 0 ||
+        ioctl(rq->media_fd, MEDIA_IOC_REQUEST_ALLOC, &slot->request_fd) < 0)
+        return -errno;
+    slot->length = rq->mplane ? plane.length : mapped.length;
+    slot->map = mmap(NULL, slot->length, PROT_READ | PROT_WRITE, MAP_SHARED, rq->video_fd,
+                     rq->mplane ? plane.m.mem_offset : mapped.m.offset);
+    return slot->map == MAP_FAILED ? (slot->map = NULL, -errno) : 0;
+}
+
+/* the formats for pictures of this size, and the buffers and requests for them, streaming */
+static int configure_session(struct request_ctx *rq, const struct request_codec *codec,
+                             const struct context *ctx, unsigned width, unsigned height)
+{
+    struct v4l2_format output =
+        format_of(rq, output_type(rq), codec->pixelformat, width, height, CODED_BUFFER_SIZE);
+    struct v4l2_requestbuffers outputs = { .count = REQUEST_SLOTS, .type = output_type(rq),
                                            .memory = V4L2_MEMORY_MMAP };
-    /* one to stream with, given a surface at its first picture; more as surfaces come */
-    struct v4l2_requestbuffers captures = { .count = 1, .type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
-                                            .memory = V4L2_MEMORY_MMAP };
-    struct v4l2_buffer mapped = { .index = 0, .type = V4L2_BUF_TYPE_VIDEO_OUTPUT,
-                                  .memory = V4L2_MEMORY_MMAP };
+    /* one a render target the client named, made before streaming as rkvdec readies its buffers
+     * then; one where it named none, more as surfaces come */
+    unsigned targets = ctx->num_targets > 0 ? (unsigned)ctx->num_targets : 1;
+    struct v4l2_requestbuffers captures = {
+        .count = targets < REQUEST_MAX_CAPTURES ? targets : REQUEST_MAX_CAPTURES,
+        .type = capture_type(rq), .memory = V4L2_MEMORY_MMAP };
+    struct v4l2_pix_format set;
     bool ten_bit = ctx->config->rt_format == VA_RT_FORMAT_YUV420_10;
     int ret;
 
-    if ((ret = open_devices(rq, codec->pixelformat)) < 0)
-        return ret;
     if (ioctl(rq->video_fd, VIDIOC_S_FMT, &output) < 0)
         return -errno;
-    /* a size past the engine's comes back clamped */
-    if (output.fmt.pix.width < (unsigned)ctx->width || output.fmt.pix.height < (unsigned)ctx->height)
-        return -ERANGE;
-    if (codec->init && (ret = codec->init(rq)) < 0)
+    if ((ret = one_plane(rq, &output, &set)) < 0)
         return ret;
-    if (ten_bit && (ret = announce_ten_bit(rq, codec->kind, ctx->width, ctx->height)) < 0)
+    /* a size past the engine's comes back clamped */
+    if (set.width < width || set.height < height)
+        return -ERANGE;
+    if (ten_bit && (ret = announce_ten_bit(rq, codec->kind, width, height)) < 0)
         return ret;
     /* compressed only where the decoder lists its format for this stream */
     if (rq->compressed_modifier &&
-        !v4l2_queue_takes(rq->video_fd, V4L2_BUF_TYPE_VIDEO_CAPTURE, capture_format(rq, ten_bit),
+        !v4l2_queue_takes(rq->video_fd, capture_type(rq), capture_format(rq, ten_bit),
                           NULL))
         rq->compressed_modifier = 0;
     uint32_t wanted = capture_format(rq, ten_bit);
-    rq->capture = (struct v4l2_format){
-        .type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
-        .fmt.pix = { .pixelformat = wanted, .width = ctx->width, .height = ctx->height },
-    };
+    rq->capture = format_of(rq, capture_type(rq), wanted, width, height, 0);
     if (ioctl(rq->video_fd, VIDIOC_S_FMT, &rq->capture) < 0)
         return -errno;
+    if ((ret = one_plane(rq, &rq->capture, &rq->picture)) < 0)
+        return ret;
     /* a format the driver did not keep would be read as one it is not */
-    if (rq->capture.fmt.pix.pixelformat != wanted)
+    if (rq->picture.pixelformat != wanted)
         return -ENOTSUP;
-    if (rq->capture.fmt.pix.width < (unsigned)ctx->width ||
-        rq->capture.fmt.pix.height < (unsigned)ctx->height)
+    if (rq->picture.width < width || rq->picture.height < height)
         return -ERANGE;
+    rq->width = width;
+    rq->height = height;
     if (ioctl(rq->video_fd, VIDIOC_REQBUFS, &outputs) < 0 ||
-        ioctl(rq->video_fd, VIDIOC_QUERYBUF, &mapped) < 0 ||
         ioctl(rq->video_fd, VIDIOC_REQBUFS, &captures) < 0 ||
-        ioctl(rq->media_fd, MEDIA_IOC_REQUEST_ALLOC, &rq->request_fd) < 0)
-        return -errno;
-    if ((ret = setup_capture(rq, 0)) < 0)
+        outputs.count < REQUEST_SLOTS)
+        return outputs.count < REQUEST_SLOTS ? -ENOBUFS : -errno;
+    for (unsigned i = 0; i < captures.count; i++)
+        if ((ret = setup_capture(rq, i)) < 0)
+            return ret;
+    for (unsigned i = 0; i < REQUEST_SLOTS; i++)
+        if ((ret = setup_slot(rq, i)) < 0)
+            return ret;
+    if ((ret = stream(rq->video_fd, output_type(rq), true)) < 0)
         return ret;
-    rq->output_length = mapped.length;
-    rq->output_map = mmap(NULL, mapped.length, PROT_READ | PROT_WRITE, MAP_SHARED, rq->video_fd,
-                          mapped.m.offset);
-    if (rq->output_map == MAP_FAILED)
-        return rq->output_map = NULL, -errno;
-    if ((ret = stream(rq->video_fd, V4L2_BUF_TYPE_VIDEO_OUTPUT, true)) < 0)
+    return stream(rq->video_fd, capture_type(rq), true);
+}
+
+static int open_session(struct request_ctx *rq, const struct request_codec *codec,
+                        const struct context *ctx)
+{
+    int ret = open_devices(rq, codec->pixelformat);
+    if (ret < 0 || (codec->init && (ret = codec->init(rq)) < 0))
         return ret;
-    return stream(rq->video_fd, V4L2_BUF_TYPE_VIDEO_CAPTURE, true);
+    return configure_session(rq, codec, ctx, ctx->width, ctx->height);
+}
+
+/* every buffer and request let go, the pictures in flight finished first; surfaces keep the
+ * dma-bufs they were lent */
+static void release_buffers(struct request_ctx *rq)
+{
+    complete_all(rq);
+    stream_both(rq, false);
+    for (unsigned i = 0; i < rq->num_captures; i++)
+        if (rq->captures[i].fd >= 0)
+            close(rq->captures[i].fd);
+    rq->num_captures = 0;
+    for (unsigned i = 0; i < REQUEST_SLOTS; i++) {
+        struct request_slot *slot = &rq->slots[i];
+        if (slot->map)
+            munmap(slot->map, slot->length);
+        if (slot->request_fd >= 0)
+            close(slot->request_fd);
+        *slot = (struct request_slot){ .request_fd = -1 };
+    }
+    rq->next_slot = rq->oldest_slot = 0;
+    enum v4l2_buf_type types[] = { output_type(rq), capture_type(rq) };
+    for (unsigned i = 0; i < 2; i++) {
+        struct v4l2_requestbuffers none = { .count = 0, .type = types[i],
+                                            .memory = V4L2_MEMORY_MMAP };
+        ioctl(rq->video_fd, VIDIOC_REQBUFS, &none);
+    }
 }
 
 static void session_close(struct request_ctx *rq)
@@ -560,10 +780,12 @@ static void session_close(struct request_ctx *rq)
     for (unsigned i = 0; i < rq->num_captures; i++)
         if (rq->captures[i].fd >= 0)
             close(rq->captures[i].fd);
-    if (rq->output_map)
-        munmap(rq->output_map, rq->output_length);
-    if (rq->request_fd >= 0)
-        close(rq->request_fd);
+    for (unsigned i = 0; i < REQUEST_SLOTS; i++) {
+        if (rq->slots[i].map)
+            munmap(rq->slots[i].map, rq->slots[i].length);
+        if (rq->slots[i].request_fd >= 0)
+            close(rq->slots[i].request_fd);
+    }
     if (rq->video_fd >= 0)
         close(rq->video_fd);
     if (rq->media_fd >= 0)
@@ -583,10 +805,11 @@ static void request_decoder_close(struct context *ctx)
     }
     if (!rq)
         return;
-    if (rq->video_fd >= 0) {
-        stream(rq->video_fd, V4L2_BUF_TYPE_VIDEO_OUTPUT, false);
-        stream(rq->video_fd, V4L2_BUF_TYPE_VIDEO_CAPTURE, false);
-    }
+    /* the engine reads and writes the session's buffers until its requests are done */
+    if (!rq->dump)
+        complete_all(rq);
+    if (rq->video_fd >= 0)
+        stream_both(rq, false);
     session_close(rq);
     ctx->engine = NULL;
 }
@@ -602,8 +825,11 @@ static int request_decoder_open(struct driver *drv, struct context *ctx)
     if (!rq)
         return codec ? -ENOMEM : -ENOTSUP;
     ctx->engine = rq;
-    *rq = (struct request_ctx){ .drv = drv, .video_fd = -1, .media_fd = -1,
-                                .request_fd = -1 };
+    *rq = (struct request_ctx){ .drv = drv, .video_fd = -1, .media_fd = -1 };
+    for (unsigned i = 0; i < REQUEST_SLOTS; i++)
+        rq->slots[i].request_fd = -1;
+    rq->profile = ctx->config->offer->profile;
+    rq->ctx = ctx;
     if (!(rq->codec_state = calloc(1, codec->state_size)))
         return -ENOMEM;
     if (ctx->targets_take_compressed)
@@ -623,7 +849,7 @@ static void release_request_picture(struct engine_picture *picture)
  * where it has memory of its own */
 static struct engine_picture *picture_of(struct request_ctx *rq, unsigned index)
 {
-    const struct v4l2_pix_format *f = &rq->capture.fmt.pix;
+    const struct v4l2_pix_format *f = &rq->picture;
     const struct capture_buffer *c = &rq->captures[index];
     struct engine_picture *p = calloc(1, sizeof(*p));
     bool ten_bit = f->pixelformat == V4L2_PIX_FMT_P010 ||
@@ -665,6 +891,25 @@ static int request_decode_picture(struct driver *drv, struct context *ctx,
     }
     if (!target)
         return -EINVAL;
+    /* a key frame of another size, as a VP9 stream may send in one context: a session anew at it,
+     * as a new context gets */
+    unsigned width = 0, height = 0;
+    const struct request_codec *codec = codec_for(ctx->config->codec->kind);
+    if (codec->picture_size)
+        codec->picture_size(pic, &width, &height);
+    if (!rq->dump && width && (width != rq->width || height != rq->height)) {
+        request_decoder_close(ctx);
+        ctx->width = width;
+        ctx->height = height;
+        if ((ret = request_decoder_open(drv, ctx)) < 0)
+            return ret;
+        rq = ctx->engine;
+    }
+    if (codec->prepare && !rq->dump && (ret = codec->prepare(rq, pic)) < 0)
+        return ret;
+    /* a buffer given to a surface anew may be a destroyed one's, still read as a reference */
+    if (!rq->dump && capture_of(rq, ctx->target) < 0 && (ret = complete_all(rq)) < 0)
+        return ret;
     if ((ret = assign_capture(rq, ctx->target)) < 0)
         return ret;
     rq->target = ret;
@@ -675,6 +920,9 @@ static int request_decode_picture(struct driver *drv, struct context *ctx,
     c->latest = -1;
     rq->repeated = -1;
     c->timestamp = ++rq->last_timestamp;
+    /* the buffer's earlier picture finished first: its timestamp no longer delivers it */
+    if (!rq->dump && (ret = complete_capture(rq, rq->target)) < 0)
+        return ret;
     ret = codec_for(ctx->config->codec->kind)->submit(rq, pic);
     rq->dump_picture++;
     if (ret < 0)
@@ -682,10 +930,15 @@ static int request_decode_picture(struct driver *drv, struct context *ctx,
     c->latest = rq->repeated >= 0 ? rq->repeated : (int)rq->target;
     if (rq->dump)
         return 0;
-    if (in_place && rq->repeated < 0) {
-        surface_mark_decoded(target);
+    if (rq->repeated < 0) {
+        struct request_slot *last = &rq->slots[(rq->next_slot + REQUEST_SLOTS - 1) % REQUEST_SLOTS];
+        last->surface = ctx->target;
+        last->picture = in_place ? -1 : c->latest;
         return 0;
     }
+    /* a repeated picture is an older buffer's, which may still be decoding */
+    if ((ret = complete_all(rq)) < 0)
+        return ret;
     struct engine_picture *p = picture_of(rq, c->latest);
     return p ? surface_bind_picture(target, p) : -ENOMEM;
 }
@@ -710,9 +963,17 @@ static int request_lend_backing(struct driver *drv, VASurfaceID id, struct surfa
 }
 
 /* a stateless picture is whole at vaEndPicture or lost; a stateful one may come later */
+/* requests done in order until the surface has its picture or none is in flight */
 static int request_sync(struct driver *drv, struct context *ctx, VASurfaceID id, bool last)
 {
-    return is_stateful(ctx) ? backend_v4l2m2m.sync(drv, ctx, id, last) : -EIO;
+    if (is_stateful(ctx))
+        return backend_v4l2m2m.sync(drv, ctx, id, last);
+    struct request_ctx *rq = ctx->engine;
+    const struct surface *s = surface_of(drv, id);
+    int ret = 0;
+    while (!ret && s && !s->delivered && rq->slots[rq->oldest_slot].busy)
+        ret = complete_oldest(rq);
+    return ret;
 }
 
 static int request_encoder_open(struct driver *drv, struct context *ctx,
