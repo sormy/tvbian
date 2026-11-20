@@ -103,7 +103,8 @@ decoded back.
 
 - **Firefox** turns hardware decoding on by itself once its probe passes ([GfxInfo.cpp][ff-gfx]).
   Its decoder sandbox opens only `/dev/video*` ([broker policy][ff-sandbox]): enough on the S905L3;
-  the H313 (`/dev/media*`) and RK35xx (`/dev/mpp_service`) need `MOZ_DISABLE_RDD_SANDBOX=1`.
+  the H313 (`/dev/media*`) and RK35xx (`/dev/mpp_service`) need `MOZ_DISABLE_RDD_SANDBOX=1`, which
+  `tvb-va-driver` sets there.
 - **Chromium** opens only PCI GPUs for VA-API unless given
   `--hardware-video-device-path=/dev/dri/va` ([vaapi_wrapper.cc][cr-vaapi]), the render node
   `tvb-va-driver`'s udev rule links for the GPU, whatever its number; a file in `/etc/chromium.d/`

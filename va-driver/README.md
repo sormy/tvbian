@@ -20,9 +20,10 @@ a box of each family known here; no image installs it yet.
   `va` plugin load the driver (`GST_VA_ALL_DRIVERS`), ranks GStreamer's own stateless decoders out,
   every node's, and on meson ranks the `va` decoders out: meson's holds each picture until later
   packets, which GStreamer, syncing each first, never sends; GStreamer's own V4L2 decoders feed
-  ahead there, and the `va` encoders stay, ranked first, as GStreamer ranks them out. It ships the
-  browsers' VA defaults too, each leaving VA off unless told: Firefox's decode, Chromium's decode
-  and encode.
+  ahead there, and the `va` encoders stay, ranked first, as GStreamer ranks them out. Where the
+  engine is MPP or a stateless decoder, it turns Firefox's decoder sandbox off
+  (`MOZ_DISABLE_RDD_SANDBOX`), which opens `/dev/video*` alone. It ships the browsers' VA defaults
+  too, each leaving VA off unless told: Firefox's decode, Chromium's decode and encode.
 - **Linking:** libmpp is linked in statically; the driver exports `__vaDriverInit_1_22` alone, so
   the library's symbols meet no other copy in a process. `patches/mpp/` makes MPP's platform probe a
   call, made only where `/dev/mpp_service` is.

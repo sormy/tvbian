@@ -513,3 +513,10 @@ real time on Cedrus whatever the driver: about 25 fps flat out, 180 of 288 frame
   motion vectors on a stream with field macroblocks, and identical once fixed. Interlaced MPEG-2
   decodes on Hantro, 73 dB, where the suite expected every `rk35xx` to refuse it as MPP does: a clip
   `REFUSED` lists now passes refused or right.
+- Firefox ESR 153 on the H313, `browser.py`, 1080p60: with its decoder sandbox on, the engine's
+  interrupts never move and every clip decodes on the CPU; with `MOZ_DISABLE_RDD_SANDBOX=1` FFmpeg
+  asks for `VAAPI_VLD` and decodes about 60 a second, H.264, HEVC and VP9. Shown, 3 to 8 a second
+  either way: Firefox's drawing, not decode. The generator now sets the variable where the engine is
+  MPP or `cedrus`, `rkvdec` or `hantro-vpu`; on the M20 it stays unset. `MOZ_ENABLE_WAYLAND` is not
+  needed: ESR 153 takes Wayland by itself. Only the H313's GPU runs Firefox here; `lima` lacks
+  GLES 3.

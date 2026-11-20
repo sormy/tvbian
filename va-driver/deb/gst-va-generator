@@ -20,3 +20,9 @@ if [ -d /sys/bus/platform/drivers/meson-vdec ]; then
   rank=$rank,vah264dec:NONE,vah265dec:NONE,vavp8dec:NONE,vavp9dec:NONE,vaav1dec:NONE,vampeg2dec:NONE,vajpegdec:NONE,vavp8alphadecodebin:NONE,vavp9alphadecodebin:NONE
 fi
 echo GST_PLUGIN_FEATURE_RANK=$rank
+# Firefox's decoder sandbox opens /dev/video* alone: MPP and the stateless decoders need more
+stateless_drivers="cedrus rkvdec hantro-vpu"
+for driver in $stateless_drivers; do
+  [ -d /sys/bus/platform/drivers/$driver ] && echo MOZ_DISABLE_RDD_SANDBOX=1 && exit 0
+done
+[ ! -e /dev/mpp_service ] || echo MOZ_DISABLE_RDD_SANDBOX=1

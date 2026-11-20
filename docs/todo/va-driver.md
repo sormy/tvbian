@@ -6,18 +6,14 @@ settings.
 
 ## Open
 
-- [ ] **Firefox's VA environment in `tvb-va-driver`**: `MOZ_ENABLE_WAYLAND` and
-      `MOZ_DISABLE_RDD_SANDBOX` where every session reads them, a greetd-started `labwc` included.
 - [ ] **Survey, one box a family**: what Debian's GStreamer and FFmpeg 7.1 already decode; whether
       Debian's arm64 Chromium is built with VA-API; whether Firefox and Chromium list modifiers at
       surface creation.
 - [ ] **Debian's `libavcodec` stays stock on trixie**: our series on 9.0.2 is a port to 7.1, not a
       backport, redone on each of its security updates. Our patches go upstream; forky's FFmpeg is
       the next look.
-- [ ] **`tvb-va-driver` in the images**, once each family's suite passes:
-      `tools/validate/va_driver.py`.
 - [ ] **Interlaced MPEG-4 through `tvb-va-driver`** on `sunxi-h616` and `rk35xx`, and interlaced
-      MPEG-2 on `rk35xx`: refused now, as `ffmpeg9` fails them too.
+      MPEG-2 on `rk35xx` with MPP: refused now, as `ffmpeg9` fails them too.
 - [ ] **`ffmpeg9 -hwaccel vaapi` on `meson-gxl` ends MPEG-2 and MPEG-4 with every picture**: the
       last 2 are lost at the end of the stream, at any `-hwaccel_output_delay`; Debian's FFmpeg 7.1
       gets them.
@@ -81,6 +77,8 @@ settings.
       without `Dav1dVideoDecoder`, so only the page's codec checks can steer it to VP9.
 - [ ] **Chromium's call on the box's encoder**: its VA encoder runs, but WebRTC drops to software
       below 360p, where a 3.5 fps canvas sends it.
+- [ ] **Firefox shows what VA decodes on `sunxi-h616`**: HEVC 1080p60 decodes at 60 fps through VA
+      and 4 are shown, the rest dropped; as few with its CPU decoder, so its drawing on Panfrost.
 - [ ] **Firefox's calls on the box's encoder**: ESR 153's FFmpeg encoder opens `libx264` alone.
 - [ ] **GStreamer on `rk35xx`**: an MPP plugin package; AirPlay mirroring (`uxplay`) needs it.
 - [ ] **Encode** for WebRTC and screen capture, through `tvb-va-driver`'s H.264, HEVC and JPEG
