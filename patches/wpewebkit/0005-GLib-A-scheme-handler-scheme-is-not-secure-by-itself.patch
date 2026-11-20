@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Tue, 17 Nov 2026 20:00:00 -0500
+Subject: [PATCH] [GLib] A scheme handler's scheme is not secure by itself
+
+Every scheme an application serves counts as potentially trustworthy, so
+webkit_security_manager_register_uri_scheme_as_secure() changes nothing.
+On GTK and WPE the application decides, as with Chromium's custom schemes.
+
+---
+ Source/WebCore/page/SecurityOrigin.cpp | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/Source/WebCore/page/SecurityOrigin.cpp b/Source/WebCore/page/SecurityOrigin.cpp
+index fb5959df..7d9e409e 100644
+--- a/Source/WebCore/page/SecurityOrigin.cpp
++++ b/Source/WebCore/page/SecurityOrigin.cpp
+@@ -98,8 +98,10 @@ static bool shouldTreatAsPotentiallyTrustworthy(StringView protocol, StringView
+     if (LegacySchemeRegistry::shouldTreatURLSchemeAsLocal(protocol))
+         return true;
+ 
++#if !PLATFORM(GTK) && !PLATFORM(WPE)
+     if (LegacySchemeRegistry::schemeIsHandledBySchemeHandler(protocol))
+         return true;
++#endif
+ 
+     return false;
+ }
+-- 
+2.56.1
+

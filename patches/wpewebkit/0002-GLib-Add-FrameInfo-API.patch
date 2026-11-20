@@ -1,0 +1,399 @@
+From c22ba3278caa0000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Tue, 17 Nov 2026 18:55:14 -0500
+Subject: [PATCH] [GLib] Add FrameInfo API
+
+Backported from WebKit c22ba3278caa (2.56): a navigation's source and
+target frames, so a navigation policy tells a top-level navigation from
+one inside a frame. Ported to 2.54.2 for WPE only: the private header
+keeps 2.54's CString frame name, and the GTK and test hunks are left out.
+
+https://bugs.webkit.org/show_bug.cgi?id=319164
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/Source/WebKit/PlatformWPE.cmake b/Source/WebKit/PlatformWPE.cmake
+index 7ca6137..5d95684 100644
+--- a/Source/WebKit/PlatformWPE.cmake
++++ b/Source/WebKit/PlatformWPE.cmake
+@@ -183,6 +183,7 @@ set(WPE_API_HEADER_TEMPLATES
+     ${WEBKIT_DIR}/UIProcess/API/glib/WebKitFileChooserRequest.h.in
+     ${WEBKIT_DIR}/UIProcess/API/glib/WebKitFindController.h.in
+     ${WEBKIT_DIR}/UIProcess/API/glib/WebKitFormSubmissionRequest.h.in
++    ${WEBKIT_DIR}/UIProcess/API/glib/WebKitFrameInfo.h.in
+     ${WEBKIT_DIR}/UIProcess/API/glib/WebKitGeolocationManager.h.in
+     ${WEBKIT_DIR}/UIProcess/API/glib/WebKitGeolocationPermissionRequest.h.in
+     ${WEBKIT_DIR}/UIProcess/API/glib/WebKitHitTestResult.h.in
+diff --git a/Source/WebKit/SourcesWPE.txt b/Source/WebKit/SourcesWPE.txt
+index 9393812..7fe5cf6 100644
+--- a/Source/WebKit/SourcesWPE.txt
++++ b/Source/WebKit/SourcesWPE.txt
+@@ -152,6 +152,7 @@ UIProcess/API/glib/WebKitFileChooserRequest.cpp @no-unify
+ UIProcess/API/glib/WebKitFindController.cpp @no-unify
+ UIProcess/API/glib/WebKitFormClient.cpp @no-unify
+ UIProcess/API/glib/WebKitFormSubmissionRequest.cpp @no-unify
++UIProcess/API/glib/WebKitFrameInfo.cpp @no-unify
+ UIProcess/API/glib/WebKitGeolocationManager.cpp @no-unify
+ UIProcess/API/glib/WebKitGeolocationPermissionRequest.cpp @no-unify
+ UIProcess/API/glib/WebKitImage.cpp @no-unify
+diff --git a/Source/WebKit/UIProcess/API/glib/WebKitFrameInfo.cpp b/Source/WebKit/UIProcess/API/glib/WebKitFrameInfo.cpp
+new file mode 100644
+index 0000000..ce7648d
+--- /dev/null
++++ b/Source/WebKit/UIProcess/API/glib/WebKitFrameInfo.cpp
+@@ -0,0 +1,116 @@
++/*
++ * Copyright (C) 2026 Tau Gärtli
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Library General Public
++ * License as published by the Free Software Foundation; either
++ * version 2 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Library General Public License for more details.
++ *
++ * You should have received a copy of the GNU Library General Public License
++ * along with this library; see the file COPYING.LIB.  If not, write to
++ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
++ * Boston, MA 02110-1301, USA.
++ */
++
++#include "config.h"
++#include "WebKitFrameInfo.h"
++
++#include "APIFrameInfo.h"
++#include "WebKitFrameInfoPrivate.h"
++
++/**
++ * WebKitFrameInfo: (ref-func webkit_frame_info_ref) (unref-func webkit_frame_info_unref)
++ *
++ * Information about a frame on a webpage.
++ *
++ * Since: 2.56
++ */
++struct _WebKitFrameInfo {
++    explicit _WebKitFrameInfo(API::FrameInfo* info)
++        : info(info)
++    {
++    }
++
++    explicit _WebKitFrameInfo(WebKitFrameInfo* frameInfo)
++        : info(frameInfo->info)
++    {
++    }
++
++    RefPtr<API::FrameInfo> info;
++    int referenceCount { 1 };
++};
++
++G_DEFINE_BOXED_TYPE(WebKitFrameInfo, webkit_frame_info, webkit_frame_info_ref, webkit_frame_info_unref)
++
++WebKitFrameInfo* webkitFrameInfoCreate(API::FrameInfo* frameInfo)
++{
++    WebKitFrameInfo* info = static_cast<WebKitFrameInfo*>(fastZeroedMalloc(sizeof(WebKitFrameInfo)));
++    new (info) WebKitFrameInfo(frameInfo);
++    return info;
++}
++
++/**
++ * webkit_frame_info_ref:
++ * @info: a #WebKitFrameInfo
++ *
++ * Atomically acquires a reference on the given @info.
++ *
++ * This function is MT-safe and may be called from any thread.
++ *
++ * Returns: The same @info with an additional reference.
++ *
++ * Since: 2.56
++ */
++WebKitFrameInfo* webkit_frame_info_ref(WebKitFrameInfo* info)
++{
++    g_return_val_if_fail(info, nullptr);
++    g_atomic_int_inc(&info->referenceCount);
++    return info;
++}
++
++/**
++ * webkit_frame_info_unref:
++ * @info: a #WebKitFrameInfo
++ *
++ * Atomically releases a reference on the given @info.
++ *
++ * If the reference was the last, the resources associated with
++ * the @info are freed.
++ *
++ * This function is MT-safe and may be called from any thread.
++ *
++ * Since: 2.56
++ */
++void webkit_frame_info_unref(WebKitFrameInfo* info)
++{
++    g_return_if_fail(info);
++    if (g_atomic_int_dec_and_test(&info->referenceCount)) {
++        info->~WebKitFrameInfo();
++        fastFree(info);
++    }
++}
++
++/**
++ * webkit_frame_info_is_main_frame:
++ * @info: a #WebKitFrameInfo
++ *
++ * Whether or not this frame is the web site's main frame or a subframe.
++ *
++ * Since: 2.56
++ */
++gboolean
++webkit_frame_info_is_main_frame(WebKitFrameInfo* info)
++{
++    g_return_val_if_fail(info, FALSE);
++
++    return info->info->isMainFrame();
++}
++
++namespace WTF {
++WTF_DEFINE_GREF_TRAITS(WebKitFrameInfo, webkit_frame_info_ref, webkit_frame_info_unref)
++}
+diff --git a/Source/WebKit/UIProcess/API/glib/WebKitFrameInfo.h.in b/Source/WebKit/UIProcess/API/glib/WebKitFrameInfo.h.in
+new file mode 100644
+index 0000000..9e174b9
+--- /dev/null
++++ b/Source/WebKit/UIProcess/API/glib/WebKitFrameInfo.h.in
+@@ -0,0 +1,47 @@
++/*
++ * Copyright (C) 2026 Tau Gärtli
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Library General Public
++ * License as published by the Free Software Foundation; either
++ * version 2 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Library General Public License for more details.
++ *
++ * You should have received a copy of the GNU Library General Public License
++ * along with this library; see the file COPYING.LIB.  If not, write to
++ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
++ * Boston, MA 02110-1301, USA.
++ */
++
++@API_SINGLE_HEADER_CHECK@
++
++#pragma once
++
++#include <glib-object.h>
++#include <@API_INCLUDE_PREFIX@/WebKitDefines.h>
++
++G_BEGIN_DECLS
++
++#define WEBKIT_TYPE_FRAME_INFO (webkit_frame_info_get_type())
++
++typedef struct _WebKitFrameInfo WebKitFrameInfo;
++
++WEBKIT_API GType
++webkit_frame_info_get_type            (void);
++
++WEBKIT_API WebKitFrameInfo *
++webkit_frame_info_ref                 (WebKitFrameInfo *info);
++
++WEBKIT_API void
++webkit_frame_info_unref               (WebKitFrameInfo *info);
++
++WEBKIT_API gboolean
++webkit_frame_info_is_main_frame       (WebKitFrameInfo *info);
++
++G_DEFINE_AUTOPTR_CLEANUP_FUNC (WebKitFrameInfo, webkit_frame_info_unref)
++
++G_END_DECLS
+diff --git a/Source/WebKit/UIProcess/API/glib/WebKitFrameInfoPrivate.h b/Source/WebKit/UIProcess/API/glib/WebKitFrameInfoPrivate.h
+new file mode 100644
+index 0000000..f286f9a
+--- /dev/null
++++ b/Source/WebKit/UIProcess/API/glib/WebKitFrameInfoPrivate.h
+@@ -0,0 +1,33 @@
++/*
++ * Copyright (C) 2026 Tau Gärtli
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Library General Public
++ * License as published by the Free Software Foundation; either
++ * version 2 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Library General Public License for more details.
++ *
++ * You should have received a copy of the GNU Library General Public License
++ * along with this library; see the file COPYING.LIB.  If not, write to
++ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
++ * Boston, MA 02110-1301, USA.
++ */
++
++#pragma once
++
++#include "WebKitFrameInfo.h"
++#include <wtf/glib/GRefPtr.h>
++
++namespace API {
++class FrameInfo;
++};
++
++namespace WTF {
++WTF_DECLARE_GREF_TRAITS(WebKitFrameInfo)
++}
++
++WebKitFrameInfo* webkitFrameInfoCreate(API::FrameInfo*);
+diff --git a/Source/WebKit/UIProcess/API/glib/WebKitNavigationAction.cpp b/Source/WebKit/UIProcess/API/glib/WebKitNavigationAction.cpp
+index 5d85708..9c97fb8 100644
+--- a/Source/WebKit/UIProcess/API/glib/WebKitNavigationAction.cpp
++++ b/Source/WebKit/UIProcess/API/glib/WebKitNavigationAction.cpp
+@@ -20,6 +20,7 @@
+ #include "config.h"
+ #include "WebKitNavigationAction.h"
+ 
++#include "WebKitFrameInfoPrivate.h"
+ #include "WebKitNavigationActionPrivate.h"
+ #include "WebKitPrivate.h"
+ #include "WebKitURIRequestPrivate.h"
+@@ -209,3 +210,44 @@ const char* webkit_navigation_action_get_frame_name(WebKitNavigationAction* navi
+     }
+     return navigation->frameName->data();
+ }
++
++/**
++ * webkit_navigation_action_get_source_frame_info:
++ * @navigation: a #WebKitNavigationAction
++ *
++ * Gets the frame that requested the navigation.
++ *
++ * Returns: (transfer none) (nullable): a #WebKitFrameInfo or %NULL
++ *
++ * Since: 2.56
++ */
++WebKitFrameInfo* webkit_navigation_action_get_source_frame_info(WebKitNavigationAction* navigation)
++{
++    g_return_val_if_fail(navigation, nullptr);
++    if (!navigation->sourceFrame) {
++        if (auto sourceFrame = navigation->action->sourceFrame())
++            navigation->sourceFrame = adoptGRef(webkitFrameInfoCreate(sourceFrame));
++    }
++    return navigation->sourceFrame.get();
++}
++
++/**
++ * webkit_navigation_action_get_target_frame_info:
++ * @navigation: a #WebKitNavigationAction
++ *
++ * Gets the frame in which to display the new content or %NULL
++ * if the target of the navigation is a new window.
++ *
++ * Returns: (transfer none) (nullable): a #WebKitFrameInfo or %NULL
++ *
++ * Since: 2.56
++ */
++WebKitFrameInfo* webkit_navigation_action_get_target_frame_info(WebKitNavigationAction* navigation)
++{
++    g_return_val_if_fail(navigation, nullptr);
++    if (!navigation->targetFrame) {
++        if (auto targetFrame = navigation->action->targetFrame())
++            navigation->targetFrame = adoptGRef(webkitFrameInfoCreate(targetFrame));
++    }
++    return navigation->targetFrame.get();
++}
+diff --git a/Source/WebKit/UIProcess/API/glib/WebKitNavigationAction.h.in b/Source/WebKit/UIProcess/API/glib/WebKitNavigationAction.h.in
+index ba17491..fb9be77 100644
+--- a/Source/WebKit/UIProcess/API/glib/WebKitNavigationAction.h.in
++++ b/Source/WebKit/UIProcess/API/glib/WebKitNavigationAction.h.in
+@@ -24,6 +24,7 @@
+ 
+ #include <glib-object.h>
+ #include <@API_INCLUDE_PREFIX@/WebKitDefines.h>
++#include <@API_INCLUDE_PREFIX@/WebKitFrameInfo.h>
+ #include <@API_INCLUDE_PREFIX@/WebKitURIRequest.h>
+ 
+ G_BEGIN_DECLS
+@@ -54,34 +55,40 @@ typedef struct _WebKitNavigationAction WebKitNavigationAction;
+ 
+ 
+ WEBKIT_API GType
+-webkit_navigation_action_get_type            (void);
++webkit_navigation_action_get_type              (void);
+ 
+ WEBKIT_API WebKitNavigationAction *
+-webkit_navigation_action_copy                (WebKitNavigationAction *navigation);
++webkit_navigation_action_copy                  (WebKitNavigationAction *navigation);
+ 
+ WEBKIT_API void
+-webkit_navigation_action_free                (WebKitNavigationAction *navigation);
++webkit_navigation_action_free                  (WebKitNavigationAction *navigation);
+ 
+ WEBKIT_API WebKitNavigationType
+-webkit_navigation_action_get_navigation_type (WebKitNavigationAction *navigation);
++webkit_navigation_action_get_navigation_type   (WebKitNavigationAction *navigation);
+ 
+ WEBKIT_API guint
+-webkit_navigation_action_get_mouse_button    (WebKitNavigationAction *navigation);
++webkit_navigation_action_get_mouse_button      (WebKitNavigationAction *navigation);
+ 
+ WEBKIT_API guint
+-webkit_navigation_action_get_modifiers       (WebKitNavigationAction *navigation);
++webkit_navigation_action_get_modifiers         (WebKitNavigationAction *navigation);
+ 
+ WEBKIT_API WebKitURIRequest *
+-webkit_navigation_action_get_request         (WebKitNavigationAction *navigation);
++webkit_navigation_action_get_request           (WebKitNavigationAction *navigation);
+ 
+ WEBKIT_API gboolean
+-webkit_navigation_action_is_user_gesture     (WebKitNavigationAction *navigation);
++webkit_navigation_action_is_user_gesture       (WebKitNavigationAction *navigation);
+ 
+ WEBKIT_API gboolean
+-webkit_navigation_action_is_redirect         (WebKitNavigationAction *navigation);
++webkit_navigation_action_is_redirect           (WebKitNavigationAction *navigation);
+ 
+ WEBKIT_API const char *
+-webkit_navigation_action_get_frame_name      (WebKitNavigationAction *navigation);
++webkit_navigation_action_get_frame_name        (WebKitNavigationAction *navigation);
++
++WEBKIT_API WebKitFrameInfo *
++webkit_navigation_action_get_source_frame_info (WebKitNavigationAction *navigation);
++
++WEBKIT_API WebKitFrameInfo *
++webkit_navigation_action_get_target_frame_info (WebKitNavigationAction *navigation);
+ 
+ G_END_DECLS
+ 
+diff --git a/Source/WebKit/UIProcess/API/glib/WebKitNavigationActionPrivate.h b/Source/WebKit/UIProcess/API/glib/WebKitNavigationActionPrivate.h
+index 4694b20..dd5a220 100644
+--- a/Source/WebKit/UIProcess/API/glib/WebKitNavigationActionPrivate.h
++++ b/Source/WebKit/UIProcess/API/glib/WebKitNavigationActionPrivate.h
+@@ -38,6 +38,8 @@ struct _WebKitNavigationAction {
+     RefPtr<API::NavigationAction> action;
+     GRefPtr<WebKitURIRequest> request;
+     std::optional<CString> frameName;
++    GRefPtr<WebKitFrameInfo> sourceFrame;
++    GRefPtr<WebKitFrameInfo> targetFrame;
+ };
+ 
+ WebKitNavigationAction* webkitNavigationActionCreate(Ref<API::NavigationAction>&&);
+diff --git a/Source/WebKit/UIProcess/API/glib/webkit.h.in b/Source/WebKit/UIProcess/API/glib/webkit.h.in
+index bf7bdc6..87c27b7 100644
+--- a/Source/WebKit/UIProcess/API/glib/webkit.h.in
++++ b/Source/WebKit/UIProcess/API/glib/webkit.h.in
+@@ -70,6 +70,7 @@
+ #endif
+ #include <@API_INCLUDE_PREFIX@/WebKitFindController.h>
+ #include <@API_INCLUDE_PREFIX@/WebKitFormSubmissionRequest.h>
++#include <@API_INCLUDE_PREFIX@/WebKitFrameInfo.h>
+ #include <@API_INCLUDE_PREFIX@/WebKitGeolocationManager.h>
+ #include <@API_INCLUDE_PREFIX@/WebKitGeolocationPermissionRequest.h>
+ #include <@API_INCLUDE_PREFIX@/WebKitHitTestResult.h>
+-- 
+2.47.3

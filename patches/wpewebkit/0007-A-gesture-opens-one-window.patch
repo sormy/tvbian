@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Wed, 18 Nov 2026 00:30:00 -0500
+Subject: [PATCH] A gesture opens one window
+
+With JavaScript not allowed to open windows by itself, a window.open()
+passed the popup blocker for as long as a user gesture was being
+processed: one click could open a window for every call its handler
+made. Creating a window already consumes the window's transient
+activation, as the HTML standard says; the blocker now asks for it too,
+and window.open() consumes the activation it passed on, whether or not
+the application then makes a window: a click opens one window, as in
+Chromium and Firefox.
+
+---
+diff --git a/Source/WebCore/page/LocalDOMWindow.cpp b/Source/WebCore/page/LocalDOMWindow.cpp
+index 3e4731e9..2a79005c 100644
+--- a/Source/WebCore/page/LocalDOMWindow.cpp
++++ b/Source/WebCore/page/LocalDOMWindow.cpp
+@@ -410,8 +410,13 @@ bool LocalDOMWindow::allowPopUp(LocalFrame& firstFrame)
+             return false;
+     }
+ 
+-    return UserGestureIndicator::processingUserGesture()
+-        || firstFrame.settings().javaScriptCanOpenWindowsAutomatically();
++    if (firstFrame.settings().javaScriptCanOpenWindowsAutomatically())
++        return true;
++
++    // A gesture opens one window: the first consumes its activation, as the HTML standard has it,
++    // so a page cannot open a window for every call one click makes
++    RefPtr window = firstFrame.window();
++    return UserGestureIndicator::processingUserGesture() && window && window->hasTransientActivation();
+ }
+ 
+ bool LocalDOMWindow::allowPopUp()
+@@ -3012,6 +3017,10 @@ ExceptionOr<RefPtr<WindowProxy>> LocalDOMWindow::open(LocalDOMWindow& activeWind
+             return RefPtr<WindowProxy> { nullptr };
+     }
+ 
++    // The call consumes the gesture it passed on, whether or not the application then makes a window
++    if (!frame->settings().javaScriptCanOpenWindowsAutomatically())
++        firstWindow.consumeTransientActivation();
++
+     // Get the target frame for the special cases of _top and _parent.
+     // In those cases, we schedule a location change right now and return early.
+     RefPtr<Frame> targetFrame;

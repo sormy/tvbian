@@ -1,0 +1,58 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Wed, 18 Nov 2026 01:30:00 -0500
+Subject: [PATCH] [WPE] An application's script is not the user's gesture
+
+webkit_web_view_evaluate_javascript() and its async function variant
+ran each script as a user gesture, and consumed the page's transient
+activation once it ended. An application that runs scripts as the user
+works, as a browser does for its own features, used up the user's
+click: a requestFullscreen() or window.open() in the click's handler
+was then refused. On WPE an application's script now runs as
+QtWebEngine's and Chromium's do, without a gesture of its own and
+leaving the user's activation alone.
+
+---
+ Source/WebKit/UIProcess/API/glib/WebKitWebView.cpp | 12 ++++++++++--
+ 1 file changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/Source/WebKit/UIProcess/API/glib/WebKitWebView.cpp b/Source/WebKit/UIProcess/API/glib/WebKitWebView.cpp
+index aae7d5b1..6427b32f 100644
+--- a/Source/WebKit/UIProcess/API/glib/WebKitWebView.cpp
++++ b/Source/WebKit/UIProcess/API/glib/WebKitWebView.cpp
+@@ -4484,6 +4484,14 @@ void webkitWebViewRunJavascriptWithoutForcedUserGestures(WebKitWebView* webView,
+     webkitWebViewRunJavaScriptWithParams(webView, WTF::move(params), nullptr, RunJavascriptReturnType::JSCValue, WTF::move(task));
+ }
+ 
++#if PLATFORM(WPE)
++// A script the application runs is not the user's gesture: it opens no window a gesture may, and leaves the
++// user's own activation for the page to use
++static constexpr auto applicationScriptGesture = ForceUserGesture::No;
++#else
++static constexpr auto applicationScriptGesture = ForceUserGesture::Yes;
++#endif
++
+ static void webkitWebViewEvaluateJavascriptInternal(WebKitWebView* webView, const char* script, gssize length, const char* worldName, const char* sourceURI, RunJavascriptReturnType returnType, GCancellable* cancellable, GAsyncReadyCallback callback, gpointer userData)
+ {
+     g_return_if_fail(WEBKIT_IS_WEB_VIEW(webView));
+@@ -4500,7 +4508,7 @@ static void webkitWebViewEvaluateJavascriptInternal(WebKitWebView* webView, cons
+         URL({ }, String::fromUTF8(sourceURI)),
+         RunAsAsyncFunction::No,
+         std::nullopt,
+-        ForceUserGesture::Yes,
++        applicationScriptGesture,
+         RemoveTransientActivation::Yes
+     };
+     webkitWebViewRunJavaScriptWithParams(webView, WTF::move(params), worldName, returnType, WTF::move(task));
+@@ -4648,7 +4656,7 @@ static void webkitWebViewCallAsyncJavascriptFunctionInternal(WebKitWebView* webV
+         URL({ }, String::fromUTF8(sourceURI)),
+         RunAsAsyncFunction::Yes,
+         WTF::move(argumentsVector),
+-        ForceUserGesture::Yes,
++        applicationScriptGesture,
+         RemoveTransientActivation::Yes
+     };
+     webkitWebViewRunJavaScriptWithParams(webView, WTF::move(params), worldName, returnType, WTF::move(task));
+-- 
+2.56.1
+

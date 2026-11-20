@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Tue, 17 Nov 2026 00:00:00 +0000
+Subject: [PATCH] [GTK][WPE] Let Rockchip's MPP video decoder into the sandbox
+
+On Rockchip SoCs, GStreamer reaches the hardware video decoder through
+Rockchip's Media Process Platform (MPP), which opens /dev/mpp_service,
+allocates from /dev/dma_heap and reads the device tree to identify the
+SoC. The sandbox has none of them, so the web process finds no hardware
+decoder and plays video in software, while the same pipeline outside
+the sandbox decodes in hardware. Bind them like the vendor GPU nodes
+already bound: each is skipped where it does not exist.
+
+The paths must be device binds: a plain bind is mounted nodev, and
+opening /dev/mpp_service through one fails with EACCES.
+
+* Source/WebKit/UIProcess/Launcher/glib/BubblewrapLauncher.cpp:
+(WebKit::bindRockchipMPP):
+(WebKit::bubblewrapSpawn):
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+--- a/Source/WebKit/UIProcess/Launcher/glib/BubblewrapLauncher.cpp
++++ b/Source/WebKit/UIProcess/Launcher/glib/BubblewrapLauncher.cpp
+@@ -518,6 +518,17 @@
+     }
+ }
+ 
++static void bindRockchipMPP(Vector<CString>& args)
++{
++    // Rockchip's Media Process Platform: its codec service, the DMA heaps it allocates from,
++    // and the device tree it identifies the SoC by.
++    args.appendList({
++        "--dev-bind-try", "/dev/mpp_service", "/dev/mpp_service",
++        "--dev-bind-try", "/dev/dma_heap", "/dev/dma_heap",
++        "--ro-bind-try", "/sys/firmware/devicetree", "/sys/firmware/devicetree",
++    });
++}
++
+ static bool enableDebugPermissions()
+ {
+     static int enabled = -1;
+@@ -957,6 +968,7 @@
+ 
+         // Although cameras can be managed via the DesktopPortal, we still need v4l2 for video decoding.
+         bindV4l(sandboxArgs);
++        bindRockchipMPP(sandboxArgs);
+ 
+ #if USE(ATSPI)
+         auto accessibilityBusAddress = launchOptions.extraInitializationData.get("accessibilityBusAddress"_s);

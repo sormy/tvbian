@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Tue, 17 Nov 2026 20:00:00 -0500
+Subject: [PATCH] [GLib] Fetch a scheme handler's scheme only when CORS-enabled
+
+fetch() reaches any scheme an application serves, though its handler cannot
+tell a fetch from the page's other loads. As in Chromium, it reaches one only
+once the application registers the scheme as CORS-enabled.
+WebKit made every such scheme CORS-enabled as its handler was
+registered; on GTK and WPE the security manager now decides alone.
+
+---
+diff --git a/Source/WebCore/loader/DocumentThreadableLoader.cpp b/Source/WebCore/loader/DocumentThreadableLoader.cpp
+index 90e9f506..9e6368e4 100644
+--- a/Source/WebCore/loader/DocumentThreadableLoader.cpp
++++ b/Source/WebCore/loader/DocumentThreadableLoader.cpp
+@@ -179,6 +179,17 @@ DocumentThreadableLoader::DocumentThreadableLoader(Document& document, Threadabl
+     if (request.url().protocolIsData())
+         m_sameOriginRequest = options.sameOriginDataURLFlag == SameOriginDataURLFlag::Set;
+ 
++#if PLATFORM(GTK) || PLATFORM(WPE)
++    // As in Chromium, fetch() reaches a scheme an application serves only once it registers the scheme as
++    // CORS-enabled: its handler cannot tell a fetch from the page's other loads
++    if (m_options.initiatorType == cachedResourceRequestInitiatorTypes().fetch
++        && LegacySchemeRegistry::schemeIsHandledBySchemeHandler(request.url().protocol())
++        && !LegacySchemeRegistry::shouldTreatURLSchemeAsCORSEnabled(request.url().protocol())) {
++        logErrorAndFail(ResourceError(errorDomainWebKitInternal, 0, request.url(), "Fetch API cannot load a scheme not registered as CORS-enabled."_s, ResourceError::Type::AccessControl));
++        return;
++    }
++#endif
++
+     if (m_sameOriginRequest || m_options.mode == FetchOptions::Mode::NoCors || m_options.mode == FetchOptions::Mode::Navigate) {
+         loadRequest(WTF::move(request), SecurityCheckPolicy::DoSecurityCheck);
+         return;
+diff --git a/Source/WebKit/WebProcess/WebPage/WebPage.cpp b/Source/WebKit/WebProcess/WebPage/WebPage.cpp
+index d0a7a878..474d5cb7 100644
+--- a/Source/WebKit/WebProcess/WebPage/WebPage.cpp
++++ b/Source/WebKit/WebProcess/WebPage/WebPage.cpp
+@@ -8906,7 +8906,10 @@ void WebPage::registerURLSchemeHandler(WebURLSchemeHandlerIdentifier handlerIden
+ {
+     WEBPAGE_RELEASE_LOG(Process, "registerURLSchemeHandler: Registered handler %" PRIu64 " for the '%s' scheme", handlerIdentifier.toUInt64(), scheme.utf8().data());
+     WebCore::LegacySchemeRegistry::registerURLSchemeAsHandledBySchemeHandler(scheme);
++#if !PLATFORM(GTK) && !PLATFORM(WPE)
++    // GTK's and WPE's applications register a scheme as CORS-enabled through the security manager
+     WebCore::LegacySchemeRegistry::registerURLSchemeAsCORSEnabled(scheme);
++#endif
+     auto schemeResult = m_schemeToURLSchemeHandlerProxyMap.add(scheme, WebURLSchemeHandlerProxy::create(*this, handlerIdentifier));
+     m_identifierToURLSchemeHandlerProxyMap.add(handlerIdentifier, Ref { schemeResult.iterator->value }.get());
+ }

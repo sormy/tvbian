@@ -1,0 +1,91 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Tue, 17 Nov 2026 20:00:00 -0500
+Subject: [PATCH] [GLib] Add webkit_navigation_action_is_popup()
+
+Whether window.open()'s features ask for a popup, by the HTML standard's
+rules, readable in WebKitWebView::create. The window properties come only
+after the new view exists, too late for a browser to choose a popup window.
+
+---
+ .../API/glib/WebKitNavigationAction.cpp         | 17 +++++++++++++++++
+ .../API/glib/WebKitNavigationAction.h.in        |  3 +++
+ .../API/glib/WebKitNavigationActionPrivate.h    |  1 +
+ .../WebKit/UIProcess/API/glib/WebKitWebView.cpp |  3 +++
+ 4 files changed, 24 insertions(+)
+
+diff --git a/Source/WebKit/UIProcess/API/glib/WebKitNavigationAction.cpp b/Source/WebKit/UIProcess/API/glib/WebKitNavigationAction.cpp
+index 9c97fb8d..8bf73544 100644
+--- a/Source/WebKit/UIProcess/API/glib/WebKitNavigationAction.cpp
++++ b/Source/WebKit/UIProcess/API/glib/WebKitNavigationAction.cpp
+@@ -251,3 +251,20 @@ WebKitFrameInfo* webkit_navigation_action_get_target_frame_info(WebKitNavigation
+     }
+     return navigation->targetFrame.get();
+ }
++
++/**
++ * webkit_navigation_action_is_popup:
++ * @navigation: a #WebKitNavigationAction
++ *
++ * Whether the new window @navigation opens asks to be a popup: by the HTML standard's rules, a
++ * window.open() whose features hide the browser's own bars. Meaningful in #WebKitWebView::create.
++ *
++ * Returns: %TRUE if the new window is a popup
++ *
++ * Since: 2.56
++ */
++gboolean webkit_navigation_action_is_popup(WebKitNavigationAction* navigation)
++{
++    g_return_val_if_fail(navigation, FALSE);
++    return navigation->isPopup;
++}
+diff --git a/Source/WebKit/UIProcess/API/glib/WebKitNavigationAction.h.in b/Source/WebKit/UIProcess/API/glib/WebKitNavigationAction.h.in
+index fb9be77e..4eba778f 100644
+--- a/Source/WebKit/UIProcess/API/glib/WebKitNavigationAction.h.in
++++ b/Source/WebKit/UIProcess/API/glib/WebKitNavigationAction.h.in
+@@ -87,6 +87,9 @@ webkit_navigation_action_get_frame_name        (WebKitNavigationAction *navigati
+ WEBKIT_API WebKitFrameInfo *
+ webkit_navigation_action_get_source_frame_info (WebKitNavigationAction *navigation);
+ 
++WEBKIT_API gboolean
++webkit_navigation_action_is_popup                (WebKitNavigationAction *navigation);
++
+ WEBKIT_API WebKitFrameInfo *
+ webkit_navigation_action_get_target_frame_info (WebKitNavigationAction *navigation);
+ 
+diff --git a/Source/WebKit/UIProcess/API/glib/WebKitNavigationActionPrivate.h b/Source/WebKit/UIProcess/API/glib/WebKitNavigationActionPrivate.h
+index dd5a2207..778abb69 100644
+--- a/Source/WebKit/UIProcess/API/glib/WebKitNavigationActionPrivate.h
++++ b/Source/WebKit/UIProcess/API/glib/WebKitNavigationActionPrivate.h
+@@ -38,6 +38,7 @@ struct _WebKitNavigationAction {
+     RefPtr<API::NavigationAction> action;
+     GRefPtr<WebKitURIRequest> request;
+     std::optional<CString> frameName;
++    bool isPopup { false };
+     GRefPtr<WebKitFrameInfo> sourceFrame;
+     GRefPtr<WebKitFrameInfo> targetFrame;
+ };
+diff --git a/Source/WebKit/UIProcess/API/glib/WebKitWebView.cpp b/Source/WebKit/UIProcess/API/glib/WebKitWebView.cpp
+index e988d2a7..aae7d5b1 100644
+--- a/Source/WebKit/UIProcess/API/glib/WebKitWebView.cpp
++++ b/Source/WebKit/UIProcess/API/glib/WebKitWebView.cpp
+@@ -55,6 +55,7 @@
+ #include "WebKitIconLoadingClient.h"
+ #include "WebKitInputMethodContextPrivate.h"
+ #include "WebKitNavigationClient.h"
++#include "WebKitNavigationActionPrivate.h"
+ #include "WebKitNotificationPrivate.h"
+ #include "WebKitPermissionStateQueryPrivate.h"
+ #include "WebKitPrivate.h"
+@@ -2875,6 +2876,8 @@ void webkitWebViewSetIcon(WebKitWebView* webView, const LinkIcon& icon, API::Dat
+ RefPtr<WebPageProxy> webkitWebViewCreateNewPage(WebKitWebView* webView, Ref<API::PageConfiguration>&& configuration, WebKitNavigationAction* navigationAction)
+ {
+     ASSERT(!webView->priv->configurationForNextRelatedView);
++    if (auto& windowFeatures = configuration->windowFeatures())
++        navigationAction->isPopup = windowFeatures->wantsPopup();
+     SetForScope configurationScope(webView->priv->configurationForNextRelatedView, WTF::move(configuration));
+ 
+     WebKitWebView* newWebView;
+-- 
+2.56.1
+

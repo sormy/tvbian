@@ -1,0 +1,61 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Thu, 19 Nov 2026 07:40:00 -0500
+Subject: [PATCH] [GStreamer] A media download pauses no lower than 32MiB
+
+The web source keeps 2% of a media resource queued, pausing its download
+above that and resuming below a fifth of it with a new range request. For a
+20 s clip at 30 Mbit/s that is 1.5 MiB, resumed at 80 ms of media, less
+than the new request takes to arrive: playback stalls for buffering on every
+resume, and 4K plays at a fraction of its rate. Pause no lower than 32MiB.
+
+---
+ .../gstreamer/WebKitWebSourceGStreamer.cpp      | 17 +++++++++++++----
+ 1 file changed, 13 insertions(+), 4 deletions(-)
+
+diff --git a/Source/WebCore/platform/graphics/gstreamer/WebKitWebSourceGStreamer.cpp b/Source/WebCore/platform/graphics/gstreamer/WebKitWebSourceGStreamer.cpp
+index 65da82d3..7661e074 100644
+--- a/Source/WebCore/platform/graphics/gstreamer/WebKitWebSourceGStreamer.cpp
++++ b/Source/WebCore/platform/graphics/gstreamer/WebKitWebSourceGStreamer.cpp
+@@ -60,6 +60,15 @@ using namespace WebCore;
+ // reached, the download task resumes.
+ #define LOW_QUEUE_FACTOR_THRESHOLD 0.2
+ 
++// But never pause below 32MiB: 2% of a short clip at a high bitrate is less media than a new
++// request takes to arrive, and playback stalls for buffering on every resume.
++static constexpr uint64_t s_minimumHighQueueSize = 32 * 1024 * 1024;
++
++static double highQueueSize(uint64_t resourceSize)
++{
++    return std::max<double>(resourceSize * HIGH_QUEUE_FACTOR_THRESHOLD, s_minimumHighQueueSize);
++}
++
+ struct WebKitWebSrcPrivate {
+ 
+     ThreadSafeWeakPtr<WebCore::MediaPlayerPrivateGStreamer> player;
+@@ -408,9 +417,9 @@ static void restartLoaderIfNeeded(WebKitWebSrc* src, DataMutexLocker<WebKitWebSr
+     }
+ 
+     size_t queueSize = gst_adapter_available(members->adapter.get());
+-    GST_TRACE_OBJECT(src, "queue size %zu (min %1.0f)", queueSize, *members->size * HIGH_QUEUE_FACTOR_THRESHOLD * LOW_QUEUE_FACTOR_THRESHOLD);
++    GST_TRACE_OBJECT(src, "queue size %zu (min %1.0f)", queueSize, highQueueSize(*members->size) * LOW_QUEUE_FACTOR_THRESHOLD);
+ 
+-    if (queueSize >= *members->size * HIGH_QUEUE_FACTOR_THRESHOLD * LOW_QUEUE_FACTOR_THRESHOLD) {
++    if (queueSize >= highQueueSize(*members->size) * LOW_QUEUE_FACTOR_THRESHOLD) {
+         GST_TRACE_OBJECT(src, "queue size above low watermark, not restarting download");
+         return;
+     }
+@@ -444,8 +453,8 @@ static void stopLoaderIfNeeded([[maybe_unused]] WebKitWebSrc* src, DataMutexLock
+     }
+ 
+     size_t queueSize = gst_adapter_available(members->adapter.get());
+-    GST_TRACE_OBJECT(src, "queue size %zu (max %1.0f)", queueSize, *members->size * HIGH_QUEUE_FACTOR_THRESHOLD);
+-    if (queueSize <= *members->size * HIGH_QUEUE_FACTOR_THRESHOLD) {
++    GST_TRACE_OBJECT(src, "queue size %zu (max %1.0f)", queueSize, highQueueSize(*members->size));
++    if (queueSize <= highQueueSize(*members->size)) {
+         GST_TRACE_OBJECT(src, "queue size under high watermark, not stopping download");
+         return;
+     }
+-- 
+2.56.1
+

@@ -1,0 +1,55 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Tue, 17 Nov 2026 20:00:00 -0500
+Subject: [PATCH] [GLib] Return a DOM node as an empty object
+
+webkit_web_view_evaluate_javascript() fails with "Unsupported result type"
+when a script returns a DOM node. Chromium returns an empty object, and
+QtWebEngine applications expect it.
+
+---
+diff --git a/Source/WebKit/Shared/JavaScriptEvaluationResult.cpp b/Source/WebKit/Shared/JavaScriptEvaluationResult.cpp
+index 9d6421e1..9299d649 100644
+--- a/Source/WebKit/Shared/JavaScriptEvaluationResult.cpp
++++ b/Source/WebKit/Shared/JavaScriptEvaluationResult.cpp
+@@ -43,6 +43,7 @@
+ #include <WebCore/Document.h>
+ #include <WebCore/ExceptionDetails.h>
+ #include <WebCore/JSWebKitJSHandle.h>
++#include <WebCore/JSNode.h>
+ #include <WebCore/JSWebKitNodeSnapshot.h>
+ #include <WebCore/ScriptWrappableInlines.h>
+ #include <WebCore/SerializedScriptValue.h>
+@@ -236,6 +237,11 @@ RefPtr<API::Object> JavaScriptEvaluationResult::toAPI()
+     return std::exchange(instantiatedObjects, { }).take(m_root);
+ }
+ 
++static bool isDOMNode(JSGlobalContextRef context, JSValueRef value)
++{
++    return JSValueIsObject(context, value) && ::toJS(::toJS(context), value).inherits<WebCore::JSNode>();
++}
++
+ std::optional<JSObjectID> JavaScriptEvaluationResult::JSExtractor::addObjectToMap(JSGlobalContextRef context, JSValueRef rootValue, size_t nestingLevel)
+ {
+     ASSERT(context);
+@@ -253,7 +259,7 @@ std::optional<JSObjectID> JavaScriptEvaluationResult::JSExtractor::addObjectToMa
+ 
+     if (std::holds_alternative<Vector<JSObjectID>>(*extractedValue))
+         m_unprocessedContainers.append(PendingContainer { identifier, { context, rootValue }, nestingLevel, PendingContainer::ContainerType::Array });
+-    else if (std::holds_alternative<ObjectMap>(*extractedValue))
++    else if (std::holds_alternative<ObjectMap>(*extractedValue) && !isDOMNode(context, rootValue))
+         m_unprocessedContainers.append(PendingContainer { identifier, { context, rootValue }, nestingLevel, PendingContainer::ContainerType::Dictionary });
+ 
+     m_valuesInMap.set({ context, rootValue }, identifier);
+@@ -401,6 +407,11 @@ auto JavaScriptEvaluationResult::JSExtractor::jsValueToExtractedValue(JSGlobalCo
+     if (JSValueIsDate(context, object))
+         return Seconds(JSValueToNumber(context, object, 0) / 1000.0);
+ 
++    // A DOM node cannot be serialized: it comes back as an empty object, as from Chromium, its
++    // members left out, where failing would make it look like a function or a thrown error
++    if (jsObject->inherits<JSNode>())
++        return ObjectMap { };
++
+     if (JSValueIsArray(context, object)) {
+         // Members will be filled in by processContainersWithoutRecursion.
+         return Vector<JSObjectID> { };
