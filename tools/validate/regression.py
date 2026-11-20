@@ -4,9 +4,9 @@
 From the host, in the repo checkout:
 
     python3 tools/validate/regression.py run [--profile short|default|extended] \\
-        [--kernels own|next|both] [--iperf HOST] BOARD=USER@HOST
+        [--kernels own|next|both] [--iperf HOST] [--released] BOARD=USER@HOST
     python3 tools/validate/regression.py deploy [--profile short|default|extended] \\
-        [--kernels own|next|both] [--iperf HOST] BOARD=USER@HOST
+        [--kernels own|next|both] [--iperf HOST] [--released] BOARD=USER@HOST
     python3 tools/validate/regression.py collect BOARD=USER@HOST ...
     python3 tools/validate/regression.py report build/validate/regression/<date>
 
@@ -30,6 +30,10 @@ back if a kernel brings no network up, and runs the profile's steps:
 
     --kernels picks the kernels apart from the profile: the family's own, its -next, or both (the
     default).
+
+--released tests a box as its owner has it: what it lacks of the release's kernels, board package
+and tools comes from its own apt, nothing is built, and the checks against this tree are left out.
+The host needs only Python, an FFmpeg for the clips, and iperf3 unless --iperf names a server.
 
 run deploys one box, prints its run log as it grows, collects and reports, in one go; several
 boxes are several runs at once. collect fetches each box's results, done or not, into
@@ -154,6 +158,9 @@ done)
 apt-get install -y -qq --reinstall $missing "$@"
 """
 PACKAGES = "/var/tmp/regress"  # the box's copy of what it was given, kept to skip what is unchanged
+# --released: what the box's apt gives the suite beside its tools and the family's kernels
+RELEASED = ("deqp", "gstreamer1.0-plugins-bad", "libgstreamer-plugins-bad1.0-0")
+RELEASED_HELP = "the release's packages from the box's apt; nothing built"
 DEQP_RUN = """cd deqp
 EGL_PLATFORM=surfaceless LD_LIBRARY_PATH=/usr/lib/deqp/lib /usr/lib/deqp/deqp-runner suite \
   --suite suite.toml --output results --baseline fails.txt --flakes flakes.txt \
@@ -383,6 +390,15 @@ class Deployment:
         last = (said.splitlines() or [""])[-1]
         return f"{len(todo)} of {len(wanted)} packages, {len(changed)} sent; {last}"
 
+    def install_released(self, which: str) -> list[str]:
+        """The family's kernels, the board's package and the suite's tools from the box's own apt,
+        where it lacks them; the kernels as uname names them, from their metapackages."""
+        family = board_family(self.board)
+        metas = [f"linux-image-tvb-{family}", f"linux-image-tvb-{family}-next"][KERNELS[which]]
+        self.box.root(INSTALL, " ".join([*metas, f"tvb-{self.board}", *TEST_TOOLS, *RELEASED]))
+        depends = self.box.run(f"dpkg-query -W -f '${{Depends}}\\n' {shlex.join(metas)}")
+        return re.findall(r"^linux-image-(\S+)", depends, re.MULTILINE)
+
     def bundle(self, releases: list[str], host_lines: list[str]) -> None:
         """The suite, its plan, its units and the host's checks, into BOX_DIR, replacing any
         earlier run's; its clips kept, and only those that changed sent."""
@@ -464,18 +480,24 @@ def address_towards(host: str) -> str:
         return probe.getsockname()[0]
 
 
-def start(profile: str, spec: str, iperf: str | None, which: str) -> None:
+def start(profile: str, spec: str, iperf: str | None, which: str, released: bool) -> None:
     """One box: its packages installed fresh, the suite bundled, the run started. Without an
-    iperf3 server named, this machine serves, at its address on the route to the box."""
+    iperf3 server named, this machine serves, at its address on the route to the box. A released
+    box runs no tree of this checkout's: the checks against it are left out."""
     board, _, target = spec.partition("=")
     box = Box(target)
     iperf = iperf or address_towards(target.rpartition("@")[2])
     deployment = Deployment(board, box, profile, iperf)
-    releases = kernels(board_family(board), [d.name for d in DEBS.glob("*.deb")])[KERNELS[which]]
-    if not releases:
-        raise NotStarted(f"no {which} {board_family(board)} kernel package in {DEBS}")
-    print(f"{board}: install {deployment.install(releases)}")
-    host_lines = [f"profile {profile}", *deployment.host_checks()]
+    if released:
+        releases = deployment.install_released(which)
+        host_lines = [f"profile {profile}"]
+    else:
+        debs = [d.name for d in DEBS.glob("*.deb")]
+        releases = kernels(board_family(board), debs)[KERNELS[which]]
+        if not releases:
+            raise NotStarted(f"no {which} {board_family(board)} kernel package in {DEBS}")
+        print(f"{board}: install {deployment.install(releases)}")
+        host_lines = [f"profile {profile}", *deployment.host_checks()]
     host_lines += [f"# input {i}" for i in deployment.inputs]
     deployment.bundle(releases, host_lines)
     failed = [line for line in host_lines if line.startswith("FAIL")]
@@ -484,15 +506,16 @@ def start(profile: str, spec: str, iperf: str | None, which: str) -> None:
     print(f"{board}: {profile} started on {', '.join(releases)}")
 
 
-def prepare(board: str) -> None:
-    """What the host gives a box, made first: the board's package built fresh, the clip corpus
-    brought up to date (cached, so all but free). One process at a time, whichever asks: the build
-    container's work volume and the corpus are one each."""
+def prepare(board: str, released: bool) -> None:
+    """What the host gives a box, made first: the board's package built fresh unless released,
+    the clip corpus brought up to date (cached, so all but free). One process at a time, whichever
+    asks: the build container's work volume and the corpus are one each."""
+    (ROOT / "build").mkdir(exist_ok=True)
     with (ROOT / "build" / ".regression.lock").open("w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         stamp, made_of = DEBS / f".tvb-{board}.inputs", board_inputs(board)
         built = list(DEBS.glob(f"tvb-{board}_*.deb"))
-        if not (built and stamp.exists() and stamp.read_text() == made_of):
+        if not released and not (built and stamp.exists() and stamp.read_text() == made_of):
             subprocess.run([str(ROOT / "build.sh"), "board", board], cwd=ROOT, check=True)
             stamp.write_text(made_of)
         subprocess.run([sys.executable, str(HERE / "video.py"), "clips"], cwd=ROOT, check=True)
@@ -515,13 +538,13 @@ def board_inputs(board: str) -> str:
     return digest.hexdigest()
 
 
-def started(profile: str, spec: str, iperf: str | None, which: str) -> bool:
+def started(profile: str, spec: str, iperf: str | None, which: str, released: bool) -> bool:
     """The box's run started; when it could not build, install or start, it says why."""
     try:
         if iperf is None:
             serve_iperf()
-        prepare(spec.partition("=")[0])
-        start(profile, spec, iperf, which)
+        prepare(spec.partition("=")[0], released)
+        start(profile, spec, iperf, which, released)
         return True
     except (ConnectionError, subprocess.CalledProcessError, NotStarted) as error:
         print(f"{spec.partition('=')[0]}: not started: {error}", flush=True)
@@ -529,7 +552,7 @@ def started(profile: str, spec: str, iperf: str | None, which: str) -> bool:
 
 
 def deploy(args: argparse.Namespace) -> int:
-    return 0 if started(args.profile, args.box, args.iperf, args.kernels) else 1
+    return 0 if started(args.profile, args.box, args.iperf, args.kernels, args.released) else 1
 
 
 def collect(args: argparse.Namespace) -> int:
@@ -623,7 +646,7 @@ def run(args: argparse.Namespace) -> int:
     """One box: deployed, watched until its run ends, collected and reported. Several boxes are
     several runs at once, one process each: the iperf3 server takes one at a time, the others wait
     their turn, so no box measures another's traffic."""
-    if not started(args.profile, args.box, args.iperf, args.kernels):
+    if not started(args.profile, args.box, args.iperf, args.kernels, args.released):
         return 1
     ended = watch(args.box, RUN_LIMIT_S[args.profile])
     report(argparse.Namespace(dir=str(fetch([args.box]))))
@@ -847,6 +870,7 @@ def main() -> int:
     begin.add_argument("--profile", choices=PROFILES, default="default")
     begin.add_argument("--iperf", metavar="HOST", help="the iperf3 server; default: this machine")
     begin.add_argument("--kernels", choices=KERNELS, default="both", help="the family's own, -next")
+    begin.add_argument("--released", action="store_true", help=RELEASED_HELP)
     begin.add_argument("box", metavar="BOARD=USER@HOST")
     gather = sub.add_parser("collect")
     gather.add_argument("boxes", nargs="+", metavar="BOARD=USER@HOST")
@@ -856,6 +880,7 @@ def main() -> int:
     whole.add_argument("--profile", choices=PROFILES, default="default")
     whole.add_argument("--iperf", metavar="HOST", help="the iperf3 server; default: this machine")
     whole.add_argument("--kernels", choices=KERNELS, default="both", help="the family's own, -next")
+    whole.add_argument("--released", action="store_true", help=RELEASED_HELP)
     whole.add_argument("box", metavar="BOARD=USER@HOST")
     args = parser.parse_args()
     commands = {"deploy": deploy, "collect": collect, "report": report, "run": run}

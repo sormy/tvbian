@@ -342,6 +342,41 @@ class InstallTest(unittest.TestCase):
         self.assertTrue(said.startswith("1 of 2 packages, 1 sent"))
 
 
+class InstallReleasedTest(unittest.TestCase):
+    def test_the_kernels_option_picks_the_metapackages_their_kernels_from_apt(self) -> None:
+        depends = {
+            "linux-image-tvb-rk35xx": "linux-image-6.1.172-tvb-rk35xx (= 6.1.172-7), tvb-aic8800-modules",
+            "linux-image-tvb-rk35xx-next": "linux-image-6.12.69-tvb-rk35xx (= 6.12.69-7)",
+        }
+        for which, metas in (
+            ("own", ["linux-image-tvb-rk35xx"]),
+            ("next", ["linux-image-tvb-rk35xx-next"]),
+            ("both", list(depends)),
+        ):
+            with self.subTest(which=which):
+                box = mock.MagicMock()
+                box.run.return_value = "\n".join(depends[m] for m in metas)
+                deployment = regression.Deployment("h96max-rk3528", box, "short", "plex")
+                releases = deployment.install_released(which)
+                wanted = box.root.call_args.args[1].split()
+                self.assertEqual(wanted[: len(metas)], metas)
+                self.assertIn("tvb-h96max-rk3528", wanted)
+                kernels = [depends[m].split()[0].removeprefix("linux-image-") for m in metas]
+                self.assertEqual(releases, kernels)
+
+
+class PrepareTest(unittest.TestCase):
+    def test_released_builds_nothing_and_still_makes_the_clips(self) -> None:
+        with (
+            mock.patch.object(regression, "ROOT", Path(tempfile.mkdtemp())),
+            mock.patch.object(regression.subprocess, "run") as run,
+            mock.patch.object(regression.desktop, "make_clips"),
+        ):
+            regression.prepare("h96max-rk3528", released=True)
+        self.assertNotIn("build.sh", " ".join(str(c.args[0][0]) for c in run.call_args_list))
+        self.assertEqual(run.call_count, 2)  # video.py's clips and the VA suite's
+
+
 class StartedTest(unittest.TestCase):
     def test_a_box_whose_build_fails_is_not_started_and_says_why(self) -> None:
         failed = subprocess.CalledProcessError(1, ["build.sh", "board", "a"])
@@ -351,7 +386,7 @@ class StartedTest(unittest.TestCase):
             mock.patch.object(regression, "start") as start,
             mock.patch("sys.stdout", out),
         ):
-            self.assertFalse(regression.started("short", "a=root@a", "plex", "both"))
+            self.assertFalse(regression.started("short", "a=root@a", "plex", "both", False))
         start.assert_not_called()
         self.assertTrue(out.getvalue().startswith("a: not started:"))
 
