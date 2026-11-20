@@ -92,9 +92,9 @@ for c in firmware/*/firmware.conf; do
   d=$(basename "$(dirname "$c")")
   plan firmware "$d" "tvb-firmware-$(sed -n 's/^FIRMWARE_CHIP=//p' "$c")" "$(bash release/inputs.sh firmware "$d")"
 done
-for c in extras/*/extra.conf; do
-  [ -f "$c" ] || continue
-  e=$(basename "$(dirname "$c")")
+# an extra after those whose packages it builds against
+for e in $(bash extras/build-with.sh --order); do
+  c=extras/$e/extra.conf
   debian=$(bash extras/version.sh "$e")
   if [ "$(bash extras/separator.sh "$e")" = "~tvb" ]; then
     suite=$(bash extras/version.sh --suite "$e")

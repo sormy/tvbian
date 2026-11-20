@@ -18,6 +18,27 @@ OUT=/out/debs
 # shellcheck source=/dev/null
 . /repo/build-env/ccache.sh
 
+# the newest build of each package of another extra it builds against
+install_build_with() {
+  local entry p f deb debs=()
+  for entry in ${BUILD_WITH:-}; do
+    p=${entry#*:}
+    deb=""
+    for f in "$OUT/${p}"_*.deb; do
+      [ -e "$f" ] || continue
+      [ -z "$deb" ] || dpkg --compare-versions "$(dpkg-deb -f "$f" Version)" gt \
+        "$(dpkg-deb -f "$deb" Version)" || continue
+      deb=$f
+    done
+    [ -n "$deb" ] || { echo "✗ $NAME builds with $p: build its extra first" >&2; exit 1; }
+    debs+=("$deb")
+  done
+  [ ${#debs[@]} -gt 0 ] || return 0
+  apt-get update -qq
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends "${debs[@]}" >/dev/null
+}
+
+install_build_with
 [ ! -f "$EXTRA/build.sh" ] || exec bash "$EXTRA/build.sh" "$PACKAGE_VERSION" "$INPUTS"
 
 WORK=/work/extras/$SOURCE
@@ -74,6 +95,7 @@ collect_debs() {
 
 fetch_source
 add_patches
+[ ! -f "$EXTRA/debian.sh" ] || bash "$EXTRA/debian.sh"
 stamp_inputs
 add_changelog_entry
 build

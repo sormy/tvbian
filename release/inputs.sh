@@ -45,9 +45,9 @@ files() {
     keyring) echo keyring/tvb-archive-keyring.gpg package/keyring.sh ;;
     extra)
       echo "extras/$2/extra.conf" extras/build.sh extras/version.sh extras/carried.sh
-      [ ! -f "extras/$2/build.sh" ] || echo "extras/$2/build.sh"
+      for f in build.sh debian.sh; do [ ! -f "extras/$2/$f" ] || echo "extras/$2/$f"; done
       # shellcheck source=/dev/null
-      (. "extras/$2/extra.conf"; echo $PATCHES) ;;
+      (. "extras/$2/extra.conf"; echo ${PATCHES:-}; [ -z "${SOURCES:-}" ] || find $SOURCES -type f | sort) ;;
     va-driver) echo va-driver/build.sh va-driver/src/* va-driver/deb/* patches/mpp/* ;;
     session)
       echo "session/$2/session.conf" "session/$2/package.list" package/session.sh \
