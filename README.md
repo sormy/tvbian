@@ -22,14 +22,14 @@ because we have trust issues too.
 | ↳ Leffot H313               | `3518_ZX_V01`              | box      | SoC RK3518 · 2 GB RAM LPDDR3 · 16 GB eMMC HS200 · SD UHS-I · USB-A 3.0 (OTG) + USB-A 2.0 · LAN 100M · SWT6621S Wi-Fi + BT · HDMI · AV · IR                | [SD or OTG][rk] |
 | [H96 Max 3518D][b]          | `3518_DG_ZX_V01`           | stick    | SoC RK3518 · 2 GB RAM LPDDR3 · 16 GB eMMC HS · **no SD** · USB-C 2.0 (OTG) + USB-A 2.0 · **no LAN** · SWT6621S Wi-Fi + BT · HDMI                          | [OTG][rk]       |
 | [H96 Max M2 Plus][m2p]      | `M2_P_ZX_20250328`         | box      | SoC RK3528 · 4 GB RAM DDR3 · 32 GB eMMC HS200 · **no SD** · USB-A 3.0 (OTG) · LAN 100M · SWT6621S Wi-Fi + BT · HDMI · AV · IR                             | [OTG][rk]       |
-| [H96 Max RK3528][rk3528] ❓ | `RK3528_DDR3_8X4_V12`      | box      | SoC RK3528 · 4 GB RAM DDR3 · 64 GB eMMC HS400 · SD UHS-I · USB-A 3.0 (OTG) + USB-A 2.0 · LAN 100M · AIC8800D80 Wi-Fi + BT · HDMI · AV · SPDIF · IR · LCD  | [SD or OTG][rk] |
+| [H96 Max RK3528][rk3528] 👤 | `RK3528_DDR3_8X4_V12`      | box      | SoC RK3528 · 4 GB RAM DDR3 · 64 GB eMMC HS400 · SD UHS-I · USB-A 3.0 (OTG) + USB-A 2.0 · LAN 100M · AIC8800D80 Wi-Fi + BT · HDMI · AV · SPDIF · IR · LCD  | [SD or OTG][rk] |
 | [H96 Max M20][m20]          | `905_DG_ZX01_V01`          | stick    | SoC S905L3 · 2 GB RAM LPDDR3 · 16 GB eMMC HS · **no SD** · USB-C 2.0 (OTG) + USB-A 2.0 · **no LAN** · MT7668S Wi-Fi + BT · HDMI                           | [OTG][aml]      |
 | [Tanix TX1 V2.0][tx1]       | `QHZIW_H313_TX1_EMCP_V2.0` | mini box | SoC H313 · 1.5 GB RAM LPDDR3 (sold as 2 GB) · 16 GB eMMC DDR52 · **no SD** · USB-A 2.0 (OTG) · **no LAN** · ATBM6031-X Wi-Fi + BLE · HDMI · AV · IR       | [OTG][aw]       |
 | [H96 Max H313][h313]        | `BA979_627_V1.0`           | box      | SoC H313 · 2 GB RAM LPDDR3 · 16 GB eMMC HS200 · SD HS · USB-A 2.0 (OTG) + USB-A 2.0 · LAN 100M · AIC8800D40L Wi-Fi + BLE · HDMI · AV · IR                 | [SD or OTG][aw] |
 
 \*What our units carry; the same model may ship with other RAM or eMMC. Any size works.
 
-❓ Not tested here: built from the box's stock firmware, waiting for an owner's report.
+👤 Tested by an owner, not here.
 
 [r69]: docs/r69-1/board.md
 [a]: docs/h96max-3518/board.md

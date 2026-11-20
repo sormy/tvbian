@@ -49,3 +49,11 @@
   of a board's back; its `…_ota_rk3528-20230630.1201.zip` is the same build.
 - The M2 itself, from #2404's stock dmesg: an RTL8211F at 1 Gbps on `gmac1`, an AIC8800 module.
   Importing it needs a tree read off an M2.
+
+## 2026-11-19 — an owner's unit runs it
+
+- An owner's 4 GB / 32 GB unit, by email: booted the image from a microSD, `tvb-install` to the
+  eMMC, and it boots from there; `apt update && apt upgrade` ran. Writing the image to the eMMC
+  directly did not work for them; how is asked. Their PCB marking is asked too.
+- `BOARD_SUPPORT=tested_by_user`, 👤 in README; `board.md` marks the microSD boot and the eMMC
+  install ✅ by that report.

@@ -1,7 +1,7 @@
 # H96 Max RK3528
 
-> **Not tested here.** Imported from the box's stock firmware image: no box has run TVBian here.
-> Every mark below rests on the image, an owner's photos and stock boot log, or a sister board that
+> **No box here.** Imported from the box's stock firmware image; an owner runs TVBian on theirs.
+> Every mark below rests on the image, an owner's photos, logs and reports, or a sister board that
 > proves the same block. Ran it? Tell us in an issue.
 
 ## Identity
@@ -117,7 +117,7 @@ for the AIC8800D80 at the same revision and sub-ID.
 | ------------------------------- | ---- | ------------------------------------------------------ |
 | Service-mode loader, bare       | ❓   | Built from the board's DDR init; not run               |
 | `mtest` over RAM                | ❓   | Not run                                                |
-| Boots from microSD              | ❓   | Not run                                                |
+| Boots from microSD              | ✅   | An owner's unit, by email                              |
 | Boots from a USB stick          | ❓   | Not run                                                |
 | Network and `ssh`               | ❓   | Not run                                                |
 | Loaders at sectors 64 and 16384 | ✅   | The image's: the stock idblock, our U-Boot             |
@@ -179,13 +179,13 @@ for the AIC8800D80 at the same revision and sub-ID.
 
 ### Storage
 
-| Check                        | Mark | Evidence |
-| ---------------------------- | ---- | -------- |
-| eMMC and microSD under `fio` | ❓   | Not run  |
-| microSD hotplug              | ❓   | Not run  |
-| `tvb-install` to eMMC, boots | ❓   | Not run  |
-| Per-unit window preserved    | ❓   | Not run  |
-| Service mode on our U-Boot   | ❓   | Not run  |
+| Check                        | Mark | Evidence                  |
+| ---------------------------- | ---- | ------------------------- |
+| eMMC and microSD under `fio` | ❓   | Not run                   |
+| microSD hotplug              | ❓   | Not run                   |
+| `tvb-install` to eMMC, boots | ✅   | An owner's unit, by email |
+| Per-unit window preserved    | ❓   | Not run                   |
+| Service mode on our U-Boot   | ❓   | Not run                   |
 
 ### Network
 
