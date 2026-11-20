@@ -506,3 +506,10 @@ real time on Cedrus whatever the driver: about 25 fps flat out, 180 of 288 frame
   JPEG task API. Each is bounded now, 64 takes a call and 2 s a JPEG, and fails rather than waits.
   The hang's own cause is not known. The R69-1's suite passes as before but for GStreamer's 10-bit
   clips, which need `gst-plugins-bad`'s `0001`, not installed there.
+- `rk35xx-next2` with cache hints on `rkvdec`'s and Hantro's CAPTURE and `vb2-dma-contig` syncing a
+  non-coherent buffer, on the 3518D: the driver's non-coherent CAPTURE takes effect unchanged.
+  Readback: HEVC 1080p 42 to 91 fps, 4K 25, HEVC Main 10 1080p 38 to 73, 4K 10.5 to 22; every clip
+  right through FFmpeg and GStreamer. H.264 MBAFF was wrong first, the kernel compressing collocated
+  motion vectors on a stream with field macroblocks, and identical once fixed. Interlaced MPEG-2
+  decodes on Hantro, 73 dB, where the suite expected every `rk35xx` to refuse it as MPP does: a clip
+  `REFUSED` lists now passes refused or right.

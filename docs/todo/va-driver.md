@@ -31,9 +31,6 @@ settings.
       itself, so every picture is copied out for the surfaces to hold.
 - [ ] **The suite times VA against `ffmpeg9`'s native path**, clip by clip, not only against the
       box's last run.
-- [ ] **`mpv --hwdec=vaapi` on the display node**: mpv's DRM output opens VA on `card0`, whose
-      driver name (`meson`, `sun4i-drm`) no package installs; with it linked by hand, `vainfo` opens
-      it and mpv still does not.
 - [ ] **4K in Debian's programs**: linear frames carry 1080p; 4K needs AFBC end to end, which a
       program gets only by listing the modifier at surface creation, and only Panfrost samples.
 - [ ] **VC-1 Main on Cedrus** once `linux-sunxi` `0815` ships: offered, and a sequence that allows B
@@ -62,8 +59,6 @@ settings.
       it.
 - [ ] **GStreamer in the host check**: its `va` plugin opens only a DRM render node, which the build
       container lacks; a Linux host or CI could pass `vgem`'s node in.
-- [ ] **A readback on `rk35xx-next2` at its memory's speed**: `rkvdec`'s and Hantro's CAPTURE take
-      no cache hints, so a picture read back is read uncached: 8-bit 1080p 42 fps.
 - [ ] **HEVC 1080p60 in WebKit on `rk35xx-next2` now and then decodes nothing**: one Falkon file run
       of several, the others at full rate.
 - [ ] **10-bit by capability on MPP**: `narrows_ten_bit` lists NV12 alone for every client; P010

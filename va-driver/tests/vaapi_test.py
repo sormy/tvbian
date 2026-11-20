@@ -203,7 +203,7 @@ ENCODES: dict[str, tuple[set[str], str, str, int]] = {
     "jpeg": ({"JPEGBaseline/EncPicture"}, "mjpeg_vaapi", "mjpeg", JPEG_FRAMES),
 }
 TEN_BIT_SURFACES = ["p010le", "nv12"]
-# clips a family's engine refuses, as ffmpeg9 does: decoding them must fail, never come out broken
+# clips a family's engine may refuse, as MPP does: refused, or decoded right, never broken
 REFUSED: dict[str, set[str]] = {
     "sunxi-h616": {"mpeg4-interlaced"},
     "rk35xx": {"mpeg2-interlaced", "mpeg4-interlaced"},
@@ -513,8 +513,10 @@ def decode_case(setup: Setup, name: str, clip: Clip, offers: set[str]) -> Iterat
         yield key, "no clip"
         return
     if name in REFUSED.get(setup.family, set()):
-        yield from refusal_case(setup, key, path)
-        return
+        refusal = list(refusal_case(setup, key, path))
+        if refusal[0][1] == "pass: refused":
+            yield from refusal
+            return
     if name in HELD.get(setup.family, set()):
         yield from held_case(setup, key, path)
         return
@@ -832,8 +834,8 @@ def gstreamer_decode_case(setup: Setup, name: str, clip: Clip, offers: set[str])
             ["ffmpeg", "-nostdin", "-hide_banner", "-v", "error"] + decoded + ["-pix_fmt", sample],
             setup.env(),
         )
-    if name in REFUSED.get(setup.family, set()):
-        yield key, "pass: refused" if not hardware else "failed: not refused"
+    if name in REFUSED.get(setup.family, set()) and not hardware:
+        yield key, "pass: refused"
         return
     software = software_frames(setup, path, sample)
     yield key, judged(
