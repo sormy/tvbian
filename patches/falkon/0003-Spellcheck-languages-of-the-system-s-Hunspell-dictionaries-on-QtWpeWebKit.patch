@@ -1,0 +1,48 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Wed, 18 Nov 2026 05:30:00 -0500
+Subject: [PATCH] Spellcheck languages of the system's Hunspell dictionaries on
+ QtWpeWebKit
+
+WebKit spellchecks through Enchant, with the Hunspell dictionaries in
+/usr/share/hunspell, not QtWebEngine's .bdic files: the preferences list
+those, each file named for its language as a .bdic file is, en_US.dic
+offering en-US.
+
+---
+diff --git a/src/lib/preferences/preferences.cpp b/src/lib/preferences/preferences.cpp
+--- a/src/lib/preferences/preferences.cpp
++++ b/src/lib/preferences/preferences.cpp
+@@ -479,6 +479,12 @@
+     connect(ui->spellcheckEnabled, &QCheckBox::toggled, this, updateSpellCheckEnabled);
+ 
+     QStringList dictionariesDirs = {};
++#ifdef FALKON_WPE
++    // WebKit spellchecks through Enchant, with the system's Hunspell dictionaries
++    const QStringList dictionaryFiles = {QSL("*.dic")};
++    dictionariesDirs.append(QSL("/usr/share/hunspell"));
++#else
++    const QStringList dictionaryFiles = {QSL("*.bdic")};
+     const QByteArray qtWeDictionariesDirs = qgetenv("QTWEBENGINE_DICTIONARIES_PATH");
+     if (!qtWeDictionariesDirs.isNull()) {
+         dictionariesDirs.append(QDir::cleanPath(QString::fromLocal8Bit(qtWeDictionariesDirs)));
+@@ -492,15 +498,17 @@
+         dictionariesDirs.append(QDir::cleanPath(QLibraryInfo::location(QLibraryInfo::DataPath) + QL1S("/qtwebengine_dictionaries")));
+ #endif
+     }
++#endif
+     dictionariesDirs.removeDuplicates();
+ 
+     ui->spellcheckDirectories->setText(dictionariesDirs.join(QL1C('\n')));
+ 
+     for (const QString &path : dictionariesDirs) {
+         QDir dir(path);
+-        const QStringList files = dir.entryList({QSL("*.bdic")});
++        const QStringList files = dir.entryList(dictionaryFiles);
+         for (const QString &file : files) {
+-            const QString lang = file.left(file.size() - 5);
++            // en_US.dic names the language en-US, as a .bdic file does
++            const QString lang = QFileInfo(file).completeBaseName().replace(QL1C('_'), QL1C('-'));
+             const QString langName = createLanguageItem(lang);
+             if (!ui->spellcheckLanguages->findItems(langName, Qt::MatchExactly).isEmpty()) {
+                 continue;

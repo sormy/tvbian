@@ -1,0 +1,95 @@
+Subject: [PATCH] AdBlock through WebKit content blockers on QtWpeWebKit
+
+QtWpeWebKit hands every request to the profile's interceptor synchronously,
+and AdBlock's matcher scans EasyList's domain rules one by one, which
+takes about 20 ms per request on a small ARM board. With FALKON_WPE the
+matcher gives its enabled filters to QtWpeWebKit, which compiles them once
+into a WebKit content blocker. The interceptor then sees only documents,
+so blocked pages still get the page that says why.
+
+---
+diff --git a/src/lib/adblock/adblockmanager.cpp b/src/lib/adblock/adblockmanager.cpp
+--- a/src/lib/adblock/adblockmanager.cpp
++++ b/src/lib/adblock/adblockmanager.cpp
+@@ -29,6 +29,9 @@
+ #include "networkmanager.h"
+ 
+ #include <QAction>
++#ifdef FALKON_WPE
++#include <QWebEngineProfile>
++#endif
+ #include <QDateTime>
+ #include <QTextStream>
+ #include <QDir>
+@@ -91,6 +94,9 @@
+         m_matcher->update();
+     } else {
+         m_matcher->clear();
++#ifdef FALKON_WPE
++        mApp->webProfile()->setAdblockFilters({});
++#endif
+     }
+ }
+ 
+diff --git a/src/lib/adblock/adblockmatcher.cpp b/src/lib/adblock/adblockmatcher.cpp
+--- a/src/lib/adblock/adblockmatcher.cpp
++++ b/src/lib/adblock/adblockmatcher.cpp
+@@ -19,6 +19,10 @@
+ #include "adblockmanager.h"
+ #include "adblockrule.h"
+ #include "adblocksubscription.h"
++#ifdef FALKON_WPE
++#include "mainapplication.h"
++#include <QWebEngineProfile>
++#endif
+ 
+ AdBlockMatcher::AdBlockMatcher(AdBlockManager* manager)
+     : QObject(manager)
+@@ -166,6 +170,10 @@
+ 
+     QHash<QString, const AdBlockRule*> cssRulesHash;
+     QVector<const AdBlockRule*> exceptionCssRules;
++#ifdef FALKON_WPE
++    // WebKit's content blockers apply them: QtWpeWebKit's interceptors are too slow for every request
++    QString filters;
++#endif
+ 
+     const auto subscriptions = m_manager->subscriptions();
+     for (AdBlockSubscription* subscription : subscriptions) {
+@@ -177,6 +185,10 @@
+             // Or unsupported ones
+             if (rule->isUnsupportedRule())
+                 continue;
++#ifdef FALKON_WPE
++            if (rule->isEnabled())
++                filters += rule->filter() + QLatin1Char('\n');
++#endif
+ 
+             if (rule->isCssRule()) {
+                 // We will add only enabled css rules to cache, because there is no enabled/disabled
+@@ -256,6 +268,9 @@
+         m_elementHidingRules = m_elementHidingRules.left(m_elementHidingRules.size() - 1);
+         m_elementHidingRules.append(QL1S("{display:none !important;} "));
+     }
++#ifdef FALKON_WPE
++    mApp->webProfile()->setAdblockFilters(filters);
++#endif
+ }
+ 
+ void AdBlockMatcher::clear()
+diff --git a/src/lib/adblock/adblockurlinterceptor.cpp b/src/lib/adblock/adblockurlinterceptor.cpp
+--- a/src/lib/adblock/adblockurlinterceptor.cpp
++++ b/src/lib/adblock/adblockurlinterceptor.cpp
+@@ -30,6 +30,12 @@
+ 
+ void AdBlockUrlInterceptor::interceptRequest(QWebEngineUrlRequestInfo &request)
+ {
++#ifdef FALKON_WPE
++    // WebKit's content blockers filter the rest; documents still get the page saying why
++    if (request.resourceType() != QWebEngineUrlRequestInfo::ResourceTypeMainFrame) {
++        return;
++    }
++#endif
+     QString ruleFilter;
+     QString ruleSubscription;
+     QUrl rewriteUrl;
