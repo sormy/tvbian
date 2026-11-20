@@ -10,37 +10,41 @@ client that kept decoding into the old pictures had every larger frame
 overrun them: a VP9 stream switching from 854x480 to 1920x1080 took an
 IOMMU read fault and a 2 s timeout a frame. H.264 and H.265 size their
 motion vector buffers from the format too. Fail such a job before the
-engine runs, for VP9, H.264 and H.265 alike.
+engine runs, for VP9, H.264 and H.265 alike. The bound is the picture
+decoded at full size, before any scaling COMPOSE asks for.
 
 Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
- drivers/staging/media/sunxi/cedrus/cedrus_context.h  | 8 ++++++++
- drivers/staging/media/sunxi/cedrus/cedrus_dec_h264.c | 7 +++++++
- drivers/staging/media/sunxi/cedrus/cedrus_dec_h265.c | 4 ++++
- drivers/staging/media/sunxi/cedrus/cedrus_dec_vp9.c  | 2 ++
- 4 files changed, 21 insertions(+)
+ drivers/staging/media/sunxi/cedrus/cedrus.h          | 11 +++++++++++
+ drivers/staging/media/sunxi/cedrus/cedrus_dec_h264.c |  7 +++++++
+ drivers/staging/media/sunxi/cedrus/cedrus_dec_h265.c |  4 ++++
+ drivers/staging/media/sunxi/cedrus/cedrus_dec_vp9.c  |  2 ++
+ 4 files changed, 24 insertions(+)
 
-diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_context.h b/drivers/staging/media/sunxi/cedrus/cedrus_context.h
-index 8a02dbc05..aadf5246e 100644
---- a/drivers/staging/media/sunxi/cedrus/cedrus_context.h
-+++ b/drivers/staging/media/sunxi/cedrus/cedrus_context.h
-@@ -106,6 +106,14 @@ static inline void cedrus_job_buffer_picture_dma(struct cedrus_context *ctx,
- 	cedrus_buffer_picture_dma(ctx, buffer, luma_addr, chroma_addr);
+diff --git a/drivers/staging/media/sunxi/cedrus/cedrus.h b/drivers/staging/media/sunxi/cedrus/cedrus.h
+index ea6c7ac..1f0b539 100644
+--- a/drivers/staging/media/sunxi/cedrus/cedrus.h
++++ b/drivers/staging/media/sunxi/cedrus/cedrus.h
+@@ -351,6 +351,17 @@ cedrus_picture_recon_format(struct cedrus_context *ctx)
+ 	return pix_format;
  }
  
-+/* Whether a frame fits the negotiated pictures: a larger one overruns their buffers */
++/*
++ * Whether a frame fits the negotiated pictures, decoded at full size before any
++ * scaling: a larger one overruns their buffers
++ */
 +static inline bool cedrus_job_picture_fits(struct cedrus_context *ctx, u32 width, u32 height)
 +{
-+	const struct v4l2_pix_format *pix = &ctx->v4l2.format_picture.fmt.pix;
++	struct v4l2_pix_format recon = cedrus_picture_recon_format(ctx);
 +
-+	return width <= pix->width && height <= pix->height;
++	return width <= ALIGN(recon.width, 16) && height <= ALIGN(recon.height, 16);
 +}
 +
- static inline void cedrus_job_buffer_picture_ref_dma(struct cedrus_context *ctx,
- 						     u64 timestamp,
- 						     dma_addr_t *luma_addr,
+ static inline void cedrus_buffer_picture_dma(struct cedrus_context *ctx,
+ 					     struct cedrus_buffer *cedrus_buffer,
+ 					     dma_addr_t *luma_addr,
 diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec_h264.c b/drivers/staging/media/sunxi/cedrus/cedrus_dec_h264.c
-index cfd1eddae..aeaabc2ca 100644
+index cfd1edd..aeaabc2 100644
 --- a/drivers/staging/media/sunxi/cedrus/cedrus_dec_h264.c
 +++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec_h264.c
 @@ -719,8 +719,15 @@ static int cedrus_dec_h264_job_configure(struct cedrus_context *cedrus_ctx)
@@ -60,7 +64,7 @@ index cfd1eddae..aeaabc2ca 100644
  		dma_addr_t luma_addr, chroma_addr;
  
 diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec_h265.c b/drivers/staging/media/sunxi/cedrus/cedrus_dec_h265.c
-index 63ed7b847..c6e7fd133 100644
+index 63ed7b8..c6e7fd1 100644
 --- a/drivers/staging/media/sunxi/cedrus/cedrus_dec_h265.c
 +++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec_h265.c
 @@ -608,6 +608,10 @@ static int cedrus_dec_h265_job_configure(struct cedrus_context *cedrus_ctx)
@@ -75,7 +79,7 @@ index 63ed7b847..c6e7fd133 100644
  	h265_buffer_picture = cedrus_buffer_picture->engine_buffer;
  
 diff --git a/drivers/staging/media/sunxi/cedrus/cedrus_dec_vp9.c b/drivers/staging/media/sunxi/cedrus/cedrus_dec_vp9.c
-index 17099f3c5..3c7f2a75b 100644
+index 17099f3..3c7f2a7 100644
 --- a/drivers/staging/media/sunxi/cedrus/cedrus_dec_vp9.c
 +++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec_vp9.c
 @@ -792,6 +792,8 @@ static int cedrus_vp9_job_configure(struct cedrus_context *ctx)
@@ -89,4 +93,3 @@ index 17099f3c5..3c7f2a75b 100644
  
 -- 
 2.47.3
-
