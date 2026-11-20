@@ -53,11 +53,11 @@ settings.
       pictures; 1080p and 4K left on the GPU decode whole.
 - [ ] **A sync on one VP9 picture on `meson-gxl`**: reading a picture back drains, and the drain
       ends the stream with an internal decoding error.
-- [ ] **No decode waits forever**: on an RK3518, FFmpeg sat two days in a futex, every thread
-      asleep, decoding `vp9-tools` through MPP with a driver build of 2026-11-15.
 - [ ] **The suite leaves no process behind**: that FFmpeg outlived its run and its directory.
 - [ ] **`mpv --hwdec=vaapi` on `rk35xx` and `meson-gxl`**: through Wayland, as on `sunxi-h616`;
-      mpv's DRM output finds no primary node where the display and the GPU are two devices.
+      mpv's DRM output finds no primary node where the display and the GPU are two devices. On
+      `meson-gxl`, with the system heap, VP9 and HEVC play with no copy; H.264 stops after about 11
+      pictures, mpv waiting on one meson holds, and the drain losing its references.
 - [ ] **`va_probe` in `tvb-va-driver`**: the suite's initialize check is UNTESTED on a box without
       it.
 - [ ] **GStreamer in the host check**: its `va` plugin opens only a DRM render node, which the build
@@ -81,6 +81,9 @@ settings.
 - [ ] **CBR on `meson-gxl`**: its encoder lists VBR alone, and WebKit asks for CBR.
 - [ ] **Constrained Baseline on `meson-gxl`**: its encoder lists Main and High alone, and WebKit's
       call asks for Constrained Baseline.
+- [ ] **Chromium off software AV1**: YouTube in Chromium on `sunxi-h616` decoded on the CPU, the
+      engine idle; no box decodes AV1 in hardware, and Chromium 156 reports AV1 supported with or
+      without `Dav1dVideoDecoder`, so only the page's codec checks can steer it to VP9.
 - [ ] **Chromium's call on the box's encoder**: its VA encoder runs, but WebRTC drops to software
       below 360p, where a 3.5 fps canvas sends it.
 - [ ] **Firefox's calls on the box's encoder**: ESR 153's FFmpeg encoder opens `libx264` alone.

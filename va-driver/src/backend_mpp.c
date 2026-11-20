@@ -36,6 +36,10 @@
 #define MAX_PUT_TRIES 10
 /* frame waits for a picture at end of stream, after MPP was told it ended */
 #define MAX_DRAIN_TRIES 10
+/* more pictures or size changes than any DPB holds, out of one call: MPP is looping, not working */
+#define MAX_TAKES 64
+/* a JPEG decoded, or the engine is gone */
+#define JPEG_WAIT_MS 2000
 #define PACKET_TIMEOUT_MS 2000
 #define H264_LEVEL_5_1 51
 #define H264_PROFILE_BASELINE 66
@@ -593,13 +597,13 @@ static int decode_jpeg(struct driver *drv, struct mpp_decoder *d, const struct c
     if (mpp_frame_init(&frame) != MPP_OK)
         goto done;
     mpp_frame_set_buffer(frame, buffer);
-    if (d->mpi->poll(d->ctx, MPP_PORT_INPUT, MPP_POLL_BLOCK) != MPP_OK ||
+    if (d->mpi->poll(d->ctx, MPP_PORT_INPUT, (MppPollType)JPEG_WAIT_MS) != MPP_OK ||
         d->mpi->dequeue(d->ctx, MPP_PORT_INPUT, &task) != MPP_OK || !task)
         goto done;
     mpp_task_meta_set_packet(task, KEY_INPUT_PACKET, packet);
     mpp_task_meta_set_frame(task, KEY_OUTPUT_FRAME, frame);
     if (d->mpi->enqueue(d->ctx, MPP_PORT_INPUT, task) != MPP_OK ||
-        d->mpi->poll(d->ctx, MPP_PORT_OUTPUT, MPP_POLL_BLOCK) != MPP_OK ||
+        d->mpi->poll(d->ctx, MPP_PORT_OUTPUT, (MppPollType)JPEG_WAIT_MS) != MPP_OK ||
         d->mpi->dequeue(d->ctx, MPP_PORT_OUTPUT, &task) != MPP_OK || !task)
         goto done;
     mpp_task_meta_get_frame(task, KEY_OUTPUT_FRAME, &out);
@@ -682,8 +686,9 @@ static int mpp_decode(struct driver *drv, struct context *ctx, const struct anne
         ret = hold_released(drv, d, target, ctx->target, &got);
     /* what is out already; a picture MPP still holds is sync's to wait for */
     set_wait(d, 0);
-    while (ret >= 0 && (ret = take_frame(drv, d, ctx->target, &got)) > 0)
-        ;
+    for (int taken = 0; ret >= 0 && (ret = take_frame(drv, d, ctx->target, &got)) > 0; taken++)
+        if (taken == MAX_TAKES)
+            return -EIO;
     return ret < 0 ? ret : 0;
 }
 
@@ -696,8 +701,9 @@ static int mpp_sync(struct driver *drv, struct context *ctx, VASurfaceID id, boo
     bool got = false;
     int ret = 0;
     set_wait(d, last ? OUTPUT_TIMEOUT_MS : 0);
-    while (!got && (ret = take_frame(drv, d, id, &got)) > 0)
-        ;
+    for (int taken = 0; !got && (ret = take_frame(drv, d, id, &got)) > 0; taken++)
+        if (taken == MAX_TAKES)
+            return -EIO;
     if (ret < 0 || got || !last)
         return ret < 0 ? ret : 0;
     if (mpp_packet_init(&end, NULL, 0) != MPP_OK)

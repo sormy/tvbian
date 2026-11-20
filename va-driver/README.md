@@ -311,6 +311,8 @@ VA carries none of these whole.
   - JPEG goes through MPP's task API: the coded picture in an MPP buffer, an output buffer handed
     with it, NV12 asked of the engine whatever the JPEG's sampling.
   - JPEG encode at a fixed quantiser, MPP's quality factor the client's quality.
+  - No wait on MPP is unbounded: a call takes at most 64 pictures or size changes out, a JPEG waits
+    2 s, and a decode that would wait longer fails instead.
   - VP9 and VP8 are offered as `mpp_check_support_format` says.
   - Encode imports the surface's dma-buf, its strides set in MPP's preprocessing as they are.
   - MPP's own log is set to warnings.

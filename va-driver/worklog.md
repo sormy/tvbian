@@ -500,3 +500,9 @@ real time on Cedrus whatever the driver: about 25 fps flat out, 180 of 288 frame
   Wayland, as on the desktop, H.264, VP9 and HEVC decode through VA and import with no copy. The
   suite's `mpv.vaapi` now plays the odd-size clip on a headless `labwc` and fails on a refused
   picture.
+- An FFmpeg on an RK3518 had sat two days in a futex decoding VP9 through MPP, every thread asleep.
+  Three waits on MPP had no bound: the loops taking whatever MPP hands out in decode and sync, which
+  a size change MPP announced again and again would keep in MPP's own waits, and both polls of the
+  JPEG task API. Each is bounded now, 64 takes a call and 2 s a JPEG, and fails rather than waits.
+  The hang's own cause is not known. The R69-1's suite passes as before but for GStreamer's 10-bit
+  clips, which need `gst-plugins-bad`'s `0001`, not installed there.
