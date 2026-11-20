@@ -89,6 +89,8 @@ FFmpeg's, and what no chip has measured yet.
       unharmed. `0032` refuses it for the encoders.
 - [ ] `*_v4l2m2m` decoders decode nothing after an end of stream: a seek back from the end or a
       looped input gets no frames. The restart command goes out; the capture queue stays done.
+- [ ] `hevc_v4l2m2m` at least as fast as VA through the same decoder: on the M20, HEVC 1080p decodes
+      at 165 fps through it and 189 through `tvb-va-driver`, both by `ffmpeg9`, decode only.
 - [ ] fuseamp asks for compressed frames: `afbc` on `v4l2request` and `*_rkmpp`, `-afbc` on
       `*_v4l2m2m`, where the plane takes the modifier.
 
