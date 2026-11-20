@@ -1,0 +1,75 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Thu, 19 Nov 2026 12:40:00 -0500
+Subject: [PATCH] media: meson: vdec: hevc: an MMU body for every capture buffer
+
+The compressed reference bodies are made for the CAPTURE buffers queued
+at that moment, and kept when the picture grows. A buffer the client
+held then has none, a kept one may be short, and the frame decoded into
+it fails with "Failed to build MMU map: -22", ending the session. Make
+or remake a buffer's body when its map is built.
+
+---
+ vdec/codec_hevc_common.c | 27 ++++++++++++++++++++++++++-
+ 1 file changed, 26 insertions(+), 1 deletion(-)
+
+diff --git a/vdec/codec_hevc_common.c b/vdec/codec_hevc_common.c
+index bb92e68..259e468 100644
+--- a/vdec/codec_hevc_common.c
++++ b/vdec/codec_hevc_common.c
+@@ -420,11 +420,22 @@ int codec_hevc_setup_buffers(struct amvdec_session *sess,
+ }
+ EXPORT_SYMBOL_GPL(codec_hevc_setup_buffers);
+ 
++static u32 codec_hevc_mmu_body_pages(struct sg_table *sgt)
++{
++	struct sg_dma_page_iter dma_iter;
++	u32 n = 0;
++
++	for_each_sgtable_dma_page(sgt, &dma_iter, 0)
++		n++;
++	return n;
++}
++
+ int codec_hevc_fill_mmu_map(struct amvdec_session *sess,
+ 			    struct codec_hevc_common *comm,
+ 			    struct vb2_buffer *vb,
+ 			    u32 is_10bit)
+ {
++	struct device *dev = sess->core->dev;
+ 	struct sg_dma_page_iter dma_iter;
+ 	struct sg_table *sgt = comm->mmu_body_sgt[vb->index];
+ 	u32 use_mmu;
+@@ -433,7 +444,7 @@ int codec_hevc_fill_mmu_map(struct amvdec_session *sess,
+ 	u32 *mmu_map = comm->mmu_map_vaddr;
+ 	u32 i = 0;
+ 
+-	if (!sgt || !mmu_map)
++	if (!mmu_map)
+ 		return -EINVAL;
+ 
+ 	use_mmu = codec_hevc_use_mmu(sess->core->platform->revision,
+@@ -447,6 +458,20 @@ int codec_hevc_fill_mmu_map(struct amvdec_session *sess,
+ 	if (nb_pages > MMU_MAP_SIZE / sizeof(*mmu_map))
+ 		return -E2BIG;
+ 
++	/*
++	 * A buffer the client held while the bodies were made has none, and one
++	 * made for a smaller picture is short: give it one of the picture's size.
++	 */
++	if (!sgt || codec_hevc_mmu_body_pages(sgt) < nb_pages) {
++		if (sgt)
++			codec_hevc_free_mmu_body(dev, sgt);
++		comm->mmu_body_sgt[vb->index] = NULL;
++		sgt = codec_hevc_alloc_mmu_body(dev, size);
++		if (IS_ERR(sgt))
++			return PTR_ERR(sgt);
++		comm->mmu_body_sgt[vb->index] = sgt;
++	}
++
+ 	for_each_sgtable_dma_page(sgt, &dma_iter, 0) {
+ 		dma_addr_t addr;
+ 
+-- 
+2.56.1
+
