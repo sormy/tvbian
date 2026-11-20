@@ -48,6 +48,7 @@ in-tree: `patches/linux-meson/` `0002` puts meson-sm1-codecs's decoder under
 | `0039` | CAPTURE buffers as many as the free CMA holds                       |
 | `0040` | VP9: a key frame keeps its own size                                 |
 | `0041` | HEVC: an MMU body for a CAPTURE buffer with none, or a short one    |
+| `0042` | a stop gives back every buffer the decoder holds                    |
 
 | Overlay package     | Module        | Device                |
 | ------------------- | ------------- | --------------------- |

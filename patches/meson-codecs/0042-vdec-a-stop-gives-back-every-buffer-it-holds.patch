@@ -1,0 +1,62 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Thu, 19 Nov 2026 15:30:00 -0500
+Subject: [PATCH] media: meson: vdec: a stop gives back every buffer it holds
+
+stop_streaming returned only the buffers still on the m2m queues. Those
+the decoder had taken off them, its references and the input its parser
+holds, stayed active: videobuf2 warned "leaving buffer N in active
+state" for up to 20 of them after a stop mid-stream. Give back every
+buffer of the queue still active once the hardware is off.
+
+---
+ vdec/vdec.c | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/vdec/vdec.c b/vdec/vdec.c
+index 2bca56a..9f529ab 100644
+--- a/vdec/vdec.c
++++ b/vdec/vdec.c
+@@ -908,6 +908,23 @@ static void vdec_reset_bufs_recycle(struct amvdec_session *sess)
+ 	bitmap_zero(sess->last_unused, VIDEO_MAX_FRAME);
+ }
+ 
++/*
++ * The decoder takes buffers off the m2m queues as it uses them: references
++ * and input the parser holds. Give back every one still active once the
++ * hardware is off, so a stop leaves none behind for the next session.
++ */
++static void vdec_return_active_bufs(struct vb2_queue *q)
++{
++	unsigned int i;
++
++	for (i = 0; i < q->max_num_buffers; i++) {
++		struct vb2_buffer *vb = vb2_get_buffer(q, i);
++
++		if (vb && vb->state == VB2_BUF_STATE_ACTIVE)
++			vb2_buffer_done(vb, VB2_BUF_STATE_ERROR);
++	}
++}
++
+ static void vdec_stop_streaming(struct vb2_queue *q)
+ {
+ 	struct amvdec_session *sess = vb2_get_drv_priv(q);
+@@ -981,6 +998,7 @@ lock_hardware:
+ 	if (q->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
+ 		while ((buf = v4l2_m2m_src_buf_remove(sess->m2m_ctx)))
+ 			v4l2_m2m_buf_done(buf, VB2_BUF_STATE_ERROR);
++		vdec_return_active_bufs(q);
+ 
+ 		sess->streamon_out = 0;
+ 	} else {
+@@ -990,6 +1008,7 @@ lock_hardware:
+ 
+ 		while ((buf = v4l2_m2m_dst_buf_remove(sess->m2m_ctx)))
+ 			v4l2_m2m_buf_done(buf, VB2_BUF_STATE_ERROR);
++		vdec_return_active_bufs(q);
+ 
+ 		amvdec_free_canvases(sess);
+ 		sess->streamon_cap = 0;
+-- 
+2.56.1
+
