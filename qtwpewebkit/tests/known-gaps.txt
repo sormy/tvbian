@@ -1,0 +1,4 @@
+# Test functions expected to fail against qtwpewebkit, as "tst_name::function  category: reason".
+# run.sh reports them as known instead of failing, and says when one passes so it can be dropped.
+# Categories: gap (qtwpewebkit behaves differently from QtWebEngine), container (passes only with a GPU),
+# pending (being built).
