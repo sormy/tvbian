@@ -5,6 +5,19 @@ below.
 
 ## Open
 
+- [ ] **Our patches upstream before new ones**: what we carry we rebuild, keep warm and bump.
+      WebKit's (`docs/todo/falkon-wpe.md`) first, its builds the dearest; then Falkon's, FFmpeg's
+      request decoders and the kernels' codec patches, each as its upstream takes them.
+- [ ] **Pinned upstreams bumped by a process, not by hand**: each extra and kernel pins what it
+      builds from: a release (`ffmpeg9` 9.0.2, `librice` 0.4.3 with its SHA-256, `deqp`,
+      `whitesur`), a tool or library inside a build (cbindgen 0.29.4, MPP 1.1.0, the deqp runner,
+      the cursors commit), a kernel release or commit (`kernel/*.conf`). Wanted: one command that
+      lists each pin against its upstream's newest, and a bump that rebuilds the extra, checks its
+      patches still apply, runs its tests and the box checks it touches, before anything is
+      committed; then run on a schedule, its findings as to-dos. The extras that follow Debian
+      (`wpewebkit` from sid) are in it too: they take the suite's newest source at build time, so
+      the process notices the suite moving, rebuilds, drops what upstream now carries (`0002` at
+      WebKit 2.56) and checks the rest still apply.
 - [ ] **Our Mesa in the published repo**: `extras/mesa` is unreleased, so a box installing Mesa gets
       Debian's, a third of Panfrost's on-screen speed at 2256×1504. Ours outranks Debian's by
       version once published.
@@ -17,6 +30,7 @@ below.
       the proof a sorted compare. Every board converts in one pass, each dtb proven
       sorted-identical. `upstream.py` already writes that view against the SoC dtsi, proven
       equivalent within semdiff's coverage.
+
 - [ ] **DDC/CI on the H616**: its boxes run DDC on the HDMI block's own pads, not PI0/PI1, so the
       `i2c-gpio` graft cannot reach them, and dw-hdmi's I2C master refuses DDC/CI; whether the sun8i
       HDMI PHY can drive those pads by bit-bang is the question.
@@ -193,6 +207,7 @@ below.
 | `docs/todo/video.md`            | hardware video: what is left, every SoC     |
 | `docs/todo/va-driver.md`        | `tvb-va-driver`: video in Debian's programs |
 | `docs/todo/usages.md`           | server, desk and TV on one image            |
+| `docs/todo/falkon-wpe.md`       | Falkon on WPE WebKit: the desk's browser    |
 | `docs/todo/media-stick.md`      | the universal media stick                   |
 | `docs/todo/kodi.md`             | Kodi 22 on our FFmpeg, built on trixie      |
 | `docs/todo/extras-upstream.md`  | extras built from an upstream release       |
