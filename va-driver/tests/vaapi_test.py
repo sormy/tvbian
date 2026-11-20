@@ -49,6 +49,7 @@ REPORT_PREFIX = "va."
 # tvb-va-driver's udev link to the GPU's render node, and the node programs open unless told
 VA_LINK = Path("/dev/dri/va")
 DRIVER_SUFFIX = "_drv_video.so"
+NOTHING_TO_TEST = 77  # the regression suite's exit status for a step this box cannot run
 FIRST_RENDER_NODE = Path("/dev/dri/renderD128")
 # where a desktop user's surfaces get their own memory, opened to this group by the udev rule
 SYSTEM_HEAP = Path("/dev/dma_heap/system")
@@ -1571,6 +1572,10 @@ def main() -> int:
         parser.error("--driver-dir is needed")
     with tempfile.TemporaryDirectory() as work:
         if args.mode == "box":
+            driver = args.driver_dir / f"{args.driver_name}{DRIVER_SUFFIX}"
+            if not driver.exists():
+                print(f"no {driver}: the driver is not installed")
+                return NOTHING_TO_TEST
             setup = Setup(
                 args.driver_dir,
                 args.driver_name,
