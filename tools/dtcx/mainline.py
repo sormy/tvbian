@@ -115,7 +115,17 @@ def number(cells: list[int]) -> int:
 def patched_soc(url: str, kernel_conf: str, base: Base) -> Source:
     """The dtsi as one tree, as dtc reads it: each dtsi it includes spliced in where the include
     stands, at the top or inside a node, then its root and &label blocks in file order."""
-    return soc_tree(dtsi_files(url, kernel_conf, base), file_name(url))
+    source = soc_tree(dtsi_files(url, kernel_conf, base), file_name(url))
+    numeric_units(source, base.defines())
+    return source
+
+
+def numeric_units(source: Source, defines: dict[str, int]) -> None:
+    """Unit addresses written as binding constants are numbers after preprocessing."""
+    for _, node in walk(source.root):
+        name, separator, address = node.name.partition("@")
+        if separator and address in defines:
+            node.name = f"{name}@{defines[address]:x}"
 
 
 def soc_tree(files: dict[str, str], top: str) -> Source:

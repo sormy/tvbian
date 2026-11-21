@@ -20,11 +20,25 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from conversions import NUMBER, REFERENCE, Conversions, gpio, okay, opp_v2, speed_bins
+from conversions import NUMBER, REFERENCE, Conversions, gpio, okay, opp_v2, speed_bins, voltage_bins
 from dtcx import Base
 from dts import Node, Prop, Source, base_name, compatibles, unit, walk
 from mainline import Mainline, patched_soc, pin_functions
-from vocabulary import BUILT, DROPPED, MAINLINE, UNRESOLVED, UNSUPPORTED, Rule, Vocabulary, fill
+from vocabulary import (
+    BUILT,
+    DROPPED,
+    MAINLINE,
+    UNRESOLVED,
+    UNSUPPORTED,
+    WITHHOLD,
+    WRAPPER,
+    Rule,
+    Vocabulary,
+    fill,
+)
+
+OPP_TABLE = "operating-points-v2"
+OPP_HZ = re.compile(r"<\s*(\d+)\s*>")
 
 SHELL = ("device_type", "status")  # what a vendor-only node keeps once its contents went
 # the devicetree spec's own device types: a node holding one says what it is, as /memory does,
@@ -42,6 +56,8 @@ class Report:
     dormant: bool = False  # reading a node the vendor disabled, or one under it
 
     def add(self, kind: str, what: str, where: str) -> None:
+        if kind == DROPPED and self.dormant:  # what a disabled node carries configures nothing
+            return
         if kind == UNRESOLVED and self.dormant:  # a question only once a board enables the node
             kind = "dormant"
         self.entries.setdefault((kind, what), []).append(where or "/")
@@ -82,7 +98,19 @@ class Translator:
         self.pin_groups: set[int] = set()  # the vendor's pin groups, translated
         self.paths: dict[str, str] = {}  # vendor path -> translated path, for aliases
         self.labelled = {label: path for path, node in walk(factory) for label in node.labels}
+        # labels another node uses, its pin groups and aliases aside: a block something drives
+        self.used = {
+            label
+            for path, node in walk(factory)
+            if path != "/aliases"
+            for p in node.props
+            if not p.name.startswith("pinctrl-")
+            for label in REFERENCE.findall(p.value)
+        }
+        self.lifted: list[Node] = []  # a wrapper's children, for its parent to take
+        self.unscaled: set[str] = set()  # labels of nodes whose OPP table was withheld
         self.placed: dict[int, str] = {}  # a node with a counterpart -> mainline's path for it
+        self.aliases: list[tuple[list[Prop], Prop, Rule, list[str], str]] = []
         self.current: Node | None = None  # the vendor node whose properties are being read
         self.token = ""  # the node rule that matched, for the report
         self.scopes: list[str] = []  # the node's vendor compatibles and name, for scoped rules
@@ -122,11 +150,19 @@ class Translator:
         self.elsewhere = [c for c in labelled if c and not self.located(fnode, c)]
         candidates = [c for c in labelled if c not in self.elsewhere]
         candidates.append(self.m.child(parent, name, unit(fnode.name)) if parent else None)
-        if not unit(fnode.name):  # no address to meet it by
+        # no address to meet it by; an OPP row only meets a row of its own table, whose frequencies
+        # other tables repeat
+        if not unit(fnode.name) and not (parent and self.ladder(self.m.nodes[parent])):
             candidates.append(self.m.named(name))
         elif compatibles(fnode):  # a block's address is unique on the SoC; a memory node's is not
             candidates.append(self.m.at(unit(fnode.name)))
         return next((c for c in candidates if c and self.agrees(fnode, self.m.nodes[c])), None)
+
+    @staticmethod
+    def ladder(mnode: Node) -> bool:
+        """Whether a mainline node is an OPP table."""
+        compatible = mnode.prop("compatible")
+        return compatible is not None and "operating-points-v2" in compatible.value
 
     def located(self, fnode: Node, mpath: str) -> bool:
         """Whether the mainline node a label names sits at the vendor node's address: a label is
@@ -164,14 +200,18 @@ class Translator:
             if found and found[0].action in BUILT:
                 self.built.append((found[0].action, fnode, path, found[0].args))
                 return None
+            if found and found[0].action == WRAPPER:
+                for child in fnode.children:
+                    out = self.node(child, f"{path}/{child.name}", mparent, cells)
+                    self.lifted += [out] if out else []
+                return None
             if found and found[0].action == "unused-by":
                 flag = fnode.prop(found[0].args[0])
                 if flag is not None and flag.value.strip("<>") not in ("0", "0x0", "0x00"):
                     self.report.add(UNRESOLVED, f"node {self.token}", path)
                 return None
             if found and found[0].action in (DROPPED, UNRESOLVED, UNSUPPORTED):
-                if found[0].action != DROPPED:
-                    self.report.add(found[0].action, f"node {self.token}", path)
+                self.report.add(found[0].action, f"node {self.token}", path)
                 return None
             if found:
                 break
@@ -209,8 +249,10 @@ class Translator:
         props = self.props(fnode, path, scopes, mnode, cells)
         mainline_cells = self.v.cells.get(base_name(fnode))
         inner = (vendor_cells(fnode), mainline_cells) if mainline_cells else None
+        lifted, self.lifted = self.lifted, []
         children = [self.node(c, f"{path}/{c.name}", mpath, inner) for c in fnode.children]
-        children = [c for c in children if c is not None]
+        children = [c for c in children if c is not None] + self.lifted
+        self.lifted = lifted
         if mpath in self.written:
             self.merge(self.written[mpath], props, children, path)
             return None
@@ -273,7 +315,10 @@ class Translator:
             if prop.name == "ranges" and cells and cells[0] != cells[1] and prop.value:
                 self.report.add("unknown", "value of ranges: across cell counts", path)
                 continue
-            out += self.converted(prop, rule, captures, path)
+            if rule.action == "alias":
+                self.aliases.append((out, prop, rule, captures, path))
+            else:
+                out += self.converted(prop, rule, captures, path)
         return out
 
     def complete(self, out: Node, mnode: Node, mpath: str, stated: bool) -> None:
@@ -289,12 +334,26 @@ class Translator:
         if not enabled and out.prop("status") is None and not stated:
             out.props.append(Prop.of("status", '"okay"'))  # the vendor's: no status is okay
         have = {p.name for p in out.props}
-        out.props = [p for p in mnode.props if p.name not in have] + out.props
+        out.props = [
+            p for p in mnode.props if p.name not in have and not self.withheld(p.name, mnode)
+        ] + out.props
+        if out.prop(OPP_TABLE) is None and self.withheld(OPP_TABLE, mnode):
+            self.unscaled.update(out.labels)
         names = {c.name for c in out.children}
+        # an OPP table's rows are the vendor's: a row only mainline's has is a speed this chip's
+        # bin was not tested at, but for the rate the device rests at suspended, below them all
+        ladder = self.ladder(mnode)
+        slowest = min((opp_rate(c) for c in out.children if c.name.startswith("opp-")), default=0)
         for child in mnode.children:
             cpath = f"{'' if mpath == '/' else mpath}/{child.name}"
+            if ladder and child.name.startswith("opp-") and not rests(child, slowest):
+                continue
             if child.name not in names and cpath not in self.matched:
                 out.children.append(self.unmatched(child, cpath))
+
+    def withheld(self, name: str, mnode: Node) -> bool:
+        found = self.rule(self.v.props, name, compatibles(mnode) + [base_name(mnode)])
+        return found is not None and found[0].action == WITHHOLD
 
     def unmatched(self, mnode: Node, mpath: str) -> Node:
         """A mainline subtree as mainline writes it, less the nodes vendor nodes met, which move in
@@ -311,7 +370,9 @@ class Translator:
     def converted(self, prop: Prop, rule: Rule, captures: list[str], path: str) -> list[Prop]:
         statement = [self.relabel(line) for line in prop.statement]
         value = prop.value
-        if rule.action == DROPPED or (rule.action == "none-if-empty" and not value):
+        if rule.action in (DROPPED, WITHHOLD) or (rule.action == "none-if-empty" and not value):
+            if rule.action == DROPPED:
+                self.report.add(DROPPED, f"property {prop.name}", f"{path} = {value}")
             return []
         if rule.action == "none-if-empty" and rule.args == ["same"]:
             return [Prop(prop.name, statement)]
@@ -430,12 +491,19 @@ class Translator:
                 kept.insert(0, (name, value))
             else:
                 found = self.rule(self.v.states, name, self.scopes)
-                if found is not None and found[0].action in ("same", "as"):
+                if found is not None and found[0].action == "used-as":
+                    if node is not None and self.used & set(node.labels):
+                        renamed = found[0].args[0]
+                        kept.insert(0 if renamed == "default" else len(kept), (renamed, value))
+                elif found is not None and found[0].action in ("same", "as"):
                     renamed = found[0].args[0] if found[0].action == "as" else name
                     at = 0 if renamed == "default" else len(kept)
                     kept.insert(at, (renamed, value))
-                elif found is None or found[0].action != DROPPED:
-                    self.report.add("unresolved", f"pin state {name}", f"{path} = {value}")
+                else:
+                    kind = (
+                        DROPPED if found is not None and found[0].action == DROPPED else UNRESOLVED
+                    )
+                    self.report.add(kind, f"pin state {name}", f"{path} = {value}")
         if not kept or kept[0][0] != "default":
             return out
         out.append(Prop.of("pinctrl-names", ", ".join(f'"{n}"' for n, _ in kept)))
@@ -504,9 +572,33 @@ def selected_functions(root: Node, functions: dict[str, set[str]], report: Repor
                         )
 
 
+def opp_rate(row: Node) -> int:
+    """An OPP row's rate in Hz, 0 where it has none."""
+    hz = row.prop("opp-hz")
+    found = OPP_HZ.search(hz.value) if hz else None
+    return int(found.group(1)) if found else 0
+
+
+def rests(row: Node, slowest: int) -> bool:
+    """Whether a mainline OPP row is the suspended device's rate, below every vendor row."""
+    return row.prop("opp-suspend") is not None and 0 < opp_rate(row) < slowest
+
+
 def opp_table_of(node: Node) -> str:
     table = node.prop("operating-points-v2")
     return table.value if table else ""
+
+
+def unthrottled(root: Node, unscaled: set[str]) -> None:
+    """Each cooling map naming a node whose OPP table was withheld, gone: nothing scales it."""
+    for _, node in walk(root):
+        if node.name == "cooling-maps":
+            node.children = [c for c in node.children if not throttles(c, unscaled)]
+
+
+def throttles(cooling_map: Node, labels: set[str]) -> bool:
+    device = cooling_map.prop("cooling-device")
+    return device is not None and bool(set(REFERENCE.findall(device.value)) & labels)
 
 
 def unreferenced(root: Node, shells: set[int]) -> None:
@@ -586,6 +678,8 @@ def translate(
 ) -> tuple[Source, Report]:
     translator = Translator(vocabulary, factory.root, mainline)
     root = translator.node(factory.root, "", None, None) or Node("/")
+    for props, prop, rule, captures, path in translator.aliases:
+        props += translator.converted(prop, rule, captures, path)
     root.name = "/"
     for out, mnode, mpath, stated in translator.completions:  # once every vendor node met its own
         translator.complete(out, mnode, mpath, stated)
@@ -593,6 +687,7 @@ def translate(
     root.children += [opp_v2(label, value) for label, value in translator.opp_tables]
     for _, table in walk(root):
         speed_bins(table)
+        voltage_bins(table)
     conversions = Conversions(
         root, translator.report.add, translator.relabel, translator.clocks, translator.revalued
     )
@@ -608,6 +703,7 @@ def translate(
         conversions.opp_range(rail, opps)
     for group, path in translator.low_banks:
         conversions.group_bank_1v8(group, path)
+    unthrottled(root, translator.unscaled)
     unreferenced(root, translator.shells)
     unselected(root, translator.pin_groups)
     if functions:

@@ -175,6 +175,7 @@ class Upstream:
         self.omitted: list[str] = []  # the distribution's nodes, left out
         self.described: dict[str, Node] = {}  # a dtsi path's key -> the board node describing it
         self.dtsi_of: dict[int, Node] = {}  # a block, or a node in one -> the dtsi's node
+        self.deleted: set[int] = set()  # the base's nodes the view deletes, and theirs
 
     def key(self, path: str) -> str:
         return key(path, self.values)
@@ -265,9 +266,10 @@ class Upstream:
         for mine, at in [(mine, at) for mine, at in met if at not in off]:
             under = self.under_pinctrl(at)
             going[at] = [c for c in self.removed(mine, at) if self.going(c, under, at in quiet)]
-        vanishing = {label for gone in going.values() for c in gone for label in labelled(c)}
+        vanishing = self.cascade(met, going)
         for mine, at in met:
             if at in off:
+                self.unpointed(at, vanishing)
                 continue
             theirs, hushed = self.soc[at], at in quiet
             if not hushed:
@@ -303,10 +305,7 @@ class Upstream:
             if hushed:
                 self.droppable |= {id(c) for c in added}
             removed = self.removed(mine, at)
-            # a device pointing to a node deleted here goes too, which dtc would still resolve
-            deleted = going[at] + [
-                c for c in removed if c not in going[at] and references(c) & vanishing
-            ]
+            deleted = going[at]
             # a device the board lacks is disabled, as a board file does; one already off, or
             # under a node the board disables, needs nothing
             devices = [c for c in removed if compatibles(c) and not disabled(c)]
@@ -329,12 +328,53 @@ class Upstream:
                 id(n) for c in added for n in [c, *(x for _, x in walk(c))] if empty(n)
             }
 
+    def cascade(self, met: list[tuple[Node, str]], going: dict[str, list[Node]]) -> set[str]:
+        """The labels that vanish: going's, and a device's the board lacks that points to one, which
+        dtc would still resolve, until no deleted node leaves a reference behind. going gains each
+        such device in its parent's place."""
+        vanishing = {label for gone in going.values() for c in gone for label in labelled(c)}
+        while True:
+            pointing = [
+                (at, c)
+                for mine, at in met
+                if at in going
+                for c in self.removed(mine, at)
+                if c not in going[at] and references(c) & vanishing
+            ]
+            if not pointing:
+                self.deleted = {
+                    id(n)
+                    for gone in going.values()
+                    for c in gone
+                    for n in [c, *(x for _, x in walk(c))]
+                }
+                return vanishing
+            for at, c in pointing:
+                going[at].append(c)
+                vanishing |= labelled(c)
+
+    def unpointed(self, at: str, vanishing: set[str]) -> None:
+        """A node off in both trees loses each property naming a label that vanishes: dtc resolves
+        a disabled node's references too."""
+        dangling = [p.name for p in self.soc[at].props if points_to(p, vanishing - self.labels)]
+        if dangling:
+            out = self.block(at)
+            out.props += [Prop(n, [f"/delete-property/ {n};"]) for n in dangling]
+
     def prune(self) -> None:
         """Each node the board adds that nothing written references, as long as one goes: a pin
         group, which configures no pin unless a device selects it, a disabled node, or one under
         a node the board disables; and any node left empty, but one the board adds empty."""
+        # what the base still points to counts as much as what the view writes
+        kept = {
+            label
+            for n in self.soc.values()
+            if id(n) not in self.deleted
+            for p in n.props
+            for label in REFERENCE.findall(p.value)
+        }
         while True:
-            referenced = set(REFERENCE.findall(self.text()))
+            referenced = set(REFERENCE.findall(self.text())) | kept
             if not any(self.pruned(b, referenced) for b in self.blocks.values()):
                 return
 
@@ -679,7 +719,9 @@ def main() -> None:
 
     base = Base.load(args.target)
     # a translated tree's dtsi is the one its translation completes against; else its base's
-    translated = (HERE / "bases" / f"{args.source}.translate.conf").is_file()
+    translated = (
+        args.source != args.target and (HERE / "bases" / f"{args.source}.translate.conf").is_file()
+    )
     named = Vocabulary.load(args.source) if translated else base
     url = args.soc or named.soc
     if not url:

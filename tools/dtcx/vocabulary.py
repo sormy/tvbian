@@ -12,6 +12,10 @@ from dataclasses import dataclass, field
 from dtcx import HERE
 
 DROPPED, UNRESOLVED, MAINLINE, UNSUPPORTED = ("none", "unresolved", "mainline", "unsupported")
+# a vendor node mainline does not have, around the nodes it does: its children stand in its place
+WRAPPER = "wrapper"
+# a property dropped from mainline's node as well as the vendor's
+WITHHOLD = "withhold"
 # what a rule can do with a property, beside dropping it or asking
 CONVERSIONS = (
     "same",
@@ -27,10 +31,29 @@ CONVERSIONS = (
     "bank-1v8",
     "implies",
     "supply-name",
+    "used-as",
 )
 # what a rule leaves out or leaves open, which a comment above it must explain
-NEEDS_COMMENT = (DROPPED, UNRESOLVED, UNSUPPORTED, "none-if-empty", "unused-by", "supply-name")
-ACTIONS = (DROPPED, UNRESOLVED, MAINLINE, UNSUPPORTED, "none-if-empty", "unused-by", *CONVERSIONS)
+NEEDS_COMMENT = (
+    DROPPED,
+    UNRESOLVED,
+    UNSUPPORTED,
+    WITHHOLD,
+    "none-if-empty",
+    "unused-by",
+    "supply-name",
+)
+ACTIONS = (
+    DROPPED,
+    UNRESOLVED,
+    MAINLINE,
+    UNSUPPORTED,
+    WRAPPER,
+    WITHHOLD,
+    "none-if-empty",
+    "unused-by",
+    *CONVERSIONS,
+)
 # vendor nodes written as the mainline nodes they describe, each by its conversion in conversions.py
 BUILT = (
     "pwrseq",
@@ -48,6 +71,16 @@ BUILT = (
     "aml-pwrseq",
     "aml-32k",
     "cec",
+    "rk-sound-card",
+    "pwm-ir",
+    "init-voltage",
+    "hdmi-ddc-i2c",
+    "console",
+    "led-roles",
+    "adc-recovery",
+    "shared-reset",
+    "radio-pcm",
+    "gpu-power",
 )
 
 

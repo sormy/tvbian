@@ -207,6 +207,42 @@ class UpstreamTest(unittest.TestCase):
         self.assertIn("\t/delete-node/ notes;", text)
         self.assertIn("\t/delete-node/ connector;", text)
 
+    def test_a_deletion_cascades_until_no_reference_dangles(self) -> None:
+        soc = SOC.replace(
+            "\tunlabelled {",
+            "\tnotes {\n\t\tout: endpoint {\n\t\t};\n\t};\n\n"
+            '\tconn: connector {\n\t\tcompatible = "test,connector";\n\t\tremote = <&out>;\n'
+            "\t};\n\n"
+            '\tsink {\n\t\tcompatible = "test,sink";\n\t\tsource = <&conn>;\n\t};\n\n'
+            "\tunlabelled {",
+        ).replace(
+            'uart1: serial@5000400 {\n\t\t\tcompatible = "snps,dw-apb-uart";\n',
+            'uart1: serial@5000400 {\n\t\t\tcompatible = "snps,dw-apb-uart";\n\t\t\tdmas = <&conn>;\n',
+        )
+        self.assertIn("dmas = <&conn>", soc)
+        text = Upstream(Source.parse(soc).root, Source.parse(BOARD)).render(Setting("test.dtsi"))
+        for gone in ("notes", "connector", "sink"):
+            self.assertIn(f"\t/delete-node/ {gone};", text)
+        self.assertIn("&uart1 {\n\t/delete-property/ dmas;", text)
+
+    def test_a_node_the_base_still_points_to_is_kept_under_a_disabled_parent(self) -> None:
+        soc = SOC.replace(
+            "\tunlabelled {",
+            '\tmac {\n\t\tcompatible = "test,mac";\n\t\tphy-handle = <&phy>;\n\n'
+            "\t\tmdio {\n\t\t\tphy: ethernet-phy@1 {\n\t\t\t\treg = <1>;\n\t\t\t};\n\t\t};\n\t};\n\n"
+            "\tunlabelled {",
+        )
+        board = BOARD.replace(
+            "\tunlabelled {",
+            '\tmac {\n\t\tcompatible = "test,mac";\n\t\tphy-handle = <&phy>;\n'
+            '\t\tstatus = "disabled";\n\n'
+            "\t\tmdio {\n\t\t\tphy: phy@1 {\n\t\t\t\treg = <1>;\n\t\t\t};\n\t\t};\n\t};\n\n"
+            "\tunlabelled {",
+        )
+        text = Upstream(Source.parse(soc).root, Source.parse(board)).render(Setting("test.dtsi"))
+        self.assertIn("/delete-node/ ethernet-phy@1;", text)
+        self.assertIn("phy: phy@1 {", text)
+
     def test_the_patches_the_board_file_needs_beyond_its_base(self) -> None:
         driver = "--- a/drivers/test/bt.c\n+++ b/drivers/test/bt.c\n"
         binding = "--- a/Documentation/bindings/mmc.yaml\t2026-10-25\n+++ b/Documentation/bindings/mmc.yaml\n"

@@ -12,6 +12,7 @@ from vocabulary import UNRESOLVED
 
 REFERENCE = re.compile(r"&([\w-]+)")
 NUMBER = re.compile(r"^(0x[0-9a-fA-F]+|[0-9]+)$")
+CELL = re.compile(r"\b(0x[0-9a-fA-F]+|[0-9]+)\b")
 SYSCONFIG_ON = 1000000  # sys_config's power_sply: 1000000 + mV, the leading 1 the rail's on
 VBUS_MICROVOLT = 5000000  # USB's VBUS
 SDIO_MICROVOLT = 3300000  # an SDIO card's supply
@@ -35,6 +36,15 @@ GPIO_PULL = {1: "GPIO_PULL_UP", 2: "GPIO_PULL_DOWN"}  # sunxi's pull cell
 USB_PORT_TYPE = {0: "peripheral", 1: "host", 2: "otg"}
 
 
+# a Rockchip pin, <bank pin function &config>: its bank and pin
+RK_PIN = re.compile(r"<\s*(\d+)\s+(RK_P\w+)\b")
+# the vendor SAI's slot width, its reset value, which its driver never changes
+SAI_SLOT_BITS = 32
+STEREO_SLOTS = 2
+# a vendor OPP row's voltage for one PVTM bin
+BIN_VOLTAGE = re.compile(r"opp-microvolt-L\d+")
+
+
 def gpio(value: str, active: str, pull: bool = False) -> str:
     """A vendor gpio, <&pio bank pin mux pull drive data>, as mainline's <&pio bank pin flags>: the
     polarity the binding gives it, which the vendor's cells do not carry; with pull, the vendor's
@@ -47,6 +57,13 @@ def gpio(value: str, active: str, pull: bool = False) -> str:
     return f"<{cells[0]} {int(cells[1], 0)} {int(cells[2], 0)} {spelled}>"
 
 
+def rk_pins(group: Node) -> dict[tuple[str, str], str]:
+    """A Rockchip pin group's entries, each <...> as written, by its bank and pin."""
+    pins = group.prop("rockchip,pins")
+    entries: list[str] = re.findall(r"<[^>]*>", pins.value) if pins else []
+    return {(m[1], m[2]): e for e in entries if (m := RK_PIN.search(e))}
+
+
 def number(value: str) -> int:
     """A one-cell value, <n> or n, as a number."""
     return int(value.strip("<>").split()[0], 0)
@@ -57,8 +74,13 @@ def okay(node: Node) -> bool:
     return status is None or "okay" in status.value
 
 
+def put(node: Node, prop: Prop) -> None:
+    """The property in place of any of its name, written last."""
+    node.props = [p for p in node.props if p.name != prop.name] + [prop]
+
+
 def enabled(node: Node) -> None:
-    node.props = [p for p in node.props if p.name != "status"] + [Prop.of("status", '"okay"')]
+    put(node, Prop.of("status", '"okay"'))
 
 
 def fixed(microvolt: int) -> list[Prop]:
@@ -88,6 +110,7 @@ class Conversions:
         self.sleep_clock: str = ""  # the label of a 32 kHz clock built for a Wi-Fi power sequence
         self.bluetooth: tuple[list[str], str, str] | None = None  # (labels, reset gpio, path)
         self.bluetooth_bus: tuple[str, str] | None = None  # (UART label, vendor wake gpio)
+        self.initial: list[str] = []  # labels of rails with a vendor initial voltage
 
     def run(self, action: str, fnode: Node, path: str, args: list[str]) -> None:
         conversions: dict[str, Callable[[Node, str, list[str]], None]] = {
@@ -106,6 +129,16 @@ class Conversions:
             "aml-pwrseq": self.aml_pwrseq,
             "aml-32k": self.aml_32k,
             "cec": self.cec,
+            "rk-sound-card": self.rk_sound_card,
+            "pwm-ir": self.pwm_ir,
+            "init-voltage": self.init_voltage,
+            "hdmi-ddc-i2c": self.hdmi_ddc_i2c,
+            "console": self.console,
+            "led-roles": self.led_roles,
+            "adc-recovery": self.adc_recovery,
+            "shared-reset": self.shared_reset,
+            "radio-pcm": self.radio_pcm,
+            "gpu-power": self.gpu_power,
         }
         conversions[action](fnode, path, args)
 
@@ -165,6 +198,7 @@ class Conversions:
         """What reads the rails' final ranges, so runs once every conversion set them; the Wi-Fi
         power sequence's sleep clock, built from another vendor node; and the Bluetooth node,
         from two."""
+        self.held_at_init()
         for host, fnode, path in self.cards:
             self.card_supply(host, fnode, path)
         if self.bluetooth is not None:
@@ -425,6 +459,144 @@ class Conversions:
             target.props = [p for p in target.props if not p.name.startswith("regulator-m")]
             target.props += fixed(microvolt)
 
+    def init_voltage(self, fnode: Node, path: str, args: list[str]) -> None:
+        """A regulator's regulator-init-microvolt, the voltage the vendor's kernel sets it to,
+        which mainline lacks: resolved once every node is written."""
+        self.initial += [label for label in fnode.labels if label in self.by_label]
+
+    def hdmi_ddc_i2c(self, fnode: Node, path: str, args: list[str]) -> None:
+        """dw-hdmi's DDC, which refuses DDC/CI's address, on the I2C controller whose pins are the
+        HDMI pin group's: the group keeps the rest, CEC, and the controller is enabled."""
+        hdmi = self.counterpart(fnode)
+        group = self.pin_group(hdmi) if hdmi else None
+        if hdmi is None or group is None:
+            return
+        pins = rk_pins(group)
+        for node in self.nodes:
+            bus = self.pin_group(node) if "i2c" in base_name(node) and node.labels else None
+            taken = set(rk_pins(bus)) if bus else set()
+            if not taken or not taken < set(pins):
+                continue
+            kept = ", ".join(e for key, e in pins.items() if key not in taken)
+            group.props = [
+                Prop.of("rockchip,pins", kept) if p.name == "rockchip,pins" else p
+                for p in group.props
+            ]
+            hdmi.props.append(Prop.of("ddc-i2c-bus", f"<&{node.labels[0]}>"))
+            enabled(node)
+            return
+        self.report(UNRESOLVED, "hdmi-ddc-i2c: no I2C controller on the HDMI pins' DDC", path)
+
+    def counterpart(self, fnode: Node) -> Node | None:
+        """The vendor node's translation: by its label, else the root's child of its name."""
+        labelled = next((self.by_label[l] for l in fnode.labels if l in self.by_label), None)
+        return labelled or next((n for n in self.root.children if n.name == fnode.name), None)
+
+    def console(self, fnode: Node, path: str, args: list[str]) -> None:
+        """The vendor's FIQ debugger, the console on the UART its rockchip,serial-id numbers: that
+        UART enabled on the debugger's pins."""
+        serial, pins = fnode.prop("rockchip,serial-id"), fnode.prop("pinctrl-0")
+        uart = self.by_label.get(f"uart{number(serial.value)}") if serial else None
+        if not okay(fnode):
+            return
+        if uart is None or pins is None:
+            self.report(UNRESOLVED, "console: no UART or pins for the FIQ debugger", path)
+            return
+        enabled(uart)
+        put(uart, Prop.of("pinctrl-names", '"default"'))
+        put(uart, Prop.of("pinctrl-0", self.relabel(pins.value)))
+
+    def led_roles(self, fnode: Node, path: str, args: list[str]) -> None:
+        """The vendor's LEDs by role, args <vendor name>:<role>: each led-<role>, labelled with the
+        role the shared LED hooks drive, which set its state: on while up for power, off for
+        standby, kept through suspend and shutdown; a vendor trigger would fight them."""
+        roles = dict(arg.split(":") for arg in args)
+        leds = self.counterpart(fnode)
+        for led in leds.children if leds else []:
+            role = roles.get(led.name)
+            if role:
+                led.name = f"led-{role}"
+                led.props = [p for p in led.props if p.name != "linux,default-trigger"]
+                put(led, Prop.of("default-state", '"on"' if role == "power" else '"off"'))
+                put(led, Prop.of("retain-state-suspended"))
+                put(led, Prop.of("retain-state-shutdown"))
+                put(led, Prop.of("label", f'"{role}"'))
+
+    def adc_recovery(self, fnode: Node, path: str, args: list[str]) -> None:
+        """The template's ADC key args[0], these boxes' one button, as the recovery button the boot
+        loader reads: KEY_VENDOR."""
+        keys = self.counterpart(fnode)
+        key = next((k for k in keys.children if k.name == args[0]), None) if keys else None
+        if key is None:
+            return
+        key.name = "button-recovery"
+        put(key, Prop.of("linux,code", "<KEY_VENDOR>"))
+        put(key, Prop.of("label", '"recovery"'))
+
+    def shared_reset(self, fnode: Node, path: str, args: list[str]) -> None:
+        """A reset line the SDIO power sequence drives too, in that sequence's polarity: gpiolib
+        shares one line only under one flag, and the vendor's driver reads raw levels anyway."""
+        node = self.counterpart(fnode)
+        reset = node.prop("reset-gpios") if node else None
+        line = re.match(r"<(&\w+ \w+) (\w+)>", reset.value) if node and reset else None
+        sequences = [n.prop("reset-gpios") for n in self.nodes if n is not node]
+        shared = next(
+            (s for s in sequences if s is not None and line and s.value.startswith(f"<{line[1]} ")),
+            None,
+        )
+        if node is None or line is None or shared is None:
+            return
+        put(node, Prop.of("reset-gpios", shared.value))
+
+    def radio_pcm(self, fnode: Node, path: str, args: list[str]) -> None:
+        """SAI0, which mainline's dtsi lacks, carrying the radio's PCM where the vendor enables it:
+        its pins in the SDIO power sequence's state, unpulled before the radio powers."""
+        self.report("unsupported", f"node {fnode.name}", path)
+        pins = fnode.prop("pinctrl-0")
+        if not okay(fnode) or pins is None:
+            return
+        for sequence in self.nodes:
+            compatible, state = sequence.prop("compatible"), sequence.prop("pinctrl-0")
+            if compatible and '"mmc-pwrseq-simple"' in compatible.value and state is not None:
+                put(sequence, Prop.of("pinctrl-0", f"{state.value}, {self.relabel(pins.value)}"))
+
+    def gpu_power(self, fnode: Node, path: str, args: list[str]) -> None:
+        """The vendor GPU's simple power model as the energy model mainline's power allocator
+        budgets: its dynamic coefficient, in the same pW/(Hz V²), on the GPU it sits in. Mainline
+        models no leakage, so the static coefficient has no counterpart."""
+        coefficient = fnode.prop("dynamic-coefficient")
+        parent = path.rsplit("/", 2)[-2] if path.count("/") > 1 else ""
+        gpu = next((n for n in self.nodes if parent and n.name == parent), None)
+        if coefficient is None or gpu is None:
+            self.report(UNRESOLVED, f"node {fnode.name}: no dynamic coefficient or GPU", path)
+            return
+        put(gpu, Prop.of("dynamic-power-coefficient", coefficient.value))
+
+    def pin_group(self, node: Node) -> Node | None:
+        """The node's default pin group, where it names one with rockchip,pins."""
+        pins = node.prop("pinctrl-0")
+        group = self.by_label.get(REFERENCE.findall(pins.value)[0]) if pins else None
+        return group if group is not None and group.prop("rockchip,pins") else None
+
+    def held_at_init(self) -> None:
+        """Each rail with an initial voltage held there, unless a consumer's OPPs scale it."""
+        scaled = {
+            ref
+            for node in self.nodes
+            if node.prop("operating-points-v2") is not None
+            for p in node.props
+            if p.name.endswith("-supply")
+            for ref in REFERENCE.findall(p.value)
+        }
+        for label in self.initial:
+            rail = self.by_label[label]
+            initial = rail.prop("regulator-init-microvolt")
+            rail.props = [p for p in rail.props if p.name != "regulator-init-microvolt"]
+            if initial is None or set(rail.labels) & scaled:
+                continue
+            rail.props = [p for p in rail.props if not p.name.startswith("regulator-m")]
+            rail.props += fixed(number(initial.value))
+
     def leds(self, fnode: Node, path: str, args: list[str]) -> None:
         """sys_config's gpio_para LEDs as gpio-leds: normal_led and standby_led name the pins, their
         *_light the level that lights them; labels power and standby, which the shared LED hooks
@@ -473,6 +645,50 @@ class Conversions:
         socket = Node("port", [], [], [], [Node("endpoint", ["hdmi_con_in"], [], [back])])
         props = [Prop.of("compatible", '"hdmi-connector"'), Prop.of("type", '"a"')]
         self.root.children.append(Node("connector", [], [], props, [socket]))
+
+    def rk_sound_card(self, fnode: Node, path: str, args: list[str]) -> None:
+        """Rockchip's own sound-card driver as mainline's simple-audio-card: its CPU and codec
+        DAIs, its card name and MCLK ratio, I2S, under the vendor node's own name; the CPU's two
+        slots 32 bits wide, as the vendor's SAI keeps them and the HDMI controller's I2S needs."""
+        cpu, codec = fnode.prop("rockchip,cpu"), fnode.prop("rockchip,codec")
+        if cpu is None or codec is None:
+            self.report("unknown", "rk-sound-card: no rockchip,cpu or rockchip,codec", path)
+            return
+        name, mclk_fs = fnode.prop("rockchip,card-name"), fnode.prop("rockchip,mclk-fs")
+        props = [Prop.of("compatible", '"simple-audio-card"')]
+        props += [Prop.of("simple-audio-card,name", name.value)] if name else []
+        props += [Prop.of("simple-audio-card,format", '"i2s"')]
+        props += [Prop.of("simple-audio-card,mclk-fs", mclk_fs.value)] if mclk_fs else []
+        dais = [
+            Node(f"simple-audio-card,{role}", [], [], [Prop.of("sound-dai", self.relabel(p.value))])
+            for role, p in (("cpu", cpu), ("codec", codec))
+        ]
+        dais[0].props += [
+            Prop.of("dai-tdm-slot-num", f"<{STEREO_SLOTS}>"),
+            Prop.of("dai-tdm-slot-width", f"<{SAI_SLOT_BITS}>"),
+        ]
+        self.root.children.append(Node(fnode.name, [], [], props, dais))
+
+    def pwm_ir(self, fnode: Node, path: str, args: list[str]) -> None:
+        """Rockchip's PWM-capture IR receiver as mainline's gpio-ir-receiver, which has no PWM
+        capture: the vendor's receiver pin as a GPIO, its demodulator's output active low."""
+        state = fnode.prop("pinctrl-0")
+        group = self.by_label.get(self.relabel(state.value).strip("<>&")) if state else None
+        pins = group.prop("rockchip,pins") if group else None
+        parent = next((n for n in self.nodes if group in n.children), None)
+        if pins is None or parent is None:
+            self.report(UNRESOLVED, "pwm-ir: no receiver pin", path)
+            return
+        bank, pin = pins.value.strip("<>").split()[:2]
+        mux = Prop.of("rockchip,pins", f"<{bank} {pin} RK_FUNC_GPIO &pcfg_pull_none>")
+        parent.children.append(Node("ir-rx-gpio", ["ir_rx_gpio"], [], [mux]))
+        props = [
+            Prop.of("compatible", '"gpio-ir-receiver"'),
+            Prop.of("gpios", f"<&gpio{bank} {pin} GPIO_ACTIVE_LOW>"),
+            Prop.of("pinctrl-names", '"default"'),
+            Prop.of("pinctrl-0", "<&ir_rx_gpio>"),
+        ]
+        self.root.children.append(Node("ir-receiver", [], [], props))
 
     def cec(self, fnode: Node, path: str, args: list[str]) -> None:
         """A vendor CEC node, enabled, as mainline's CEC controller args[0] names enabled on the
@@ -550,6 +766,35 @@ def speed_bins(table: Node) -> None:
         props.append(Prop.of("opp-supported-hw", f"<0x{sum(1 << s for s in volts):02x}>"))
         merged.append(Node(f"opp-{hz.split('<')[1].strip('>')}", [], [], props))
     table.children = [c for c in table.children if c.prop("opp-supported-hw") is None] + merged
+
+
+def voltage_bins(table: Node) -> None:
+    """A table whose rows carry a voltage per silicon bin (opp-microvolt-L<n>), which the vendor's
+    cpufreq picks by the chip's PVTM reading: each row's opp-microvolt becomes the highest of its
+    voltages, which every bin's chip runs at, for a kernel that cannot bin it. A bin the vendor
+    left to the default gets that default as its own column, for a kernel that can."""
+    selectable = selected_bins(table)
+    for row in table.children:
+        bins = [p for p in row.props if BIN_VOLTAGE.fullmatch(p.name)]
+        if not bins:
+            continue
+        default = row.prop("opp-microvolt")
+        volts = bins + ([default] if default is not None else [])
+        highest = max(volts, key=lambda p: [int(v, 0) for v in p.value.strip("<>").split()])
+        named = {p.name for p in bins}
+        unnamed = [f"opp-microvolt-L{n}" for n in selectable if f"opp-microvolt-L{n}" not in named]
+        filled = [Prop.of(name, default.value) for name in unnamed] if default is not None else []
+        row.props = [p for p in row.props if p is not default] + filled
+        row.props.insert(1, Prop.of("opp-microvolt", highest.value))
+
+
+def selected_bins(table: Node) -> list[int]:
+    """The bins a table's selectors (rockchip,*-voltage-sel: low, high, bin triples) can name."""
+    bins: set[int] = set()
+    for prop in table.props:
+        if prop.name.startswith("rockchip,") and prop.name.endswith("-voltage-sel"):
+            bins.update(int(n, 0) for n in CELL.findall(prop.value)[2::3])
+    return sorted(bins)
 
 
 def opp_v2(label: str, value: str) -> Node:

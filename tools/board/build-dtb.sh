@@ -32,7 +32,12 @@ case "${1:-}" in
 esac
 shift
 
-boards() { for c in "$BOARDS_DIR"/*/board.conf; do d=$(dirname "$c"); [ ! -f "$d/$NAME.patch" ] || basename "$d"; done; }
+# a board, or a tree of it for another kernel in a subdirectory: h96max-3518/next2
+boards() {
+	for c in "$BOARDS_DIR"/*/board.conf "$BOARDS_DIR"/*/*/board.conf; do
+		d=$(dirname "$c"); [ ! -f "$d/$NAME.patch" ] || echo "${d#"$BOARDS_DIR"/}"
+	done
+}
 BOARDS="${*:-$(boards)}"
 [ -n "$BOARDS" ] || { echo "no boards/<board>/$NAME.patch found — name a board"; exit 1; }
 [ -x "$DTC" ] || { echo "Need the patched dtc. Run: ./build.sh tool dtc"; exit 1; }
@@ -66,7 +71,10 @@ for BOARD in $BOARDS; do
 	# everything is written to $tmp first and published only when every check has passed
 	python3 "$DTCX" "$DTCX_FLAGS" "$SOURCE" "$DIR/factory_$NAME.dtb" > "$tmp/factory_$NAME.dts"
 	PATCH_BASE="$tmp/factory_$NAME.dts"
-	if [ -f "$BASES/$SOURCE.translate.conf" ]; then
+	# a translation applies where the target is another dialect than the factory's
+	TRANSLATION=
+	[ "$SOURCE" = "$TARGET" ] || [ ! -f "$BASES/$SOURCE.translate.conf" ] || TRANSLATION="$BASES/$SOURCE.translate.conf"
+	if [ -n "$TRANSLATION" ]; then
 		PATCH_BASE="$tmp/factory_${NAME}_translated.dts"
 		python3 "$TRANSLATE" "$SOURCE" "$TARGET" "$tmp/factory_$NAME.dts" > "$PATCH_BASE"
 	fi
@@ -92,7 +100,7 @@ for BOARD in $BOARDS; do
 	# a kernel tree's upstream view, on the board's own base or the one its bases name (a
 	# translation's, or the target's), proven to describe the dtb it was written from
 	VIEW=
-	if [ "$NAME" = board ] && { [ -n "$VIEW_BASE" ] || grep -qs '^soc ' "$BASES/$SOURCE.translate.conf" "$BASES/$TARGET.conf"; }; then
+	if [ "$NAME" = board ] && { [ -n "$VIEW_BASE" ] || grep -qs '^soc ' $TRANSLATION "$BASES/$TARGET.conf"; }; then
 		python3 "$UPSTREAM" --prove "$tmp/$NAME.dtb" ${VIEW_BASE:+--soc "$VIEW_BASE"} "$SOURCE" "$TARGET" "$tmp/$NAME.dts" > "$tmp/upstream.dts" ||
 			{ echo "$BOARD: board-upstream.dts does not describe board.dtb"; exit 1; }
 		VIEW=1

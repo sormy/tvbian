@@ -8,11 +8,11 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools/dtcx"))
-from conversions import gpio, speed_bins  # noqa: E402
+from conversions import Conversions, gpio, speed_bins, voltage_bins  # noqa: E402
 from dtcx import Base  # noqa: E402
 from dts import Node, Prop, Source, compatibles, unit, walk  # noqa: E402
-from mainline import MESON_FUNCTION, Mainline, amend, touching  # noqa: E402
-from translate import Report, selected_functions, translate  # noqa: E402
+from mainline import MESON_FUNCTION, Mainline, amend, numeric_units, touching  # noqa: E402
+from translate import Report, rests, selected_functions, translate, unthrottled  # noqa: E402
 from vocabulary import Pattern, Vocabulary, fill  # noqa: E402
 
 FACTORY = """/dts-v1/;
@@ -137,11 +137,11 @@ def base() -> Base:
     return Base("test", "mainline", "", headers=["dt-bindings/clock/test.h"])
 
 
-def translated(factory: str = FACTORY) -> tuple[dict[str, Node], Report]:
+def translated(factory: str = FACTORY, mainline: str = MAINLINE) -> tuple[dict[str, Node], Report]:
     source, report = translate(
         Source.parse(factory),
         Vocabulary.parse(VOCABULARY),
-        Mainline(Source.parse(MAINLINE)),
+        Mainline(Source.parse(mainline)),
         base(),
     )
     return dict(walk(source.root)) | {"/": source.root}, report
@@ -297,6 +297,27 @@ class TranslateTest(unittest.TestCase):
         self.assertFalse([e for e in report.entries if "another address" in e[1]])
         self.assertEqual(values(nodes["/soc/mmc@4020000"])["status"], '"okay"')
 
+    def test_an_opp_table_keeps_only_the_vendor_s_rows(self) -> None:
+        mainline = MAINLINE.replace(
+            '\t\tcompatible = "allwinner,sun50i-h616-operating-points";\n',
+            '\t\tcompatible = "operating-points-v2";\n\n'
+            "\t\topp-1800000000 {\n\t\t\topp-hz = /bits/ 64 <1800000000>;\n\t\t};\n",
+        )
+        nodes, _ = translated(mainline=mainline)
+        self.assertIn("/opp-table-cpu/opp-480000000", nodes)
+        self.assertNotIn("/opp-table-cpu/opp-1800000000", nodes)
+
+    def test_an_opp_row_meets_only_a_row_of_its_own_table(self) -> None:
+        mainline = MAINLINE.replace(
+            '\t\tcompatible = "allwinner,sun50i-h616-operating-points";\n\t};\n',
+            '\t\tcompatible = "operating-points-v2";\n\t};\n\n'
+            '\topp-table-gpu {\n\t\tcompatible = "operating-points-v2";\n\n'
+            "\t\topp-480000000 {\n\t\t\topp-hz = /bits/ 64 <480000000>;\n\t\t};\n\t};\n",
+        )
+        factory = FACTORY.replace("\t\topp@480000000 {", "\t\topp-480000000 {")  # no unit address
+        nodes, _ = translated(factory, mainline)
+        self.assertIn("/opp-table-cpu/opp-480000000", nodes)
+
     def test_mainline_completes_what_the_vendor_does_not_say(self) -> None:
         nodes, _ = translated()
         mmc = values(nodes["/soc/mmc@4020000"])
@@ -338,7 +359,48 @@ class TranslateTest(unittest.TestCase):
         mmc = values(dict(walk(source.root))["/soc/mmc@4020000"])
         self.assertEqual(mmc["pinctrl-names"], '"default"')
         self.assertEqual(mmc["pinctrl-0"], "<&sdc0_pins_a>")  # the vendor's pinctrl-1
-        self.assertFalse([e for e in report.entries if "pin state" in e[1]])
+        states = [e for e in report.entries if "pin state" in e[1]]
+        self.assertEqual(states, [("none", "pin state clk_cmd_pins")])
+
+    def test_a_used_block_takes_its_active_pins_as_default(self) -> None:
+        factory = FACTORY.replace(
+            '\t\t\tpinctrl-names = "default", "sleep";\n\t\t\tpinctrl-0 = <&sdc0_pins_a>;',
+            '\t\t\tpinctrl-names = "active";\n\t\t\tpinctrl-0 = <&sdc0_pins_a>;',
+        )
+        vocabulary = VOCABULARY + "state active used-as default\n"
+        for used in (True, False):
+            with self.subTest(used=used):
+                tree = (
+                    factory.replace(
+                        '\t\t\tdma-names = "tx";', '\t\t\tdma-names = "tx";\n\t\t\tmmc = <&sdc0>;'
+                    )
+                    if used
+                    else factory
+                )
+                source, _ = translate(
+                    Source.parse(tree),
+                    Vocabulary.parse(vocabulary),
+                    Mainline(Source.parse(MAINLINE)),
+                    base(),
+                )
+                mmc = values(dict(walk(source.root))["/soc/mmc@4020000"])
+                if used:
+                    self.assertEqual(mmc["pinctrl-names"], '"default"')
+                    self.assertEqual(mmc["pinctrl-0"], "<&sdc0_pins_a>")
+                else:
+                    self.assertNotIn("pinctrl-names", mmc)
+
+    def test_a_drop_is_reported_only_on_an_enabled_node(self) -> None:
+        for status, reported in (("okay", True), ("disabled", False)):
+            with self.subTest(status=status):
+                factory = FACTORY.replace(
+                    "\t\t\tbus-width = <4>;",
+                    f'\t\t\tbus-width = <4>;\n\t\t\tstatus = "{status}";',
+                    1,
+                )
+                _, report = translated(factory)
+                drops = [what for kind, what in report.entries if kind == "none"]
+                self.assertEqual("pin state sleep" in drops, reported)
 
     def test_a_state_with_no_pin_groups_is_not_written(self) -> None:
         factory = FACTORY.replace("\t\t\tpinctrl-0 = <&sdc0_pins_a>;\n", "", 1)
@@ -363,6 +425,26 @@ class TranslateTest(unittest.TestCase):
         for factory in (FACTORY, by_label):
             with self.subTest(by_label=factory is by_label):
                 nodes, _ = translated(factory)
+                self.assertEqual(values(nodes["/aliases"]), {"mmc0": "&mmc0"})
+
+    def test_binding_constants_in_unit_addresses_meet_vendor_numbers(self) -> None:
+        mainline = Source.parse(
+            "/ {\n\tpower {\n\t\tpower-domain@PD_GPU {\n\t\t\treg = <PD_GPU>;\n\t\t};\n\t};\n};\n"
+        )
+        numeric_units(mainline, {"PD_GPU": 4})
+        index = Mainline(mainline)
+        self.assertEqual(index.child("/power", "pd_gpu", "4"), "/power/power-domain@4")
+
+    def test_aliases_before_their_targets_are_preserved(self) -> None:
+        for by_label in (False, True):
+            factory = Source.parse(FACTORY)
+            aliases = next(n for n in factory.root.children if n.name == "aliases")
+            factory.root.children.remove(aliases)
+            factory.root.children.insert(0, aliases)
+            if by_label:
+                aliases.props[0] = Prop.of("mmc0", "&sdc0")
+            with self.subTest(by_label=by_label):
+                nodes, _ = translated(factory.render())
                 self.assertEqual(values(nodes["/aliases"]), {"mmc0": "&mmc0"})
 
     def test_speed_grade_bits_renumbered_and_the_rest_asked(self) -> None:
@@ -630,6 +712,88 @@ class BoardTest(unittest.TestCase):
         )
         speed_bins(table)
         self.assertEqual([c.name for c in table.children], ["opp-1"])
+
+    def test_only_a_suspend_row_below_every_vendor_row_rests_there(self) -> None:
+        slowest = 700000000
+        for hz, suspend, kept in [
+            (300000000, True, True),
+            (700000000, True, False),
+            (900000000, True, False),
+            (300000000, False, False),
+        ]:
+            with self.subTest(hz=hz, suspend=suspend):
+                props = [Prop.of("opp-hz", f"/bits/ 64 <{hz}>")]
+                props += [Prop.of("opp-suspend")] if suspend else []
+                self.assertEqual(rests(Node(f"opp-{hz}", props=props), slowest), kept)
+
+    def test_a_bin_left_to_the_default_gets_it_as_its_own_column(self) -> None:
+        table = Node(
+            "opp-table",
+            props=[Prop.of("rockchip,pvtm-voltage-sel", "<0 10 0>, <11 20 1>, <21 99 2>")],
+            children=[
+                Node(
+                    "opp-1",
+                    props=[
+                        Prop.of("opp-hz", "<1>"),
+                        Prop.of("opp-microvolt", "<900000>"),
+                        Prop.of("opp-microvolt-L0", "<962500>"),
+                    ],
+                ),
+                Node("opp-2", props=[Prop.of("opp-hz", "<2>"), Prop.of("opp-microvolt", "<5>")]),
+            ],
+        )
+        voltage_bins(table)
+        volts = {p.name: p.value for p in table.children[0].props}
+        self.assertEqual(volts["opp-microvolt"], "<962500>")
+        self.assertEqual(
+            [volts[f"opp-microvolt-L{n}"] for n in range(3)], ["<962500>", "<900000>", "<900000>"]
+        )
+        self.assertEqual([p.name for p in table.children[1].props], ["opp-hz", "opp-microvolt"])
+
+    def test_voltage_bins_default_to_the_highest_and_stay(self) -> None:
+        def row(name: str, *volts: tuple[str, str]) -> Node:
+            props = [Prop.of("opp-hz", "<1>")] + [Prop.of(n, v) for n, v in volts]
+            return Node(name, [], [], props)
+
+        table = Node(
+            "opp-table",
+            [],
+            [],
+            [],
+            [
+                row(
+                    "binned",
+                    ("opp-microvolt", "<825000 825000 1100000>"),
+                    ("opp-microvolt-L0", "<900000 900000 1100000>"),
+                    ("opp-microvolt-L1", "<887500 887500 1100000>"),
+                ),
+                row(
+                    "default-highest",
+                    ("opp-microvolt", "<962500 962500 1100000>"),
+                    ("opp-microvolt-L1", "<950000 950000 1100000>"),
+                ),
+                row("unbinned", ("opp-microvolt", "<5>")),
+            ],
+        )
+        voltage_bins(table)
+        self.assertEqual(
+            [
+                [(p.name, p.value) for p in c.props if p.name.startswith("opp-microvolt")]
+                for c in table.children
+            ],
+            [
+                [
+                    ("opp-microvolt", "<900000 900000 1100000>"),
+                    ("opp-microvolt-L0", "<900000 900000 1100000>"),
+                    ("opp-microvolt-L1", "<887500 887500 1100000>"),
+                ],
+                [
+                    ("opp-microvolt", "<962500 962500 1100000>"),
+                    ("opp-microvolt-L1", "<950000 950000 1100000>"),
+                ],
+                [("opp-microvolt", "<5>")],
+            ],
+        )
 
 
 LAYOUT = """/dts-v1/;
@@ -1148,3 +1312,327 @@ class ConversionsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+RK_FACTORY = """/dts-v1/;
+
+/ {
+\thdmi_sound: hdmi-sound {
+\t\tcompatible = "rockchip,hdmi";
+\t\trockchip,mclk-fs = <128>;
+\t\trockchip,card-name = "rockchip,hdmi";
+\t\trockchip,cpu = <&sai3>;
+\t\trockchip,codec = <&hdmi>;
+\t};
+
+\tpwm3: pwm@ffa90030 {
+\t\tcompatible = "rockchip,remotectl-pwm";
+\t\tpinctrl-names = "default";
+\t\tpinctrl-0 = <&pwm3m0_pins>;
+\t\tremote_pwm_id = <3>;
+\t\tstatus = "okay";
+\t};
+
+\tpinctrl {
+\t\tpwm3 {
+\t\t\tpwm3m0_pins: pwm3m0-pins {
+\t\t\t\trockchip,pins = <4 RK_PC6 1 &pcfg_pull_none>;
+\t\t\t};
+\t\t};
+\t};
+
+\tsai3: sai@ffbb0000 {
+\t};
+
+\thdmi: hdmi@ff8d0000 {
+\t};
+
+\tvdd_cpu: vdd-cpu {
+\t\tcompatible = "pwm-regulator";
+\t\tregulator-min-microvolt = <746000>;
+\t\tregulator-max-microvolt = <1201000>;
+\t\tregulator-init-microvolt = <953000>;
+\t};
+
+\tvdd_logic: vdd-logic {
+\t\tcompatible = "pwm-regulator";
+\t\tregulator-min-microvolt = <705000>;
+\t\tregulator-max-microvolt = <1006000>;
+\t\tregulator-init-microvolt = <900000>;
+\t};
+
+\tconsumer {
+\t\tcompatible = "test,consumer";
+\t\toperating-points-v2 = <&vdd_cpu>;
+\t\tcpu-supply = <&vdd_cpu>;
+\t};
+
+\tgpu: gpu@ff700000 {
+\t\tcompatible = "arm,mali-450";
+\t\toperating-points-v2 = <&gpu_opp_table>;
+\t};
+
+\tusbdrd {
+\t\tcompatible = "rockchip,rk3528-dwc3";
+
+\t\tdwc3@fe500000 {
+\t\t\tcompatible = "snps,dwc3";
+\t\t\treg = <0x00 0xfe500000 0x00 0x400000>;
+\t\t\tdr_mode = "host";
+\t\t};
+\t};
+};
+"""
+RK_MAINLINE = """/ {
+\tpinctrl {
+\t\tpwm3 {
+\t\t\tpwm3m0_pins: pwm3m0-pins {
+\t\t\t\trockchip,pins = <4 RK_PC6 1 &pcfg_pull_none>;
+\t\t\t};
+\t\t};
+\t};
+
+\tsai3: sai@ffbb0000 {
+\t};
+
+\thdmi: hdmi@ff8d0000 {
+\t};
+
+\tgpu: gpu@ff700000 {
+\t\tcompatible = "arm,mali-450";
+\t\toperating-points-v2 = <&gpu_opp_table>;
+\t};
+
+\tusb_host0_xhci: usb@fe500000 {
+\t\tcompatible = "rockchip,rk3528-dwc3", "snps,dwc3";
+\t\treg = <0x0 0xfe500000 0x0 0x400000>;
+\t\tdr_mode = "otg";
+\t\tstatus = "disabled";
+\t};
+};
+"""
+RK_VOCABULARY = r"""prop compatible reg rockchip,pins mainline
+# a test's
+prop remote_pwm_id none
+node rockchip,hdmi rk-sound-card
+node rockchip,remotectl-pwm pwm-ir
+# a test's
+node rockchip,rk3528-dwc3 wrapper
+compatible snps,dwc3 rockchip,rk3528-dwc3
+prop dr_mode same
+compatible pwm-regulator pwm-regulator
+compatible test,consumer test,consumer
+prop regulator-* cpu-supply operating-points-v2 same
+also pwm-regulator init-voltage
+# a test's
+prop operating-points-v2@arm,mali-450 withhold
+"""
+
+
+def rockchip(factory: str = RK_FACTORY) -> tuple[dict[str, Node], Report]:
+    source, report = translate(
+        Source.parse(factory),
+        Vocabulary.parse(RK_VOCABULARY),
+        Mainline(Source.parse(RK_MAINLINE)),
+        base(),
+    )
+    return dict(walk(source.root)) | {"/": source.root}, report
+
+
+class RockchipTest(unittest.TestCase):
+    def test_the_vendor_sound_card_is_a_simple_card_on_its_dais(self) -> None:
+        nodes, _ = rockchip()
+        card = values(nodes["/hdmi-sound"])
+        self.assertEqual(card["compatible"], '"simple-audio-card"')
+        self.assertEqual(card["simple-audio-card,mclk-fs"], "<128>")
+        cpu = values(nodes["/hdmi-sound/simple-audio-card,cpu"])
+        self.assertEqual(cpu["sound-dai"], "<&sai3>")
+        self.assertEqual((cpu["dai-tdm-slot-num"], cpu["dai-tdm-slot-width"]), ("<2>", "<32>"))
+        codec = values(nodes["/hdmi-sound/simple-audio-card,codec"])
+        self.assertEqual(codec["sound-dai"], "<&hdmi>")
+
+    def test_a_card_without_its_dais_is_a_question(self) -> None:
+        nodes, report = rockchip(RK_FACTORY.replace("\t\trockchip,cpu = <&sai3>;\n", ""))
+        self.assertNotIn("/hdmi-sound", nodes)
+        self.assertIn("rk-sound-card", report.text())
+
+    def test_the_pwm_remote_is_a_gpio_receiver_on_its_pin(self) -> None:
+        nodes, _ = rockchip()
+        receiver = values(nodes["/ir-receiver"])
+        self.assertEqual(receiver["compatible"], '"gpio-ir-receiver"')
+        self.assertEqual(receiver["gpios"], "<&gpio4 RK_PC6 GPIO_ACTIVE_LOW>")
+        pin = values(nodes["/pinctrl/pwm3/ir-rx-gpio"])
+        self.assertEqual(pin["rockchip,pins"], "<4 RK_PC6 RK_FUNC_GPIO &pcfg_pull_none>")
+
+    def test_a_remote_without_its_pin_is_a_question(self) -> None:
+        nodes, report = rockchip(RK_FACTORY.replace("\t\tpinctrl-0 = <&pwm3m0_pins>;\n", ""))
+        self.assertNotIn("/ir-receiver", nodes)
+        self.assertIn("pwm-ir", report.text())
+
+    def test_a_wrapper_goes_and_its_child_meets_mainline_s_node(self) -> None:
+        nodes, _ = rockchip()
+        self.assertFalse([p for p in nodes if p.startswith("/usbdrd")])
+        usb = values(nodes["/usb@fe500000"])
+        self.assertEqual(usb["dr_mode"], '"host"')
+        self.assertEqual(usb["status"], '"okay"')
+
+    def test_a_rail_no_consumer_scales_is_held_at_its_initial_voltage(self) -> None:
+        nodes, _ = rockchip()
+        logic = values(nodes["/vdd-logic"])
+        self.assertEqual(logic["regulator-min-microvolt"], "<900000>")
+        self.assertEqual(logic["regulator-max-microvolt"], "<900000>")
+        self.assertNotIn("regulator-init-microvolt", logic)
+
+    def test_a_rail_a_consumer_s_opps_scale_keeps_its_range(self) -> None:
+        nodes, _ = rockchip()
+        cpu = values(nodes["/vdd-cpu"])
+        self.assertEqual(cpu["regulator-min-microvolt"], "<746000>")
+        self.assertEqual(cpu["regulator-max-microvolt"], "<1201000>")
+        self.assertNotIn("regulator-init-microvolt", cpu)
+
+    def test_a_cooling_map_on_a_node_without_its_opps_goes(self) -> None:
+        def cooling_map(name: str, device: str) -> Node:
+            return Node(name, props=[Prop.of("cooling-device", f"<&{device} 0 1>")])
+
+        maps = Node(
+            "cooling-maps", children=[cooling_map("map0", "cpu0"), cooling_map("map1", "gpu")]
+        )
+        root = Node("/", children=[Node("thermal-zones", children=[maps])])
+        unthrottled(root, {"gpu"})
+        self.assertEqual([c.name for c in maps.children], ["map0"])
+
+    def test_hdmi_ddc_moves_to_the_i2c_controller_on_its_pins(self) -> None:
+        def group(label: str, pins: str) -> Node:
+            return Node(label, [label], props=[Prop.of("rockchip,pins", pins)])
+
+        hdmi = Node("hdmi@ff8d0000", ["hdmi"], props=[Prop.of("pinctrl-0", "<&hdmi_pins>")])
+        i2c = Node("i2c@ffa58000", ["i2c2"], props=[Prop.of("pinctrl-0", "<&i2c2m0_xfer>")])
+        i2c.props.append(Prop.of("status", '"disabled"'))
+        pins = "<0 RK_PA3 1 &pcfg_pull_none>, <0 RK_PA4 1 &pcfg_pull_none>, <0 RK_PA5 1 &x>"
+        ddc = "<0 RK_PA4 2 &pcfg_pull_none_smt>, <0 RK_PA5 2 &pcfg_pull_none_smt>"
+        pinctrl = Node("pinctrl", children=[group("hdmi_pins", pins), group("i2c2m0_xfer", ddc)])
+        root = Node("/", children=[hdmi, i2c, pinctrl])
+        report: list[str] = []
+        conversions = Conversions(
+            root, lambda *a: report.append(a[1]), lambda s: s, lambda *a: [], lambda *a: ""
+        )
+        conversions.run("hdmi-ddc-i2c", Node("hdmi@ff8d0000", ["hdmi"]), "/hdmi@ff8d0000", [])
+        self.assertEqual(values(hdmi)["ddc-i2c-bus"], "<&i2c2>")
+        self.assertEqual(
+            values(pinctrl.children[0])["rockchip,pins"], "<0 RK_PA3 1 &pcfg_pull_none>"
+        )
+        self.assertEqual(values(i2c)["status"], '"okay"')
+        self.assertEqual(report, [])
+
+    @staticmethod
+    def converted(
+        root: Node, action: str, vendor: Node, args: list[str], path: str = ""
+    ) -> list[str]:
+        """Run one conversion over root; what it reported."""
+        report: list[str] = []
+        conversions = Conversions(
+            root,
+            lambda *a: report.append(f"{a[0]} {a[1]}"),
+            lambda s: s,
+            lambda *a: [],
+            lambda *a: "",
+        )
+        conversions.run(action, vendor, path or f"/{vendor.name}", args)
+        return report
+
+    def test_the_fiq_debugger_s_console_is_its_uart_on_its_pins(self) -> None:
+        for status, lit in (('"okay"', True), ('"disabled"', False)):
+            with self.subTest(status=status):
+                uart = Node("serial@ff9f0000", ["uart0"], props=[Prop.of("status", '"disabled"')])
+                fiq = Node(
+                    "fiq-debugger",
+                    props=[
+                        Prop.of("rockchip,serial-id", "<0x00>"),
+                        Prop.of("pinctrl-0", "<&uart0m0_xfer>"),
+                        Prop.of("status", status),
+                    ],
+                )
+                report = self.converted(Node("/", children=[uart]), "console", fiq, [])
+                expected = '"okay"' if lit else '"disabled"'
+                self.assertEqual(values(uart)["status"], expected)
+                self.assertEqual("pinctrl-0" in values(uart), lit)
+                self.assertEqual(report, [])
+
+    def test_leds_take_their_roles_and_others_stay(self) -> None:
+        timer = Prop.of("linux,default-trigger", '"timer"')
+        leds = Node(
+            "gpio-leds",
+            ["leds"],
+            children=[Node("work-green"), Node("work-red", props=[timer]), Node("net")],
+        )
+        args = ["work-green:power", "work-red:standby"]
+        self.converted(Node("/", children=[leds]), "led-roles", Node("gpio-leds", ["leds"]), args)
+        self.assertEqual([c.name for c in leds.children], ["led-power", "led-standby", "net"])
+        power = values(leds.children[0])
+        self.assertEqual((power["label"], power["default-state"]), ('"power"', '"on"'))
+        self.assertIn("retain-state-shutdown", power)
+        self.assertEqual(values(leds.children[1])["default-state"], '"off"')
+        self.assertNotIn("linux,default-trigger", values(leds.children[1]))
+        self.assertNotIn("label", values(leds.children[2]))
+
+    def test_the_template_s_adc_key_is_the_recovery_button(self) -> None:
+        for name in ("vol-up-key", "menu-key"):
+            with self.subTest(key=name):
+                key = Node(name, props=[Prop.of("linux,code", "<KEY_VOLUMEUP>")])
+                keys = Node("adc-keys", ["adc_keys"], children=[key])
+                vendor = Node("adc-keys", ["adc_keys"])
+                self.converted(Node("/", children=[keys]), "adc-recovery", vendor, ["vol-up-key"])
+                moved = name == "vol-up-key"
+                self.assertEqual(key.name, "button-recovery" if moved else name)
+                code = "<KEY_VENDOR>" if moved else "<KEY_VOLUMEUP>"
+                self.assertEqual(values(key)["linux,code"], code)
+
+    def test_a_reset_the_power_sequence_drives_takes_its_polarity(self) -> None:
+        for line, expected in (("RK_PB2", "GPIO_ACTIVE_LOW"), ("RK_PB5", "GPIO_ACTIVE_HIGH")):
+            with self.subTest(sequence=line):
+                radio = Node(
+                    "seekwcn_boot",
+                    ["seekwcn_boot"],
+                    props=[Prop.of("reset-gpios", "<&gpio3 RK_PB2 GPIO_ACTIVE_HIGH>")],
+                )
+                sequence = Node(
+                    "sdio-pwrseq",
+                    props=[Prop.of("reset-gpios", f"<&gpio3 {line} GPIO_ACTIVE_LOW>")],
+                )
+                root = Node("/", children=[radio, sequence])
+                self.converted(root, "shared-reset", Node("seekwcn_boot", ["seekwcn_boot"]), [])
+                self.assertEqual(values(radio)["reset-gpios"], f"<&gpio3 RK_PB2 {expected}>")
+
+    def test_an_enabled_sai0_lends_its_pins_to_the_radio_s_power_sequence(self) -> None:
+        for status, lent in (('"okay"', True), ('"disabled"', False)):
+            with self.subTest(status=status):
+                sequence = Node(
+                    "sdio-pwrseq",
+                    props=[
+                        Prop.of("compatible", '"mmc-pwrseq-simple"'),
+                        Prop.of("pinctrl-0", "<&wifi_enable_h>"),
+                    ],
+                )
+                sai = Node(
+                    "sai@ffb80000",
+                    props=[Prop.of("pinctrl-0", "<&i2s0m0_lrck>"), Prop.of("status", status)],
+                )
+                report = self.converted(Node("/", children=[sequence]), "radio-pcm", sai, [])
+                pins = "<&wifi_enable_h>, <&i2s0m0_lrck>" if lent else "<&wifi_enable_h>"
+                self.assertEqual(values(sequence)["pinctrl-0"], pins)
+                self.assertEqual(report, ["unsupported node sai@ffb80000"])
+
+    def test_the_gpu_s_power_model_gives_it_a_dynamic_power_coefficient(self) -> None:
+        model = Node("power-model", props=[Prop.of("dynamic-coefficient", "<724>")])
+        for path, gives in (("/gpu@ff700000/power-model", True), ("/power-model", False)):
+            with self.subTest(path=path):
+                gpu = Node("gpu@ff700000")
+                report = self.converted(Node("/", children=[gpu]), "gpu-power", model, [], path)
+                self.assertEqual(
+                    values(gpu).get("dynamic-power-coefficient"), "<724>" if gives else None
+                )
+                self.assertEqual(bool(report), not gives)
+
+    def test_a_withheld_property_leaves_mainline_s_node_too(self) -> None:
+        nodes, _ = rockchip()
+        self.assertNotIn("operating-points-v2", values(nodes["/gpu@ff700000"]))

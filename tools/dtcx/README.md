@@ -116,7 +116,7 @@ The conf maps every vendor token to one outcome. Syntax:
 | `value`         | `<property> <vendor> <mainline>`: a quoted word in that property                |
 | `node`          | `<tokens…> <action> [args]`: a vendor node by compatible, name or full name     |
 | `prop`          | `<tokens…> <action> [args]`: a vendor property                                  |
-| `state`         | `<tokens…> <action>`: a non-default pin state: `same`, `as <state>` or `none`   |
+| `state`         | `<tokens…> <action>`: a pin state: `same`, `as`, `used-as <state>` or `none`    |
 | `clock`         | `<tokens…> as <provider> <cell>`: a vendor clock reference, for a built node    |
 | `also`          | `<token> <conversion> [args]`: a conversion besides the node's translation      |
 
@@ -125,6 +125,7 @@ The conf maps every vendor token to one outcome. Syntax:
 | `same`          | keep as written                                                                |
 | `mainline`      | mainline's dtsi has it; keep only on a node without a mainline counterpart     |
 | `as`            | `<name>`: rename; quoted words go through `value`                              |
+| `used-as`       | `<state>`, a pin state: rename it where another node uses the node, else drop  |
 | `flag`          | `<n>:<flag> …`: a number as a flag, `-` for none; other numbers are a question |
 | `scale`         | `<name> <step> <offset> [<n>:-]`: write `n × step + offset`; `<n>:-` is unset  |
 | `bits`          | `<from>:<to> …`: map each vendor bit; any other bit is a question              |
@@ -138,6 +139,8 @@ The conf maps every vendor token to one outcome. Syntax:
 | `none`          | drop it (the comment says why that is safe)                                    |
 | `none-if-empty` | `[same]`: drop when empty; keep a value with `same`, else a question           |
 | `unused-by`     | `<flag>`, on a node: drop when the vendor flag is absent or 0, else a question |
+| `wrapper`       | on a node: drop it, its children translated in its place                       |
+| `withhold`      | drop it from the vendor's node and mainline's; OPPs' cooling maps too          |
 | `supply-name`   | a supply by regulator name: drop when no vendor regulator has it               |
 | `unresolved`    | a question for the board's bring-up                                            |
 | `unsupported`   | no mainline binding exists: listed, not written                                |
@@ -145,13 +148,18 @@ The conf maps every vendor token to one outcome. Syntax:
 `node` can also name a conversion from `conversions.py`, which builds the mainline node from the
 vendor's own description: `pwrseq [parent]`, `vbus`, `enable <label>`, `boot-voltage`, `leds`,
 `hdmi-connector <controller> <port>`, `bluetooth-reset <property>` with `bluetooth-uart`,
-`bank-bias`, `recovery-key <level>`, and for Amlogic `aml-slot <host>`, `aml-pwrseq <host>`,
-`aml-32k`. OPP rows sharing a frequency merge into one row with `opp-microvolt-speed<bin>` per speed
-bin. Pin states without pin groups are not written.
+`bank-bias`, `recovery-key <level>`, `cec <controller> <hdmi>`, `rk-sound-card`, `pwm-ir`,
+`init-voltage`, `hdmi-ddc-i2c`, `led-roles <name>:<role>…`, `adc-recovery <key>` and `shared-reset`
+(each an `also`), `console`, `radio-pcm`, `gpu-power`, and for Amlogic `aml-slot <host>`,
+`aml-pwrseq <host>`, `aml-32k`. OPP rows sharing a frequency merge into one row with
+`opp-microvolt-speed<bin>` per speed bin. An OPP table keeps the vendor's rows, and of mainline's
+only an `opp-suspend` row below them all. Pin states without pin groups are not written.
 
-`--report <file>` lists what the conf left open, one decision per line: `unresolved` (a question),
-`dormant` (a question on a node the vendor disabled), `unsupported`, and `unknown` (a token the conf
-does not name; never guessed). A conf is done when nothing is unknown and every drop has a reason.
+`--report <file>` lists every decision the conf made away from the vendor, one a line: `none` (a
+node, property or pin state dropped from an enabled node), `unresolved` (a question), `dormant` (a
+question on a node the vendor disabled), `unsupported`, and `unknown` (a token the conf does not
+name; never guessed). A conf is done when nothing is unknown and every `none` names what it did on
+the vendor kernel and why mainline needs none of it.
 
 ## Comparing trees: semdiff.py
 
