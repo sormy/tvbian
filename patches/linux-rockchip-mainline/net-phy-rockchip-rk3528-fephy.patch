@@ -1,0 +1,199 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] net: phy: rockchip: support the RK3528 integrated FEPHY
+
+The RK3528's integrated 10/100 PHY, ID 0x00441400, links as a generic
+PHY but runs with its analog front end untuned. Program it as Rockchip's
+driver does with a fixed receive-detect threshold: transmit levels from
+the per-chip OTP trim, power saving and EEE off, and the transmit
+setting for 10BASE-T on each link change.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+--- a/drivers/net/phy/Kconfig
++++ b/drivers/net/phy/Kconfig
+@@ -414,7 +414,8 @@ config RENESAS_PHY
+ config ROCKCHIP_PHY
+ 	tristate "Rockchip Ethernet PHYs"
+ 	help
+-	  Currently supports the integrated Ethernet PHY.
++	  Currently supports the integrated Ethernet PHYs of the RK3036/RK3228
++	  family and of the RK3528.
+ 
+ config SMSC_PHY
+ 	tristate "SMSC PHYs"
+--- a/drivers/net/phy/rockchip.c
++++ b/drivers/net/phy/rockchip.c
+@@ -14,9 +14,12 @@
+ #include <linux/module.h>
+ #include <linux/mii.h>
+ #include <linux/netdevice.h>
++#include <linux/nvmem-consumer.h>
+ #include <linux/phy.h>
++#include <linux/slab.h>
+ 
+ #define INTERNAL_EPHY_ID			0x1234d400
++#define RK3528_EPHY_ID				0x00441400
+ 
+ #define MII_INTERNAL_CTRL_STATUS		17
+ #define SMI_ADDR_TSTCNTL			20
+@@ -170,6 +173,133 @@ static int rockchip_phy_resume(struct phy_device *phydev)
+ 	return rockchip_integrated_phy_config_init(phydev);
+ }
+ 
++/* RK3528 integrated FEPHY: pages select through register 0x1f, page number in the high byte */
++#define RK3528_PAGE_SEL				0x1f
++#define RK3528_PAGE_AFE				6
++#define RK3528_AFE_TX_CTRL			0x14
++#define RK3528_AFE_TX_10M			BIT(13)
++#define RK3528_TX_LEVEL_100M			0x2d
++#define RK3528_TX_LEVEL_10M			0x32
++
++struct rk3528_ephy {
++	u8 tx_level_100m;
++	u8 tx_level_10m;
++};
++
++static int rk3528_ephy_read_page(struct phy_device *phydev)
++{
++	int ret = __phy_read(phydev, RK3528_PAGE_SEL);
++
++	return ret < 0 ? ret : ret >> 8;
++}
++
++static int rk3528_ephy_write_page(struct phy_device *phydev, int page)
++{
++	return __phy_write(phydev, RK3528_PAGE_SEL, page << 8);
++}
++
++static int rk3528_ephy_probe(struct phy_device *phydev)
++{
++	struct rk3528_ephy *priv;
++	struct nvmem_cell *cell;
++	size_t len;
++	u8 *level;
++
++	priv = devm_kzalloc(&phydev->mdio.dev, sizeof(*priv), GFP_KERNEL);
++	if (!priv)
++		return -ENOMEM;
++
++	priv->tx_level_100m = RK3528_TX_LEVEL_100M;
++	priv->tx_level_10m = RK3528_TX_LEVEL_10M;
++	phydev->priv = priv;
++
++	/* The transmit levels are trimmed per chip in OTP; unprogrammed parts keep the defaults */
++	cell = devm_nvmem_cell_get(&phydev->mdio.dev, "txlevel");
++	if (IS_ERR(cell)) {
++		if (PTR_ERR(cell) == -ENOENT)
++			return 0;
++		return PTR_ERR(cell);
++	}
++
++	level = nvmem_cell_read(cell, &len);
++	if (IS_ERR(level))
++		return PTR_ERR(level);
++
++	if (len == 2 && level[0] && level[1]) {
++		priv->tx_level_10m = level[0];
++		priv->tx_level_100m = level[1];
++	}
++	kfree(level);
++
++	return 0;
++}
++
++static const struct {
++	u8 page;
++	u8 reg;
++	u16 val;
++} rk3528_ephy_init[] = {
++	{ 1, 0x10, 0xfbfe },	/* offset clock on */
++	{ 1, 0x12, 0x4822 },	/* auto power saving off, 2 s receive detect */
++	{ 2, 0x18, 0x0000 },	/* AFE transmit/receive */
++	{ 6, 0x10, 0x5540 },	/* ADC */
++	{ 6, 0x12, 0x0400 },	/* gain */
++	{ 6, RK3528_AFE_TX_CTRL, 0x1088 },	/* receive detect at 160 mV */
++	{ 6, 0x17, 0x0575 },	/* charge pump current */
++	{ 6, 0x18, 0x0000 },	/* ADC op-amp bias */
++	{ 6, 0x19, 0x0408 },	/* receive signal detector level */
++	{ 6, 0x1c, 0x8880 },	/* AFE power-down control */
++	{ 6, 0x1b, 0x888e },	/* transmit MOS drive */
++	{ 8, 0x1d, 0x0844 },	/* auto calibration off */
++	{ 8, 0x13, 0xc096 },	/* restart offset calibration */
++};
++
++static int rk3528_ephy_config_init(struct phy_device *phydev)
++{
++	struct rk3528_ephy *priv = phydev->priv;
++	int i, ret;
++
++	for (i = 0; i < ARRAY_SIZE(rk3528_ephy_init); i++) {
++		ret = phy_write_paged(phydev, rk3528_ephy_init[i].page,
++				      rk3528_ephy_init[i].reg,
++				      rk3528_ephy_init[i].val);
++		if (ret)
++			return ret;
++	}
++
++	ret = phy_write_paged(phydev, RK3528_PAGE_AFE, 0x15,
++			      priv->tx_level_100m << 8 | priv->tx_level_10m);
++	if (ret)
++		return ret;
++
++	/* ultra auto power saving off; IEEE-compliant mode on */
++	ret = phy_modify_paged(phydev, 1, 0x13, BIT(15), 0);
++	if (ret)
++		return ret;
++
++	ret = phy_modify_paged(phydev, 1, 0x17, 0, BIT(3));
++	if (ret)
++		return ret;
++
++	phy_disable_eee(phydev);
++
++	return 0;
++}
++
++static void rk3528_ephy_link_change_notify(struct phy_device *phydev)
++{
++	u16 val = phydev->speed == SPEED_10 ? RK3528_AFE_TX_10M : 0;
++	int ret;
++
++	if (phydev->state != PHY_RUNNING)
++		return;
++
++	ret = phy_modify_paged(phydev, RK3528_PAGE_AFE, RK3528_AFE_TX_CTRL,
++			       GENMASK(14, 13), val);
++	if (ret)
++		phydev_err(phydev, "10M transmit setting failed: %d\n", ret);
++}
++
+ static struct phy_driver rockchip_phy_driver[] = {
+ {
+ 	.phy_id			= INTERNAL_EPHY_ID,
+@@ -184,12 +314,26 @@ static struct phy_driver rockchip_phy_driver[] = {
+ 	.suspend		= genphy_suspend,
+ 	.resume			= rockchip_phy_resume,
+ },
++{
++	PHY_ID_MATCH_EXACT(RK3528_EPHY_ID),
++	.name			= "Rockchip RK3528 integrated FEPHY",
++	/* PHY_BASIC_FEATURES */
++	.probe			= rk3528_ephy_probe,
++	.read_page		= rk3528_ephy_read_page,
++	.write_page		= rk3528_ephy_write_page,
++	.config_init		= rk3528_ephy_config_init,
++	.link_change_notify	= rk3528_ephy_link_change_notify,
++	.soft_reset		= genphy_soft_reset,
++	.suspend		= genphy_suspend,
++	.resume			= genphy_resume,
++},
+ };
+ 
+ module_phy_driver(rockchip_phy_driver);
+ 
+ static const struct mdio_device_id __maybe_unused rockchip_phy_tbl[] = {
+ 	{ INTERNAL_EPHY_ID, 0xfffffff0 },
++	{ PHY_ID_MATCH_EXACT(RK3528_EPHY_ID) },
+ 	{ }
+ };
+ 

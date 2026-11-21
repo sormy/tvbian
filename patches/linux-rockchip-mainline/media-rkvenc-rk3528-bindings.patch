@@ -1,0 +1,31 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] dt-bindings: media: rockchip,rv1126-rkvenc: Add RK3528
+
+The RK3528 carries the VEPU540C successor of the RKVENC v1 encoder. It
+takes the same AXI, AHB and core clocks and resets, one interrupt, a
+power domain and one IOMMU.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ .../devicetree/bindings/media/rockchip,rv1126-rkvenc.yaml     | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/Documentation/devicetree/bindings/media/rockchip,rv1126-rkvenc.yaml b/Documentation/devicetree/bindings/media/rockchip,rv1126-rkvenc.yaml
+index 9a83ce1..66abfac 100644
+--- a/Documentation/devicetree/bindings/media/rockchip,rv1126-rkvenc.yaml
++++ b/Documentation/devicetree/bindings/media/rockchip,rv1126-rkvenc.yaml
+@@ -12,11 +12,13 @@ maintainers:
+ description:
+   The RKVENC v1 encoder found in the RV1109, RV1126, RK3566 and RK3568
+   encodes H.264 and HEVC from raw YUV or RGB frames. It reads and writes
+-  memory through an IOMMU with two MMU instances.
++  memory through an IOMMU with two MMU instances. The RK3528 carries its
++  VEPU540C successor, behind a single MMU instance.
+ 
+ properties:
+   compatible:
+     enum:
++      - rockchip,rk3528-rkvenc
+       - rockchip,rk3568-rkvenc
+       - rockchip,rv1126-rkvenc
+ 

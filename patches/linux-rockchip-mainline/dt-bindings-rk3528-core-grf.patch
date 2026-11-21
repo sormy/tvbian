@@ -1,0 +1,18 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] dt-bindings: soc: rockchip: grf: Add RK3528 core GRF
+
+The RK3528 GRF block at 0xff300000 holds the CPU's PVTPLL count.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/Documentation/devicetree/bindings/soc/rockchip/grf.yaml b/Documentation/devicetree/bindings/soc/rockchip/grf.yaml
+--- a/Documentation/devicetree/bindings/soc/rockchip/grf.yaml
++++ b/Documentation/devicetree/bindings/soc/rockchip/grf.yaml
+@@ -15,6 +15,7 @@ properties:
+       - items:
+           - enum:
+               - rockchip,rk3288-sgrf
++              - rockchip,rk3528-core-grf
+               - rockchip,rk3528-ioc-grf
+               - rockchip,rk3528-pipe-phy-grf
+               - rockchip,rk3528-vo-grf

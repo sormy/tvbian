@@ -1,0 +1,578 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] drm/rockchip: add the RK3528 CVBS TV encoder
+
+The RK3528 has a composite video output: VOP2 video port 1 sends a
+BT.656 stream through its RGB interface to a BT.656 decoder, a TV
+encoder and an on-chip video DAC. Add an encoder and a Composite
+connector for it, bound to the Rockchip DRM master as a component, with
+the PAL 720x576i and NTSC 720x480i modes.
+
+The register values, the luma filter, the 4x clock upsampling, the
+settle times and the DAC output current trim from OTP, one step lower on
+test version 0 parts, are those of the Rockchip BSP driver by Algea Cao.
+
+The encoder cannot sense a load, so the connector reports unknown:
+clients light it only when nothing else is connected.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/drivers/gpu/drm/rockchip/Kconfig b/drivers/gpu/drm/rockchip/Kconfig
+--- a/drivers/gpu/drm/rockchip/Kconfig
++++ b/drivers/gpu/drm/rockchip/Kconfig
+@@ -152,4 +152,13 @@ config ROCKCHIP_RK3066_HDMI
+ 	  This selects support for Rockchip SoC specific extensions
+ 	  for the RK3066 HDMI driver. If you want to enable
+ 	  HDMI on RK3066 based SoC, you should select this option.
++
++config ROCKCHIP_TVE
++	bool "Rockchip TV encoder support"
++	depends on ROCKCHIP_VOP2
++	help
++	  Choose this option to enable the composite video (CVBS) output
++	  of the RK3528. Video port 1 of the VOP2 sends a BT.656 stream to
++	  the TV encoder, which drives the on-chip video DAC in PAL or
++	  NTSC. Say Y if your board wires the CVBS jack to that DAC.
+ endif
+diff --git a/drivers/gpu/drm/rockchip/Makefile b/drivers/gpu/drm/rockchip/Makefile
+--- a/drivers/gpu/drm/rockchip/Makefile
++++ b/drivers/gpu/drm/rockchip/Makefile
+@@ -19,5 +19,6 @@ rockchipdrm-$(CONFIG_ROCKCHIP_INNO_HDMI) += inno_hdmi-rockchip.o
+ rockchipdrm-$(CONFIG_ROCKCHIP_LVDS) += rockchip_lvds.o
+ rockchipdrm-$(CONFIG_ROCKCHIP_RGB) += rockchip_rgb.o
+ rockchipdrm-$(CONFIG_ROCKCHIP_RK3066_HDMI) += rk3066_hdmi.o
++rockchipdrm-$(CONFIG_ROCKCHIP_TVE) += rockchip_tve.o
+ 
+ obj-$(CONFIG_DRM_ROCKCHIP) += rockchipdrm.o
+diff --git a/drivers/gpu/drm/rockchip/rockchip_drm_drv.c b/drivers/gpu/drm/rockchip/rockchip_drm_drv.c
+--- a/drivers/gpu/drm/rockchip/rockchip_drm_drv.c
++++ b/drivers/gpu/drm/rockchip/rockchip_drm_drv.c
+@@ -545,6 +545,7 @@ static int __init rockchip_drm_init(void)
+ 	ADD_ROCKCHIP_SUB_DRIVER(inno_hdmi_driver, CONFIG_ROCKCHIP_INNO_HDMI);
+ 	ADD_ROCKCHIP_SUB_DRIVER(rk3066_hdmi_driver,
+ 				CONFIG_ROCKCHIP_RK3066_HDMI);
++	ADD_ROCKCHIP_SUB_DRIVER(rockchip_tve_driver, CONFIG_ROCKCHIP_TVE);
+ 
+ 	ret = platform_register_drivers(rockchip_sub_drivers,
+ 					num_rockchip_sub_drivers);
+diff --git a/drivers/gpu/drm/rockchip/rockchip_drm_drv.h b/drivers/gpu/drm/rockchip/rockchip_drm_drv.h
+--- a/drivers/gpu/drm/rockchip/rockchip_drm_drv.h
++++ b/drivers/gpu/drm/rockchip/rockchip_drm_drv.h
+@@ -101,6 +101,7 @@ extern struct platform_driver rockchip_dp_driver;
+ extern struct platform_driver rockchip_lvds_driver;
+ extern struct platform_driver vop_platform_driver;
+ extern struct platform_driver rk3066_hdmi_driver;
++extern struct platform_driver rockchip_tve_driver;
+ extern struct platform_driver vop2_platform_driver;
+ 
+ static inline struct rockchip_encoder *to_rockchip_encoder(struct drm_encoder *encoder)
+diff --git a/drivers/gpu/drm/rockchip/rockchip_tve.c b/drivers/gpu/drm/rockchip/rockchip_tve.c
+new file mode 100644
+--- /dev/null
++++ b/drivers/gpu/drm/rockchip/rockchip_tve.c
+@@ -0,0 +1,506 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Rockchip RK3528 CVBS TV encoder
++ *
++ * Register sequences and VDAC trim from the Rockchip BSP driver by
++ * Algea Cao <algea.cao@rock-chips.com>.
++ */
++
++#include <linux/bitfield.h>
++#include <linux/bits.h>
++#include <linux/clk.h>
++#include <linux/component.h>
++#include <linux/delay.h>
++#include <linux/hw_bitfield.h>
++#include <linux/io.h>
++#include <linux/media-bus-format.h>
++#include <linux/mfd/syscon.h>
++#include <linux/module.h>
++#include <linux/nvmem-consumer.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++#include <linux/pm_runtime.h>
++#include <linux/regmap.h>
++
++#include <drm/drm_atomic.h>
++#include <drm/drm_atomic_helper.h>
++#include <drm/drm_connector.h>
++#include <drm/drm_encoder.h>
++#include <drm/drm_modes.h>
++#include <drm/drm_of.h>
++#include <drm/drm_probe_helper.h>
++
++#include <uapi/linux/videodev2.h>
++
++#include "rockchip_drm_drv.h"
++
++#define RK3528_VO_GRF_CVBS_CON		0x0010
++#define CVBS_CON_MASK			GENMASK(5, 0)
++#define CVBS_CON_TVE_DCLK_EN		BIT(4)
++#define CVBS_CON_DCLK_UPSAMPLE_4X	BIT(3)
++#define CVBS_CON_DCLK_UPSAMPLE_EN	BIT(2)
++#define CVBS_CON_TVE_MODE_PAL		BIT(1)
++#define CVBS_CON_TVE_EN			BIT(0)
++
++#define BT656_DECODER_CTRL		0x3d00
++#define BT656_DECODER_CROP		0x3d04
++#define BT656_DECODER_SIZE		0x3d08
++#define BT656_DECODER_HTOTAL_HS_END	0x3d0c
++#define BT656_DECODER_VACT_ST_HACT_ST	0x3d10
++#define BT656_DECODER_VTOTAL_VS_END	0x3d14
++#define BT656_DECODER_VS_ST_END_F1	0x3d18
++#define BT656_DECODER_DBG_REG		0x3d1c
++
++#define TVE_MODE_CTRL			0x3e00
++#define TVE_HOR_TIMING1			0x3e04
++#define TVE_HOR_TIMING2			0x3e08
++#define TVE_HOR_TIMING3			0x3e0c
++#define TVE_SUB_CAR_FRQ			0x3e10
++#define TVE_LUMA_FILTER(n)		(0x3e14 + (n) * 4)
++#define TVE_IMAGE_POSITION		0x3e34
++#define TVE_ROUTING			0x3e38
++#define TVE_SYNC_ADJUST			0x3e50
++#define TVE_STATUS			0x3e54
++#define TVE_CTRL			0x3e68
++#define TVE_INTR_STATUS			0x3e6c
++#define TVE_INTR_EN			0x3e70
++#define TVE_INTR_CLR			0x3e74
++#define TVE_COLOR_BUSRT_SAT		0x3e78
++#define TVE_CHROMA_BANDWIDTH		0x3e8c
++#define TVE_BRIGHTNESS_CONTRAST		0x3e90
++#define TVE_CLAMP			0x3ea0
++
++#define VDAC_CLK_RST			0x0000
++#define VDAC_ANALOG_RST_N		BIT(7)
++#define VDAC_DIGITAL_RST_N		BIT(6)
++#define VDAC_PWM_REF_CTRL		0x0280
++#define VDAC_REF_VOLTAGE		GENMASK(7, 4)
++#define VDAC_DAC_PWN			BIT(1)
++#define VDAC_BIAS_PWN			BIT(0)
++#define VDAC_CURRENT_CTRL		0x0284
++
++#define VDAC_RESET_MS			20
++#define TVE_SETTLE_MS			1000
++
++#define BT656_REG_COUNT			8
++#define TVE_REG_COUNT			17
++
++struct tve_reg {
++	u16 offset;
++	u32 value;
++};
++
++struct tve_standard {
++	struct drm_display_mode mode;
++	bool pal;
++	struct tve_reg bt656[BT656_REG_COUNT];
++	struct tve_reg tve[TVE_REG_COUNT];
++};
++
++static const struct tve_standard rk3528_tve_standards[] = {
++	{
++		.mode = { DRM_MODE("720x576i", DRM_MODE_TYPE_DRIVER, 13500,
++				   720, 753, 816, 864, 0, 576, 580, 586, 625, 0,
++				   DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_PVSYNC |
++				   DRM_MODE_FLAG_INTERLACE | DRM_MODE_FLAG_DBLCLK) },
++		.pal = true,
++		.bt656 = {
++			{ BT656_DECODER_CROP, 0x00000000 },
++			{ BT656_DECODER_SIZE, 0x024002d0 },
++			{ BT656_DECODER_HTOTAL_HS_END, 0x0360003f },
++			{ BT656_DECODER_VACT_ST_HACT_ST, 0x0016006f },
++			{ BT656_DECODER_VTOTAL_VS_END, 0x02710003 },
++			{ BT656_DECODER_VS_ST_END_F1, 0x0138013b },
++			{ BT656_DECODER_DBG_REG, 0x024002d0 },
++			{ BT656_DECODER_CTRL, 0x00000009 },
++		},
++		.tve = {
++			{ TVE_MODE_CTRL, 0x010ab906 },
++			{ TVE_HOR_TIMING1, 0x00c28381 },
++			{ TVE_HOR_TIMING2, 0x267d111d },
++			{ TVE_HOR_TIMING3, 0x66c00880 },
++			{ TVE_SUB_CAR_FRQ, 0x2a098acb },
++			{ TVE_IMAGE_POSITION, 0x001500f6 },
++			{ TVE_ROUTING, 0x10008882 },
++			{ TVE_SYNC_ADJUST, 0x00000000 },
++			{ TVE_STATUS, 0x000000b0 },
++			{ TVE_CTRL, 0x00000000 },
++			{ TVE_INTR_STATUS, 0x00000000 },
++			{ TVE_INTR_EN, 0x00000000 },
++			{ TVE_INTR_CLR, 0x00000000 },
++			{ TVE_COLOR_BUSRT_SAT, 0x00356245 },
++			{ TVE_CHROMA_BANDWIDTH, 0x00000022 },
++			{ TVE_BRIGHTNESS_CONTRAST, 0x0000aa00 },
++			{ TVE_CLAMP, 0x00000000 },
++		},
++	}, {
++		.mode = { DRM_MODE("720x480i", DRM_MODE_TYPE_DRIVER, 13500,
++				   720, 753, 815, 858, 0, 480, 480, 486, 525, 0,
++				   DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_PVSYNC |
++				   DRM_MODE_FLAG_INTERLACE | DRM_MODE_FLAG_DBLCLK) },
++		.bt656 = {
++			{ BT656_DECODER_CROP, 0x00000000 },
++			{ BT656_DECODER_SIZE, 0x01e002d0 },
++			{ BT656_DECODER_HTOTAL_HS_END, 0x035a003e },
++			{ BT656_DECODER_VACT_ST_HACT_ST, 0x00160069 },
++			{ BT656_DECODER_VTOTAL_VS_END, 0x020d0003 },
++			{ BT656_DECODER_VS_ST_END_F1, 0x01060109 },
++			{ BT656_DECODER_DBG_REG, 0x024002d0 },
++			{ BT656_DECODER_CTRL, 0x00000009 },
++		},
++		.tve = {
++			{ TVE_MODE_CTRL, 0x000af906 },
++			{ TVE_HOR_TIMING1, 0x00c07a81 },
++			{ TVE_HOR_TIMING2, 0x169810fc },
++			{ TVE_HOR_TIMING3, 0x96b40000 },
++			{ TVE_SUB_CAR_FRQ, 0x21f07bd7 },
++			{ TVE_IMAGE_POSITION, 0x001500d6 },
++			{ TVE_ROUTING, 0x10088880 },
++			{ TVE_SYNC_ADJUST, 0x00000000 },
++			{ TVE_STATUS, 0x00000000 },
++			{ TVE_CTRL, 0x00000000 },
++			{ TVE_INTR_STATUS, 0x00000000 },
++			{ TVE_INTR_EN, 0x00000000 },
++			{ TVE_INTR_CLR, 0x00000000 },
++			{ TVE_COLOR_BUSRT_SAT, 0x0052543c },
++			{ TVE_CHROMA_BANDWIDTH, 0x00000002 },
++			{ TVE_BRIGHTNESS_CONTRAST, 0x00008300 },
++			{ TVE_CLAMP, 0x00000000 },
++		},
++	},
++};
++
++static const u32 rk3528_tve_luma_filter[] = {
++	0x0ff80006, 0x00090010, 0x0ffb0fd8, 0x00080057,
++	0x0fef0f64, 0x0016010a, 0x0f830df7, 0x08de055f,
++};
++
++struct rockchip_tve_soc_data {
++	const struct tve_standard *standards;
++	unsigned int num_standards;
++	const u32 *luma_filter;
++	unsigned int num_luma_filter;
++	u32 grf_cvbs_con;
++	u8 out_current_default;
++	u8 ref_voltage;
++};
++
++static const struct rockchip_tve_soc_data rk3528_tve_data = {
++	.standards = rk3528_tve_standards,
++	.num_standards = ARRAY_SIZE(rk3528_tve_standards),
++	.luma_filter = rk3528_tve_luma_filter,
++	.num_luma_filter = ARRAY_SIZE(rk3528_tve_luma_filter),
++	.grf_cvbs_con = RK3528_VO_GRF_CVBS_CON,
++	.out_current_default = 0xd2,
++	.ref_voltage = 7,
++};
++
++struct rockchip_tve {
++	struct device *dev;
++	const struct rockchip_tve_soc_data *data;
++	struct rockchip_encoder encoder;
++	struct drm_connector connector;
++	void __iomem *regs;
++	void __iomem *vdac;
++	struct regmap *grf;
++	struct clk_bulk_data *clks;
++	int num_clks;
++	u8 out_current;
++};
++
++static struct rockchip_tve *encoder_to_tve(struct drm_encoder *encoder)
++{
++	return container_of(encoder, struct rockchip_tve, encoder.encoder);
++}
++
++static struct rockchip_tve *connector_to_tve(struct drm_connector *connector)
++{
++	return container_of(connector, struct rockchip_tve, connector);
++}
++
++static const struct tve_standard *tve_find_standard(const struct rockchip_tve *tve,
++						    const struct drm_display_mode *mode)
++{
++	unsigned int i;
++
++	for (i = 0; i < tve->data->num_standards; i++)
++		if (drm_mode_match(mode, &tve->data->standards[i].mode,
++				   DRM_MODE_MATCH_TIMINGS | DRM_MODE_MATCH_CLOCK |
++				   DRM_MODE_MATCH_FLAGS))
++			return &tve->data->standards[i];
++
++	return NULL;
++}
++
++static void tve_write_regs(struct rockchip_tve *tve, const struct tve_reg *regs, int count)
++{
++	int i;
++
++	for (i = 0; i < count; i++)
++		writel_relaxed(regs[i].value, tve->regs + regs[i].offset);
++}
++
++static void tve_set_standard(struct rockchip_tve *tve, const struct tve_standard *std)
++{
++	u32 con = CVBS_CON_TVE_DCLK_EN | CVBS_CON_DCLK_UPSAMPLE_4X |
++		  CVBS_CON_DCLK_UPSAMPLE_EN | CVBS_CON_TVE_EN;
++	int i;
++
++	for (i = 0; i < tve->data->num_luma_filter; i++)
++		writel_relaxed(tve->data->luma_filter[i], tve->regs + TVE_LUMA_FILTER(i));
++
++	tve_write_regs(tve, std->bt656, ARRAY_SIZE(std->bt656));
++	tve_write_regs(tve, std->tve, ARRAY_SIZE(std->tve));
++
++	if (std->pal)
++		con |= CVBS_CON_TVE_MODE_PAL;
++	regmap_write(tve->grf, tve->data->grf_cvbs_con, FIELD_PREP_WM16(CVBS_CON_MASK, con));
++}
++
++static void tve_vdac_enable(struct rockchip_tve *tve)
++{
++	writel_relaxed(0, tve->vdac + VDAC_CLK_RST);
++	msleep(VDAC_RESET_MS);
++	writel_relaxed(VDAC_ANALOG_RST_N | VDAC_DIGITAL_RST_N, tve->vdac + VDAC_CLK_RST);
++
++	writel_relaxed(tve->out_current, tve->vdac + VDAC_CURRENT_CTRL);
++	writel_relaxed(FIELD_PREP(VDAC_REF_VOLTAGE, tve->data->ref_voltage) |
++		       VDAC_DAC_PWN | VDAC_BIAS_PWN, tve->vdac + VDAC_PWM_REF_CTRL);
++}
++
++static void tve_vdac_disable(struct rockchip_tve *tve)
++{
++	writel_relaxed(0, tve->vdac + VDAC_PWM_REF_CTRL);
++}
++
++static void rockchip_tve_encoder_atomic_enable(struct drm_encoder *encoder,
++					       struct drm_atomic_commit *state)
++{
++	struct rockchip_tve *tve = encoder_to_tve(encoder);
++	struct drm_crtc *crtc = drm_atomic_get_new_crtc_for_encoder(state, encoder);
++	struct drm_crtc_state *crtc_state = drm_atomic_get_new_crtc_state(state, crtc);
++	const struct tve_standard *std = tve_find_standard(tve, &crtc_state->adjusted_mode);
++	int ret;
++
++	ret = pm_runtime_resume_and_get(tve->dev);
++	if (ret) {
++		dev_err(tve->dev, "failed to resume: %d\n", ret);
++		return;
++	}
++
++	ret = clk_bulk_prepare_enable(tve->num_clks, tve->clks);
++	if (ret) {
++		dev_err(tve->dev, "failed to enable clocks: %d\n", ret);
++		pm_runtime_put(tve->dev);
++		return;
++	}
++
++	tve_set_standard(tve, std);
++	/* The BSP waits this long between starting the encoder and the DAC */
++	msleep(TVE_SETTLE_MS);
++	tve_vdac_enable(tve);
++}
++
++static void rockchip_tve_encoder_atomic_disable(struct drm_encoder *encoder,
++						struct drm_atomic_commit *state)
++{
++	struct rockchip_tve *tve = encoder_to_tve(encoder);
++
++	tve_vdac_disable(tve);
++	clk_bulk_disable_unprepare(tve->num_clks, tve->clks);
++	pm_runtime_put(tve->dev);
++}
++
++static int rockchip_tve_encoder_atomic_check(struct drm_encoder *encoder,
++					     struct drm_crtc_state *crtc_state,
++					     struct drm_connector_state *conn_state)
++{
++	struct rockchip_tve *tve = encoder_to_tve(encoder);
++	struct rockchip_crtc_state *s = to_rockchip_crtc_state(crtc_state);
++
++	if (!tve_find_standard(tve, &crtc_state->adjusted_mode))
++		return -EINVAL;
++
++	s->output_mode = ROCKCHIP_OUT_MODE_P888;
++	s->output_type = DRM_MODE_CONNECTOR_Composite;
++	s->output_bpc = 8;
++	s->bus_format = MEDIA_BUS_FMT_YUV8_1X24;
++	s->color_space = V4L2_COLORSPACE_SMPTE170M;
++
++	return 0;
++}
++
++static const struct drm_encoder_helper_funcs rockchip_tve_encoder_helper_funcs = {
++	.atomic_enable = rockchip_tve_encoder_atomic_enable,
++	.atomic_disable = rockchip_tve_encoder_atomic_disable,
++	.atomic_check = rockchip_tve_encoder_atomic_check,
++};
++
++static int rockchip_tve_get_modes(struct drm_connector *connector)
++{
++	const struct rockchip_tve_soc_data *data = connector_to_tve(connector)->data;
++	unsigned int i;
++
++	for (i = 0; i < data->num_standards; i++) {
++		struct drm_display_mode *mode;
++
++		mode = drm_mode_duplicate(connector->dev, &data->standards[i].mode);
++		if (!mode)
++			return i;
++		if (data->standards[i].pal)
++			mode->type |= DRM_MODE_TYPE_PREFERRED;
++		drm_mode_probed_add(connector, mode);
++	}
++
++	return i;
++}
++
++static enum drm_mode_status rockchip_tve_mode_valid(struct drm_connector *connector,
++						    const struct drm_display_mode *mode)
++{
++	return tve_find_standard(connector_to_tve(connector), mode) ? MODE_OK : MODE_BAD;
++}
++
++static const struct drm_connector_helper_funcs rockchip_tve_connector_helper_funcs = {
++	.get_modes = rockchip_tve_get_modes,
++	.mode_valid = rockchip_tve_mode_valid,
++};
++
++/* The encoder cannot sense a load: clients use it when nothing else is connected */
++static enum drm_connector_status rockchip_tve_detect(struct drm_connector *connector,
++						     bool force)
++{
++	return connector_status_unknown;
++}
++
++static const struct drm_connector_funcs rockchip_tve_connector_funcs = {
++	.detect = rockchip_tve_detect,
++	.fill_modes = drm_helper_probe_single_connector_modes,
++	.reset = drm_atomic_helper_connector_reset,
++	.atomic_duplicate_state = drm_atomic_helper_connector_duplicate_state,
++	.atomic_destroy_state = drm_atomic_helper_connector_destroy_state,
++};
++
++static int rockchip_tve_bind(struct device *dev, struct device *master, void *data)
++{
++	struct rockchip_tve *tve = dev_get_drvdata(dev);
++	struct drm_encoder *encoder = &tve->encoder.encoder;
++	struct drm_connector *connector = &tve->connector;
++	struct drm_device *drm = data;
++	int ret;
++
++	encoder->possible_crtcs = drm_of_find_possible_crtcs(drm, dev->of_node);
++	if (!encoder->possible_crtcs)
++		return -EPROBE_DEFER;
++
++	ret = rockchip_drm_encoder_set_crtc_endpoint_id(&tve->encoder, dev->of_node, 0, 0);
++	if (ret)
++		return ret;
++
++	ret = drmm_encoder_init(drm, encoder, NULL, DRM_MODE_ENCODER_TVDAC, NULL);
++	if (ret)
++		return ret;
++
++	drm_encoder_helper_add(encoder, &rockchip_tve_encoder_helper_funcs);
++
++	connector->interlace_allowed = true;
++	ret = drmm_connector_init(drm, connector, &rockchip_tve_connector_funcs,
++				  DRM_MODE_CONNECTOR_Composite, NULL);
++	if (ret)
++		return ret;
++
++	drm_connector_helper_add(connector, &rockchip_tve_connector_helper_funcs);
++
++	return drm_connector_attach_encoder(connector, encoder);
++}
++
++static const struct component_ops rockchip_tve_component_ops = {
++	.bind = rockchip_tve_bind,
++};
++
++static int rockchip_tve_read_out_current(struct rockchip_tve *tve)
++{
++	u8 trim, version;
++	int ret;
++
++	tve->out_current = tve->data->out_current_default;
++
++	ret = nvmem_cell_read_u8(tve->dev, "out-current", &trim);
++	if (ret == -EPROBE_DEFER)
++		return ret;
++	if (ret || !trim)
++		return 0;
++
++	ret = nvmem_cell_read_u8(tve->dev, "version", &version);
++	if (ret == -EPROBE_DEFER)
++		return ret;
++	/* Test version 0 parts are trimmed one step high */
++	if (!ret && !version)
++		trim--;
++
++	tve->out_current = trim;
++
++	return 0;
++}
++
++static int rockchip_tve_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct rockchip_tve *tve;
++	int ret;
++
++	tve = devm_kzalloc(dev, sizeof(*tve), GFP_KERNEL);
++	if (!tve)
++		return -ENOMEM;
++
++	tve->dev = dev;
++	tve->data = of_device_get_match_data(dev);
++
++	tve->regs = devm_platform_ioremap_resource(pdev, 0);
++	if (IS_ERR(tve->regs))
++		return PTR_ERR(tve->regs);
++
++	tve->vdac = devm_platform_ioremap_resource(pdev, 1);
++	if (IS_ERR(tve->vdac))
++		return PTR_ERR(tve->vdac);
++
++	tve->grf = syscon_regmap_lookup_by_phandle(dev->of_node, "rockchip,grf");
++	if (IS_ERR(tve->grf))
++		return dev_err_probe(dev, PTR_ERR(tve->grf), "failed to get rockchip,grf\n");
++
++	tve->num_clks = devm_clk_bulk_get_all(dev, &tve->clks);
++	if (tve->num_clks < 0)
++		return dev_err_probe(dev, tve->num_clks, "failed to get clocks\n");
++
++	ret = rockchip_tve_read_out_current(tve);
++	if (ret)
++		return ret;
++
++	ret = devm_pm_runtime_enable(dev);
++	if (ret)
++		return ret;
++
++	platform_set_drvdata(pdev, tve);
++
++	return component_add(dev, &rockchip_tve_component_ops);
++}
++
++static void rockchip_tve_remove(struct platform_device *pdev)
++{
++	component_del(&pdev->dev, &rockchip_tve_component_ops);
++}
++
++static const struct of_device_id rockchip_tve_dt_ids[] = {
++	{ .compatible = "rockchip,rk3528-tve", .data = &rk3528_tve_data },
++	{ /* sentinel */ }
++};
++MODULE_DEVICE_TABLE(of, rockchip_tve_dt_ids);
++
++struct platform_driver rockchip_tve_driver = {
++	.probe = rockchip_tve_probe,
++	.remove = rockchip_tve_remove,
++	.driver = {
++		.name = "rockchip-tve",
++		.of_match_table = rockchip_tve_dt_ids,
++	},
++};

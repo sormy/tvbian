@@ -1,0 +1,93 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] media: rc: keymaps: Add the H96 Max M2 Plus remote
+
+The H96 Max M2 Plus's stock remote, NEC, address 0x04. Map each button as
+its label reads: the four app keys as the colour keys, and the mouse
+button, which toggles a pointer in the vendor's software, as
+KEY_TOUCHPAD_TOGGLE for a pointer mode to follow.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+--- a/drivers/media/rc/keymaps/Makefile
++++ b/drivers/media/rc/keymaps/Makefile
+@@ -56,6 +56,7 @@ obj-$(CONFIG_RC_MAP) += \
+ 			rc-geekbox.o \
+ 			rc-genius-tvgo-a11mce.o \
+ 			rc-gotview7135.o \
++			rc-h96max-m2-plus.o \
+ 			rc-hauppauge.o \
+ 			rc-hisi-poplar.o \
+ 			rc-hisi-tv-demo.o \
+--- /dev/null
++++ b/drivers/media/rc/keymaps/rc-h96max-m2-plus.c
+@@ -0,0 +1,60 @@
++// SPDX-License-Identifier: GPL-2.0+
++
++#include <media/rc-map.h>
++#include <linux/module.h>
++
++/*
++ * Keymap for the H96 Max M2 Plus's stock remote. The app keys,
++ * YouTube, Netflix, Prime Video and Google Play, are the colour keys. The
++ * mouse button toggles a pointer mode, as the vendor's software does with it.
++ */
++
++static struct rc_map_table h96max_m2_plus[] = {
++	{ 0x04f7, KEY_POWER },
++	{ 0x04f6, KEY_MUTE },
++	{ 0x0404, KEY_RED },
++	{ 0x044b, KEY_GREEN },
++	{ 0x0414, KEY_YELLOW },
++	{ 0x044c, KEY_BLUE },
++	{ 0x04fd, KEY_VOLUMEUP },
++	{ 0x04fc, KEY_VOLUMEDOWN },
++	{ 0x04ff, KEY_CHANNELUP },
++	{ 0x04fe, KEY_CHANNELDOWN },
++	{ 0x04d2, KEY_HOMEPAGE },
++	{ 0x04e5, KEY_BACK },
++	{ 0x04e4, KEY_BACKSPACE },
++	{ 0x04ba, KEY_UP },
++	{ 0x04b9, KEY_DOWN },
++	{ 0x04b8, KEY_LEFT },
++	{ 0x04b7, KEY_RIGHT },
++	{ 0x04bb, KEY_OK },
++	{ 0x04b5, KEY_MENU },
++	{ 0x044d, KEY_CONFIG },
++	{ 0x045b, KEY_SEARCH },
++	{ 0x04d0, KEY_TOUCHPAD_TOGGLE },
++};
++
++static struct rc_map_list h96max_m2_plus_map = {
++	.map = {
++		.scan     = h96max_m2_plus,
++		.size     = ARRAY_SIZE(h96max_m2_plus),
++		.rc_proto = RC_PROTO_NEC,
++		.name     = RC_MAP_H96MAX_M2_PLUS,
++	}
++};
++
++static int __init init_rc_map_h96max_m2_plus(void)
++{
++	return rc_map_register(&h96max_m2_plus_map);
++}
++
++static void __exit exit_rc_map_h96max_m2_plus(void)
++{
++	rc_map_unregister(&h96max_m2_plus_map);
++}
++
++module_init(init_rc_map_h96max_m2_plus)
++module_exit(exit_rc_map_h96max_m2_plus)
++
++MODULE_LICENSE("GPL");
++MODULE_DESCRIPTION("H96 Max M2 Plus remote controller keytable");
+--- a/include/media/rc-map.h
++++ b/include/media/rc-map.h
+@@ -259,6 +259,7 @@ struct rc_map *rc_map_get(const char *name);
+ #define RC_MAP_GEEKBOX                   "rc-geekbox"
+ #define RC_MAP_GENIUS_TVGO_A11MCE        "rc-genius-tvgo-a11mce"
+ #define RC_MAP_GOTVIEW7135               "rc-gotview7135"
++#define RC_MAP_H96MAX_M2_PLUS            "rc-h96max-m2-plus"
+ #define RC_MAP_HAUPPAUGE                 "rc-hauppauge"
+ #define RC_MAP_HISI_POPLAR               "rc-hisi-poplar"
+ #define RC_MAP_HISI_TV_DEMO              "rc-hisi-tv-demo"

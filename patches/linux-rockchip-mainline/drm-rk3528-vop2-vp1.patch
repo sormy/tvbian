@@ -1,0 +1,152 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] drm/rockchip: vop2: add RK3528 video port 1 and Esmart3
+
+The RK3528 VOP has a second video port, which feeds the BT.656 encoder
+in front of the CVBS TV encoder. Its windows are Esmart2, its primary
+plane, and Esmart3; the other windows stay on VP0. Esmart3 alone in
+VP1's mixer shows black, and the Rockchip BSP scans VP1 out of Esmart2.
+Port and window data follow the BSP: VP1 outputs at most 720x576,
+Esmart2 is layer id 0 in VP1's mixer, Esmart3 is at 0x1e00 with AXI ids
+0xc/0xd and layer id 1, and its port select is bits 29:28 of
+OVL_SYS_PORT_SEL_IMD.
+
+Windows on the RK3528 are bound to their port, so an equal share of the
+windows per port would cut VP0 from four layers to two once VP1 is
+described. Let a port's data name its layer count.
+
+The VOP node now needs the dclk_vp1 clock, DCLK_VOP1.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
+--- a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
++++ b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
+@@ -2743,7 +2743,7 @@ static int vop2_create_crtcs(struct vop2 *vop2)
+ 		struct vop2_video_port *vp = &vop2->vps[i];
+ 
+ 		if (vp->crtc.port)
+-			vp->nlayers = vop2_data->win_size / nvps;
++			vp->nlayers = vp->data->nlayers ?: vop2_data->win_size / nvps;
+ 	}
+ 
+ 	return 0;
+diff --git a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.h b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.h
+--- a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.h
++++ b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.h
+@@ -231,6 +231,11 @@ struct vop2_video_port_data {
+ 	 * @pixel_rate: pixel per cycle
+ 	 */
+ 	u8 pixel_rate;
++	/**
++	 * @nlayers: windows this port's mixer takes, when the windows are
++	 * bound to their port; 0 shares all windows equally between ports
++	 */
++	u8 nlayers;
+ };
+ 
+ struct vop2_video_port {
+@@ -453,6 +458,7 @@ enum dst_factor_mode {
+ #define RK3528_OVL_SYS_ESMART0_CTRL		0x520
+ #define RK3528_OVL_SYS_ESMART1_CTRL		0x524
+ #define RK3528_OVL_SYS_ESMART2_CTRL		0x528
++#define RK3528_OVL_SYS_ESMART3_CTRL		0x52c
+ #define RK3528_LUT_PORT_SEL__ESMART_LB_MODE	GENMASK(27, 26)
+ #define RK3528_ESMART_LB_MODE_4K_2K_2K		2
+ #define RK3576_CLUSTER0_MIX_SRC_COLOR_CTRL	0x530
+@@ -786,6 +792,7 @@ enum dst_factor_mode {
+ #define RK3528_OVL_SYS_PORT_SEL_IMD__ESMART0		GENMASK(17, 16)
+ #define RK3528_OVL_SYS_PORT_SEL_IMD__ESMART1		GENMASK(21, 20)
+ #define RK3528_OVL_SYS_PORT_SEL_IMD__ESMART2		GENMASK(25, 24)
++#define RK3528_OVL_SYS_PORT_SEL_IMD__ESMART3		GENMASK(29, 28)
+ #define RK3528_OVL_SYS_PORT_SEL_IMD__CLUSTER0		GENMASK(1, 0)
+ #define RK3528_OVL_SYS_CLUSTER0_CTRL__DLY_NUM		GENMASK(15, 0)
+ #define RK3528_OVL_SYS_ESMART0_CTRL__DLY_NUM		GENMASK(7, 0)
+diff --git a/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c b/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c
+--- a/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c
++++ b/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c
+@@ -2535,6 +2535,8 @@ static const struct {
+ 	  RK3528_OVL_SYS_ESMART1_CTRL },
+ 	{ ROCKCHIP_VOP2_ESMART2, RK3528_OVL_SYS_PORT_SEL_IMD__ESMART2,
+ 	  RK3528_OVL_SYS_ESMART2_CTRL },
++	{ ROCKCHIP_VOP2_ESMART3, RK3528_OVL_SYS_PORT_SEL_IMD__ESMART3,
++	  RK3528_OVL_SYS_ESMART3_CTRL },
+ };
+ 
+ static u32 rk3528_ovl_sys_route(struct vop2 *vop2, unsigned int phys_id, u32 vp_id, u32 port_sel)
+@@ -2601,18 +2603,30 @@ static const struct vop2_video_port_data rk3528_vop_video_ports[] = {
+ 		.pre_scan_max_dly = { 8, 6, 2, 0 },
+ 		.offset = 0xc00,
+ 		.pixel_rate = 1,
++		.nlayers = 3,
++	}, {
++		.id = 1,
++		.max_output = { 720, 576 },
++		/* win layer_mix hdr */
++		.pre_scan_max_dly = { 8, 2, 0, 0 },
++		.offset = 0xd00,
++		.pixel_rate = 1,
++		.nlayers = 2,
+ 	},
+ };
+ 
+ /*
+  * rk3528 vop with 1 cluster and 4 esmart win, VP0 drives HDMI and VP1 the
+- * CVBS encoder. Only VP0 with Esmart0 and Cluster0 is described for now.
++ * CVBS encoder. Esmart2 and Esmart3 are VP1's, the other windows VP0's.
+  *
+  * AXI config::
+  *
+  * * Cluster0 win0: 0x2, 0x3
+  * * Cluster0 win1: 0x4, 0x5
+  * * Esmart0:       0x6, 0x7
++ * * Esmart1:       0x8, 0x9
++ * * Esmart2:       0xa, 0xb
++ * * Esmart3:       0xc, 0xd
+  */
+ static const struct vop2_win_data rk3528_vop_win_data[] = {
+ 	{
+@@ -2649,17 +2663,32 @@ static const struct vop2_win_data rk3528_vop_win_data[] = {
+ 		.name = "Esmart2-win0",
+ 		.phys_id = ROCKCHIP_VOP2_ESMART2,
+ 		.base = 0x1c00,
+-		.possible_vp_mask = BIT(0),
++		.possible_vp_mask = BIT(1),
+ 		.formats = formats_rk356x_esmart,
+ 		.nformats = ARRAY_SIZE(formats_rk356x_esmart),
+ 		.format_modifiers = format_modifiers,
+-		.layer_sel_id = { 3, 0xf, 0xf, 0xf },
++		.layer_sel_id = { 0xf, 0, 0xf, 0xf },
+ 		.supported_rotations = DRM_MODE_REFLECT_Y,
+-		.type = DRM_PLANE_TYPE_OVERLAY,
++		.type = DRM_PLANE_TYPE_PRIMARY,
+ 		.axi_yrgb_r_id = 10,
+ 		.axi_uv_r_id = 11,
+ 		.max_upscale_factor = 8,
+ 		.max_downscale_factor = 8,
++	}, {
++		.name = "Esmart3-win0",
++		.phys_id = ROCKCHIP_VOP2_ESMART3,
++		.base = 0x1e00,
++		.possible_vp_mask = BIT(1),
++		.formats = formats_rk356x_esmart,
++		.nformats = ARRAY_SIZE(formats_rk356x_esmart),
++		.format_modifiers = format_modifiers,
++		.layer_sel_id = { 0xf, 1, 0xf, 0xf },
++		.supported_rotations = DRM_MODE_REFLECT_Y,
++		.type = DRM_PLANE_TYPE_OVERLAY,
++		.axi_yrgb_r_id = 12,
++		.axi_uv_r_id = 13,
++		.max_upscale_factor = 8,
++		.max_downscale_factor = 8,
+ 	}, {
+ 		.name = "Cluster0-win0",
+ 		.phys_id = ROCKCHIP_VOP2_CLUSTER0,
+@@ -2681,7 +2710,7 @@ static const struct vop2_win_data rk3528_vop_win_data[] = {
+ 
+ static const struct vop2_data rk3528_vop = {
+ 	.version = VOP_VERSION_RK3528,
+-	.nr_vps = 1,
++	.nr_vps = 2,
+ 	.max_input = { 4096, 4096 },
+ 	.max_output = { 4096, 4096 },
+ 	.vp = rk3528_vop_video_ports,

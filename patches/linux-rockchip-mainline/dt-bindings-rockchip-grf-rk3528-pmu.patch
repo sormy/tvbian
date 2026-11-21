@@ -1,0 +1,23 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] dt-bindings: soc: rockchip: Add RK3528 PMU GRF
+
+The RK3528 PMU GRF holds the DRAM type and width the DDR monitor reads.
+Add its compatible beside the SoC's other GRFs.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ Documentation/devicetree/bindings/soc/rockchip/grf.yaml | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/Documentation/devicetree/bindings/soc/rockchip/grf.yaml b/Documentation/devicetree/bindings/soc/rockchip/grf.yaml
+index ef461a8..7ad9b69 100644
+--- a/Documentation/devicetree/bindings/soc/rockchip/grf.yaml
++++ b/Documentation/devicetree/bindings/soc/rockchip/grf.yaml
+@@ -18,6 +18,7 @@ properties:
+               - rockchip,rk3528-core-grf
+               - rockchip,rk3528-ioc-grf
+               - rockchip,rk3528-pipe-phy-grf
++              - rockchip,rk3528-pmu-grf
+               - rockchip,rk3528-vo-grf
+               - rockchip,rk3528-vpu-grf
+               - rockchip,rk3562-ioc-grf

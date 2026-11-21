@@ -1,0 +1,145 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] media: Add non-split AFBC YUV420 16x16 pixel formats
+
+Rockchip's RK35xx video decoders write AFBC in 16x16 blocks, sparse but
+not split, which none of the split 16x16 formats describes. Add an 8-bit
+and a 10-bit one beside them, with their sizes from the same helpers.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/Documentation/userspace-api/media/v4l/pixfmt-afbc.rst b/Documentation/userspace-api/media/v4l/pixfmt-afbc.rst
+index 7fad401..d8df3c2 100644
+--- a/Documentation/userspace-api/media/v4l/pixfmt-afbc.rst
++++ b/Documentation/userspace-api/media/v4l/pixfmt-afbc.rst
+@@ -41,6 +41,13 @@ AFBC Formats
+       - 16x16
+       - Sparse, Split
+       - DRM_FORMAT_YUV420_8BIT (AFBC_FORMAT_MOD_BLOCK_SIZE_16x16 | AFBC_FORMAT_MOD_SPARSE | AFBC_FORMAT_MOD_SPLIT)
++    * - V4L2_PIX_FMT_AFBC_YUV420_16x16
++      - 'AN68'
++      - YUV420
++      - 8 bits
++      - 16x16
++      - Sparse
++      - DRM_FORMAT_YUV420_8BIT (AFBC_FORMAT_MOD_BLOCK_SIZE_16x16 | AFBC_FORMAT_MOD_SPARSE)
+     * - V4L2_PIX_FMT_AFBC_YUV420_32x8
+       - 'A328'
+       - YUV420
+@@ -55,6 +62,13 @@ AFBC Formats
+       - 16x16
+       - Sparse, Split
+       - DRM_FORMAT_YUV420_10BIT (AFBC_FORMAT_MOD_BLOCK_SIZE_16x16 | AFBC_FORMAT_MOD_SPARSE | AFBC_FORMAT_MOD_SPLIT)
++    * - V4L2_PIX_FMT_AFBC_YUV420_16x16_10
++      - 'AN6a'
++      - YUV420
++      - 10 bits
++      - 16x16
++      - Sparse
++      - DRM_FORMAT_YUV420_10BIT (AFBC_FORMAT_MOD_BLOCK_SIZE_16x16 | AFBC_FORMAT_MOD_SPARSE)
+     * - V4L2_PIX_FMT_AFBC_YUV420_32x8_10
+       - 'A32a'
+       - YUV420
+@@ -69,6 +83,10 @@ AFBC Stride computation
+ Stride is equal to the aligned width * 3 * bits per component / 2 / 8.
+ 
+ .. _V4L2-PIX-FMT-AFBC-YUV420-16x16-SPLIT:
++
++.. _V4L2-PIX-FMT-AFBC-YUV420-16x16:
+ .. _V4L2-PIX-FMT-AFBC-YUV420-32x8:
+ .. _V4L2-PIX-FMT-AFBC-YUV420-16x16-10-SPLIT:
++
++.. _V4L2-PIX-FMT-AFBC-YUV420-16x16-10:
+ .. _V4L2-PIX-FMT-AFBC-YUV420-32x8-10:
+diff --git a/drivers/media/v4l2-core/v4l2-common.c b/drivers/media/v4l2-core/v4l2-common.c
+index d838e3a..2eb1d49 100644
+--- a/drivers/media/v4l2-core/v4l2-common.c
++++ b/drivers/media/v4l2-core/v4l2-common.c
+@@ -363,10 +363,14 @@ const struct v4l2_format_info *v4l2_format_info(u32 format)
+ 		/* AFBC formats */
+ 		{ .format = V4L2_PIX_FMT_AFBC_YUV420_16x16_SPLIT, .pixel_enc = V4L2_PIXEL_ENC_YUV, .mem_planes = 1, .comp_planes = 1, .bpp = { 6, 0, 0, 0 }, .bpp_div = { 4, 1, 1, 1 }, .hdiv = 1, .vdiv = 1,
+ 		  .block_w = { 16, 0, 0, 0 },	.block_h = { 16, 0, 0, 0 }},
++		{ .format = V4L2_PIX_FMT_AFBC_YUV420_16x16, .pixel_enc = V4L2_PIXEL_ENC_YUV, .mem_planes = 1, .comp_planes = 1, .bpp = { 6, 0, 0, 0 }, .bpp_div = { 4, 1, 1, 1 }, .hdiv = 1, .vdiv = 1,
++		  .block_w = { 16, 0, 0, 0 },	.block_h = { 16, 0, 0, 0 }},
+ 		{ .format = V4L2_PIX_FMT_AFBC_YUV420_32x8, .pixel_enc = V4L2_PIXEL_ENC_YUV, .mem_planes = 1, .comp_planes = 1, .bpp = { 6, 0, 0, 0 }, .bpp_div = { 4, 1, 1, 1 }, .hdiv = 1, .vdiv = 1,
+ 		  .block_w = { 32, 0, 0, 0 },	.block_h = { 8, 0, 0, 0 }},
+ 		{ .format = V4L2_PIX_FMT_AFBC_YUV420_16x16_10_SPLIT, .pixel_enc = V4L2_PIXEL_ENC_YUV, .mem_planes = 1, .comp_planes = 1, .bpp = { 15, 0, 0, 0 }, .bpp_div = { 8, 1, 1, 1 }, .hdiv = 1, .vdiv = 1,
+ 		   .block_w = { 16, 0, 0, 0 },	.block_h = { 16, 0, 0, 0 }},
++		{ .format = V4L2_PIX_FMT_AFBC_YUV420_16x16_10, .pixel_enc = V4L2_PIXEL_ENC_YUV, .mem_planes = 1, .comp_planes = 1, .bpp = { 15, 0, 0, 0 }, .bpp_div = { 8, 1, 1, 1 }, .hdiv = 1, .vdiv = 1,
++		   .block_w = { 16, 0, 0, 0 },	.block_h = { 16, 0, 0, 0 }},
+ 		{ .format = V4L2_PIX_FMT_AFBC_YUV420_32x8_10, .pixel_enc = V4L2_PIXEL_ENC_YUV, .mem_planes = 1, .comp_planes = 1, .bpp = { 15, 0, 0, 0 }, .bpp_div = { 8, 1, 1, 1 }, .hdiv = 1, .vdiv = 1,
+ 		   .block_w = { 32, 0, 0, 0 },	.block_h = { 8, 0, 0, 0 }},
+ 
+@@ -515,7 +519,9 @@ size_t v4l2_pixfmt_afbc_header_size(int fourcc, int width, int height)
+ 
+ 	switch (fourcc) {
+ 	case V4L2_PIX_FMT_AFBC_YUV420_16x16_SPLIT:
++	case V4L2_PIX_FMT_AFBC_YUV420_16x16:
+ 	case V4L2_PIX_FMT_AFBC_YUV420_16x16_10_SPLIT:
++	case V4L2_PIX_FMT_AFBC_YUV420_16x16_10:
+ 		width_in_block = ALIGN(width, 16) >> 4;
+ 		height_in_block = ALIGN(height, 16) >> 4;
+ 		break;
+@@ -539,7 +545,9 @@ size_t v4l2_pixfmt_afbc_payload_size(int fourcc, int width, int height)
+ 
+ 	switch (fourcc) {
+ 	case V4L2_PIX_FMT_AFBC_YUV420_16x16_SPLIT:
++	case V4L2_PIX_FMT_AFBC_YUV420_16x16:
+ 	case V4L2_PIX_FMT_AFBC_YUV420_16x16_10_SPLIT:
++	case V4L2_PIX_FMT_AFBC_YUV420_16x16_10:
+ 		width_in_block = ALIGN(width, 16) >> 4;
+ 		height_in_block = ALIGN(height, 16) >> 4;
+ 		break;
+@@ -552,10 +560,12 @@ size_t v4l2_pixfmt_afbc_payload_size(int fourcc, int width, int height)
+ 
+ 	switch (fourcc) {
+ 	case V4L2_PIX_FMT_AFBC_YUV420_16x16_SPLIT:
++	case V4L2_PIX_FMT_AFBC_YUV420_16x16:
+ 	case V4L2_PIX_FMT_AFBC_YUV420_32x8:
+ 		block_payload_size = 384;
+ 		break;
+ 	case V4L2_PIX_FMT_AFBC_YUV420_16x16_10_SPLIT:
++	case V4L2_PIX_FMT_AFBC_YUV420_16x16_10:
+ 	case V4L2_PIX_FMT_AFBC_YUV420_32x8_10:
+ 		block_payload_size = 512;
+ 		break;
+@@ -587,8 +597,10 @@ bool v4l2_is_format_afbc(int fourcc)
+ {
+ 	switch (fourcc) {
+ 	case V4L2_PIX_FMT_AFBC_YUV420_16x16_SPLIT:
++	case V4L2_PIX_FMT_AFBC_YUV420_16x16:
+ 	case V4L2_PIX_FMT_AFBC_YUV420_32x8:
+ 	case V4L2_PIX_FMT_AFBC_YUV420_16x16_10_SPLIT:
++	case V4L2_PIX_FMT_AFBC_YUV420_16x16_10:
+ 	case V4L2_PIX_FMT_AFBC_YUV420_32x8_10:
+ 		return true;
+ 	}
+diff --git a/drivers/media/v4l2-core/v4l2-ioctl.c b/drivers/media/v4l2-core/v4l2-ioctl.c
+index 0f13845..fa63744 100644
+--- a/drivers/media/v4l2-core/v4l2-ioctl.c
++++ b/drivers/media/v4l2-core/v4l2-ioctl.c
+@@ -1388,8 +1388,10 @@ static void v4l_fill_fmtdesc(struct v4l2_fmtdesc *fmt)
+ 	case V4L2_PIX_FMT_YUV444M:	descr = "Planar YUV 4:4:4 (N-C)"; break;
+ 	case V4L2_PIX_FMT_YVU444M:	descr = "Planar YVU 4:4:4 (N-C)"; break;
+ 	case V4L2_PIX_FMT_AFBC_YUV420_16x16_SPLIT: descr = "AFBC 8-bit YUV420 16x16 split"; break;
++	case V4L2_PIX_FMT_AFBC_YUV420_16x16: descr = "AFBC 8-bit YUV420 16x16"; break;
+ 	case V4L2_PIX_FMT_AFBC_YUV420_32x8: descr = "AFBC 8-bit YUV420 32x8"; break;
+ 	case V4L2_PIX_FMT_AFBC_YUV420_16x16_10_SPLIT: descr = "AFBC 10-bit YUV420 16x16 split"; break;
++	case V4L2_PIX_FMT_AFBC_YUV420_16x16_10: descr = "AFBC 10-bit YUV420 16x16"; break;
+ 	case V4L2_PIX_FMT_AFBC_YUV420_32x8_10: descr = "AFBC 10-bit YUV420 32x8"; break;
+ 	case V4L2_PIX_FMT_SBGGR8:	descr = "8-bit Bayer BGBG/GRGR"; break;
+ 	case V4L2_PIX_FMT_SGBRG8:	descr = "8-bit Bayer GBGB/RGRG"; break;
+diff --git a/include/uapi/linux/videodev2.h b/include/uapi/linux/videodev2.h
+index 8edcdca..ceed8a4 100644
+--- a/include/uapi/linux/videodev2.h
++++ b/include/uapi/linux/videodev2.h
+@@ -700,8 +700,10 @@ struct v4l2_pix_format {
+ 
+ /* AFBC formats */
+ #define V4L2_PIX_FMT_AFBC_YUV420_16x16_SPLIT	v4l2_fourcc('A', '1', '6', '8') /* AFBC containing 8-bit YUV420 in 16x16 blocks, sparse, split */
++#define V4L2_PIX_FMT_AFBC_YUV420_16x16		v4l2_fourcc('A', 'N', '6', '8') /* AFBC containing 8-bit YUV420 in 16x16 blocks, sparse */
+ #define V4L2_PIX_FMT_AFBC_YUV420_32x8		v4l2_fourcc('A', '3', '2', '8') /* AFBC containing 8-bit YUV420 in 32x8 blocks, sparse */
+ #define V4L2_PIX_FMT_AFBC_YUV420_16x16_10_SPLIT v4l2_fourcc('A', '1', '6', 'a') /* AFBC containing 10-bit YUV420 in 16x16 blocks, sparse, split */
++#define V4L2_PIX_FMT_AFBC_YUV420_16x16_10	v4l2_fourcc('A', 'N', '6', 'a') /* AFBC containing 10-bit YUV420 in 16x16 blocks, sparse */
+ #define V4L2_PIX_FMT_AFBC_YUV420_32x8_10	v4l2_fourcc('A', '3', '2', 'a') /* AFBC containing 10-bit YUV420 in 32x8 blocks, sparse */
+ 
+ /* Bayer formats - see http://www.siliconimaging.com/RGB%20Bayer.htm */

@@ -1,0 +1,136 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] drm/rockchip: vop2: Report the lit output for DDR rate changes
+
+The RK3528's trusted firmware changes the DDR rate at a display's
+blanking when told the output's type and line time; told nothing, it
+switches mid-scanout, the display underflows, and with 4K60 scanning
+the bus later hangs. Keep each video port's connector type, pixel clock
+and line time while it is lit, and report the fastest one to the DMC
+driver, the output a stall underflows first.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ drivers/gpu/drm/rockchip/rockchip_drm_vop2.c | 69 ++++++++++++++++++++
+ include/soc/rockchip/rockchip_scanout.h      | 13 ++++
+ 2 files changed, 82 insertions(+)
+
+diff --git a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
+index 68defb9..d54c219 100644
+--- a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
++++ b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
+@@ -43,6 +43,8 @@
+ #include "rockchip_drm_vop2.h"
+ #include "rockchip_rgb.h"
+ 
++#include <soc/rockchip/rockchip_scanout.h>
++
+ /*
+  * VOP2 architecture
+  *
+@@ -1082,6 +1084,71 @@ static bool vop2_gamma_lut_in_use(struct vop2 *vop2, struct vop2_video_port *vp)
+ 	return gamma_en_vp_id != nr_vps && gamma_en_vp_id != vp->id;
+ }
+ 
++/*
++ * The outputs the DDR's trusted firmware times a rate change by, so the change
++ * lands in a blanking: of the lit video ports, the one with the fastest pixel
++ * clock, whose scanout a stall underflows first.
++ */
++struct vop2_scanout {
++	int connector_type;	/* DRM_MODE_CONNECTOR_*, Unknown while dark */
++	int clock_khz;
++	u32 line_ns;
++};
++
++static DEFINE_SPINLOCK(vop2_scanout_lock);
++static struct vop2_scanout vop2_scanouts[ROCKCHIP_MAX_CRTC];
++
++static void vop2_scanout_enable(struct vop2_video_port *vp, struct drm_atomic_commit *state,
++				const struct drm_display_mode *mode)
++{
++	struct drm_connector_state *conn_state;
++	struct drm_connector *connector;
++	int type = DRM_MODE_CONNECTOR_Unknown;
++	int i;
++
++	for_each_new_connector_in_state(state, connector, conn_state, i)
++		if (conn_state->crtc == &vp->crtc &&
++		    connector->connector_type != DRM_MODE_CONNECTOR_WRITEBACK)
++			type = connector->connector_type;
++	if (type == DRM_MODE_CONNECTOR_Unknown || !mode->crtc_clock)
++		return;
++
++	spin_lock(&vop2_scanout_lock);
++	vop2_scanouts[vp->id] = (struct vop2_scanout) {
++		.connector_type = type,
++		.clock_khz = mode->crtc_clock,
++		.line_ns = div_u64((u64)mode->crtc_htotal * NSEC_PER_MSEC, mode->crtc_clock),
++	};
++	spin_unlock(&vop2_scanout_lock);
++}
++
++static void vop2_scanout_disable(struct vop2_video_port *vp)
++{
++	spin_lock(&vop2_scanout_lock);
++	vop2_scanouts[vp->id].connector_type = DRM_MODE_CONNECTOR_Unknown;
++	spin_unlock(&vop2_scanout_lock);
++}
++
++int rockchip_drm_scanout(int *connector_type, u32 *line_ns)
++{
++	const struct vop2_scanout *fastest = NULL;
++	int i, ret = -ENODEV;
++
++	spin_lock(&vop2_scanout_lock);
++	for (i = 0; i < ARRAY_SIZE(vop2_scanouts); i++)
++		if (vop2_scanouts[i].connector_type != DRM_MODE_CONNECTOR_Unknown &&
++		    (!fastest || vop2_scanouts[i].clock_khz > fastest->clock_khz))
++			fastest = &vop2_scanouts[i];
++	if (fastest) {
++		*connector_type = fastest->connector_type;
++		*line_ns = fastest->line_ns;
++		ret = 0;
++	}
++	spin_unlock(&vop2_scanout_lock);
++	return ret;
++}
++EXPORT_SYMBOL_GPL(rockchip_drm_scanout);
++
+ static void vop2_crtc_atomic_disable(struct drm_crtc *crtc,
+ 				     struct drm_atomic_commit *state)
+ {
+@@ -1095,6 +1162,7 @@ static void vop2_crtc_atomic_disable(struct drm_crtc *crtc,
+ 	if (!vp->enabled)
+ 		goto out_unlock;
+ 
++	vop2_scanout_disable(vp);
+ 	old_crtc_state = drm_atomic_get_old_crtc_state(state, crtc);
+ 	drm_atomic_helper_disable_planes_on_crtc(old_crtc_state, false);
+ 
+@@ -2029,6 +2097,7 @@ static void vop2_crtc_atomic_enable(struct drm_crtc *crtc,
+ 
+ 	drm_crtc_vblank_on(crtc);
+ 
++	vop2_scanout_enable(vp, state, mode);
+ 	vop2_unlock(vop2);
+ 	return;
+ 
+diff --git a/include/soc/rockchip/rockchip_scanout.h b/include/soc/rockchip/rockchip_scanout.h
+new file mode 100644
+index 0000000..df0e094
+--- /dev/null
++++ b/include/soc/rockchip/rockchip_scanout.h
+@@ -0,0 +1,13 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * The display output the DDR's trusted firmware times a rate change by.
++ */
++#ifndef __SOC_ROCKCHIP_SCANOUT_H
++#define __SOC_ROCKCHIP_SCANOUT_H
++
++#include <linux/types.h>
++
++/* The output's DRM connector type and line time, or -ENODEV with none lit */
++int rockchip_drm_scanout(int *connector_type, u32 *line_ns);
++
++#endif

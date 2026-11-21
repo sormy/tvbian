@@ -1,0 +1,224 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] media: rkvdec: Add AFBC output to the VDPU381 H.264 and VP9 decoders
+
+The VDPU381 writes H.264 and VP9 pictures as AFBC as it does HEVC ones,
+by the same registers and in the same layout. An H.264 picture starts 4
+lines down its surface as an HEVC one does, a VP9 one at its top: report
+so. Offer the non-split AFBC YUV420 16x16 formats for them, 4:2:0 only,
+after the linear ones.
+
+A VP9 picture's references are laid out as it is: give each its header
+row and its payload's offset, which its luma size register holds then,
+and find its motion vectors where every buffer keeps them, past the
+AFBC picture rather than past a linear one.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ .../platform/rockchip/rkvdec/rkvdec-vdpu381-h264.c |  4 +---
+ .../platform/rockchip/rkvdec/rkvdec-vdpu381-vp9.c  | 46 +++++++++++++++++++++++++++----------------
+ .../platform/rockchip/rkvdec/rkvdec.c              | 45 +++++++++++++++++++++++++++++++++++++-----
+ .../platform/rockchip/rkvdec/rkvdec.h              |  4 ++--
+ 4 files changed, 72 insertions(+), 27 deletions(-)
+
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-h264.c b/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-h264.c
+index b961fdd..da0dbf7 100644
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-h264.c
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-h264.c
+@@ -260,9 +260,7 @@ static void config_registers(struct rkvdec_ctx *ctx,
+ 	ver_virstride = dst_fmt->height;
+ 	y_virstride = hor_virstride * ver_virstride;
+ 
+-	regs->common.reg018_y_hor_stride.y_hor_virstride = hor_virstride / 16;
+-	regs->common.reg019_uv_hor_stride.uv_hor_virstride = hor_virstride / 16;
+-	regs->common.reg020_y_stride.y_virstride = y_virstride / 16;
++	rkvdec_vdpu381_set_picture(&regs->common, dst_fmt, y_virstride);
+ 
+ 	/* Activate block gating */
+ 	regs->common.reg026_block_gating_en.inter_auto_gating_e = 1;
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-vp9.c b/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-vp9.c
+index 9aa75a5..1669989 100644
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-vp9.c
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-vp9.c
+@@ -277,9 +277,11 @@ static void config_ref_registers(struct rkvdec_ctx *ctx,
+ 				 struct rkvdec_decoded_buffer *ref_buf,
+ 				 int i)
+ {
++	const struct v4l2_pix_format_mplane *pix = &ctx->decoded_fmt.fmt.pix_mp;
+ 	unsigned int aligned_pitch, aligned_height, y_len;
+ 	struct rkvdec_vp9_ctx *vp9_ctx = ctx->priv;
+ 	struct rkvdec_vdpu381_regs_vp9 *regs = &vp9_ctx->regs;
++	u32 hor_virstride, virstride;
+ 
+ 	aligned_height = round_up(ref_buf->vp9.height, 64);
+ 
+@@ -316,25 +318,33 @@ static void config_ref_registers(struct rkvdec_ctx *ctx,
+ 	if (&ref_buf->base.vb == run->base.bufs.dst)
+ 		return;
+ 
+-	/* Real buffer stride, not display-width-derived (see config_registers). */
+-	aligned_pitch = ctx->decoded_fmt.fmt.pix_mp.plane_fmt[0].bytesperline;
+-	y_len = aligned_height * aligned_pitch;
++	if (v4l2_is_format_afbc(pix->pixelformat)) {
++		/* As the picture's: the header row, the payload's offset in bits 4 to 31 */
++		hor_virstride = rkvdec_afbc_hdr_stride(pix->width) / 16;
++		virstride = rkvdec_afbc_payload_offset(pix->width, pix->height);
++	} else {
++		/* Real buffer stride, not display-width-derived (see config_registers). */
++		aligned_pitch = pix->plane_fmt[0].bytesperline;
++		y_len = aligned_height * aligned_pitch;
++		hor_virstride = aligned_pitch / 16;
++		virstride = y_len / 16;
++	}
+ 
+ 	switch (i) {
+ 	case 0:
+-		regs->vp9_param.reg79.vp9_lastfy_hor_virstride = aligned_pitch / 16;
+-		regs->vp9_param.reg80.vp9_lastfuv_hor_virstride = aligned_pitch / 16;
+-		regs->vp9_param.reg85.vp9_lastfy_virstride = y_len / 16;
++		regs->vp9_param.reg79.vp9_lastfy_hor_virstride = hor_virstride;
++		regs->vp9_param.reg80.vp9_lastfuv_hor_virstride = hor_virstride;
++		regs->vp9_param.reg85.vp9_lastfy_virstride = virstride;
+ 		break;
+ 	case 1:
+-		regs->vp9_param.reg81.vp9_goldenfy_hor_virstride = aligned_pitch / 16;
+-		regs->vp9_param.reg82.vp9_goldenuv_hor_virstride = aligned_pitch / 16;
+-		regs->vp9_param.reg86.vp9_goldeny_virstride = y_len / 16;
++		regs->vp9_param.reg81.vp9_goldenfy_hor_virstride = hor_virstride;
++		regs->vp9_param.reg82.vp9_goldenuv_hor_virstride = hor_virstride;
++		regs->vp9_param.reg86.vp9_goldeny_virstride = virstride;
+ 		break;
+ 	case 2:
+-		regs->vp9_param.reg83.vp9_altreffy_hor_virstride = aligned_pitch / 16;
+-		regs->vp9_param.reg84.vp9_altreff_uv_hor_virstride = aligned_pitch / 16;
+-		regs->vp9_param.reg87.vp9_altrefy_virstride = y_len / 16;
++		regs->vp9_param.reg83.vp9_altreffy_hor_virstride = hor_virstride;
++		regs->vp9_param.reg84.vp9_altreff_uv_hor_virstride = hor_virstride;
++		regs->vp9_param.reg87.vp9_altrefy_virstride = virstride;
+ 		break;
+ 	}
+ }
+@@ -416,15 +426,19 @@ static void rkvdec_write_regs(struct rkvdec_ctx *ctx)
+ 
+ static dma_addr_t get_mv_base_addr(struct rkvdec_ctx *ctx, struct rkvdec_decoded_buffer *buf)
+ {
++	dma_addr_t addr = vb2_dma_contig_plane_dma_addr(&buf->base.vb.vb2_buf, 0);
+ 	unsigned int aligned_pitch, aligned_height, yuv_len;
+ 
++	/* An AFBC picture's motion vectors follow it where every buffer keeps them */
++	if (v4l2_is_format_afbc(ctx->decoded_fmt.fmt.pix_mp.pixelformat))
++		return addr + ctx->colmv_offset;
++
+ 	aligned_height = round_up(buf->vp9.height, 64);
+ 
+ 	aligned_pitch = ctx->decoded_fmt.fmt.pix_mp.plane_fmt[0].bytesperline;
+ 	yuv_len = (aligned_height * aligned_pitch * 3) / 2;
+ 
+-	return vb2_dma_contig_plane_dma_addr(&buf->base.vb.vb2_buf, 0) +
+-	       yuv_len;
++	return addr + yuv_len;
+ }
+ 
+ static void config_registers(struct rkvdec_ctx *ctx,
+@@ -479,9 +493,7 @@ static void config_registers(struct rkvdec_ctx *ctx,
+ 
+ 	pixels = ctx->decoded_fmt.fmt.pix_mp.height * ctx->decoded_fmt.fmt.pix_mp.width;
+ 
+-	regs->common.reg018_y_hor_stride.y_hor_virstride = aligned_pitch / 16;
+-	regs->common.reg019_uv_hor_stride.uv_hor_virstride = aligned_pitch / 16;
+-	regs->common.reg020_y_stride.y_virstride = y_len / 16;
++	rkvdec_vdpu381_set_picture(&regs->common, &ctx->decoded_fmt.fmt.pix_mp, y_len);
+ 
+ 	stream_len = vb2_get_plane_payload(&run->base.bufs.src->vb2_buf, 0);
+ 
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec.c b/drivers/media/platform/rockchip/rkvdec/rkvdec.c
+index b00297b..dd0f1b5 100644
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec.c
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec.c
+@@ -456,6 +456,33 @@ static const struct rkvdec_decoded_fmt_desc rkvdec_h264_decoded_fmts[] = {
+ 	},
+ };
+ 
++static const struct rkvdec_decoded_fmt_desc rkvdec_vdpu381_h264_decoded_fmts[] = {
++	{
++		.fourcc = V4L2_PIX_FMT_NV12,
++		.image_fmt = RKVDEC_IMG_FMT_420_8BIT,
++	},
++	{
++		.fourcc = V4L2_PIX_FMT_NV15,
++		.image_fmt = RKVDEC_IMG_FMT_420_10BIT,
++	},
++	{
++		.fourcc = V4L2_PIX_FMT_NV16,
++		.image_fmt = RKVDEC_IMG_FMT_422_8BIT,
++	},
++	{
++		.fourcc = V4L2_PIX_FMT_NV20,
++		.image_fmt = RKVDEC_IMG_FMT_422_10BIT,
++	},
++	{
++		.fourcc = V4L2_PIX_FMT_AFBC_YUV420_16x16,
++		.image_fmt = RKVDEC_IMG_FMT_420_8BIT,
++	},
++	{
++		.fourcc = V4L2_PIX_FMT_AFBC_YUV420_16x16_10,
++		.image_fmt = RKVDEC_IMG_FMT_420_10BIT,
++	},
++};
++
+ static const struct rkvdec_ctrl_desc rkvdec_vp9_ctrl_descs[] = {
+ 	{
+ 		.cfg.id = V4L2_CID_STATELESS_VP9_FRAME,
+@@ -520,6 +547,14 @@ static const struct rkvdec_decoded_fmt_desc rkvdec_vdpu381_vp9_decoded_fmts[] =
+ 		.fourcc = V4L2_PIX_FMT_NV15,
+ 		.image_fmt =  RKVDEC_IMG_FMT_420_10BIT,
+ 	},
++	{
++		.fourcc = V4L2_PIX_FMT_AFBC_YUV420_16x16,
++		.image_fmt = RKVDEC_IMG_FMT_420_8BIT,
++	},
++	{
++		.fourcc = V4L2_PIX_FMT_AFBC_YUV420_16x16_10,
++		.image_fmt = RKVDEC_IMG_FMT_420_10BIT,
++	},
+ };
+ 
+ static const struct rkvdec_coded_fmt_desc rkvdec_coded_fmts[] = {
+@@ -618,8 +653,8 @@ static const struct rkvdec_coded_fmt_desc vdpu381_coded_fmts[] = {
+ 		},
+ 		.ctrls = &vdpu38x_h264_ctrls,
+ 		.ops = &rkvdec_vdpu381_h264_fmt_ops,
+-		.num_decoded_fmts = ARRAY_SIZE(rkvdec_h264_decoded_fmts),
+-		.decoded_fmts = rkvdec_h264_decoded_fmts,
++		.num_decoded_fmts = ARRAY_SIZE(rkvdec_vdpu381_h264_decoded_fmts),
++		.decoded_fmts = rkvdec_vdpu381_h264_decoded_fmts,
+ 		.subsystem_flags = VB2_V4L2_FL_SUPPORTS_M2M_HOLD_CAPTURE_BUF,
+ 	},
+ 	{
+@@ -938,9 +973,9 @@ static int rkvdec_g_selection(struct file *file, void *priv,
+ {
+ 	struct rkvdec_ctx *ctx = file_to_rkvdec_ctx(file);
+ 	const struct v4l2_pix_format_mplane *pix = &ctx->decoded_fmt.fmt.pix_mp;
+-	bool hevc = ctx->coded_fmt.fmt.pix_mp.pixelformat == V4L2_PIX_FMT_HEVC_SLICE;
+-	u32 top = hevc && v4l2_is_format_afbc(pix->pixelformat) ?
+-		  RKVDEC_AFBC_HEVC_TOP_LINES : 0;
++	bool vp9 = ctx->coded_fmt.fmt.pix_mp.pixelformat == V4L2_PIX_FMT_VP9_FRAME;
++	u32 top = !vp9 && v4l2_is_format_afbc(pix->pixelformat) ?
++		  RKVDEC_AFBC_TOP_LINES : 0;
+ 
+ 	if (s->type != V4L2_BUF_TYPE_VIDEO_CAPTURE)
+ 		return -EINVAL;
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec.h b/drivers/media/platform/rockchip/rkvdec/rkvdec.h
+index 28d2b44..43a72e6 100644
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec.h
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec.h
+@@ -156,8 +156,8 @@ struct rkvdec_dev {
+ #define RKVDEC_AFBC_EXTRA_ROWS		64
+ #define RKVDEC_AFBC_BLOCK_BYTES_8BIT	384
+ #define RKVDEC_AFBC_BLOCK_BYTES_10BIT	512
+-/* An HEVC picture starts this many lines into its AFBC surface */
+-#define RKVDEC_AFBC_HEVC_TOP_LINES	4
++/* An H.264 or HEVC picture starts this many lines into its AFBC surface, a VP9 one at its top */
++#define RKVDEC_AFBC_TOP_LINES		4
+ 
+ static inline u32 rkvdec_afbc_hdr_stride(u32 width)
+ {

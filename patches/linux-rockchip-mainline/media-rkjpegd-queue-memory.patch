@@ -1,0 +1,63 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Wed, 18 Nov 2026 08:49:58 -0500
+Subject: [PATCH] media: rockchip: rkjpegd: Bound each queue's memory
+
+A coded buffer holds two bytes a pixel, so FFmpeg's default 16 OUTPUT
+and 20 CAPTURE buffers of a 6144x4096 picture take 1.5 GiB, the whole
+RAM of an RK3528 TV box, and the box dies out of memory. Give a queue at
+most an eighth of the RAM: a large picture gets fewer buffers, a small
+one as many as it asks for.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ drivers/media/platform/rockchip/rkjpegd/rkjpegd.c | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/drivers/media/platform/rockchip/rkjpegd/rkjpegd.c b/drivers/media/platform/rockchip/rkjpegd/rkjpegd.c
+index b33141c..2189be5 100644
+--- a/drivers/media/platform/rockchip/rkjpegd/rkjpegd.c
++++ b/drivers/media/platform/rockchip/rkjpegd/rkjpegd.c
+@@ -22,6 +22,7 @@
+ #include <linux/iopoll.h>
+ #include <linux/kref.h>
+ #include <linux/log2.h>
++#include <linux/mm.h>
+ #include <linux/module.h>
+ #include <linux/mutex.h>
+ #include <linux/platform_device.h>
+@@ -61,6 +62,12 @@
+ /* Bytes per pixel used to size a coded buffer for a given resolution. */
+ #define RKJPEGD_CODED_MAX_DEPTH	2
+ 
++/*
++ * The share of the RAM one queue may take: a large picture gets fewer
++ * buffers rather than the whole memory.
++ */
++#define RKJPEGD_QUEUE_RAM_SHARE	8
++
+ /* Milliseconds a frame may take before the watchdog resets the block. */
+ #define RKJPEGD_TIMEOUT_MS	2000
+ 
+@@ -1712,6 +1719,8 @@ static int rkjpegd_queue_setup(struct vb2_queue *vq, unsigned int *num_buffers,
+ 	struct rkjpegd_ctx *ctx = vb2_get_drv_priv(vq);
+ 	struct v4l2_pix_format_mplane pix_mp;
+ 	struct v4l2_rect crop;
++	unsigned int held = vb2_get_num_buffers(vq);
++	u64 budget, fit;
+ 	u32 sizeimage;
+ 
+ 	if (V4L2_TYPE_IS_OUTPUT(vq->type)) {
+@@ -1731,6 +1740,12 @@ static int rkjpegd_queue_setup(struct vb2_queue *vq, unsigned int *num_buffers,
+ 		sizes[0] = sizeimage;
+ 	}
+ 
++	budget = ((u64)totalram_pages() << PAGE_SHIFT) / RKJPEGD_QUEUE_RAM_SHARE;
++	fit = div_u64(budget, sizes[0]);
++	if (fit <= held)
++		return -ENOMEM;
++	*num_buffers = min_t(u64, *num_buffers, fit - held);
++
+ 	return 0;
+ }
+ 

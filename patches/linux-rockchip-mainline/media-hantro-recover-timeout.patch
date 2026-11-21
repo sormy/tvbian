@@ -1,0 +1,104 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] media: verisilicon: Reset the IOMMU after a timed out job
+
+A job that never raises its interrupt is finished by the watchdog, which
+soft-resets the core, but the core's IOMMU is left as it stopped:
+stalled on the write it faulted, so every later job fails until a
+reboot. Attach and detach an empty domain after the soft reset, as
+rkvdec does on an error, so the IOMMU is reset and the next job runs.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ drivers/media/platform/verisilicon/hantro.h     |  2 ++
+ drivers/media/platform/verisilicon/hantro_drv.c | 30 ++++++++++++++++++++++++++++++
+ 2 files changed, 32 insertions(+)
+
+diff --git a/drivers/media/platform/verisilicon/hantro.h b/drivers/media/platform/verisilicon/hantro.h
+index c0a40d3..7b30d69 100644
+--- a/drivers/media/platform/verisilicon/hantro.h
++++ b/drivers/media/platform/verisilicon/hantro.h
+@@ -187,6 +187,7 @@ hantro_vdev_to_func(struct video_device *vdev)
+  *			dev_ macros.
+  * @clocks:		Array of clock handles.
+  * @resets:		Array of reset handles.
++ * @empty_domain:	An IOMMU domain attached and detached to reset the IOMMU.
+  * @reg_bases:		Mapped addresses of VPU registers.
+  * @enc_base:		Mapped address of VPU encoder register for convenience.
+  * @dec_base:		Mapped address of VPU decoder register for convenience.
+@@ -207,6 +208,7 @@ struct hantro_dev {
+ 	struct device *dev;
+ 	struct clk_bulk_data *clocks;
+ 	struct reset_control *resets;
++	struct iommu_domain *empty_domain;
+ 	void __iomem **reg_bases;
+ 	void __iomem *enc_base;
+ 	void __iomem *dec_base;
+diff --git a/drivers/media/platform/verisilicon/hantro_drv.c b/drivers/media/platform/verisilicon/hantro_drv.c
+index 00f30f8..15d6116 100644
+--- a/drivers/media/platform/verisilicon/hantro_drv.c
++++ b/drivers/media/platform/verisilicon/hantro_drv.c
+@@ -11,6 +11,7 @@
+  */
+ 
+ #include <linux/clk.h>
++#include <linux/iommu.h>
+ #include <linux/module.h>
+ #include <linux/of.h>
+ #include <linux/of_platform.h>
+@@ -116,6 +117,20 @@ void hantro_irq_done(struct hantro_dev *vpu,
+ 	}
+ }
+ 
++/*
++ * A core stuck on the bus keeps its IOMMU stalled: after the codec's own
++ * soft reset, attach and detach an empty domain, which resets the IOMMU and
++ * reloads the default domain's table, so the next job runs. Its CRU resets
++ * stay alone: pulsed under a busy core they hang the bus.
++ */
++static void hantro_iommu_reset(struct hantro_dev *vpu)
++{
++	if (vpu->empty_domain) {
++		iommu_attach_device(vpu->empty_domain, vpu->dev);
++		iommu_detach_device(vpu->empty_domain, vpu->dev);
++	}
++}
++
+ void hantro_watchdog(struct work_struct *work)
+ {
+ 	struct hantro_dev *vpu;
+@@ -128,6 +143,7 @@ void hantro_watchdog(struct work_struct *work)
+ 		vpu_err("frame processing timed out!\n");
+ 		if (ctx->codec_ops->reset)
+ 			ctx->codec_ops->reset(ctx);
++		hantro_iommu_reset(vpu);
+ 		hantro_job_finish(vpu, ctx, VB2_BUF_STATE_ERROR);
+ 	}
+ }
+@@ -1109,6 +1125,11 @@ init_new_m2m_dev:
+ 	return v4l2_m2m_init(&vpu_m2m_ops);
+ }
+ 
++static void hantro_free_domain(void *domain)
++{
++	iommu_domain_free(domain);
++}
++
+ static int hantro_probe(struct platform_device *pdev)
+ {
+ 	const struct of_device_id *match;
+@@ -1170,6 +1191,15 @@ static int hantro_probe(struct platform_device *pdev)
+ 	if (IS_ERR(vpu->resets))
+ 		return PTR_ERR(vpu->resets);
+ 
++	if (iommu_get_domain_for_dev(&pdev->dev)) {
++		vpu->empty_domain = iommu_paging_domain_alloc(&pdev->dev);
++		if (IS_ERR(vpu->empty_domain))
++			vpu->empty_domain = NULL;
++		else if (devm_add_action_or_reset(&pdev->dev, hantro_free_domain,
++						  vpu->empty_domain))
++			return -ENOMEM;
++	}
++
+ 	num_bases = vpu->variant->num_regs ?: 1;
+ 	vpu->reg_bases = devm_kcalloc(&pdev->dev, num_bases,
+ 				      sizeof(*vpu->reg_bases), GFP_KERNEL);

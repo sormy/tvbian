@@ -1,0 +1,32 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] drm/rockchip: vop2: Scan out AFBC on RK3528's cluster window
+
+RK3528's Cluster0 decodes AFBC through the RK3568 cluster registers the
+driver already drives, YUV 4:2:0 included, so a video decoder's AFBC
+pictures can be scanned out without being written linear first. Offer
+the AFBC modifiers on it.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c b/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c
+index 216d5e8..184aa4e 100644
+--- a/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c
++++ b/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c
+@@ -2738,7 +2738,7 @@ static const struct vop2_win_data rk3528_vop_win_data[] = {
+ 		.possible_vp_mask = BIT(0),
+ 		.formats = formats_cluster,
+ 		.nformats = ARRAY_SIZE(formats_cluster),
+-		.format_modifiers = format_modifiers,
++		.format_modifiers = format_modifiers_afbc,
+ 		.layer_sel_id = { 0, 0xf, 0xf, 0xf },
+ 		.supported_rotations = DRM_MODE_REFLECT_X | DRM_MODE_REFLECT_Y,
+ 		.type = DRM_PLANE_TYPE_OVERLAY,
+@@ -2746,7 +2746,7 @@ static const struct vop2_win_data rk3528_vop_win_data[] = {
+ 		.axi_uv_r_id = 3,
+ 		.max_upscale_factor = 4,
+ 		.max_downscale_factor = 4,
+-		.feature = WIN_FEATURE_CLUSTER,
++		.feature = WIN_FEATURE_AFBDC | WIN_FEATURE_CLUSTER,
+ 	},
+ };
+ 

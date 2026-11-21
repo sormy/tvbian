@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Wed, 18 Nov 2026 09:02:50 -0500
+Subject: [PATCH] phy: rockchip: inno-hdmi: Add the 27.027 MHz pixel clock
+
+CEA's 480p and 480i at 60 Hz, rather than 59.94, take 27.027 MHz, which
+the pre-PLL table lacks, so the modes are pruned. Take the 27 MHz
+dividers with the VCO 1.001 times faster: 864.864 MHz, a fraction of
+0.036 on a feedback divider of 36.
+
+DRM gives 480i's half rate as 13.514 MHz, so a CRTC doubling it asks
+for 27.028 MHz: the same entry answers that rate too, 37 ppm off.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ drivers/phy/rockchip/phy-rockchip-inno-hdmi.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/drivers/phy/rockchip/phy-rockchip-inno-hdmi.c b/drivers/phy/rockchip/phy-rockchip-inno-hdmi.c
+index 7ce6563..b3ef06a 100644
+--- a/drivers/phy/rockchip/phy-rockchip-inno-hdmi.c
++++ b/drivers/phy/rockchip/phy-rockchip-inno-hdmi.c
+@@ -296,6 +296,8 @@ static const struct pre_pll_config pre_pll_cfg_table[] = {
+ 	{ 25175000,  31468750,  1,   41, 0, 3, 3,  1, 3, 3,  4, 0, 0xf5554f},
+ 	{ 27000000,  27000000,  1,   36, 0, 3, 3,  1, 2, 3,  4, 0,      0x0},
+ 	{ 27000000,  33750000,  1,   45, 0, 3, 3,  1, 3, 3,  4, 0,      0x0},
++	{ 27027000,  27027000,  1,   36, 0, 3, 3,  1, 2, 3,  4, 0,  0x9374c},
++	{ 27028000,  27028000,  1,   36, 0, 3, 3,  1, 2, 3,  4, 0,  0x9374c},
+ 	{ 31500000,  31500000,  1,   42, 0, 3, 3,  1, 2, 3,  4, 0,      0x0},
+ 	{ 31500000,  39375000,  1,  105, 1, 3, 3, 10, 0, 3,  4, 0,      0x0},
+ 	{ 33750000,  33750000,  1,   45, 0, 3, 3,  1, 2, 3,  4, 0,      0x0},

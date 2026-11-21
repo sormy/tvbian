@@ -1,0 +1,1001 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Wed, 18 Nov 2026 00:51:15 -0500
+Subject: [PATCH] media: rockchip: Add the RK3528 IEP2 deinterlacer
+
+The RK3528's IEP2 deinterlaces with edge-directed interpolation,
+motion detection and comb, OSD and pulldown detection, which mainline
+has no driver for. Add a mem2mem driver taking an interlaced NV12 frame
+and giving a progressive frame from each of its fields, in the mode and
+with the tuning Rockchip's MPP gives the vendor kernel, as the
+sun8i deinterlacer does on Allwinner. The interrupt line is shared with
+the VDPP and the IOMMU, so it is answered only while the IEP is in use
+and in its own work mode.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ drivers/media/platform/rockchip/Kconfig       |   1 +
+ drivers/media/platform/rockchip/Makefile      |   1 +
+ drivers/media/platform/rockchip/iep2/Kconfig  |  15 +
+ drivers/media/platform/rockchip/iep2/Makefile |   2 +
+ .../rockchip/iep2/rockchip-iep2-regs.h        | 118 +++
+ .../platform/rockchip/iep2/rockchip-iep2.c    | 792 ++++++++++++++++++
+ 6 files changed, 929 insertions(+)
+ create mode 100644 drivers/media/platform/rockchip/iep2/Kconfig
+ create mode 100644 drivers/media/platform/rockchip/iep2/Makefile
+ create mode 100644 drivers/media/platform/rockchip/iep2/rockchip-iep2-regs.h
+ create mode 100644 drivers/media/platform/rockchip/iep2/rockchip-iep2.c
+
+diff --git a/drivers/media/platform/rockchip/Kconfig b/drivers/media/platform/rockchip/Kconfig
+index ba401d3..4f65bd0 100644
+--- a/drivers/media/platform/rockchip/Kconfig
++++ b/drivers/media/platform/rockchip/Kconfig
+@@ -2,6 +2,7 @@
+ 
+ comment "Rockchip media platform drivers"
+ 
++source "drivers/media/platform/rockchip/iep2/Kconfig"
+ source "drivers/media/platform/rockchip/rga/Kconfig"
+ source "drivers/media/platform/rockchip/rkcif/Kconfig"
+ source "drivers/media/platform/rockchip/rkisp1/Kconfig"
+diff --git a/drivers/media/platform/rockchip/Makefile b/drivers/media/platform/rockchip/Makefile
+index 0e0b2cb..c385048 100644
+--- a/drivers/media/platform/rockchip/Makefile
++++ b/drivers/media/platform/rockchip/Makefile
+@@ -1,4 +1,5 @@
+ # SPDX-License-Identifier: GPL-2.0-only
++obj-y += iep2/
+ obj-y += rga/
+ obj-y += rkcif/
+ obj-y += rkisp1/
+diff --git a/drivers/media/platform/rockchip/iep2/Kconfig b/drivers/media/platform/rockchip/iep2/Kconfig
+new file mode 100644
+index 0000000..71f22cd
+--- /dev/null
++++ b/drivers/media/platform/rockchip/iep2/Kconfig
+@@ -0,0 +1,15 @@
++# SPDX-License-Identifier: GPL-2.0-only
++config VIDEO_ROCKCHIP_IEP2
++	tristate "Rockchip IEP2 deinterlacer"
++	depends on V4L_MEM2MEM_DRIVERS
++	depends on VIDEO_DEV
++	depends on ARCH_ROCKCHIP || COMPILE_TEST
++	select VIDEOBUF2_DMA_CONTIG
++	select V4L2_MEM2MEM_DEV
++	help
++	  Support for the Rockchip IEP2 deinterlacer of the RK3528: an
++	  interlaced NV12 frame in, a progressive frame from each of its
++	  fields out.
++
++	  To compile this driver as a module, choose M here: the module
++	  will be called rockchip-iep2.
+diff --git a/drivers/media/platform/rockchip/iep2/Makefile b/drivers/media/platform/rockchip/iep2/Makefile
+new file mode 100644
+index 0000000..5c572d9
+--- /dev/null
++++ b/drivers/media/platform/rockchip/iep2/Makefile
+@@ -0,0 +1,2 @@
++# SPDX-License-Identifier: GPL-2.0-only
++obj-$(CONFIG_VIDEO_ROCKCHIP_IEP2) += rockchip-iep2.o
+diff --git a/drivers/media/platform/rockchip/iep2/rockchip-iep2-regs.h b/drivers/media/platform/rockchip/iep2/rockchip-iep2-regs.h
+new file mode 100644
+index 0000000..a56dd94
+--- /dev/null
++++ b/drivers/media/platform/rockchip/iep2/rockchip-iep2-regs.h
+@@ -0,0 +1,118 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Rockchip IEP2 deinterlacer registers, as the vendor kernel names them
++ */
++
++#ifndef __ROCKCHIP_IEP2_REGS_H__
++#define __ROCKCHIP_IEP2_REGS_H__
++
++#include <linux/bits.h>
++
++#define IEP2_FRM_START			0x0000
++#define     IEP2_FRM_EN				BIT(0)
++
++#define IEP2_CONFIG0			0x0004
++#define     IEP2_ACLK_SRESET_P			BIT(21)
++#define     IEP2_DEBUG_DATA_EN			BIT(16)
++#define     IEP2_DST_YUV_SWAP(x)		(((x) & 3) << 12)
++#define     IEP2_DST_FMT(x)			(((x) & 3) << 8)
++#define     IEP2_SRC_YUV_SWAP(x)		(((x) & 3) << 4)
++#define     IEP2_SRC_FMT(x)			((x) & 3)
++
++#define IEP2_WORK_MODE			0x0008
++#define     IEP2_WORK_MODE_IEP2			BIT(0)
++#define     IEP2_WORK_MODE_MASK			GENMASK(1, 0)
++
++#define IEP2_STATUS			0x0014
++#define     IEP2_ARST_FINISH_DONE		BIT(0)
++
++#define IEP2_INT_EN			0x0020
++#define IEP2_INT_CLR			0x0024
++#define IEP2_INT_STS			0x0028
++#define     IEP2_INT_TIMEOUT			BIT(5)
++#define     IEP2_INT_BUS_ERROR			BIT(4)
++#define     IEP2_INT_OSD_MAX			BIT(1)
++#define     IEP2_INT_FRM_DONE			BIT(0)
++#define     IEP2_INT_ALL			GENMASK(31, 0)
++
++#define IEP2_VIR_SRC_IMG_WIDTH		0x0030
++#define     IEP2_SRC_VIR_UV_STRIDE(x)		(((x) & 0xffff) << 16)
++#define     IEP2_SRC_VIR_Y_STRIDE(x)		((x) & 0xffff)
++#define IEP2_VIR_DST_IMG_WIDTH		0x0034
++#define     IEP2_DST_VIR_STRIDE(x)		((x) & 0xffff)
++#define IEP2_SRC_IMG_SIZE		0x0038
++#define     IEP2_SRC_PIC_HEIGHT(x)		(((x) & 0x7ff) << 16)
++#define     IEP2_SRC_PIC_WIDTH(x)		((x) & 0x7ff)
++
++#define IEP2_DIL_CONFIG0		0x0040
++#define     IEP2_DIL_MV_HIST_EN			BIT(17)
++#define     IEP2_DIL_COMB_EN			BIT(15)
++#define     IEP2_DIL_BLE_EN			BIT(14)
++#define     IEP2_DIL_EEDI_EN			BIT(13)
++#define     IEP2_DIL_MEMC_EN			BIT(12)
++#define     IEP2_DIL_OSD_EN			BIT(11)
++#define     IEP2_DIL_PD_EN			BIT(10)
++#define     IEP2_DIL_FF_EN			BIT(9)
++#define     IEP2_DIL_FIELD_ORDER(x)		(((x) & 1) << 5)
++#define     IEP2_DIL_OUT_MODE(x)		(((x) & 1) << 4)
++#define     IEP2_DIL_MODE(x)			((x) & 0xf)
++
++#define IEP2_TIMEOUT_CFG		0x0050
++#define     IEP2_TIMEOUT_CFG_EN			BIT(31)
++#define     IEP2_TIMEOUT_CYCLES			GENMASK(25, 0)
++
++#define IEP2_SRC_ADDR_CURY		0x0060
++#define IEP2_SRC_ADDR_NXTY		0x0064
++#define IEP2_SRC_ADDR_PREY		0x0068
++#define IEP2_SRC_ADDR_CURUV		0x006c
++#define IEP2_SRC_ADDR_NXTUV		0x0074
++#define IEP2_SRC_ADDR_PREUV		0x007c
++#define IEP2_SRC_ADDR_MD		0x0084
++#define IEP2_SRC_ADDR_MV		0x0088
++#define IEP2_ROI_ADDR			0x008c
++#define IEP2_DST_ADDR_TOPY		0x00b0
++#define IEP2_DST_ADDR_BOTY		0x00b4
++#define IEP2_DST_ADDR_TOPC		0x00b8
++#define IEP2_DST_ADDR_BOTC		0x00bc
++#define IEP2_DST_ADDR_MD		0x00c0
++#define IEP2_DST_ADDR_MV		0x00c4
++
++#define IEP2_MD_CONFIG0			0x00e0
++#define     IEP2_MD_THETA(x)			(((x) & 3) << 8)
++#define     IEP2_MD_R(x)			(((x) & 0xf) << 4)
++#define     IEP2_MD_LAMBDA(x)			((x) & 0xf)
++
++#define IEP2_DECT_CONFIG0		0x00e4
++#define     IEP2_OSD_GRADV_THR(x)		(((x) & 0xff) << 24)
++#define     IEP2_OSD_GRADH_THR(x)		(((x) & 0xff) << 16)
++#define     IEP2_DECT_RESI_THR(x)		((x) & 0xff)
++
++#define IEP2_OSD_CONFIG0		0x00fc
++#define     IEP2_OSD_LINE_NUM(x)		(((x) & 0x1ff) << 16)
++#define     IEP2_OSD_PEC_THR(x)			((x) & 0x7ff)
++
++#define IEP2_ME_CONFIG0			0x0120
++#define     IEP2_ME_THR_OFFSET(x)		(((x) & 0xff) << 16)
++#define     IEP2_MV_SIMILAR_NUM_THR0(x)		(((x) & 0xf) << 12)
++#define     IEP2_MV_SIMILAR_THR(x)		(((x) & 0xf) << 8)
++#define     IEP2_MV_BONUS(x)			(((x) & 0xf) << 4)
++#define     IEP2_ME_PENA(x)			((x) & 0xf)
++
++#define IEP2_ME_LIMIT_CONFIG		0x0124
++#define     IEP2_MV_RIGHT_LIMIT(x)		(((x) & 0x3f) << 8)
++#define     IEP2_MV_LEFT_LIMIT(x)		((x) & 0x3f)
++
++#define IEP2_EEDI_CONFIG0		0x0130
++#define     IEP2_EEDI_THR0(x)			((x) & 0x1f)
++#define IEP2_BLE_CONFIG0		0x0134
++#define     IEP2_BLE_BACKTOMA_NUM(x)		((x) & 7)
++
++#define IEP2_COMB_CONFIG0		0x0138
++#define     IEP2_COMB_CNT_THR(x)		(((x) & 0xf) << 24)
++#define     IEP2_COMB_FEATURE_THR(x)		(((x) & 0x3f) << 16)
++#define     IEP2_COMB_T_THR(x)			(((x) & 0xff) << 8)
++#define     IEP2_COMB_OSD_VLD_ALL		GENMASK(7, 0)
++
++#define IEP2_DIL_MTN_TAB(i)		(0x0140 + ((i) * 4))
++
++#endif
+diff --git a/drivers/media/platform/rockchip/iep2/rockchip-iep2.c b/drivers/media/platform/rockchip/iep2/rockchip-iep2.c
+new file mode 100644
+index 0000000..d1f60f7
+--- /dev/null
++++ b/drivers/media/platform/rockchip/iep2/rockchip-iep2.c
+@@ -0,0 +1,792 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Rockchip IEP2 deinterlacer: an interlaced NV12 frame in, a progressive
++ * frame from each of its fields out, as the vendor's MPP programs it
++ */
++
++#include <linux/clk.h>
++#include <linux/delay.h>
++#include <linux/dma-mapping.h>
++#include <linux/interrupt.h>
++#include <linux/io.h>
++#include <linux/iopoll.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++#include <linux/pm_runtime.h>
++#include <linux/reset.h>
++#include <linux/slab.h>
++#include <media/v4l2-device.h>
++#include <media/v4l2-ioctl.h>
++#include <media/v4l2-mem2mem.h>
++#include <media/videobuf2-dma-contig.h>
++#include <media/videobuf2-v4l2.h>
++
++#include "rockchip-iep2-regs.h"
++
++#define IEP2_NAME		"rockchip-iep2"
++
++#define IEP2_TILE_W		16
++#define IEP2_TILE_H		4
++#define IEP2_TILES_W_MAX	120
++#define IEP2_TILES_H_MAX	272
++#define IEP2_MIN_WIDTH		64
++#define IEP2_MIN_HEIGHT		32
++#define IEP2_MAX_WIDTH		(IEP2_TILES_W_MAX * IEP2_TILE_W)
++#define IEP2_MAX_HEIGHT		(IEP2_TILES_H_MAX * IEP2_TILE_H)
++#define IEP2_STRIDE_UNIT	4	/* stride registers count 32-bit words */
++
++#define IEP2_FMT_YUV420		3
++#define IEP2_YUV_SWAP_SP_UV	0
++#define IEP2_DIL_MODE_I2O2	4	/* both fields in, a frame from each out */
++#define IEP2_OUT_MODE_LINE	0
++#define IEP2_FIELD_ORDER_TB	0
++#define IEP2_FIELD_ORDER_BT	1
++
++/* MPP's defaults, the RK3528's motion detection without its pre-filter */
++#define IEP2_MD_THETA_DEF	1
++#define IEP2_MD_R_DEF		6
++#define IEP2_MD_LAMBDA_DEF	8
++#define IEP2_DECT_RESI_THR_DEF	30
++#define IEP2_OSD_GRAD_THR_DEF	60
++#define IEP2_OSD_LINE_NUM_DEF	2
++#define IEP2_OSD_PEC_SCALE	26	/* osd_pec_thr = width * 26 / 128 */
++#define IEP2_OSD_PEC_SHIFT	7
++#define IEP2_ME_PENA_DEF	5
++#define IEP2_MV_BONUS_DEF	10
++#define IEP2_MV_SIMILAR_THR_DEF	4
++#define IEP2_MV_SIMILAR_NUM_DEF	4
++#define IEP2_ME_THR_OFFSET_DEF	20
++#define IEP2_MV_LEFT_LIMIT_DEF	28
++#define IEP2_MV_RIGHT_LIMIT_DEF	27
++#define IEP2_EEDI_THR0_DEF	12
++#define IEP2_BLE_BACKTOMA_DEF	1
++#define IEP2_COMB_T_THR_DEF	4
++#define IEP2_COMB_FEATURE_DEF	16
++
++#define IEP2_MV_BUF_SIZE	(IEP2_TILES_W_MAX * IEP2_TILES_H_MAX)
++#define IEP2_MD_BUF_SIZE	(IEP2_MAX_WIDTH * IEP2_MAX_HEIGHT)
++#define IEP2_ROI_BUF_SIZE	IEP2_MV_BUF_SIZE
++#define IEP2_RESET_TIMEOUT_US	5
++#define IEP2_CRU_RESET_US	5
++#define IEP2_FRAMES_PER_JOB	2	/* a frame from each field */
++
++static const u32 iep2_mtn_tab[] = {
++	0x00000000, 0x00000000, 0x00000000, 0x00000000,
++	0x01010000, 0x06050302, 0x0f0d0a08, 0x1c191512,
++	0x2b282420, 0x3634312e, 0x3d3c3a38, 0x40403f3e,
++	0x40404040, 0x40404040, 0x40404040, 0x40404040
++};
++
++struct iep2_aux {
++	void *cpu;
++	dma_addr_t dma;
++	size_t size;
++};
++
++struct iep2_dev {
++	struct v4l2_device v4l2_dev;
++	struct video_device vfd;
++	struct device *dev;
++	struct v4l2_m2m_dev *m2m_dev;
++	struct mutex dev_mutex;	/* serialises the video device's ioctls */
++	void __iomem *base;
++	struct clk_bulk_data *clks;
++	int num_clks;
++	struct reset_control *rstc;	/* held while streaming: the engine is the VDPP's too */
++	struct iep2_aux mv, md, roi;
++};
++
++struct iep2_ctx {
++	struct v4l2_fh fh;
++	struct iep2_dev *iep;
++	struct v4l2_pix_format src_fmt;
++	struct v4l2_pix_format dst_fmt;
++};
++
++static inline void iep2_write(struct iep2_dev *iep, u32 reg, u32 val)
++{
++	writel_relaxed(val, iep->base + reg);
++}
++
++static inline u32 iep2_read(struct iep2_dev *iep, u32 reg)
++{
++	return readl_relaxed(iep->base + reg);
++}
++
++static inline struct iep2_ctx *iep2_file2ctx(struct file *file)
++{
++	return container_of(file_to_v4l2_fh(file), struct iep2_ctx, fh);
++}
++
++static bool iep2_bottom_first(const struct iep2_ctx *ctx)
++{
++	return ctx->src_fmt.field == V4L2_FIELD_INTERLACED_BT;
++}
++
++static void iep2_config(struct iep2_dev *iep, struct iep2_ctx *ctx)
++{
++	const struct v4l2_pix_format *src = &ctx->src_fmt;
++	const struct v4l2_pix_format *dst = &ctx->dst_fmt;
++	u32 tiles_w = DIV_ROUND_UP(src->width, IEP2_TILE_W);
++	u32 tiles_h = DIV_ROUND_UP(src->height, IEP2_TILE_H);
++	u32 reg;
++	int i;
++
++	reg = IEP2_SRC_FMT(IEP2_FMT_YUV420) |
++	      IEP2_SRC_YUV_SWAP(IEP2_YUV_SWAP_SP_UV) |
++	      IEP2_DST_FMT(IEP2_FMT_YUV420) |
++	      IEP2_DST_YUV_SWAP(IEP2_YUV_SWAP_SP_UV) |
++	      IEP2_DEBUG_DATA_EN;
++	iep2_write(iep, IEP2_CONFIG0, reg);
++	iep2_write(iep, IEP2_WORK_MODE, IEP2_WORK_MODE_IEP2);
++
++	reg = IEP2_SRC_PIC_WIDTH(tiles_w * IEP2_TILE_W - 1) |
++	      IEP2_SRC_PIC_HEIGHT(tiles_h * IEP2_TILE_H - 1);
++	iep2_write(iep, IEP2_SRC_IMG_SIZE, reg);
++
++	reg = IEP2_SRC_VIR_Y_STRIDE(src->bytesperline / IEP2_STRIDE_UNIT) |
++	      IEP2_SRC_VIR_UV_STRIDE(src->bytesperline / IEP2_STRIDE_UNIT);
++	iep2_write(iep, IEP2_VIR_SRC_IMG_WIDTH, reg);
++	iep2_write(iep, IEP2_VIR_DST_IMG_WIDTH,
++		   IEP2_DST_VIR_STRIDE(dst->bytesperline / IEP2_STRIDE_UNIT));
++
++	reg = IEP2_DIL_MV_HIST_EN | IEP2_DIL_COMB_EN | IEP2_DIL_BLE_EN |
++	      IEP2_DIL_EEDI_EN | IEP2_DIL_MEMC_EN | IEP2_DIL_OSD_EN |
++	      IEP2_DIL_PD_EN | IEP2_DIL_FF_EN |
++	      IEP2_DIL_FIELD_ORDER(iep2_bottom_first(ctx) ? IEP2_FIELD_ORDER_BT :
++							     IEP2_FIELD_ORDER_TB) |
++	      IEP2_DIL_OUT_MODE(IEP2_OUT_MODE_LINE) |
++	      IEP2_DIL_MODE(IEP2_DIL_MODE_I2O2);
++	iep2_write(iep, IEP2_DIL_CONFIG0, reg);
++
++	iep2_write(iep, IEP2_TIMEOUT_CFG, IEP2_TIMEOUT_CFG_EN | IEP2_TIMEOUT_CYCLES);
++
++	iep2_write(iep, IEP2_SRC_ADDR_MD, iep->md.dma);
++	iep2_write(iep, IEP2_SRC_ADDR_MV, iep->mv.dma);
++	iep2_write(iep, IEP2_DST_ADDR_MD, iep->md.dma);
++	iep2_write(iep, IEP2_DST_ADDR_MV, iep->mv.dma);
++	iep2_write(iep, IEP2_ROI_ADDR, iep->roi.dma);
++
++	reg = IEP2_MD_THETA(IEP2_MD_THETA_DEF) | IEP2_MD_R(IEP2_MD_R_DEF) |
++	      IEP2_MD_LAMBDA(IEP2_MD_LAMBDA_DEF);
++	iep2_write(iep, IEP2_MD_CONFIG0, reg);
++
++	reg = IEP2_DECT_RESI_THR(IEP2_DECT_RESI_THR_DEF) |
++	      IEP2_OSD_GRADH_THR(IEP2_OSD_GRAD_THR_DEF) |
++	      IEP2_OSD_GRADV_THR(IEP2_OSD_GRAD_THR_DEF);
++	iep2_write(iep, IEP2_DECT_CONFIG0, reg);
++
++	reg = IEP2_OSD_PEC_THR((src->width * IEP2_OSD_PEC_SCALE) >> IEP2_OSD_PEC_SHIFT) |
++	      IEP2_OSD_LINE_NUM(IEP2_OSD_LINE_NUM_DEF);
++	iep2_write(iep, IEP2_OSD_CONFIG0, reg);
++
++	reg = IEP2_ME_PENA(IEP2_ME_PENA_DEF) | IEP2_MV_BONUS(IEP2_MV_BONUS_DEF) |
++	      IEP2_MV_SIMILAR_THR(IEP2_MV_SIMILAR_THR_DEF) |
++	      IEP2_MV_SIMILAR_NUM_THR0(IEP2_MV_SIMILAR_NUM_DEF) |
++	      IEP2_ME_THR_OFFSET(IEP2_ME_THR_OFFSET_DEF);
++	iep2_write(iep, IEP2_ME_CONFIG0, reg);
++
++	/* the left limit is a negative displacement, as its two's complement */
++	reg = IEP2_MV_LEFT_LIMIT(-IEP2_MV_LEFT_LIMIT_DEF) |
++	      IEP2_MV_RIGHT_LIMIT(IEP2_MV_RIGHT_LIMIT_DEF);
++	iep2_write(iep, IEP2_ME_LIMIT_CONFIG, reg);
++
++	iep2_write(iep, IEP2_EEDI_CONFIG0, IEP2_EEDI_THR0(IEP2_EEDI_THR0_DEF));
++	iep2_write(iep, IEP2_BLE_CONFIG0, IEP2_BLE_BACKTOMA_NUM(IEP2_BLE_BACKTOMA_DEF));
++
++	reg = IEP2_COMB_OSD_VLD_ALL | IEP2_COMB_T_THR(IEP2_COMB_T_THR_DEF) |
++	      IEP2_COMB_FEATURE_THR(IEP2_COMB_FEATURE_DEF);
++	iep2_write(iep, IEP2_COMB_CONFIG0, reg);
++
++	for (i = 0; i < ARRAY_SIZE(iep2_mtn_tab); i++)
++		iep2_write(iep, IEP2_DIL_MTN_TAB(i), iep2_mtn_tab[i]);
++}
++
++static void iep2_set_src(struct iep2_dev *iep, struct iep2_ctx *ctx, dma_addr_t y)
++{
++	dma_addr_t uv = y + ctx->src_fmt.bytesperline * ctx->src_fmt.height;
++
++	/* one frame holds both fields: it is current, next and previous at once */
++	iep2_write(iep, IEP2_SRC_ADDR_CURY, y);
++	iep2_write(iep, IEP2_SRC_ADDR_CURUV, uv);
++	iep2_write(iep, IEP2_SRC_ADDR_NXTY, y);
++	iep2_write(iep, IEP2_SRC_ADDR_NXTUV, uv);
++	iep2_write(iep, IEP2_SRC_ADDR_PREY, y);
++	iep2_write(iep, IEP2_SRC_ADDR_PREUV, uv);
++}
++
++static void iep2_set_dst(struct iep2_dev *iep, struct iep2_ctx *ctx,
++			 dma_addr_t top, dma_addr_t bottom)
++{
++	size_t chroma = ctx->dst_fmt.bytesperline * ctx->dst_fmt.height;
++
++	iep2_write(iep, IEP2_DST_ADDR_TOPY, top);
++	iep2_write(iep, IEP2_DST_ADDR_TOPC, top + chroma);
++	iep2_write(iep, IEP2_DST_ADDR_BOTY, bottom);
++	iep2_write(iep, IEP2_DST_ADDR_BOTC, bottom + chroma);
++}
++
++static void iep2_device_run(void *priv)
++{
++	struct iep2_ctx *ctx = priv;
++	struct iep2_dev *iep = ctx->iep;
++	struct vb2_v4l2_buffer *src, *dst[IEP2_FRAMES_PER_JOB];
++	dma_addr_t first, second;
++	struct v4l2_m2m_buffer *b;
++	int n = 0;
++
++	src = v4l2_m2m_next_src_buf(ctx->fh.m2m_ctx);
++	v4l2_m2m_for_each_dst_buf(ctx->fh.m2m_ctx, b) {
++		dst[n] = &b->vb;
++		v4l2_m2m_buf_copy_metadata(src, dst[n]);
++		if (++n == IEP2_FRAMES_PER_JOB)
++			break;
++	}
++
++	iep2_config(iep, ctx);
++	iep2_set_src(iep, ctx, vb2_dma_contig_plane_dma_addr(&src->vb2_buf, 0));
++
++	/* the first field in time fills the first buffer */
++	first = vb2_dma_contig_plane_dma_addr(&dst[0]->vb2_buf, 0);
++	second = vb2_dma_contig_plane_dma_addr(&dst[1]->vb2_buf, 0);
++	if (iep2_bottom_first(ctx))
++		iep2_set_dst(iep, ctx, second, first);
++	else
++		iep2_set_dst(iep, ctx, first, second);
++
++	iep2_write(iep, IEP2_INT_EN, IEP2_INT_FRM_DONE | IEP2_INT_OSD_MAX |
++		   IEP2_INT_BUS_ERROR | IEP2_INT_TIMEOUT);
++
++	/* registers before the start */
++	wmb();
++	writel(IEP2_FRM_EN, iep->base + IEP2_FRM_START);
++}
++
++static int iep2_job_ready(void *priv)
++{
++	struct iep2_ctx *ctx = priv;
++
++	return v4l2_m2m_num_src_bufs_ready(ctx->fh.m2m_ctx) >= 1 &&
++	       v4l2_m2m_num_dst_bufs_ready(ctx->fh.m2m_ctx) >= IEP2_FRAMES_PER_JOB;
++}
++
++static void iep2_reset(struct iep2_dev *iep)
++{
++	u32 status;
++
++	writel(IEP2_ACLK_SRESET_P, iep->base + IEP2_CONFIG0);
++	if (!readl_poll_timeout_atomic(iep->base + IEP2_STATUS, status,
++				       status & IEP2_ARST_FINISH_DONE, 0,
++				       IEP2_RESET_TIMEOUT_US))
++		return;
++
++	dev_warn(iep->dev, "soft reset timed out, resetting through the CRU\n");
++	reset_control_assert(iep->rstc);
++	udelay(IEP2_CRU_RESET_US);
++	reset_control_deassert(iep->rstc);
++}
++
++static irqreturn_t iep2_irq(int irq, void *data)
++{
++	struct iep2_dev *iep = data;
++	enum vb2_buffer_state state = VB2_BUF_STATE_DONE;
++	struct iep2_ctx *ctx;
++	u32 mode, status;
++	int i;
++
++	/* the line is shared with the VDPP and the IOMMU; an unclocked IEP cannot be read */
++	if (pm_runtime_get_if_in_use(iep->dev) <= 0)
++		return IRQ_NONE;
++
++	mode = iep2_read(iep, IEP2_WORK_MODE) & IEP2_WORK_MODE_MASK;
++	if (mode && mode != IEP2_WORK_MODE_IEP2)
++		goto none;
++
++	status = iep2_read(iep, IEP2_INT_STS);
++	iep2_write(iep, IEP2_INT_CLR, IEP2_INT_ALL);
++	if (!(status & (IEP2_INT_FRM_DONE | IEP2_INT_BUS_ERROR | IEP2_INT_TIMEOUT)))
++		goto none;
++
++	ctx = v4l2_m2m_get_curr_priv(iep->m2m_dev);
++	if (!ctx) {
++		dev_err(iep->dev, "interrupt with no job running\n");
++		goto handled;
++	}
++
++	if (status & (IEP2_INT_BUS_ERROR | IEP2_INT_TIMEOUT)) {
++		dev_err(iep->dev, "job failed, status %#x\n", status);
++		state = VB2_BUF_STATE_ERROR;
++		iep2_reset(iep);
++	}
++
++	for (i = 0; i < IEP2_FRAMES_PER_JOB; i++)
++		v4l2_m2m_buf_done(v4l2_m2m_dst_buf_remove(ctx->fh.m2m_ctx), state);
++	v4l2_m2m_buf_done(v4l2_m2m_src_buf_remove(ctx->fh.m2m_ctx), state);
++	v4l2_m2m_job_finish(iep->m2m_dev, ctx->fh.m2m_ctx);
++
++handled:
++	pm_runtime_put(iep->dev);
++	return IRQ_HANDLED;
++none:
++	pm_runtime_put(iep->dev);
++	return IRQ_NONE;
++}
++
++static void iep2_prepare_format(struct v4l2_pix_format *pix)
++{
++	pix->pixelformat = V4L2_PIX_FMT_NV12;
++	pix->width = ALIGN(clamp(pix->width, IEP2_MIN_WIDTH, IEP2_MAX_WIDTH), IEP2_TILE_W);
++	pix->height = ALIGN(clamp(pix->height, IEP2_MIN_HEIGHT, IEP2_MAX_HEIGHT),
++			    IEP2_TILE_H);
++	pix->bytesperline = pix->width;
++	pix->sizeimage = pix->bytesperline * pix->height * 3 / 2;
++}
++
++static int iep2_querycap(struct file *file, void *priv, struct v4l2_capability *cap)
++{
++	strscpy(cap->driver, IEP2_NAME, sizeof(cap->driver));
++	strscpy(cap->card, IEP2_NAME, sizeof(cap->card));
++	snprintf(cap->bus_info, sizeof(cap->bus_info), "platform:%s", IEP2_NAME);
++	return 0;
++}
++
++static int iep2_enum_fmt(struct file *file, void *priv, struct v4l2_fmtdesc *f)
++{
++	if (f->index)
++		return -EINVAL;
++
++	f->pixelformat = V4L2_PIX_FMT_NV12;
++	return 0;
++}
++
++static int iep2_enum_framesizes(struct file *file, void *priv,
++				struct v4l2_frmsizeenum *fsize)
++{
++	if (fsize->index || fsize->pixel_format != V4L2_PIX_FMT_NV12)
++		return -EINVAL;
++
++	fsize->type = V4L2_FRMSIZE_TYPE_STEPWISE;
++	fsize->stepwise.min_width = IEP2_MIN_WIDTH;
++	fsize->stepwise.max_width = IEP2_MAX_WIDTH;
++	fsize->stepwise.step_width = IEP2_TILE_W;
++	fsize->stepwise.min_height = IEP2_MIN_HEIGHT;
++	fsize->stepwise.max_height = IEP2_MAX_HEIGHT;
++	fsize->stepwise.step_height = IEP2_TILE_H;
++	return 0;
++}
++
++static int iep2_g_fmt_vid_cap(struct file *file, void *priv, struct v4l2_format *f)
++{
++	f->fmt.pix = iep2_file2ctx(file)->dst_fmt;
++	return 0;
++}
++
++static int iep2_g_fmt_vid_out(struct file *file, void *priv, struct v4l2_format *f)
++{
++	f->fmt.pix = iep2_file2ctx(file)->src_fmt;
++	return 0;
++}
++
++static int iep2_try_fmt_vid_cap(struct file *file, void *priv, struct v4l2_format *f)
++{
++	f->fmt.pix.field = V4L2_FIELD_NONE;
++	iep2_prepare_format(&f->fmt.pix);
++	return 0;
++}
++
++static int iep2_try_fmt_vid_out(struct file *file, void *priv, struct v4l2_format *f)
++{
++	if (f->fmt.pix.field != V4L2_FIELD_INTERLACED_TB &&
++	    f->fmt.pix.field != V4L2_FIELD_INTERLACED_BT)
++		f->fmt.pix.field = V4L2_FIELD_INTERLACED;
++	iep2_prepare_format(&f->fmt.pix);
++	return 0;
++}
++
++static int iep2_s_fmt(struct file *file, struct v4l2_format *f,
++		      struct v4l2_pix_format *dst)
++{
++	struct iep2_ctx *ctx = iep2_file2ctx(file);
++
++	if (vb2_is_busy(v4l2_m2m_get_vq(ctx->fh.m2m_ctx, f->type)))
++		return -EBUSY;
++
++	*dst = f->fmt.pix;
++	return 0;
++}
++
++static int iep2_s_fmt_vid_cap(struct file *file, void *priv, struct v4l2_format *f)
++{
++	iep2_try_fmt_vid_cap(file, priv, f);
++	return iep2_s_fmt(file, f, &iep2_file2ctx(file)->dst_fmt);
++}
++
++static int iep2_s_fmt_vid_out(struct file *file, void *priv, struct v4l2_format *f)
++{
++	struct iep2_ctx *ctx = iep2_file2ctx(file);
++	int ret;
++
++	iep2_try_fmt_vid_out(file, priv, f);
++	ret = iep2_s_fmt(file, f, &ctx->src_fmt);
++	if (ret)
++		return ret;
++
++	ctx->dst_fmt.colorspace = f->fmt.pix.colorspace;
++	ctx->dst_fmt.xfer_func = f->fmt.pix.xfer_func;
++	ctx->dst_fmt.ycbcr_enc = f->fmt.pix.ycbcr_enc;
++	ctx->dst_fmt.quantization = f->fmt.pix.quantization;
++	return 0;
++}
++
++static const struct v4l2_ioctl_ops iep2_ioctl_ops = {
++	.vidioc_querycap		= iep2_querycap,
++	.vidioc_enum_framesizes		= iep2_enum_framesizes,
++	.vidioc_enum_fmt_vid_cap	= iep2_enum_fmt,
++	.vidioc_g_fmt_vid_cap		= iep2_g_fmt_vid_cap,
++	.vidioc_try_fmt_vid_cap		= iep2_try_fmt_vid_cap,
++	.vidioc_s_fmt_vid_cap		= iep2_s_fmt_vid_cap,
++	.vidioc_enum_fmt_vid_out	= iep2_enum_fmt,
++	.vidioc_g_fmt_vid_out		= iep2_g_fmt_vid_out,
++	.vidioc_try_fmt_vid_out		= iep2_try_fmt_vid_out,
++	.vidioc_s_fmt_vid_out		= iep2_s_fmt_vid_out,
++	.vidioc_reqbufs			= v4l2_m2m_ioctl_reqbufs,
++	.vidioc_querybuf		= v4l2_m2m_ioctl_querybuf,
++	.vidioc_qbuf			= v4l2_m2m_ioctl_qbuf,
++	.vidioc_dqbuf			= v4l2_m2m_ioctl_dqbuf,
++	.vidioc_prepare_buf		= v4l2_m2m_ioctl_prepare_buf,
++	.vidioc_create_bufs		= v4l2_m2m_ioctl_create_bufs,
++	.vidioc_expbuf			= v4l2_m2m_ioctl_expbuf,
++	.vidioc_streamon		= v4l2_m2m_ioctl_streamon,
++	.vidioc_streamoff		= v4l2_m2m_ioctl_streamoff,
++};
++
++static struct v4l2_pix_format *iep2_queue_fmt(struct vb2_queue *vq)
++{
++	struct iep2_ctx *ctx = vb2_get_drv_priv(vq);
++
++	return V4L2_TYPE_IS_OUTPUT(vq->type) ? &ctx->src_fmt : &ctx->dst_fmt;
++}
++
++static int iep2_queue_setup(struct vb2_queue *vq, unsigned int *nbuffers,
++			    unsigned int *nplanes, unsigned int sizes[],
++			    struct device *alloc_devs[])
++{
++	unsigned int size = iep2_queue_fmt(vq)->sizeimage;
++
++	if (*nplanes)
++		return sizes[0] < size ? -EINVAL : 0;
++
++	sizes[0] = size;
++	*nplanes = 1;
++	return 0;
++}
++
++static int iep2_buf_prepare(struct vb2_buffer *vb)
++{
++	unsigned int size = iep2_queue_fmt(vb->vb2_queue)->sizeimage;
++
++	if (vb2_plane_size(vb, 0) < size)
++		return -EINVAL;
++
++	vb2_set_plane_payload(vb, 0, size);
++	return 0;
++}
++
++static void iep2_buf_queue(struct vb2_buffer *vb)
++{
++	struct iep2_ctx *ctx = vb2_get_drv_priv(vb->vb2_queue);
++
++	v4l2_m2m_buf_queue(ctx->fh.m2m_ctx, to_vb2_v4l2_buffer(vb));
++}
++
++static void iep2_queue_cleanup(struct vb2_queue *vq, enum vb2_buffer_state state)
++{
++	struct iep2_ctx *ctx = vb2_get_drv_priv(vq);
++	struct vb2_v4l2_buffer *vbuf;
++
++	for (;;) {
++		vbuf = V4L2_TYPE_IS_OUTPUT(vq->type) ?
++			v4l2_m2m_src_buf_remove(ctx->fh.m2m_ctx) :
++			v4l2_m2m_dst_buf_remove(ctx->fh.m2m_ctx);
++		if (!vbuf)
++			break;
++		v4l2_m2m_buf_done(vbuf, state);
++	}
++}
++
++static int iep2_start_streaming(struct vb2_queue *vq, unsigned int count)
++{
++	struct iep2_ctx *ctx = vb2_get_drv_priv(vq);
++	int ret;
++
++	if (!V4L2_TYPE_IS_OUTPUT(vq->type))
++		return 0;
++
++	ret = reset_control_acquire(ctx->iep->rstc);
++	if (ret)
++		goto err;
++
++	ret = pm_runtime_resume_and_get(ctx->iep->dev);
++	if (ret < 0) {
++		reset_control_release(ctx->iep->rstc);
++		goto err;
++	}
++	return 0;
++
++err:
++	iep2_queue_cleanup(vq, VB2_BUF_STATE_QUEUED);
++	return ret;
++}
++
++static void iep2_stop_streaming(struct vb2_queue *vq)
++{
++	struct iep2_ctx *ctx = vb2_get_drv_priv(vq);
++
++	if (V4L2_TYPE_IS_OUTPUT(vq->type)) {
++		pm_runtime_put(ctx->iep->dev);
++		reset_control_release(ctx->iep->rstc);
++	}
++
++	iep2_queue_cleanup(vq, VB2_BUF_STATE_ERROR);
++}
++
++static const struct vb2_ops iep2_qops = {
++	.queue_setup		= iep2_queue_setup,
++	.buf_prepare		= iep2_buf_prepare,
++	.buf_queue		= iep2_buf_queue,
++	.start_streaming	= iep2_start_streaming,
++	.stop_streaming		= iep2_stop_streaming,
++};
++
++static int iep2_init_vq(struct iep2_ctx *ctx, struct vb2_queue *vq,
++			enum v4l2_buf_type type, unsigned int min_queued)
++{
++	vq->type = type;
++	vq->io_modes = VB2_MMAP | VB2_DMABUF;
++	vq->drv_priv = ctx;
++	vq->buf_struct_size = sizeof(struct v4l2_m2m_buffer);
++	vq->min_queued_buffers = min_queued;
++	vq->ops = &iep2_qops;
++	vq->mem_ops = &vb2_dma_contig_memops;
++	vq->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_COPY;
++	vq->lock = &ctx->iep->dev_mutex;
++	vq->dev = ctx->iep->dev;
++	return vb2_queue_init(vq);
++}
++
++static int iep2_queue_init(void *priv, struct vb2_queue *src_vq, struct vb2_queue *dst_vq)
++{
++	int ret;
++
++	ret = iep2_init_vq(priv, src_vq, V4L2_BUF_TYPE_VIDEO_OUTPUT, 1);
++	if (ret)
++		return ret;
++
++	return iep2_init_vq(priv, dst_vq, V4L2_BUF_TYPE_VIDEO_CAPTURE, IEP2_FRAMES_PER_JOB);
++}
++
++static int iep2_open(struct file *file)
++{
++	struct iep2_dev *iep = video_drvdata(file);
++	struct iep2_ctx *ctx;
++	int ret;
++
++	if (mutex_lock_interruptible(&iep->dev_mutex))
++		return -ERESTARTSYS;
++
++	ctx = kzalloc_obj(*ctx);
++	if (!ctx) {
++		ret = -ENOMEM;
++		goto unlock;
++	}
++
++	ctx->src_fmt.field = V4L2_FIELD_INTERLACED;
++	ctx->src_fmt.width = IEP2_MAX_WIDTH;
++	ctx->src_fmt.height = IEP2_MAX_HEIGHT;
++	iep2_prepare_format(&ctx->src_fmt);
++	ctx->dst_fmt = ctx->src_fmt;
++	ctx->dst_fmt.field = V4L2_FIELD_NONE;
++
++	v4l2_fh_init(&ctx->fh, video_devdata(file));
++	ctx->iep = iep;
++
++	ctx->fh.m2m_ctx = v4l2_m2m_ctx_init(iep->m2m_dev, ctx, &iep2_queue_init);
++	if (IS_ERR(ctx->fh.m2m_ctx)) {
++		ret = PTR_ERR(ctx->fh.m2m_ctx);
++		kfree(ctx);
++		goto unlock;
++	}
++
++	v4l2_fh_add(&ctx->fh, file);
++	ret = 0;
++unlock:
++	mutex_unlock(&iep->dev_mutex);
++	return ret;
++}
++
++static int iep2_release(struct file *file)
++{
++	struct iep2_dev *iep = video_drvdata(file);
++	struct iep2_ctx *ctx = iep2_file2ctx(file);
++
++	mutex_lock(&iep->dev_mutex);
++	v4l2_fh_del(&ctx->fh, file);
++	v4l2_fh_exit(&ctx->fh);
++	v4l2_m2m_ctx_release(ctx->fh.m2m_ctx);
++	kfree(ctx);
++	mutex_unlock(&iep->dev_mutex);
++	return 0;
++}
++
++static const struct v4l2_file_operations iep2_fops = {
++	.owner		= THIS_MODULE,
++	.open		= iep2_open,
++	.release	= iep2_release,
++	.poll		= v4l2_m2m_fop_poll,
++	.unlocked_ioctl	= video_ioctl2,
++	.mmap		= v4l2_m2m_fop_mmap,
++};
++
++static const struct video_device iep2_video_device = {
++	.name		= IEP2_NAME,
++	.vfl_dir	= VFL_DIR_M2M,
++	.fops		= &iep2_fops,
++	.ioctl_ops	= &iep2_ioctl_ops,
++	.minor		= -1,
++	.release	= video_device_release_empty,
++	.device_caps	= V4L2_CAP_VIDEO_M2M | V4L2_CAP_STREAMING,
++};
++
++static const struct v4l2_m2m_ops iep2_m2m_ops = {
++	.device_run	= iep2_device_run,
++	.job_ready	= iep2_job_ready,
++};
++
++static int iep2_alloc_aux(struct iep2_dev *iep, struct iep2_aux *aux, size_t size)
++{
++	aux->size = size;
++	aux->cpu = dmam_alloc_coherent(iep->dev, size, &aux->dma, GFP_KERNEL);
++	return aux->cpu ? 0 : -ENOMEM;
++}
++
++static int iep2_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct iep2_dev *iep;
++	int irq, ret;
++
++	iep = devm_kzalloc(dev, sizeof(*iep), GFP_KERNEL);
++	if (!iep)
++		return -ENOMEM;
++
++	iep->dev = dev;
++	iep->vfd = iep2_video_device;
++
++	iep->base = devm_platform_ioremap_resource(pdev, 0);
++	if (IS_ERR(iep->base))
++		return PTR_ERR(iep->base);
++
++	iep->num_clks = devm_clk_bulk_get_all(dev, &iep->clks);
++	if (iep->num_clks < 0)
++		return dev_err_probe(dev, iep->num_clks, "failed to get clocks\n");
++
++	iep->rstc = devm_reset_control_array_get_exclusive_released(dev);
++	if (IS_ERR(iep->rstc))
++		return dev_err_probe(dev, PTR_ERR(iep->rstc), "failed to get resets\n");
++
++	ret = iep2_alloc_aux(iep, &iep->mv, IEP2_MV_BUF_SIZE) ?:
++	      iep2_alloc_aux(iep, &iep->md, IEP2_MD_BUF_SIZE) ?:
++	      iep2_alloc_aux(iep, &iep->roi, IEP2_ROI_BUF_SIZE);
++	if (ret)
++		return ret;
++
++	irq = platform_get_irq(pdev, 0);
++	if (irq < 0)
++		return irq;
++
++	ret = devm_request_irq(dev, irq, iep2_irq, IRQF_SHARED, dev_name(dev), iep);
++	if (ret)
++		return dev_err_probe(dev, ret, "failed to request IRQ\n");
++
++	mutex_init(&iep->dev_mutex);
++
++	ret = v4l2_device_register(dev, &iep->v4l2_dev);
++	if (ret)
++		return ret;
++
++	iep->m2m_dev = v4l2_m2m_init(&iep2_m2m_ops);
++	if (IS_ERR(iep->m2m_dev)) {
++		ret = PTR_ERR(iep->m2m_dev);
++		goto err_v4l2;
++	}
++
++	iep->vfd.lock = &iep->dev_mutex;
++	iep->vfd.v4l2_dev = &iep->v4l2_dev;
++	video_set_drvdata(&iep->vfd, iep);
++	platform_set_drvdata(pdev, iep);
++	pm_runtime_enable(dev);
++
++	ret = video_register_device(&iep->vfd, VFL_TYPE_VIDEO, -1);
++	if (ret)
++		goto err_m2m;
++
++	return 0;
++
++err_m2m:
++	pm_runtime_disable(dev);
++	v4l2_m2m_release(iep->m2m_dev);
++err_v4l2:
++	v4l2_device_unregister(&iep->v4l2_dev);
++	return ret;
++}
++
++static void iep2_remove(struct platform_device *pdev)
++{
++	struct iep2_dev *iep = platform_get_drvdata(pdev);
++
++	video_unregister_device(&iep->vfd);
++	v4l2_m2m_release(iep->m2m_dev);
++	v4l2_device_unregister(&iep->v4l2_dev);
++	pm_runtime_disable(&pdev->dev);
++}
++
++static int iep2_runtime_resume(struct device *dev)
++{
++	struct iep2_dev *iep = dev_get_drvdata(dev);
++
++	return clk_bulk_prepare_enable(iep->num_clks, iep->clks);
++}
++
++static int iep2_runtime_suspend(struct device *dev)
++{
++	struct iep2_dev *iep = dev_get_drvdata(dev);
++
++	clk_bulk_disable_unprepare(iep->num_clks, iep->clks);
++	return 0;
++}
++
++static const struct dev_pm_ops iep2_pm_ops = {
++	RUNTIME_PM_OPS(iep2_runtime_suspend, iep2_runtime_resume, NULL)
++};
++
++static const struct of_device_id iep2_dt_match[] = {
++	{ .compatible = "rockchip,rk3528-iep" },
++	{ /* sentinel */ }
++};
++MODULE_DEVICE_TABLE(of, iep2_dt_match);
++
++static struct platform_driver iep2_driver = {
++	.probe		= iep2_probe,
++	.remove		= iep2_remove,
++	.driver		= {
++		.name		= IEP2_NAME,
++		.of_match_table	= iep2_dt_match,
++		.pm		= pm_ptr(&iep2_pm_ops),
++	},
++};
++module_platform_driver(iep2_driver);
++
++MODULE_AUTHOR("Artem Butusov <art.sormy@gmail.com>");
++MODULE_DESCRIPTION("Rockchip IEP2 deinterlacer");
++MODULE_LICENSE("GPL");

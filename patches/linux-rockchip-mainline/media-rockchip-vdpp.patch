@@ -1,0 +1,1469 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Wed, 18 Nov 2026 01:43:55 -0500
+Subject: [PATCH] media: rockchip: Add the RK3528 VDPP scaler
+
+The RK3528's VDPP is a video post-processor with a polyphase scaler,
+which mainline has no driver for. Add a mem2mem driver scaling an NV12
+frame to the CAPTURE size with the filters Rockchip's MPP gives the
+vendor kernel, its enhancement off.
+
+The VDPP is one engine with the IEP2: the same clocks, resets, interrupt
+and IOMMU. The driver takes the shared resets released and acquires them
+while streaming, so a second user of the engine gets -EBUSY at STREAMON,
+and answers the interrupt only while in use and in its own work mode.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ drivers/media/platform/rockchip/Kconfig       |   1 +
+ drivers/media/platform/rockchip/Makefile      |   1 +
+ drivers/media/platform/rockchip/vdpp/Kconfig  |  14 +
+ drivers/media/platform/rockchip/vdpp/Makefile |   3 +
+ .../rockchip/vdpp/rockchip-vdpp-m2m.c         | 709 ++++++++++++++++++
+ .../rockchip/vdpp/rockchip-vdpp-regs.h        |  95 +++
+ .../rockchip/vdpp/rockchip-vdpp-zme.c         | 545 ++++++++++++++
+ .../rockchip/vdpp/rockchip-vdpp-zme.h         |  16 +
+ 8 files changed, 1384 insertions(+)
+ create mode 100644 drivers/media/platform/rockchip/vdpp/Kconfig
+ create mode 100644 drivers/media/platform/rockchip/vdpp/Makefile
+ create mode 100644 drivers/media/platform/rockchip/vdpp/rockchip-vdpp-m2m.c
+ create mode 100644 drivers/media/platform/rockchip/vdpp/rockchip-vdpp-regs.h
+ create mode 100644 drivers/media/platform/rockchip/vdpp/rockchip-vdpp-zme.c
+ create mode 100644 drivers/media/platform/rockchip/vdpp/rockchip-vdpp-zme.h
+
+diff --git a/drivers/media/platform/rockchip/Kconfig b/drivers/media/platform/rockchip/Kconfig
+index 195fb07..9563322 100644
+--- a/drivers/media/platform/rockchip/Kconfig
++++ b/drivers/media/platform/rockchip/Kconfig
+@@ -9,3 +9,4 @@ source "drivers/media/platform/rockchip/rkisp1/Kconfig"
+ source "drivers/media/platform/rockchip/rkjpegd/Kconfig"
+ source "drivers/media/platform/rockchip/rkvdec/Kconfig"
+ source "drivers/media/platform/rockchip/rkvenc/Kconfig"
++source "drivers/media/platform/rockchip/vdpp/Kconfig"
+diff --git a/drivers/media/platform/rockchip/Makefile b/drivers/media/platform/rockchip/Makefile
+index fdbc1d6..f1d9c78 100644
+--- a/drivers/media/platform/rockchip/Makefile
++++ b/drivers/media/platform/rockchip/Makefile
+@@ -6,3 +6,4 @@ obj-y += rkisp1/
+ obj-y += rkjpegd/
+ obj-y += rkvdec/
+ obj-y += rkvenc/
++obj-y += vdpp/
+diff --git a/drivers/media/platform/rockchip/vdpp/Kconfig b/drivers/media/platform/rockchip/vdpp/Kconfig
+new file mode 100644
+index 0000000..9bff601
+--- /dev/null
++++ b/drivers/media/platform/rockchip/vdpp/Kconfig
+@@ -0,0 +1,14 @@
++# SPDX-License-Identifier: GPL-2.0-only
++config VIDEO_ROCKCHIP_VDPP
++	tristate "Rockchip VDPP scaler"
++	depends on V4L_MEM2MEM_DRIVERS
++	depends on VIDEO_DEV
++	depends on ARCH_ROCKCHIP || COMPILE_TEST
++	select VIDEOBUF2_DMA_CONTIG
++	select V4L2_MEM2MEM_DEV
++	help
++	  Support for the Rockchip VDPP video post-processor of the RK3528,
++	  as a scaler: an NV12 frame in, an NV12 frame of another size out.
++
++	  To compile this driver as a module, choose M here: the module
++	  will be called rockchip-vdpp.
+diff --git a/drivers/media/platform/rockchip/vdpp/Makefile b/drivers/media/platform/rockchip/vdpp/Makefile
+new file mode 100644
+index 0000000..3b30742
+--- /dev/null
++++ b/drivers/media/platform/rockchip/vdpp/Makefile
+@@ -0,0 +1,3 @@
++# SPDX-License-Identifier: GPL-2.0-only
++obj-$(CONFIG_VIDEO_ROCKCHIP_VDPP) += rockchip-vdpp.o
++rockchip-vdpp-y := rockchip-vdpp-m2m.o rockchip-vdpp-zme.o
+diff --git a/drivers/media/platform/rockchip/vdpp/rockchip-vdpp-m2m.c b/drivers/media/platform/rockchip/vdpp/rockchip-vdpp-m2m.c
+new file mode 100644
+index 0000000..3a52213
+--- /dev/null
++++ b/drivers/media/platform/rockchip/vdpp/rockchip-vdpp-m2m.c
+@@ -0,0 +1,709 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Rockchip VDPP: an NV12 frame scaled to the CAPTURE size, as the vendor's
++ * MPP programs the RK3528's VDPP, with its enhancement off
++ */
++
++#include <linux/clk.h>
++#include <linux/delay.h>
++#include <linux/interrupt.h>
++#include <linux/io.h>
++#include <linux/iopoll.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++#include <linux/pm_runtime.h>
++#include <linux/reset.h>
++#include <linux/slab.h>
++#include <media/v4l2-device.h>
++#include <media/v4l2-ioctl.h>
++#include <media/v4l2-mem2mem.h>
++#include <media/videobuf2-dma-contig.h>
++#include <media/videobuf2-v4l2.h>
++
++#include "rockchip-vdpp-regs.h"
++#include "rockchip-vdpp-zme.h"
++
++#define VDPP_NAME		"rockchip-vdpp"
++
++#define VDPP_MIN_SIZE		128
++#define VDPP_MAX_WIDTH		1920
++#define VDPP_MAX_HEIGHT		1088
++#define VDPP_SIZE_STEP		2
++#define VDPP_WIDTH_ALIGN	16	/* the engine works in whole 16-pixel columns */
++#define VDPP_SRC_HEIGHT_ALIGN	8	/* and reads whole 8-line rows */
++#define VDPP_DST_HEIGHT_ALIGN	1
++#define VDPP_STRIDE_UNIT	4	/* stride registers count 32-bit words */
++
++#define VDPP_FMT_YUV420		3
++#define VDPP_YUV_SWAP_SP_UV	0
++#define VDPP_TIMEOUT_CYCLES	0x8ffffff
++#define VDPP_INT_ERRORS		(VDPP_INT_CONFIG_ERROR | VDPP_INT_TIMEOUT | VDPP_INT_BUS_ERROR)
++#define VDPP_RESET_TIMEOUT_US	5
++#define VDPP_CRU_RESET_US	5
++
++struct vdpp_dev {
++	struct v4l2_device v4l2_dev;
++	struct video_device vfd;
++	struct device *dev;
++	struct v4l2_m2m_dev *m2m_dev;
++	struct mutex dev_mutex;	/* serialises the video device's ioctls */
++	void __iomem *base;
++	void __iomem *zme;
++	struct clk_bulk_data *clks;
++	int num_clks;
++	struct reset_control *rstc;	/* held while streaming: the engine is the IEP2's too */
++};
++
++struct vdpp_ctx {
++	struct v4l2_fh fh;
++	struct vdpp_dev *vdpp;
++	struct v4l2_pix_format src_fmt;
++	struct v4l2_pix_format dst_fmt;
++	struct v4l2_rect crop;
++};
++
++static inline void vdpp_write(struct vdpp_dev *vdpp, u32 reg, u32 val)
++{
++	writel_relaxed(val, vdpp->base + reg);
++}
++
++static inline u32 vdpp_read(struct vdpp_dev *vdpp, u32 reg)
++{
++	return readl_relaxed(vdpp->base + reg);
++}
++
++static inline struct vdpp_ctx *vdpp_file2ctx(struct file *file)
++{
++	return container_of(file_to_v4l2_fh(file), struct vdpp_ctx, fh);
++}
++
++static u32 vdpp_pic_size(u32 width, u32 height, u32 height_align)
++{
++	u32 w = ALIGN(width, VDPP_WIDTH_ALIGN);
++	u32 h = ALIGN(height, height_align);
++
++	return VDPP_PIC_WIDTH(w - 1) | VDPP_PIC_RIGHT_REDUNDANT(w - width) |
++	       VDPP_PIC_HEIGHT(h - 1) | VDPP_PIC_DOWN_REDUNDANT(h - height);
++}
++
++static void vdpp_config(struct vdpp_dev *vdpp, struct vdpp_ctx *ctx)
++{
++	const struct v4l2_pix_format *dst = &ctx->dst_fmt;
++	const struct v4l2_rect *crop = &ctx->crop;
++
++	vdpp_write(vdpp, VDPP_CONFIG0,
++		   VDPP_SRC_FMT(VDPP_FMT_YUV420) | VDPP_SRC_YUV_SWAP(VDPP_YUV_SWAP_SP_UV) |
++		   VDPP_DST_FMT(VDPP_FMT_YUV420) | VDPP_DST_YUV_SWAP(VDPP_YUV_SWAP_SP_UV));
++	vdpp_write(vdpp, VDPP_WORK_MODE, VDPP_WORK_MODE_VEP);
++	vdpp_write(vdpp, VDPP_CLK_GATE, VDPP_CLK_ON_ALL);
++
++	vdpp_write(vdpp, VDPP_SRC_VIR_STRIDE,
++		   VDPP_VIR_STRIDE(ctx->src_fmt.bytesperline / VDPP_STRIDE_UNIT));
++	vdpp_write(vdpp, VDPP_DST_VIR_STRIDE,
++		   VDPP_VIR_STRIDE(dst->bytesperline / VDPP_STRIDE_UNIT));
++	vdpp_write(vdpp, VDPP_SRC_PIC_SIZE,
++		   vdpp_pic_size(crop->width, crop->height, VDPP_SRC_HEIGHT_ALIGN));
++	vdpp_write(vdpp, VDPP_DST_PIC_SIZE,
++		   vdpp_pic_size(dst->width, dst->height, VDPP_DST_HEIGHT_ALIGN));
++	vdpp_write(vdpp, VDPP_TIMEOUT_CFG, VDPP_TIMEOUT_CFG_EN | VDPP_TIMEOUT_CYCLES);
++
++	vdpp_zme_config(vdpp->zme, crop->width, crop->height, dst->width, dst->height);
++}
++
++static void vdpp_set_frame(struct vdpp_dev *vdpp, const struct v4l2_pix_format *pix,
++			   struct vb2_v4l2_buffer *buf, u32 reg_y, u32 reg_uv)
++{
++	dma_addr_t y = vb2_dma_contig_plane_dma_addr(&buf->vb2_buf, 0);
++
++	vdpp_write(vdpp, reg_y, y);
++	vdpp_write(vdpp, reg_uv, y + pix->bytesperline * pix->height);
++}
++
++static void vdpp_device_run(void *priv)
++{
++	struct vdpp_ctx *ctx = priv;
++	struct vdpp_dev *vdpp = ctx->vdpp;
++	struct vb2_v4l2_buffer *src, *dst;
++
++	src = v4l2_m2m_next_src_buf(ctx->fh.m2m_ctx);
++	dst = v4l2_m2m_next_dst_buf(ctx->fh.m2m_ctx);
++	v4l2_m2m_buf_copy_metadata(src, dst);
++
++	vdpp_config(vdpp, ctx);
++	vdpp_set_frame(vdpp, &ctx->src_fmt, src, VDPP_SRC_ADDR_Y, VDPP_SRC_ADDR_UV);
++	vdpp_set_frame(vdpp, &ctx->dst_fmt, dst, VDPP_DST_ADDR_Y, VDPP_DST_ADDR_UV);
++	vdpp_write(vdpp, VDPP_INT_EN, VDPP_INT_FRM_DONE | VDPP_INT_OSD_MAX | VDPP_INT_ERRORS);
++
++	/* registers before the start */
++	wmb();
++	writel(VDPP_FRM_EN, vdpp->base + VDPP_FRM_START);
++}
++
++static void vdpp_reset(struct vdpp_dev *vdpp)
++{
++	u32 status;
++
++	writel(VDPP_ACLK_SRESET_P, vdpp->base + VDPP_CONFIG0);
++	if (!readl_poll_timeout_atomic(vdpp->base + VDPP_STATUS, status,
++				       status & VDPP_ARST_FINISH_DONE, 0,
++				       VDPP_RESET_TIMEOUT_US))
++		return;
++
++	dev_warn(vdpp->dev, "soft reset timed out, resetting through the CRU\n");
++	reset_control_assert(vdpp->rstc);
++	udelay(VDPP_CRU_RESET_US);
++	reset_control_deassert(vdpp->rstc);
++}
++
++static irqreturn_t vdpp_irq(int irq, void *data)
++{
++	struct vdpp_dev *vdpp = data;
++	enum vb2_buffer_state state = VB2_BUF_STATE_DONE;
++	struct vdpp_ctx *ctx;
++	u32 status;
++
++	/* the line is shared with the IEP2 and the IOMMU; an unclocked VDPP cannot be read */
++	if (pm_runtime_get_if_in_use(vdpp->dev) <= 0)
++		return IRQ_NONE;
++
++	if ((vdpp_read(vdpp, VDPP_WORK_MODE) & VDPP_WORK_MODE_MASK) != VDPP_WORK_MODE_VEP)
++		goto none;
++
++	status = vdpp_read(vdpp, VDPP_INT_STS);
++	vdpp_write(vdpp, VDPP_INT_CLR, VDPP_INT_ALL);
++	if (!(status & (VDPP_INT_FRM_DONE | VDPP_INT_ERRORS)))
++		goto none;
++
++	ctx = v4l2_m2m_get_curr_priv(vdpp->m2m_dev);
++	if (!ctx) {
++		dev_err(vdpp->dev, "interrupt with no job running\n");
++		goto handled;
++	}
++
++	if (status & VDPP_INT_ERRORS) {
++		dev_err(vdpp->dev, "job failed, status %#x\n", status);
++		state = VB2_BUF_STATE_ERROR;
++		vdpp_reset(vdpp);
++	}
++
++	v4l2_m2m_buf_done(v4l2_m2m_dst_buf_remove(ctx->fh.m2m_ctx), state);
++	v4l2_m2m_buf_done(v4l2_m2m_src_buf_remove(ctx->fh.m2m_ctx), state);
++	v4l2_m2m_job_finish(vdpp->m2m_dev, ctx->fh.m2m_ctx);
++
++handled:
++	pm_runtime_put(vdpp->dev);
++	return IRQ_HANDLED;
++none:
++	pm_runtime_put(vdpp->dev);
++	return IRQ_NONE;
++}
++
++static void vdpp_prepare_format(struct v4l2_pix_format *pix)
++{
++	pix->pixelformat = V4L2_PIX_FMT_NV12;
++	pix->field = V4L2_FIELD_NONE;
++	pix->width = ALIGN(clamp(pix->width, VDPP_MIN_SIZE, VDPP_MAX_WIDTH), VDPP_SIZE_STEP);
++	pix->height = ALIGN(clamp(pix->height, VDPP_MIN_SIZE, VDPP_MAX_HEIGHT), VDPP_SIZE_STEP);
++	pix->bytesperline = ALIGN(pix->width, VDPP_WIDTH_ALIGN);
++	/* chroma for the whole rows the engine reads */
++	pix->sizeimage = pix->bytesperline *
++			 (pix->height + ALIGN(pix->height, VDPP_SRC_HEIGHT_ALIGN) / 2);
++}
++
++static void vdpp_reset_crop(struct vdpp_ctx *ctx)
++{
++	ctx->crop = (struct v4l2_rect) {
++		.width = ctx->src_fmt.width,
++		.height = ctx->src_fmt.height,
++	};
++}
++
++static bool vdpp_scale_supported(const struct vdpp_ctx *ctx)
++{
++	return ctx->crop.width <= ctx->dst_fmt.width * VDPP_ZME_MAX_DOWNSCALE &&
++	       ctx->crop.height <= ctx->dst_fmt.height * VDPP_ZME_MAX_DOWNSCALE;
++}
++
++static int vdpp_querycap(struct file *file, void *priv, struct v4l2_capability *cap)
++{
++	strscpy(cap->driver, VDPP_NAME, sizeof(cap->driver));
++	strscpy(cap->card, VDPP_NAME, sizeof(cap->card));
++	snprintf(cap->bus_info, sizeof(cap->bus_info), "platform:%s", VDPP_NAME);
++	return 0;
++}
++
++static int vdpp_enum_fmt(struct file *file, void *priv, struct v4l2_fmtdesc *f)
++{
++	if (f->index)
++		return -EINVAL;
++
++	f->pixelformat = V4L2_PIX_FMT_NV12;
++	return 0;
++}
++
++static int vdpp_enum_framesizes(struct file *file, void *priv,
++				struct v4l2_frmsizeenum *fsize)
++{
++	if (fsize->index || fsize->pixel_format != V4L2_PIX_FMT_NV12)
++		return -EINVAL;
++
++	fsize->type = V4L2_FRMSIZE_TYPE_STEPWISE;
++	fsize->stepwise.min_width = VDPP_MIN_SIZE;
++	fsize->stepwise.max_width = VDPP_MAX_WIDTH;
++	fsize->stepwise.step_width = VDPP_SIZE_STEP;
++	fsize->stepwise.min_height = VDPP_MIN_SIZE;
++	fsize->stepwise.max_height = VDPP_MAX_HEIGHT;
++	fsize->stepwise.step_height = VDPP_SIZE_STEP;
++	return 0;
++}
++
++static int vdpp_g_fmt_vid_cap(struct file *file, void *priv, struct v4l2_format *f)
++{
++	f->fmt.pix = vdpp_file2ctx(file)->dst_fmt;
++	return 0;
++}
++
++static int vdpp_g_fmt_vid_out(struct file *file, void *priv, struct v4l2_format *f)
++{
++	f->fmt.pix = vdpp_file2ctx(file)->src_fmt;
++	return 0;
++}
++
++static int vdpp_try_fmt(struct file *file, void *priv, struct v4l2_format *f)
++{
++	vdpp_prepare_format(&f->fmt.pix);
++	return 0;
++}
++
++static int vdpp_s_fmt(struct file *file, struct v4l2_format *f,
++		      struct v4l2_pix_format *dst)
++{
++	struct vdpp_ctx *ctx = vdpp_file2ctx(file);
++
++	if (vb2_is_busy(v4l2_m2m_get_vq(ctx->fh.m2m_ctx, f->type)))
++		return -EBUSY;
++
++	vdpp_prepare_format(&f->fmt.pix);
++	*dst = f->fmt.pix;
++	return 0;
++}
++
++static int vdpp_s_fmt_vid_cap(struct file *file, void *priv, struct v4l2_format *f)
++{
++	return vdpp_s_fmt(file, f, &vdpp_file2ctx(file)->dst_fmt);
++}
++
++static int vdpp_s_fmt_vid_out(struct file *file, void *priv, struct v4l2_format *f)
++{
++	struct vdpp_ctx *ctx = vdpp_file2ctx(file);
++	int ret;
++
++	ret = vdpp_s_fmt(file, f, &ctx->src_fmt);
++	if (ret)
++		return ret;
++
++	vdpp_reset_crop(ctx);
++	ctx->dst_fmt.colorspace = f->fmt.pix.colorspace;
++	ctx->dst_fmt.xfer_func = f->fmt.pix.xfer_func;
++	ctx->dst_fmt.ycbcr_enc = f->fmt.pix.ycbcr_enc;
++	ctx->dst_fmt.quantization = f->fmt.pix.quantization;
++	return 0;
++}
++
++static int vdpp_g_selection(struct file *file, void *priv, struct v4l2_selection *s)
++{
++	struct vdpp_ctx *ctx = vdpp_file2ctx(file);
++	bool output = V4L2_TYPE_IS_OUTPUT(s->type);
++	const struct v4l2_pix_format *pix = output ? &ctx->src_fmt : &ctx->dst_fmt;
++
++	switch (s->target) {
++	case V4L2_SEL_TGT_CROP:
++		if (!output)
++			return -EINVAL;
++		s->r = ctx->crop;
++		return 0;
++	case V4L2_SEL_TGT_CROP_DEFAULT:
++	case V4L2_SEL_TGT_CROP_BOUNDS:
++		if (!output)
++			return -EINVAL;
++		break;
++	case V4L2_SEL_TGT_COMPOSE:
++	case V4L2_SEL_TGT_COMPOSE_DEFAULT:
++	case V4L2_SEL_TGT_COMPOSE_BOUNDS:
++		if (output)
++			return -EINVAL;
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	s->r = (struct v4l2_rect) { .width = pix->width, .height = pix->height };
++	return 0;
++}
++
++/* the crop keeps the frame's top left: the engine's alignment for another is unknown */
++static int vdpp_s_selection(struct file *file, void *priv, struct v4l2_selection *s)
++{
++	struct vdpp_ctx *ctx = vdpp_file2ctx(file);
++	u32 max_w = min(ctx->src_fmt.width, ctx->dst_fmt.width * VDPP_ZME_MAX_DOWNSCALE);
++	u32 max_h = min(ctx->src_fmt.height, ctx->dst_fmt.height * VDPP_ZME_MAX_DOWNSCALE);
++
++	if (!V4L2_TYPE_IS_OUTPUT(s->type) || s->target != V4L2_SEL_TGT_CROP)
++		return -EINVAL;
++
++	s->r.left = 0;
++	s->r.top = 0;
++	s->r.width = ALIGN(clamp(s->r.width, VDPP_MIN_SIZE, max_w), VDPP_SIZE_STEP);
++	s->r.height = ALIGN(clamp(s->r.height, VDPP_MIN_SIZE, max_h), VDPP_SIZE_STEP);
++	ctx->crop = s->r;
++	return 0;
++}
++
++static const struct v4l2_ioctl_ops vdpp_ioctl_ops = {
++	.vidioc_querycap		= vdpp_querycap,
++	.vidioc_enum_framesizes		= vdpp_enum_framesizes,
++	.vidioc_enum_fmt_vid_cap	= vdpp_enum_fmt,
++	.vidioc_g_fmt_vid_cap		= vdpp_g_fmt_vid_cap,
++	.vidioc_try_fmt_vid_cap		= vdpp_try_fmt,
++	.vidioc_s_fmt_vid_cap		= vdpp_s_fmt_vid_cap,
++	.vidioc_enum_fmt_vid_out	= vdpp_enum_fmt,
++	.vidioc_g_fmt_vid_out		= vdpp_g_fmt_vid_out,
++	.vidioc_try_fmt_vid_out		= vdpp_try_fmt,
++	.vidioc_s_fmt_vid_out		= vdpp_s_fmt_vid_out,
++	.vidioc_g_selection		= vdpp_g_selection,
++	.vidioc_s_selection		= vdpp_s_selection,
++	.vidioc_reqbufs			= v4l2_m2m_ioctl_reqbufs,
++	.vidioc_querybuf		= v4l2_m2m_ioctl_querybuf,
++	.vidioc_qbuf			= v4l2_m2m_ioctl_qbuf,
++	.vidioc_dqbuf			= v4l2_m2m_ioctl_dqbuf,
++	.vidioc_prepare_buf		= v4l2_m2m_ioctl_prepare_buf,
++	.vidioc_create_bufs		= v4l2_m2m_ioctl_create_bufs,
++	.vidioc_expbuf			= v4l2_m2m_ioctl_expbuf,
++	.vidioc_streamon		= v4l2_m2m_ioctl_streamon,
++	.vidioc_streamoff		= v4l2_m2m_ioctl_streamoff,
++};
++
++static struct v4l2_pix_format *vdpp_queue_fmt(struct vb2_queue *vq)
++{
++	struct vdpp_ctx *ctx = vb2_get_drv_priv(vq);
++
++	return V4L2_TYPE_IS_OUTPUT(vq->type) ? &ctx->src_fmt : &ctx->dst_fmt;
++}
++
++static int vdpp_queue_setup(struct vb2_queue *vq, unsigned int *nbuffers,
++			    unsigned int *nplanes, unsigned int sizes[],
++			    struct device *alloc_devs[])
++{
++	unsigned int size = vdpp_queue_fmt(vq)->sizeimage;
++
++	if (*nplanes)
++		return sizes[0] < size ? -EINVAL : 0;
++
++	sizes[0] = size;
++	*nplanes = 1;
++	return 0;
++}
++
++static int vdpp_buf_prepare(struct vb2_buffer *vb)
++{
++	unsigned int size = vdpp_queue_fmt(vb->vb2_queue)->sizeimage;
++
++	if (vb2_plane_size(vb, 0) < size)
++		return -EINVAL;
++
++	if (!V4L2_TYPE_IS_OUTPUT(vb->vb2_queue->type))
++		vb2_set_plane_payload(vb, 0, size);
++	return 0;
++}
++
++static void vdpp_buf_queue(struct vb2_buffer *vb)
++{
++	struct vdpp_ctx *ctx = vb2_get_drv_priv(vb->vb2_queue);
++
++	v4l2_m2m_buf_queue(ctx->fh.m2m_ctx, to_vb2_v4l2_buffer(vb));
++}
++
++static void vdpp_queue_cleanup(struct vb2_queue *vq, enum vb2_buffer_state state)
++{
++	struct vdpp_ctx *ctx = vb2_get_drv_priv(vq);
++	struct vb2_v4l2_buffer *vbuf;
++
++	for (;;) {
++		vbuf = V4L2_TYPE_IS_OUTPUT(vq->type) ?
++			v4l2_m2m_src_buf_remove(ctx->fh.m2m_ctx) :
++			v4l2_m2m_dst_buf_remove(ctx->fh.m2m_ctx);
++		if (!vbuf)
++			break;
++		v4l2_m2m_buf_done(vbuf, state);
++	}
++}
++
++static int vdpp_claim_engine(struct vdpp_dev *vdpp)
++{
++	int ret;
++
++	ret = reset_control_acquire(vdpp->rstc);
++	if (ret)
++		return ret;
++
++	ret = pm_runtime_resume_and_get(vdpp->dev);
++	if (ret < 0)
++		reset_control_release(vdpp->rstc);
++	return ret;
++}
++
++static int vdpp_start_streaming(struct vb2_queue *vq, unsigned int count)
++{
++	struct vdpp_ctx *ctx = vb2_get_drv_priv(vq);
++	int ret = 0;
++
++	if (!vdpp_scale_supported(ctx))
++		ret = -EINVAL;
++	else if (V4L2_TYPE_IS_OUTPUT(vq->type))
++		ret = vdpp_claim_engine(ctx->vdpp);
++
++	if (ret < 0)
++		vdpp_queue_cleanup(vq, VB2_BUF_STATE_QUEUED);
++	return ret;
++}
++
++static void vdpp_stop_streaming(struct vb2_queue *vq)
++{
++	struct vdpp_ctx *ctx = vb2_get_drv_priv(vq);
++
++	if (V4L2_TYPE_IS_OUTPUT(vq->type)) {
++		pm_runtime_put(ctx->vdpp->dev);
++		reset_control_release(ctx->vdpp->rstc);
++	}
++
++	vdpp_queue_cleanup(vq, VB2_BUF_STATE_ERROR);
++}
++
++static const struct vb2_ops vdpp_qops = {
++	.queue_setup		= vdpp_queue_setup,
++	.buf_prepare		= vdpp_buf_prepare,
++	.buf_queue		= vdpp_buf_queue,
++	.start_streaming	= vdpp_start_streaming,
++	.stop_streaming		= vdpp_stop_streaming,
++};
++
++static int vdpp_init_vq(struct vdpp_ctx *ctx, struct vb2_queue *vq,
++			enum v4l2_buf_type type)
++{
++	vq->type = type;
++	vq->io_modes = VB2_MMAP | VB2_DMABUF;
++	vq->drv_priv = ctx;
++	vq->buf_struct_size = sizeof(struct v4l2_m2m_buffer);
++	vq->ops = &vdpp_qops;
++	vq->mem_ops = &vb2_dma_contig_memops;
++	vq->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_COPY;
++	vq->lock = &ctx->vdpp->dev_mutex;
++	vq->dev = ctx->vdpp->dev;
++	return vb2_queue_init(vq);
++}
++
++static int vdpp_queue_init(void *priv, struct vb2_queue *src_vq, struct vb2_queue *dst_vq)
++{
++	int ret;
++
++	ret = vdpp_init_vq(priv, src_vq, V4L2_BUF_TYPE_VIDEO_OUTPUT);
++	if (ret)
++		return ret;
++
++	return vdpp_init_vq(priv, dst_vq, V4L2_BUF_TYPE_VIDEO_CAPTURE);
++}
++
++static int vdpp_open(struct file *file)
++{
++	struct vdpp_dev *vdpp = video_drvdata(file);
++	struct vdpp_ctx *ctx;
++	int ret;
++
++	if (mutex_lock_interruptible(&vdpp->dev_mutex))
++		return -ERESTARTSYS;
++
++	ctx = kzalloc_obj(*ctx);
++	if (!ctx) {
++		ret = -ENOMEM;
++		goto unlock;
++	}
++
++	ctx->src_fmt.width = VDPP_MAX_WIDTH;
++	ctx->src_fmt.height = VDPP_MAX_HEIGHT;
++	vdpp_prepare_format(&ctx->src_fmt);
++	ctx->dst_fmt = ctx->src_fmt;
++	vdpp_reset_crop(ctx);
++
++	v4l2_fh_init(&ctx->fh, video_devdata(file));
++	ctx->vdpp = vdpp;
++
++	ctx->fh.m2m_ctx = v4l2_m2m_ctx_init(vdpp->m2m_dev, ctx, &vdpp_queue_init);
++	if (IS_ERR(ctx->fh.m2m_ctx)) {
++		ret = PTR_ERR(ctx->fh.m2m_ctx);
++		kfree(ctx);
++		goto unlock;
++	}
++
++	v4l2_fh_add(&ctx->fh, file);
++	ret = 0;
++unlock:
++	mutex_unlock(&vdpp->dev_mutex);
++	return ret;
++}
++
++static int vdpp_release(struct file *file)
++{
++	struct vdpp_dev *vdpp = video_drvdata(file);
++	struct vdpp_ctx *ctx = vdpp_file2ctx(file);
++
++	mutex_lock(&vdpp->dev_mutex);
++	v4l2_fh_del(&ctx->fh, file);
++	v4l2_fh_exit(&ctx->fh);
++	v4l2_m2m_ctx_release(ctx->fh.m2m_ctx);
++	kfree(ctx);
++	mutex_unlock(&vdpp->dev_mutex);
++	return 0;
++}
++
++static const struct v4l2_file_operations vdpp_fops = {
++	.owner		= THIS_MODULE,
++	.open		= vdpp_open,
++	.release	= vdpp_release,
++	.poll		= v4l2_m2m_fop_poll,
++	.unlocked_ioctl	= video_ioctl2,
++	.mmap		= v4l2_m2m_fop_mmap,
++};
++
++static const struct video_device vdpp_video_device = {
++	.name		= VDPP_NAME,
++	.vfl_dir	= VFL_DIR_M2M,
++	.fops		= &vdpp_fops,
++	.ioctl_ops	= &vdpp_ioctl_ops,
++	.minor		= -1,
++	.release	= video_device_release_empty,
++	.device_caps	= V4L2_CAP_VIDEO_M2M | V4L2_CAP_STREAMING,
++};
++
++static const struct v4l2_m2m_ops vdpp_m2m_ops = {
++	.device_run	= vdpp_device_run,
++};
++
++static int vdpp_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct vdpp_dev *vdpp;
++	int irq, ret;
++
++	vdpp = devm_kzalloc(dev, sizeof(*vdpp), GFP_KERNEL);
++	if (!vdpp)
++		return -ENOMEM;
++
++	vdpp->dev = dev;
++	vdpp->vfd = vdpp_video_device;
++
++	vdpp->base = devm_platform_ioremap_resource_byname(pdev, "vdpp");
++	if (IS_ERR(vdpp->base))
++		return PTR_ERR(vdpp->base);
++
++	vdpp->zme = devm_platform_ioremap_resource_byname(pdev, "zme");
++	if (IS_ERR(vdpp->zme))
++		return PTR_ERR(vdpp->zme);
++
++	vdpp->num_clks = devm_clk_bulk_get_all(dev, &vdpp->clks);
++	if (vdpp->num_clks < 0)
++		return dev_err_probe(dev, vdpp->num_clks, "failed to get clocks\n");
++
++	vdpp->rstc = devm_reset_control_array_get_exclusive_released(dev);
++	if (IS_ERR(vdpp->rstc))
++		return dev_err_probe(dev, PTR_ERR(vdpp->rstc), "failed to get resets\n");
++
++	irq = platform_get_irq(pdev, 0);
++	if (irq < 0)
++		return irq;
++
++	ret = devm_request_irq(dev, irq, vdpp_irq, IRQF_SHARED, dev_name(dev), vdpp);
++	if (ret)
++		return dev_err_probe(dev, ret, "failed to request IRQ\n");
++
++	mutex_init(&vdpp->dev_mutex);
++
++	ret = v4l2_device_register(dev, &vdpp->v4l2_dev);
++	if (ret)
++		return ret;
++
++	vdpp->m2m_dev = v4l2_m2m_init(&vdpp_m2m_ops);
++	if (IS_ERR(vdpp->m2m_dev)) {
++		ret = PTR_ERR(vdpp->m2m_dev);
++		goto err_v4l2;
++	}
++
++	vdpp->vfd.lock = &vdpp->dev_mutex;
++	vdpp->vfd.v4l2_dev = &vdpp->v4l2_dev;
++	video_set_drvdata(&vdpp->vfd, vdpp);
++	platform_set_drvdata(pdev, vdpp);
++	pm_runtime_enable(dev);
++
++	ret = video_register_device(&vdpp->vfd, VFL_TYPE_VIDEO, -1);
++	if (ret)
++		goto err_m2m;
++
++	return 0;
++
++err_m2m:
++	pm_runtime_disable(dev);
++	v4l2_m2m_release(vdpp->m2m_dev);
++err_v4l2:
++	v4l2_device_unregister(&vdpp->v4l2_dev);
++	return ret;
++}
++
++static void vdpp_remove(struct platform_device *pdev)
++{
++	struct vdpp_dev *vdpp = platform_get_drvdata(pdev);
++
++	video_unregister_device(&vdpp->vfd);
++	v4l2_m2m_release(vdpp->m2m_dev);
++	v4l2_device_unregister(&vdpp->v4l2_dev);
++	pm_runtime_disable(&pdev->dev);
++}
++
++static int vdpp_runtime_resume(struct device *dev)
++{
++	struct vdpp_dev *vdpp = dev_get_drvdata(dev);
++
++	return clk_bulk_prepare_enable(vdpp->num_clks, vdpp->clks);
++}
++
++static int vdpp_runtime_suspend(struct device *dev)
++{
++	struct vdpp_dev *vdpp = dev_get_drvdata(dev);
++
++	clk_bulk_disable_unprepare(vdpp->num_clks, vdpp->clks);
++	return 0;
++}
++
++static const struct dev_pm_ops vdpp_pm_ops = {
++	RUNTIME_PM_OPS(vdpp_runtime_suspend, vdpp_runtime_resume, NULL)
++};
++
++static const struct of_device_id vdpp_dt_match[] = {
++	{ .compatible = "rockchip,rk3528-vdpp" },
++	{ /* sentinel */ }
++};
++MODULE_DEVICE_TABLE(of, vdpp_dt_match);
++
++static struct platform_driver vdpp_driver = {
++	.probe		= vdpp_probe,
++	.remove		= vdpp_remove,
++	.driver		= {
++		.name		= VDPP_NAME,
++		.of_match_table	= vdpp_dt_match,
++		.pm		= pm_ptr(&vdpp_pm_ops),
++	},
++};
++module_platform_driver(vdpp_driver);
++
++MODULE_AUTHOR("Artem Butusov <art.sormy@gmail.com>");
++MODULE_DESCRIPTION("Rockchip VDPP scaler");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/media/platform/rockchip/vdpp/rockchip-vdpp-regs.h b/drivers/media/platform/rockchip/vdpp/rockchip-vdpp-regs.h
+new file mode 100644
+index 0000000..311cd6d
+--- /dev/null
++++ b/drivers/media/platform/rockchip/vdpp/rockchip-vdpp-regs.h
+@@ -0,0 +1,95 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Rockchip VDPP registers, as Rockchip's MPP names them
++ */
++
++#ifndef __ROCKCHIP_VDPP_REGS_H__
++#define __ROCKCHIP_VDPP_REGS_H__
++
++#include <linux/bits.h>
++
++#define VDPP_FRM_START			0x0000
++#define     VDPP_FRM_EN				BIT(0)
++
++#define VDPP_CONFIG0			0x0004
++#define     VDPP_ACLK_SRESET_P			BIT(21)
++#define     VDPP_DST_YUV_SWAP(x)		(((x) & 3) << 12)
++#define     VDPP_DST_FMT(x)			(((x) & 3) << 8)
++#define     VDPP_SRC_YUV_SWAP(x)		(((x) & 3) << 4)
++#define     VDPP_SRC_FMT(x)			((x) & 3)
++
++#define VDPP_WORK_MODE			0x0008
++#define     VDPP_WORK_MODE_VEP			2
++#define     VDPP_WORK_MODE_MASK			GENMASK(1, 0)
++
++#define VDPP_CLK_GATE			0x0010
++#define     VDPP_CLK_ON_ALL			GENMASK(11, 0)
++
++#define VDPP_STATUS			0x0014
++#define     VDPP_ARST_FINISH_DONE		BIT(0)
++
++#define VDPP_INT_EN			0x0020
++#define VDPP_INT_CLR			0x0024
++#define VDPP_INT_STS			0x0028
++#define     VDPP_INT_CONFIG_ERROR		BIT(6)
++#define     VDPP_INT_TIMEOUT			BIT(5)
++#define     VDPP_INT_BUS_ERROR			BIT(4)
++#define     VDPP_INT_OSD_MAX			BIT(1)
++#define     VDPP_INT_FRM_DONE			BIT(0)
++#define     VDPP_INT_ALL			GENMASK(31, 0)
++
++#define VDPP_SRC_VIR_STRIDE		0x0030
++#define VDPP_DST_VIR_STRIDE		0x0034
++#define     VDPP_VIR_STRIDE(x)			((x) & 0xffff)
++
++#define VDPP_SRC_PIC_SIZE		0x0038
++#define VDPP_DST_PIC_SIZE		0x003c
++#define     VDPP_PIC_DOWN_REDUNDANT(x)		(((x) & 7) << 28)
++#define     VDPP_PIC_HEIGHT(x)			(((x) & 0x7ff) << 16)
++#define     VDPP_PIC_RIGHT_REDUNDANT(x)		(((x) & 0xf) << 12)
++#define     VDPP_PIC_WIDTH(x)			((x) & 0x7ff)
++
++#define VDPP_TIMEOUT_CFG		0x0050
++#define     VDPP_TIMEOUT_CFG_EN			BIT(31)
++
++#define VDPP_SRC_ADDR_Y			0x0060
++#define VDPP_SRC_ADDR_UV		0x0064
++#define VDPP_DST_ADDR_Y			0x0068
++#define VDPP_DST_ADDR_UV		0x006c
++
++/* the scaler's own register window */
++#define VDPP_ZME_YRGB_HOR_COE		0x0000
++#define VDPP_ZME_YRGB_VER_COE		0x0200
++#define VDPP_ZME_CBCR_HOR_COE		0x0400
++#define VDPP_ZME_CBCR_VER_COE		0x0600
++#define     VDPP_ZME_COE_PAIR(a, b)		(((a) & 0x3ff) | (((b) & 0x3ff) << 16))
++
++#define VDPP_ZME_CTRL			0x0800
++#define     VDPP_ZME_AUTO_GATING_EN		BIT(31)
++#define     VDPP_ZME_FORMAT_OUT(x)		(((x) & 0xf) << 8)
++#define     VDPP_ZME_FORMAT_IN(x)		(((x) & 0xf) << 4)
++
++/* each plane's scaling registers, at these offsets from its base */
++#define VDPP_ZME_YRGB			0x0810
++#define VDPP_ZME_CBCR			0x0830
++#define VDPP_ZME_SCL_CTRL		0x0000
++#define     VDPP_ZME_XSU_BYPASS			BIT(18)
++#define     VDPP_ZME_YS_BYPASS			BIT(17)
++#define     VDPP_ZME_XSD_BYPASS			BIT(16)
++#define     VDPP_ZME_DERING_EN			BIT(8)
++#define     VDPP_ZME_YSCL_MODE(x)		(((x) & 3) << 6)
++#define     VDPP_ZME_YSU_EN			BIT(5)
++#define     VDPP_ZME_YSD_EN			BIT(4)
++#define     VDPP_ZME_XSCL_MODE(x)		(((x) & 3) << 2)
++#define     VDPP_ZME_XSU_EN			BIT(1)
++#define     VDPP_ZME_XSD_EN			BIT(0)
++#define VDPP_ZME_DERING			0x000c
++#define     VDPP_ZME_DERING_DELTA(x)		(((x) & 0x1f) << 24)
++#define     VDPP_ZME_DERING_ALPHA(x)		(((x) & 0x1f) << 16)
++#define     VDPP_ZME_DERING_SEN1(x)		(((x) & 0x1f) << 8)
++#define     VDPP_ZME_DERING_SEN0(x)		((x) & 0x1f)
++#define VDPP_ZME_XSCL_FACTOR		0x0010
++#define VDPP_ZME_YSCL_FACTOR		0x0014
++#define     VDPP_ZME_SCL_FACTOR(x)		((x) & 0xffff)
++
++#endif
+diff --git a/drivers/media/platform/rockchip/vdpp/rockchip-vdpp-zme.c b/drivers/media/platform/rockchip/vdpp/rockchip-vdpp-zme.c
+new file mode 100644
+index 0000000..d0698ad
+--- /dev/null
++++ b/drivers/media/platform/rockchip/vdpp/rockchip-vdpp-zme.c
+@@ -0,0 +1,545 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Rockchip VDPP scaler: the filters and factors Rockchip's MPP gives it
++ */
++
++#include <linux/io.h>
++#include <linux/kernel.h>
++
++#include "rockchip-vdpp-regs.h"
++#include "rockchip-vdpp-zme.h"
++
++#define VDPP_ZME_RATIOS			11
++#define VDPP_ZME_PHASES			17
++#define VDPP_ZME_TAPS			8
++#define VDPP_ZME_FMT_YUV420		4
++#define VDPP_ZME_SCL_MULTI_PHASE	3
++#define VDPP_ZME_DOWN_SHIFT		12
++#define VDPP_ZME_UP_SHIFT		16
++#define VDPP_ZME_PERMILLE		1000
++#define VDPP_ZME_CHROMA_DIV		2	/* 4:2:0 */
++
++#define VDPP_ZME_DERING_SEN0_DEF	16
++#define VDPP_ZME_DERING_SEN1_DEF	4
++#define VDPP_ZME_DERING_ALPHA_DEF	16
++#define VDPP_ZME_DERING_DELTA_DEF	13
++
++struct vdpp_zme_plane {
++	u32 scl;
++	u32 hor_coe;
++	u32 ver_coe;
++};
++
++static const struct vdpp_zme_plane vdpp_zme_yrgb = {
++	VDPP_ZME_YRGB, VDPP_ZME_YRGB_HOR_COE, VDPP_ZME_YRGB_VER_COE
++};
++
++static const struct vdpp_zme_plane vdpp_zme_cbcr = {
++	VDPP_ZME_CBCR, VDPP_ZME_CBCR_HOR_COE, VDPP_ZME_CBCR_VER_COE
++};
++
++/* output to input size, in thousandths, from which each filter set is used */
++static const u16 vdpp_zme_ratio_min[VDPP_ZME_RATIOS - 1] = {
++	2667, 2000, 1500, 1001, 1000, 833, 700, 500, 330, 250
++};
++
++static const s16 vdpp_zme_tap8[VDPP_ZME_RATIOS][VDPP_ZME_PHASES][VDPP_ZME_TAPS] = {
++	{
++		{    4,  -12,   20,  488,   20,  -12,    4,    0 },
++		{    4,   -8,    8,  484,   36,  -16,    4,    0 },
++		{    4,   -4,   -4,  476,   52,  -20,    8,    0 },
++		{    0,    0,  -16,  480,   68,  -28,    8,    0 },
++		{    0,    4,  -24,  472,   84,  -32,    8,    0 },
++		{    0,    4,  -36,  468,  100,  -36,   12,    0 },
++		{    0,    8,  -44,  456,  120,  -40,   12,    0 },
++		{    0,   12,  -52,  448,  136,  -44,   12,    0 },
++		{    0,   12,  -56,  436,  156,  -48,   16,   -4 },
++		{   -4,   16,  -60,  424,  176,  -52,   16,   -4 },
++		{   -4,   16,  -64,  412,  196,  -56,   16,   -4 },
++		{   -4,   16,  -68,  400,  216,  -60,   16,   -4 },
++		{   -4,   20,  -72,  380,  236,  -64,   20,   -4 },
++		{   -4,   20,  -72,  364,  256,  -68,   20,   -4 },
++		{   -4,   20,  -72,  348,  272,  -68,   20,   -4 },
++		{   -4,   20,  -72,  332,  292,  -72,   20,   -4 },
++		{   -4,   20,  -72,  312,  312,  -72,   20,   -4 },
++	},
++	{
++		{    8,  -24,   44,  456,   44,  -24,    8,    0 },
++		{    8,  -20,   28,  460,   56,  -28,    8,    0 },
++		{    8,  -16,   16,  452,   72,  -32,   12,    0 },
++		{    4,  -12,    8,  448,   88,  -36,   12,    0 },
++		{    4,   -8,   -4,  444,  104,  -40,   12,    0 },
++		{    4,   -8,  -16,  444,  120,  -44,   12,    0 },
++		{    4,   -4,  -24,  432,  136,  -48,   16,    0 },
++		{    4,    0,  -32,  428,  152,  -52,   16,   -4 },
++		{    0,    4,  -40,  424,  168,  -56,   16,   -4 },
++		{    0,    4,  -44,  412,  188,  -60,   16,   -4 },
++		{    0,    8,  -52,  400,  204,  -60,   16,   -4 },
++		{    0,    8,  -56,  388,  224,  -64,   16,   -4 },
++		{    0,   12,  -60,  372,  240,  -64,   16,   -4 },
++		{    0,   12,  -64,  356,  264,  -68,   16,   -4 },
++		{    0,   12,  -64,  340,  280,  -68,   16,   -4 },
++		{    0,   16,  -68,  324,  296,  -68,   16,   -4 },
++		{    0,   16,  -68,  308,  308,  -68,   16,    0 },
++	},
++	{
++		{   12,  -32,   64,  424,   64,  -32,   12,    0 },
++		{    8,  -32,   52,  432,   76,  -36,   12,    0 },
++		{    8,  -28,   40,  432,   88,  -40,   12,    0 },
++		{    8,  -24,   28,  428,  104,  -44,   12,    0 },
++		{    8,  -20,   16,  424,  120,  -48,   12,    0 },
++		{    8,  -16,    8,  416,  132,  -48,   12,    0 },
++		{    4,  -16,   -4,  420,  148,  -52,   12,    0 },
++		{    4,  -12,  -12,  412,  164,  -56,   12,    0 },
++		{    4,   -8,  -20,  400,  180,  -56,   12,    0 },
++		{    4,   -4,  -28,  388,  196,  -56,   12,    0 },
++		{    4,   -4,  -32,  380,  212,  -60,   12,    0 },
++		{    4,    0,  -40,  368,  228,  -60,   12,    0 },
++		{    4,    0,  -44,  356,  244,  -60,   12,    0 },
++		{    0,    4,  -48,  344,  260,  -60,   12,    0 },
++		{    0,    4,  -52,  332,  276,  -60,   12,    0 },
++		{    0,    8,  -56,  320,  292,  -60,    8,    0 },
++		{    0,    8,  -56,  304,  304,  -56,    8,    0 },
++	},
++	{
++		{   12,  -40,   84,  400,   84,  -40,   12,    0 },
++		{   12,  -40,   72,  404,   96,  -44,   12,    0 },
++		{   12,  -36,   60,  404,  108,  -48,   12,    0 },
++		{    8,  -32,   48,  404,  120,  -48,   12,    0 },
++		{    8,  -32,   36,  404,  136,  -52,   12,    0 },
++		{    8,  -28,   28,  396,  148,  -52,   12,    0 },
++		{    8,  -24,   16,  392,  160,  -52,   12,    0 },
++		{    8,  -20,    8,  384,  176,  -56,   12,    0 },
++		{    8,  -20,    0,  384,  188,  -56,    8,    0 },
++		{    8,  -16,   -8,  372,  204,  -56,    8,    0 },
++		{    8,  -12,  -16,  364,  216,  -56,    8,    0 },
++		{    4,  -12,  -20,  356,  232,  -56,    8,    0 },
++		{    4,   -8,  -28,  348,  244,  -56,    8,    0 },
++		{    4,   -8,  -32,  332,  264,  -52,    4,    0 },
++		{    4,   -4,  -36,  324,  272,  -52,    4,    0 },
++		{    4,    0,  -40,  312,  280,  -48,    0,    4 },
++		{    4,    0,  -44,  296,  296,  -44,    0,    4 },
++	},
++	{
++		{    0,    0,    0,  511,    0,    0,    0,    0 },
++		{   -1,    3,  -12,  511,   14,   -4,    1,    0 },
++		{   -2,    6,  -23,  509,   28,   -8,    2,    0 },
++		{   -2,    9,  -33,  503,   44,  -12,    3,    0 },
++		{   -3,   11,  -41,  496,   61,  -16,    4,    0 },
++		{   -3,   13,  -48,  488,   79,  -21,    5,   -1 },
++		{   -3,   14,  -54,  477,   98,  -25,    7,   -2 },
++		{   -4,   16,  -59,  465,  118,  -30,    8,   -2 },
++		{   -4,   17,  -63,  451,  138,  -35,    9,   -1 },
++		{   -4,   18,  -66,  437,  158,  -39,   10,   -2 },
++		{   -4,   18,  -68,  421,  180,  -44,   11,   -2 },
++		{   -4,   18,  -69,  404,  201,  -48,   13,   -3 },
++		{   -4,   18,  -70,  386,  222,  -52,   14,   -2 },
++		{   -4,   18,  -70,  368,  244,  -56,   15,   -3 },
++		{   -4,   18,  -69,  348,  265,  -59,   16,   -3 },
++		{   -4,   18,  -67,  329,  286,  -63,   16,   -3 },
++		{   -3,   17,  -65,  307,  307,  -65,   17,   -3 },
++	},
++	{
++		{  -16,    0,  145,  254,  145,    0,  -16,    0 },
++		{  -16,   -2,  140,  253,  151,    3,  -17,    0 },
++		{  -15,   -5,  135,  253,  157,    5,  -18,    0 },
++		{  -14,   -7,  129,  252,  162,    8,  -18,    0 },
++		{  -13,   -9,  123,  252,  167,   11,  -19,    0 },
++		{  -13,  -11,  118,  250,  172,   15,  -19,    0 },
++		{  -12,  -12,  112,  250,  177,   18,  -20,   -1 },
++		{  -11,  -14,  107,  247,  183,   21,  -20,   -1 },
++		{  -10,  -15,  101,  245,  188,   25,  -21,   -1 },
++		{   -9,  -16,   96,  243,  192,   29,  -21,   -2 },
++		{   -8,  -18,   90,  242,  197,   33,  -22,   -2 },
++		{   -8,  -19,   85,  239,  202,   37,  -22,   -2 },
++		{   -7,  -19,   80,  236,  206,   41,  -22,   -3 },
++		{   -7,  -20,   75,  233,  210,   46,  -22,   -3 },
++		{   -6,  -21,   69,  230,  215,   50,  -22,   -3 },
++		{   -5,  -21,   65,  226,  219,   55,  -22,   -5 },
++		{   -5,  -21,   60,  222,  222,   60,  -21,   -5 },
++	},
++	{
++		{  -16,    0,  145,  254,  145,    0,  -16,    0 },
++		{  -16,   -2,  140,  253,  151,    3,  -17,    0 },
++		{  -15,   -5,  135,  253,  157,    5,  -18,    0 },
++		{  -14,   -7,  129,  252,  162,    8,  -18,    0 },
++		{  -13,   -9,  123,  252,  167,   11,  -19,    0 },
++		{  -13,  -11,  118,  250,  172,   15,  -19,    0 },
++		{  -12,  -12,  112,  250,  177,   18,  -20,   -1 },
++		{  -11,  -14,  107,  247,  183,   21,  -20,   -1 },
++		{  -10,  -15,  101,  245,  188,   25,  -21,   -1 },
++		{   -9,  -16,   96,  243,  192,   29,  -21,   -2 },
++		{   -8,  -18,   90,  242,  197,   33,  -22,   -2 },
++		{   -8,  -19,   85,  239,  202,   37,  -22,   -2 },
++		{   -7,  -19,   80,  236,  206,   41,  -22,   -3 },
++		{   -7,  -20,   75,  233,  210,   46,  -22,   -3 },
++		{   -6,  -21,   69,  230,  215,   50,  -22,   -3 },
++		{   -5,  -21,   65,  226,  219,   55,  -22,   -5 },
++		{   -5,  -21,   60,  222,  222,   60,  -21,   -5 },
++	},
++	{
++		{  -16,    0,  145,  254,  145,    0,  -16,    0 },
++		{  -16,   -2,  140,  253,  151,    3,  -17,    0 },
++		{  -15,   -5,  135,  253,  157,    5,  -18,    0 },
++		{  -14,   -7,  129,  252,  162,    8,  -18,    0 },
++		{  -13,   -9,  123,  252,  167,   11,  -19,    0 },
++		{  -13,  -11,  118,  250,  172,   15,  -19,    0 },
++		{  -12,  -12,  112,  250,  177,   18,  -20,   -1 },
++		{  -11,  -14,  107,  247,  183,   21,  -20,   -1 },
++		{  -10,  -15,  101,  245,  188,   25,  -21,   -1 },
++		{   -9,  -16,   96,  243,  192,   29,  -21,   -2 },
++		{   -8,  -18,   90,  242,  197,   33,  -22,   -2 },
++		{   -8,  -19,   85,  239,  202,   37,  -22,   -2 },
++		{   -7,  -19,   80,  236,  206,   41,  -22,   -3 },
++		{   -7,  -20,   75,  233,  210,   46,  -22,   -3 },
++		{   -6,  -21,   69,  230,  215,   50,  -22,   -3 },
++		{   -5,  -21,   65,  226,  219,   55,  -22,   -5 },
++		{   -5,  -21,   60,  222,  222,   60,  -21,   -5 },
++	},
++	{
++		{  -18,   18,  144,  226,  144,   19,  -17,   -4 },
++		{  -17,   16,  139,  226,  148,   21,  -17,   -4 },
++		{  -17,   13,  135,  227,  153,   24,  -18,   -5 },
++		{  -17,   11,  131,  226,  157,   27,  -18,   -5 },
++		{  -17,    9,  126,  225,  161,   30,  -17,   -5 },
++		{  -16,    6,  122,  225,  165,   33,  -17,   -6 },
++		{  -16,    4,  118,  224,  169,   37,  -17,   -7 },
++		{  -16,    2,  113,  224,  173,   40,  -17,   -7 },
++		{  -15,    0,  109,  222,  177,   43,  -17,   -7 },
++		{  -15,   -1,  104,  220,  181,   47,  -16,   -8 },
++		{  -14,   -3,  100,  218,  185,   51,  -16,   -9 },
++		{  -14,   -5,   96,  217,  188,   54,  -15,   -9 },
++		{  -14,   -6,   91,  214,  192,   58,  -14,   -9 },
++		{  -13,   -7,   87,  212,  195,   62,  -14,  -10 },
++		{  -13,   -9,   83,  210,  198,   66,  -13,  -10 },
++		{  -12,  -10,   79,  207,  201,   70,  -12,  -11 },
++		{  -12,  -11,   74,  205,  205,   74,  -11,  -12 },
++	},
++	{
++		{   14,   66,  113,  133,  113,   66,   14,   -7 },
++		{   12,   65,  112,  133,  114,   68,   15,   -7 },
++		{   11,   63,  111,  132,  115,   70,   17,   -7 },
++		{   10,   62,  110,  132,  116,   71,   18,   -7 },
++		{    8,   60,  108,  132,  118,   73,   20,   -7 },
++		{    7,   58,  107,  132,  119,   75,   21,   -7 },
++		{    6,   56,  106,  132,  120,   76,   23,   -7 },
++		{    5,   55,  105,  131,  121,   78,   24,   -7 },
++		{    4,   53,  103,  131,  122,   80,   26,   -7 },
++		{    3,   51,  102,  131,  122,   81,   28,   -6 },
++		{    2,   50,  101,  130,  123,   83,   29,   -6 },
++		{    1,   48,   99,  131,  124,   84,   31,   -6 },
++		{    0,   46,   98,  129,  125,   86,   33,   -5 },
++		{   -1,   45,   97,  128,  126,   88,   34,   -5 },
++		{   -2,   43,   95,  130,  126,   89,   36,   -5 },
++		{   -3,   41,   94,  128,  127,   91,   38,   -4 },
++		{   -3,   39,   92,  128,  128,   92,   39,   -3 },
++	},
++	{
++		{   39,   69,   93,  102,   93,   69,   39,    8 },
++		{   38,   68,   92,  102,   93,   70,   40,    9 },
++		{   37,   67,   91,  102,   93,   71,   41,   10 },
++		{   36,   66,   91,  101,   94,   71,   42,   11 },
++		{   35,   65,   90,  102,   94,   72,   43,   11 },
++		{   34,   64,   89,  102,   94,   73,   44,   12 },
++		{   33,   63,   88,  101,   95,   74,   45,   13 },
++		{   32,   62,   88,  100,   95,   75,   46,   14 },
++		{   31,   62,   87,  100,   95,   75,   47,   15 },
++		{   30,   61,   86,   99,   96,   76,   48,   16 },
++		{   29,   60,   86,   98,   96,   77,   49,   17 },
++		{   28,   59,   85,   98,   96,   78,   50,   18 },
++		{   27,   58,   84,   99,   97,   78,   50,   19 },
++		{   26,   57,   83,   99,   97,   79,   51,   20 },
++		{   25,   56,   83,   98,   97,   80,   52,   21 },
++		{   24,   55,   82,   97,   98,   81,   53,   22 },
++		{   23,   54,   81,   98,   98,   81,   54,   23 },
++	},
++};
++
++static const s16 vdpp_zme_tap6[VDPP_ZME_RATIOS][VDPP_ZME_PHASES][VDPP_ZME_TAPS] = {
++	{
++		{  -12,   20,  492,   20,  -12,    4,    0,    0 },
++		{   -8,    8,  488,   36,  -16,    4,    0,    0 },
++		{   -4,   -4,  488,   48,  -20,    4,    0,    0 },
++		{    0,  -16,  484,   64,  -24,    4,    0,    0 },
++		{    0,  -24,  476,   80,  -28,    8,    0,    0 },
++		{    4,  -32,  464,  100,  -32,    8,    0,    0 },
++		{    8,  -40,  456,  116,  -36,    8,    0,    0 },
++		{    8,  -48,  448,  136,  -40,    8,    0,    0 },
++		{   12,  -52,  436,  152,  -44,    8,    0,    0 },
++		{   12,  -60,  424,  172,  -48,   12,    0,    0 },
++		{   12,  -64,  412,  192,  -52,   12,    0,    0 },
++		{   16,  -64,  392,  212,  -56,   12,    0,    0 },
++		{   16,  -68,  380,  232,  -60,   12,    0,    0 },
++		{   16,  -68,  360,  248,  -60,   16,    0,    0 },
++		{   16,  -68,  344,  268,  -64,   16,    0,    0 },
++		{   16,  -68,  328,  288,  -68,   16,    0,    0 },
++		{   16,  -68,  308,  308,  -68,   16,    0,    0 },
++	},
++	{
++		{  -20,   40,  468,   40,  -20,    4,    0,    0 },
++		{  -16,   28,  464,   56,  -24,    4,    0,    0 },
++		{  -16,   16,  464,   68,  -28,    8,    0,    0 },
++		{  -12,    4,  460,   84,  -32,    8,    0,    0 },
++		{   -8,   -4,  452,  100,  -36,    8,    0,    0 },
++		{   -4,  -12,  444,  116,  -40,    8,    0,    0 },
++		{   -4,  -24,  440,  136,  -44,    8,    0,    0 },
++		{    0,  -32,  432,  152,  -48,    8,    0,    0 },
++		{    0,  -36,  416,  168,  -48,   12,    0,    0 },
++		{    4,  -44,  408,  184,  -52,   12,    0,    0 },
++		{    4,  -48,  400,  200,  -56,   12,    0,    0 },
++		{    8,  -52,  380,  220,  -56,   12,    0,    0 },
++		{    8,  -56,  372,  236,  -60,   12,    0,    0 },
++		{    8,  -60,  356,  256,  -60,   12,    0,    0 },
++		{   12,  -60,  340,  268,  -60,   12,    0,    0 },
++		{   12,  -60,  324,  288,  -64,   12,    0,    0 },
++		{   12,  -64,  308,  308,  -64,   12,    0,    0 },
++	},
++	{
++		{  -28,   60,  440,   60,  -28,    8,    0,    0 },
++		{  -28,   48,  440,   76,  -32,    8,    0,    0 },
++		{  -24,   36,  440,   88,  -36,    8,    0,    0 },
++		{  -20,   28,  432,  104,  -40,    8,    0,    0 },
++		{  -16,   16,  428,  116,  -40,    8,    0,    0 },
++		{  -16,    4,  428,  132,  -44,    8,    0,    0 },
++		{  -12,   -4,  420,  148,  -48,    8,    0,    0 },
++		{   -8,  -12,  408,  164,  -48,    8,    0,    0 },
++		{   -8,  -20,  404,  180,  -52,    8,    0,    0 },
++		{   -4,  -24,  388,  196,  -52,    8,    0,    0 },
++		{   -4,  -32,  384,  212,  -56,    8,    0,    0 },
++		{    0,  -36,  372,  224,  -56,    8,    0,    0 },
++		{    0,  -40,  360,  240,  -56,    8,    0,    0 },
++		{    4,  -44,  344,  256,  -56,    8,    0,    0 },
++		{    4,  -48,  332,  272,  -56,    8,    0,    0 },
++		{    4,  -52,  316,  292,  -56,    8,    0,    0 },
++		{    8,  -52,  300,  300,  -52,    8,    0,    0 },
++	},
++	{
++		{  -36,   80,  420,   80,  -36,    4,    0,    0 },
++		{  -32,   68,  412,   92,  -36,    8,    0,    0 },
++		{  -28,   56,  412,  104,  -40,    8,    0,    0 },
++		{  -28,   44,  412,  116,  -40,    8,    0,    0 },
++		{  -24,   36,  404,  132,  -44,    8,    0,    0 },
++		{  -24,   24,  404,  144,  -44,    8,    0,    0 },
++		{  -20,   16,  396,  160,  -48,    8,    0,    0 },
++		{  -16,    8,  388,  172,  -48,    8,    0,    0 },
++		{  -16,    0,  380,  188,  -48,    8,    0,    0 },
++		{  -12,   -8,  376,  200,  -48,    4,    0,    0 },
++		{  -12,  -12,  364,  216,  -48,    4,    0,    0 },
++		{   -8,  -20,  356,  228,  -48,    4,    0,    0 },
++		{   -8,  -24,  344,  244,  -48,    4,    0,    0 },
++		{   -4,  -32,  332,  260,  -48,    4,    0,    0 },
++		{   -4,  -36,  320,  272,  -44,    4,    0,    0 },
++		{    0,  -40,  308,  288,  -44,    0,    0,    0 },
++		{    0,  -40,  296,  296,  -40,    0,    0,    0 },
++	},
++	{
++		{    0,    0,  511,    0,    0,    0,    0,    0 },
++		{    3,  -12,  511,   13,   -3,    0,    0,    0 },
++		{    6,  -22,  507,   28,   -7,    0,    0,    0 },
++		{    8,  -32,  502,   44,  -11,    1,    0,    0 },
++		{   10,  -40,  495,   61,  -15,    1,    0,    0 },
++		{   11,  -47,  486,   79,  -19,    2,    0,    0 },
++		{   12,  -53,  476,   98,  -24,    3,    0,    0 },
++		{   13,  -58,  464,  117,  -28,    4,    0,    0 },
++		{   14,  -62,  451,  137,  -33,    5,    0,    0 },
++		{   15,  -65,  437,  157,  -38,    6,    0,    0 },
++		{   15,  -67,  420,  179,  -42,    7,    0,    0 },
++		{   15,  -68,  404,  200,  -46,    7,    0,    0 },
++		{   14,  -68,  386,  221,  -50,    9,    0,    0 },
++		{   14,  -68,  367,  243,  -54,   10,    0,    0 },
++		{   14,  -67,  348,  264,  -58,   11,    0,    0 },
++		{   13,  -66,  328,  286,  -61,   12,    0,    0 },
++		{   13,  -63,  306,  306,  -63,   13,    0,    0 },
++	},
++	{
++		{  -31,  104,  362,  104,  -31,    4,    0,    0 },
++		{  -30,   94,  362,  114,  -32,    4,    0,    0 },
++		{  -29,   84,  361,  125,  -32,    3,    0,    0 },
++		{  -28,   75,  359,  136,  -33,    3,    0,    0 },
++		{  -27,   66,  356,  147,  -33,    3,    0,    0 },
++		{  -25,   57,  353,  158,  -33,    2,    0,    0 },
++		{  -24,   49,  349,  169,  -33,    2,    0,    0 },
++		{  -22,   41,  344,  180,  -32,    1,    0,    0 },
++		{  -20,   33,  339,  191,  -31,    0,    0,    0 },
++		{  -19,   26,  333,  203,  -30,   -1,    0,    0 },
++		{  -17,   19,  327,  214,  -29,   -2,    0,    0 },
++		{  -16,   13,  320,  225,  -27,   -3,    0,    0 },
++		{  -14,    7,  312,  236,  -25,   -4,    0,    0 },
++		{  -13,    1,  305,  246,  -22,   -5,    0,    0 },
++		{  -11,   -4,  295,  257,  -19,   -6,    0,    0 },
++		{  -10,   -8,  286,  267,  -16,   -7,    0,    0 },
++		{   -9,  -12,  277,  277,  -12,   -9,    0,    0 },
++	},
++	{
++		{  -31,  104,  362,  104,  -31,    4,    0,    0 },
++		{  -30,   94,  362,  114,  -32,    4,    0,    0 },
++		{  -29,   84,  361,  125,  -32,    3,    0,    0 },
++		{  -28,   75,  359,  136,  -33,    3,    0,    0 },
++		{  -27,   66,  356,  147,  -33,    3,    0,    0 },
++		{  -25,   57,  353,  158,  -33,    2,    0,    0 },
++		{  -24,   49,  349,  169,  -33,    2,    0,    0 },
++		{  -22,   41,  344,  180,  -32,    1,    0,    0 },
++		{  -20,   33,  339,  191,  -31,    0,    0,    0 },
++		{  -19,   26,  333,  203,  -30,   -1,    0,    0 },
++		{  -17,   19,  327,  214,  -29,   -2,    0,    0 },
++		{  -16,   13,  320,  225,  -27,   -3,    0,    0 },
++		{  -14,    7,  312,  236,  -25,   -4,    0,    0 },
++		{  -13,    1,  305,  246,  -22,   -5,    0,    0 },
++		{  -11,   -4,  295,  257,  -19,   -6,    0,    0 },
++		{  -10,   -8,  286,  267,  -16,   -7,    0,    0 },
++		{   -9,  -12,  277,  277,  -12,   -9,    0,    0 },
++	},
++	{
++		{  -20,  130,  297,  130,  -20,   -5,    0,    0 },
++		{  -21,  122,  298,  138,  -19,   -6,    0,    0 },
++		{  -22,  115,  297,  146,  -17,   -7,    0,    0 },
++		{  -22,  108,  296,  153,  -16,   -7,    0,    0 },
++		{  -23,  101,  295,  161,  -14,   -8,    0,    0 },
++		{  -23,   93,  294,  169,  -12,   -9,    0,    0 },
++		{  -24,   87,  292,  177,  -10,  -10,    0,    0 },
++		{  -24,   80,  289,  185,   -7,  -11,    0,    0 },
++		{  -24,   73,  286,  193,   -4,  -12,    0,    0 },
++		{  -23,   66,  283,  200,   -1,  -13,    0,    0 },
++		{  -23,   60,  279,  208,    2,  -14,    0,    0 },
++		{  -23,   54,  276,  215,    5,  -15,    0,    0 },
++		{  -22,   48,  271,  222,    9,  -16,    0,    0 },
++		{  -21,   42,  266,  229,   13,  -17,    0,    0 },
++		{  -21,   37,  261,  236,   17,  -18,    0,    0 },
++		{  -21,   32,  255,  242,   22,  -18,    0,    0 },
++		{  -20,   27,  249,  249,   27,  -20,    0,    0 },
++	},
++	{
++		{   16,  136,  217,  136,   16,   -9,    0,    0 },
++		{   13,  132,  217,  141,   18,   -9,    0,    0 },
++		{   11,  128,  217,  145,   21,  -10,    0,    0 },
++		{    9,  124,  216,  149,   24,  -10,    0,    0 },
++		{    7,  119,  216,  153,   27,  -10,    0,    0 },
++		{    5,  115,  216,  157,   30,  -11,    0,    0 },
++		{    3,  111,  215,  161,   33,  -11,    0,    0 },
++		{    1,  107,  214,  165,   36,  -11,    0,    0 },
++		{    0,  102,  213,  169,   39,  -11,    0,    0 },
++		{   -2,   98,  211,  173,   43,  -11,    0,    0 },
++		{   -3,   94,  209,  177,   46,  -11,    0,    0 },
++		{   -4,   90,  207,  180,   50,  -11,    0,    0 },
++		{   -5,   85,  206,  184,   53,  -11,    0,    0 },
++		{   -6,   81,  203,  187,   57,  -10,    0,    0 },
++		{   -7,   77,  201,  190,   61,  -10,    0,    0 },
++		{   -8,   73,  198,  193,   65,   -9,    0,    0 },
++		{   -9,   69,  196,  196,   69,   -9,    0,    0 },
++	},
++	{
++		{   66,  115,  138,  115,   66,   12,    0,    0 },
++		{   64,  114,  136,  116,   68,   14,    0,    0 },
++		{   63,  113,  134,  117,   70,   15,    0,    0 },
++		{   61,  111,  135,  118,   71,   16,    0,    0 },
++		{   59,  110,  133,  119,   73,   18,    0,    0 },
++		{   57,  108,  134,  120,   74,   19,    0,    0 },
++		{   55,  107,  133,  121,   76,   20,    0,    0 },
++		{   53,  105,  133,  121,   78,   22,    0,    0 },
++		{   51,  104,  133,  122,   79,   23,    0,    0 },
++		{   49,  102,  132,  123,   81,   25,    0,    0 },
++		{   47,  101,  132,  124,   82,   26,    0,    0 },
++		{   45,   99,  131,  125,   84,   28,    0,    0 },
++		{   44,   98,  130,  125,   85,   30,    0,    0 },
++		{   42,   96,  130,  126,   87,   31,    0,    0 },
++		{   40,   95,  128,  127,   89,   33,    0,    0 },
++		{   38,   93,  129,  127,   90,   35,    0,    0 },
++		{   36,   92,  128,  128,   92,   36,    0,    0 },
++	},
++	{
++		{   80,  105,  116,  105,   80,   26,    0,    0 },
++		{   79,  104,  115,  105,   81,   28,    0,    0 },
++		{   77,  103,  116,  106,   81,   29,    0,    0 },
++		{   76,  102,  115,  106,   82,   31,    0,    0 },
++		{   74,  101,  115,  106,   83,   33,    0,    0 },
++		{   73,  100,  114,  106,   84,   35,    0,    0 },
++		{   71,   99,  114,  107,   84,   37,    0,    0 },
++		{   70,   98,  113,  107,   85,   39,    0,    0 },
++		{   68,   98,  113,  107,   86,   40,    0,    0 },
++		{   67,   97,  112,  108,   86,   42,    0,    0 },
++		{   65,   96,  112,  108,   87,   44,    0,    0 },
++		{   63,   95,  112,  108,   88,   46,    0,    0 },
++		{   62,   94,  112,  108,   88,   48,    0,    0 },
++		{   60,   93,  111,  109,   89,   50,    0,    0 },
++		{   58,   93,  111,  109,   90,   51,    0,    0 },
++		{   57,   92,  110,  110,   90,   53,    0,    0 },
++		{   55,   91,  110,  110,   91,   55,    0,    0 },
++	},
++};
++
++static u32 vdpp_zme_shift(u32 act, u32 dsp)
++{
++	return act < dsp ? VDPP_ZME_UP_SHIFT : VDPP_ZME_DOWN_SHIFT;
++}
++
++static u32 vdpp_zme_factor(u32 act, u32 dsp)
++{
++	return ((act - 1) << vdpp_zme_shift(act, dsp)) / (dsp - 1);
++}
++
++static unsigned int vdpp_zme_ratio(u32 act, u32 dsp)
++{
++	u32 shift = vdpp_zme_shift(act, dsp);
++	u32 permille = (VDPP_ZME_PERMILLE << shift) / ((act << shift) / dsp);
++	unsigned int i;
++
++	for (i = 0; i < ARRAY_SIZE(vdpp_zme_ratio_min); i++)
++		if (permille >= vdpp_zme_ratio_min[i])
++			break;
++	return i;
++}
++
++static void vdpp_zme_write_coe(void __iomem *zme, u32 reg,
++			       const s16 (*coe)[VDPP_ZME_TAPS])
++{
++	unsigned int phase, tap;
++
++	for (phase = 0; phase < VDPP_ZME_PHASES; phase++) {
++		for (tap = 0; tap < VDPP_ZME_TAPS; tap += 2) {
++			writel_relaxed(VDPP_ZME_COE_PAIR(coe[phase][tap], coe[phase][tap + 1]),
++				       zme + reg);
++			reg += sizeof(u32);
++		}
++	}
++}
++
++static void vdpp_zme_plane(void __iomem *zme, const struct vdpp_zme_plane *plane,
++			   u32 src_w, u32 src_h, u32 dst_w, u32 dst_h)
++{
++	u32 ctrl = VDPP_ZME_XSCL_MODE(VDPP_ZME_SCL_MULTI_PHASE) |
++		   VDPP_ZME_YSCL_MODE(VDPP_ZME_SCL_MULTI_PHASE) | VDPP_ZME_DERING_EN;
++
++	ctrl |= src_w > dst_w ? VDPP_ZME_XSD_EN : VDPP_ZME_XSD_BYPASS;
++	ctrl |= src_w < dst_w ? VDPP_ZME_XSU_EN : VDPP_ZME_XSU_BYPASS;
++	if (src_h > dst_h)
++		ctrl |= VDPP_ZME_YSD_EN;
++	else if (src_h < dst_h)
++		ctrl |= VDPP_ZME_YSU_EN;
++	else
++		ctrl |= VDPP_ZME_YS_BYPASS;
++
++	writel_relaxed(ctrl, zme + plane->scl + VDPP_ZME_SCL_CTRL);
++	writel_relaxed(VDPP_ZME_DERING_SEN0(VDPP_ZME_DERING_SEN0_DEF) |
++		       VDPP_ZME_DERING_SEN1(VDPP_ZME_DERING_SEN1_DEF) |
++		       VDPP_ZME_DERING_ALPHA(VDPP_ZME_DERING_ALPHA_DEF) |
++		       VDPP_ZME_DERING_DELTA(VDPP_ZME_DERING_DELTA_DEF),
++		       zme + plane->scl + VDPP_ZME_DERING);
++	writel_relaxed(VDPP_ZME_SCL_FACTOR(vdpp_zme_factor(src_w, dst_w)),
++		       zme + plane->scl + VDPP_ZME_XSCL_FACTOR);
++	writel_relaxed(VDPP_ZME_SCL_FACTOR(vdpp_zme_factor(src_h, dst_h)),
++		       zme + plane->scl + VDPP_ZME_YSCL_FACTOR);
++
++	vdpp_zme_write_coe(zme, plane->hor_coe, vdpp_zme_tap8[vdpp_zme_ratio(src_w, dst_w)]);
++	vdpp_zme_write_coe(zme, plane->ver_coe, vdpp_zme_tap6[vdpp_zme_ratio(src_h, dst_h)]);
++}
++
++void vdpp_zme_config(void __iomem *zme, u32 src_w, u32 src_h, u32 dst_w, u32 dst_h)
++{
++	writel_relaxed(VDPP_ZME_FORMAT_IN(VDPP_ZME_FMT_YUV420) |
++		       VDPP_ZME_FORMAT_OUT(VDPP_ZME_FMT_YUV420) | VDPP_ZME_AUTO_GATING_EN,
++		       zme + VDPP_ZME_CTRL);
++	vdpp_zme_plane(zme, &vdpp_zme_yrgb, src_w, src_h, dst_w, dst_h);
++	vdpp_zme_plane(zme, &vdpp_zme_cbcr,
++		       src_w / VDPP_ZME_CHROMA_DIV, src_h / VDPP_ZME_CHROMA_DIV,
++		       dst_w / VDPP_ZME_CHROMA_DIV, dst_h / VDPP_ZME_CHROMA_DIV);
++}
+diff --git a/drivers/media/platform/rockchip/vdpp/rockchip-vdpp-zme.h b/drivers/media/platform/rockchip/vdpp/rockchip-vdpp-zme.h
+new file mode 100644
+index 0000000..06115ec
+--- /dev/null
++++ b/drivers/media/platform/rockchip/vdpp/rockchip-vdpp-zme.h
+@@ -0,0 +1,16 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Rockchip VDPP scaler
++ */
++
++#ifndef __ROCKCHIP_VDPP_ZME_H__
++#define __ROCKCHIP_VDPP_ZME_H__
++
++#include <linux/types.h>
++
++/* past it MPP gathers lines before scaling, which is not programmed here */
++#define VDPP_ZME_MAX_DOWNSCALE	4
++
++void vdpp_zme_config(void __iomem *zme, u32 src_w, u32 src_h, u32 dst_w, u32 dst_h);
++
++#endif

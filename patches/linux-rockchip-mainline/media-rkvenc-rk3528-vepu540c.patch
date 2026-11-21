@@ -1,0 +1,1481 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] media: rockchip: rkvenc: Add the RK3528 VEPU540C H.264 back end
+
+The RK3528 encoder is a VEPU540C: the RKVENC v1 programming model with
+its registers regrouped into classes and no indirect L2 window. Add it
+as a second back end behind a table of hardware operations, so that the
+stateful front end serves both.
+
+The back end codes H.264 from NV12 at one QP per picture, up to
+8192x8192; HEVC is not offered on this core. Past 3072 pixels wide the
+line cache spills into an extension buffer, which each reference slot
+carries; a reference's body follows its header in one buffer, as the
+core writes past the header's size. Encoded and decoded back on an
+RK3528, H.264 holds 47 dB or better up to 8192x8192, and 16384x8640
+fails, as it does under Rockchip's MPP.
+
+Its register image follows Rockchip MPP's H.264 HAL for the block in
+fixed QP mode. Built on a host from the same parameters, the two images
+match except for the interrupt enables, the hardware watchdog and the
+IDR picture id of P slices, none of which reach the stream.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ .../media/platform/rockchip/rkvenc/Kconfig    |   5 +-
+ .../media/platform/rockchip/rkvenc/Makefile   |   2 +
+ .../platform/rockchip/rkvenc/rkvenc-ref.c     |  30 +-
+ .../platform/rockchip/rkvenc/rkvenc-v4l2.c    |  11 +-
+ .../rockchip/rkvenc/rkvenc-vepu540c-regs.h    | 241 +++++++
+ .../rockchip/rkvenc/rkvenc-vepu540c-tables.c  | 106 ++++
+ .../rockchip/rkvenc/rkvenc-vepu540c.c         | 586 ++++++++++++++++++
+ .../rockchip/rkvenc/rkvenc-vepu540c.h         |  15 +
+ .../platform/rockchip/rkvenc/rkvenc-vepu541.h |   2 +
+ .../media/platform/rockchip/rkvenc/rkvenc.c   | 153 +++--
+ .../media/platform/rockchip/rkvenc/rkvenc.h   |  36 +-
+ 11 files changed, 1130 insertions(+), 57 deletions(-)
+
+diff --git a/drivers/media/platform/rockchip/rkvenc/Kconfig b/drivers/media/platform/rockchip/rkvenc/Kconfig
+index 1d76314..a49cf7e 100644
+--- a/drivers/media/platform/rockchip/rkvenc/Kconfig
++++ b/drivers/media/platform/rockchip/rkvenc/Kconfig
+@@ -1,6 +1,6 @@
+ # SPDX-License-Identifier: GPL-2.0-only
+ config VIDEO_ROCKCHIP_RKVENC
+-	tristate "Rockchip RKVENC (vepu540/vepu541) H.264/HEVC encoder"
++	tristate "Rockchip RKVENC (vepu540/vepu540c/vepu541) H.264/HEVC encoder"
+ 	depends on ARCH_ROCKCHIP || COMPILE_TEST
+ 	depends on VIDEO_DEV
+ 	select MEDIA_CONTROLLER
+@@ -8,7 +8,8 @@ config VIDEO_ROCKCHIP_RKVENC
+ 	select V4L2_MEM2MEM_DEV
+ 	help
+ 	  Support for the Rockchip RKVENC v1 hardware video encoder found
+-	  in the RV1109/RV1126 (vepu541) and RK3566/RK3568 (vepu540) SoCs.
++	  in the RV1109/RV1126 (vepu541) and RK3566/RK3568 (vepu540) SoCs,
++	  and for the H.264 encoder of the RK3528 (vepu540c).
+ 
+ 	  It encodes NV12 raw frames into H.264 (AVC) or HEVC (H.265)
+ 	  bitstreams using a stateful memory-to-memory V4L2 interface.
+diff --git a/drivers/media/platform/rockchip/rkvenc/Makefile b/drivers/media/platform/rockchip/rkvenc/Makefile
+index 026c81a..4ea3ae4 100644
+--- a/drivers/media/platform/rockchip/rkvenc/Makefile
++++ b/drivers/media/platform/rockchip/rkvenc/Makefile
+@@ -7,6 +7,8 @@ rockchip-rkvenc-y += rkvenc.o \
+ 		     rkvenc-h264.o \
+ 		     rkvenc-hevc.o \
+ 		     rkvenc-nal.o \
++		     rkvenc-vepu540c.o \
++		     rkvenc-vepu540c-tables.o \
+ 		     rkvenc-vepu541.o \
+ 		     rkvenc-vepu541-h264.o \
+ 		     rkvenc-vepu541-hevc.o \
+diff --git a/drivers/media/platform/rockchip/rkvenc/rkvenc-ref.c b/drivers/media/platform/rockchip/rkvenc/rkvenc-ref.c
+index b0f15d3..aabd67b 100644
+--- a/drivers/media/platform/rockchip/rkvenc/rkvenc-ref.c
++++ b/drivers/media/platform/rockchip/rkvenc/rkvenc-ref.c
+@@ -14,6 +14,7 @@ enum {
+ 	RKVENC_BUF_BODY,
+ 	RKVENC_BUF_DSP,
+ 	RKVENC_BUF_CMV,
++	RKVENC_BUF_EBUF,
+ };
+ 
+ static void rkvenc_ref_free_slot(struct rkvenc_ctx *ctx, unsigned int i)
+@@ -27,10 +28,12 @@ static void rkvenc_ref_free_slot(struct rkvenc_ctx *ctx, unsigned int i)
+ 	sizes[RKVENC_BUF_BODY] = ctx->slot_sz.rfp_body;
+ 	sizes[RKVENC_BUF_DSP] = ctx->slot_sz.dsp;
+ 	sizes[RKVENC_BUF_CMV] = ctx->slot_sz.cmv;
++	sizes[RKVENC_BUF_EBUF] = ctx->slot_sz.ebuf;
+ 	handles[RKVENC_BUF_HDR] = ctx->slot[i].rfp_hdr;
+ 	handles[RKVENC_BUF_BODY] = ctx->slot[i].rfp_body;
+ 	handles[RKVENC_BUF_DSP] = ctx->slot[i].dsp;
+ 	handles[RKVENC_BUF_CMV] = ctx->slot[i].cmv;
++	handles[RKVENC_BUF_EBUF] = ctx->slot[i].ebuf;
+ 
+ 	for (b = 0; b < RKVENC_SLOT_BUFS; b++) {
+ 		if (ctx->slot_cpu[i][b])
+@@ -53,7 +56,8 @@ int rkvenc_ref_alloc(struct rkvenc_ctx *ctx)
+ 	if (ctx->slots_alloc)
+ 		return 0;
+ 
+-	rkvenc_vepu541_slot_sizes(ctx->codec, ctx->width, ctx->height, sz);
++	ctx->dev->variant->ops->slot_sizes(ctx->codec, ctx->width, ctx->height,
++					   sz);
+ 
+ 	for (i = 0; i < RKVENC_SLOTS; i++) {
+ 		cpu = dma_alloc_attrs(dev, sz->rfp_hdr, &dma, GFP_KERNEL,
+@@ -63,12 +67,15 @@ int rkvenc_ref_alloc(struct rkvenc_ctx *ctx)
+ 		ctx->slot_cpu[i][RKVENC_BUF_HDR] = cpu;
+ 		ctx->slot[i].rfp_hdr = lower_32_bits(dma);
+ 
+-		cpu = dma_alloc_attrs(dev, sz->rfp_body, &dma, GFP_KERNEL,
+-				      DMA_ATTR_NO_KERNEL_MAPPING);
+-		if (!cpu)
+-			goto err;
+-		ctx->slot_cpu[i][RKVENC_BUF_BODY] = cpu;
+-		ctx->slot[i].rfp_body = lower_32_bits(dma);
++		if (sz->rfp_body) {
++			cpu = dma_alloc_attrs(dev, sz->rfp_body, &dma,
++					      GFP_KERNEL,
++					      DMA_ATTR_NO_KERNEL_MAPPING);
++			if (!cpu)
++				goto err;
++			ctx->slot_cpu[i][RKVENC_BUF_BODY] = cpu;
++			ctx->slot[i].rfp_body = lower_32_bits(dma);
++		}
+ 
+ 		cpu = dma_alloc_attrs(dev, sz->dsp, &dma, GFP_KERNEL,
+ 				      DMA_ATTR_NO_KERNEL_MAPPING);
+@@ -87,6 +94,15 @@ int rkvenc_ref_alloc(struct rkvenc_ctx *ctx)
+ 		} else {
+ 			ctx->slot[i].cmv = 0;
+ 		}
++
++		if (sz->ebuf) {
++			cpu = dma_alloc_attrs(dev, sz->ebuf, &dma, GFP_KERNEL,
++					      DMA_ATTR_NO_KERNEL_MAPPING);
++			if (!cpu)
++				goto err;
++			ctx->slot_cpu[i][RKVENC_BUF_EBUF] = cpu;
++			ctx->slot[i].ebuf = lower_32_bits(dma);
++		}
+ 	}
+ 
+ 	ctx->slots_alloc = true;
+diff --git a/drivers/media/platform/rockchip/rkvenc/rkvenc-v4l2.c b/drivers/media/platform/rockchip/rkvenc/rkvenc-v4l2.c
+index 3be496f..b049f23 100644
+--- a/drivers/media/platform/rockchip/rkvenc/rkvenc-v4l2.c
++++ b/drivers/media/platform/rockchip/rkvenc/rkvenc-v4l2.c
+@@ -45,6 +45,12 @@ rkvenc_find_fmt(const struct rkvenc_fmt *fmts, unsigned int n, u32 fourcc)
+ 	return NULL;
+ }
+ 
++/* H.264 comes first, so that a core without HEVC lists only the head */
++static unsigned int rkvenc_num_capture_fmts(struct rkvenc_dev *dev)
++{
++	return dev->variant->h264_only ? 1 : ARRAY_SIZE(rkvenc_capture_fmts);
++}
++
+ static bool rkvenc_is_h264(u32 fourcc)
+ {
+ 	return fourcc == V4L2_PIX_FMT_H264;
+@@ -663,9 +669,10 @@ static int rkvenc_querycap(struct file *file, void *priv,
+ static int rkvenc_enum_fmt(struct file *file, void *priv,
+ 			   struct v4l2_fmtdesc *f, bool capture)
+ {
++	struct rkvenc_ctx *ctx = fh_to_rkvenc_ctx(file->private_data);
+ 	const struct rkvenc_fmt *fmts = capture ? rkvenc_capture_fmts
+ 						: rkvenc_output_fmts;
+-	unsigned int n = capture ? ARRAY_SIZE(rkvenc_capture_fmts)
++	unsigned int n = capture ? rkvenc_num_capture_fmts(ctx->dev)
+ 				 : ARRAY_SIZE(rkvenc_output_fmts);
+ 
+ 	if (f->index >= n)
+@@ -723,7 +730,7 @@ static void rkvenc_try_fmt_vid_cap(struct rkvenc_ctx *ctx, struct v4l2_format *f
+ 	const struct rkvenc_fmt *fmt;
+ 
+ 	fmt = rkvenc_find_fmt(rkvenc_capture_fmts,
+-			      ARRAY_SIZE(rkvenc_capture_fmts),
++			      rkvenc_num_capture_fmts(ctx->dev),
+ 			      pix->pixelformat);
+ 	if (!fmt) {
+ 		fmt = &rkvenc_capture_fmts[0];
+diff --git a/drivers/media/platform/rockchip/rkvenc/rkvenc-vepu540c-regs.h b/drivers/media/platform/rockchip/rkvenc/rkvenc-vepu540c-regs.h
+new file mode 100644
+index 0000000..a61b965
+--- /dev/null
++++ b/drivers/media/platform/rockchip/rkvenc/rkvenc-vepu540c-regs.h
+@@ -0,0 +1,241 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef RKVENC_VEPU540C_REGS_H
++#define RKVENC_VEPU540C_REGS_H
++
++#include <linux/bits.h>
++
++#define VEPU540C_ENC_STRT			0x0010
++#define   VEPU540C_ENC_STRT_CMD			GENMASK(9, 8)
++#define   VEPU540C_ENC_STRT_CMD_FRAME		1
++
++#define VEPU540C_ENC_CLR			0x0014
++#define   VEPU540C_ENC_CLR_SAFE			BIT(0)
++#define   VEPU540C_ENC_CLR_FORCE		BIT(1)
++
++#define VEPU540C_INT_EN				0x0020
++#define VEPU540C_INT_MSK			0x0024
++#define VEPU540C_INT_CLR			0x0028
++#define VEPU540C_INT_STA			0x002c
++#define   VEPU540C_INT_ENC_DONE			BIT(0)
++#define   VEPU540C_INT_SCLR_DONE		BIT(2)
++#define   VEPU540C_INT_BSF_OFLW			BIT(4)
++#define   VEPU540C_INT_ENC_ERR			BIT(6)
++#define   VEPU540C_INT_WDG			BIT(8)
++#define   VEPU540C_INT_ALL			GENMASK(15, 0)
++#define   VEPU540C_INT_USED			(VEPU540C_INT_ENC_DONE | \
++						 VEPU540C_INT_SCLR_DONE | \
++						 VEPU540C_INT_BSF_OFLW | \
++						 VEPU540C_INT_ENC_ERR | \
++						 VEPU540C_INT_WDG)
++
++#define VEPU540C_DTRNS_MAP			0x0030
++#define   VEPU540C_DTRNS_MAP_BSW_BUS_EDIN	GENMASK(15, 12)
++
++#define VEPU540C_ENC_WDG			0x0038
++#define   VEPU540C_ENC_WDG_VS_LOAD_THD		GENMASK(23, 0)
++
++#define VEPU540C_FUNC_EN			0x0054
++#define   VEPU540C_FUNC_EN_CKE			BIT(0)
++#define   VEPU540C_FUNC_EN_RESETN_HW		BIT(1)
++#define   VEPU540C_FUNC_EN_DONE_TMVP		BIT(2)
++
++#define VEPU540C_CTL_LAST			0x0060
++
++#define VEPU540C_PIC_FIRST			0x0270
++#define VEPU540C_ADR_SRC0			0x0280
++#define VEPU540C_ADR_SRC1			0x0284
++#define VEPU540C_ADR_SRC2			0x0288
++#define VEPU540C_ADR_RFPW_H			0x028c
++#define VEPU540C_ADR_RFPW_B			0x0290
++#define VEPU540C_ADR_RFPR_H			0x0294
++#define VEPU540C_ADR_RFPR_B			0x0298
++#define VEPU540C_ADR_DSPW			0x02a4
++#define VEPU540C_ADR_DSPR			0x02a8
++#define VEPU540C_ADR_BSBT			0x02b0
++#define VEPU540C_ADR_BSBB			0x02b4
++#define VEPU540C_ADR_BSBS			0x02b8
++#define VEPU540C_ADR_BSBR			0x02bc
++#define VEPU540C_ADR_EBUFT			0x02c8
++#define VEPU540C_ADR_EBUFB			0x02cc
++#define VEPU540C_ADR_RFPT_H			0x02d0
++#define VEPU540C_ADR_RFPB_H			0x02d4
++#define VEPU540C_ADR_RFPT_B			0x02d8
++#define VEPU540C_ADR_RFPB_B			0x02dc
++
++#define VEPU540C_ENC_PIC			0x0300
++#define   VEPU540C_ENC_PIC_CUR_FRM_REF		BIT(2)
++#define   VEPU540C_ENC_PIC_BS_SCP		BIT(4)
++#define   VEPU540C_ENC_PIC_QP			GENMASK(13, 8)
++
++#define VEPU540C_ENC_RSL			0x0310
++#define   VEPU540C_ENC_RSL_WD8_M1		GENMASK(10, 0)
++#define   VEPU540C_ENC_RSL_HD8_M1		GENMASK(26, 16)
++
++#define VEPU540C_SRC_FILL			0x0314
++#define   VEPU540C_SRC_FILL_W			GENMASK(5, 0)
++#define   VEPU540C_SRC_FILL_H			GENMASK(21, 16)
++
++#define VEPU540C_SRC_FMT			0x0318
++#define   VEPU540C_SRC_FMT_CFMT			GENMASK(5, 2)
++#define   VEPU540C_SRC_FMT_CFMT_NV12		6
++#define   VEPU540C_SRC_FMT_OUT_FMT		BIT(7)
++
++#define VEPU540C_SRC_STRD0			0x0334
++#define   VEPU540C_SRC_STRD0_STRD		GENMASK(16, 0)
++#define VEPU540C_SRC_STRD1			0x0338
++#define   VEPU540C_SRC_STRD1_STRD		GENMASK(15, 0)
++
++#define VEPU540C_RC_QP				0x0354
++#define   VEPU540C_RC_QP_MAX			GENMASK(25, 20)
++#define   VEPU540C_RC_QP_MIN			GENMASK(31, 26)
++
++#define VEPU540C_ME_RNGE			0x0370
++#define   VEPU540C_ME_RNGE_CIME_DWNH		GENMASK(3, 0)
++#define   VEPU540C_ME_RNGE_CIME_UPH		GENMASK(7, 4)
++#define   VEPU540C_ME_RNGE_CIME_RGTW		GENMASK(11, 8)
++#define   VEPU540C_ME_RNGE_CIME_LFTW		GENMASK(15, 12)
++
++#define VEPU540C_ME_CFG				0x0374
++#define   VEPU540C_ME_CFG_SRGN_MAX_NUM		GENMASK(6, 0)
++#define   VEPU540C_ME_CFG_CIME_DIST_THRE	GENMASK(19, 7)
++#define   VEPU540C_ME_CFG_RME_SRCH_H		GENMASK(21, 20)
++#define   VEPU540C_ME_CFG_RME_SRCH_V		GENMASK(23, 22)
++
++#define VEPU540C_ME_CACH			0x0378
++#define   VEPU540C_ME_CACH_CIME_SIZE_RAMA	GENMASK(9, 0)
++#define   VEPU540C_ME_CACH_CIME_HGT_RAMA	GENMASK(15, 11)
++#define   VEPU540C_ME_CACH_CME_LINEBUF_W	GENMASK(27, 18)
++
++#define VEPU540C_RDO_CFG			0x03a0
++#define   VEPU540C_RDO_CFG_RECT_SIZE		BIT(0)
++#define   VEPU540C_RDO_CFG_VLC_LMT		BIT(3)
++#define   VEPU540C_RDO_CFG_CHRM_SPCL		BIT(4)
++#define   VEPU540C_RDO_CFG_CCWA_E		BIT(13)
++#define   VEPU540C_RDO_CFG_INTRA_COST_E		BIT(15)
++#define   VEPU540C_RDO_CFG_ATF_E		BIT(28)
++#define   VEPU540C_RDO_CFG_ATR_E		BIT(29)
++
++#define VEPU540C_IPRD_CSTS			0x03a4
++#define   VEPU540C_IPRD_CSTS_RDO_MARK_MODE	GENMASK(8, 0)
++
++#define VEPU540C_SYNT_NAL			0x03b0
++#define   VEPU540C_SYNT_NAL_REF_IDC		GENMASK(1, 0)
++#define   VEPU540C_SYNT_NAL_UNIT_TYPE		GENMASK(6, 2)
++
++#define VEPU540C_SYNT_SPS			0x03b4
++#define   VEPU540C_SYNT_SPS_MAX_FNUM		GENMASK(3, 0)
++#define   VEPU540C_SYNT_SPS_DRCT_8X8		BIT(4)
++#define   VEPU540C_SYNT_SPS_MPOC_LM4		GENMASK(8, 5)
++
++#define VEPU540C_SYNT_PPS			0x03b8
++#define   VEPU540C_SYNT_PPS_ETPY_MODE		BIT(0)
++#define   VEPU540C_SYNT_PPS_TRNS_8X8		BIT(1)
++#define   VEPU540C_SYNT_PPS_PIC_INIT_QP		GENMASK(12, 7)
++#define   VEPU540C_SYNT_PPS_CB_OFST		GENMASK(17, 13)
++#define   VEPU540C_SYNT_PPS_CR_OFST		GENMASK(22, 18)
++#define   VEPU540C_SYNT_PPS_DBF_CP_FLG		BIT(24)
++
++#define VEPU540C_SYNT_SLI0			0x03bc
++#define   VEPU540C_SYNT_SLI0_SLI_TYPE		GENMASK(1, 0)
++#define   VEPU540C_SYNT_SLI0_FRM_NUM		GENMASK(31, 16)
++
++#define VEPU540C_SYNT_SLI1			0x03c0
++#define   VEPU540C_SYNT_SLI1_IDR_PID		GENMASK(15, 0)
++#define   VEPU540C_SYNT_SLI1_POC_LSB		GENMASK(31, 16)
++
++#define VEPU540C_SYNT_SLI2			0x03c4
++#define   VEPU540C_SYNT_SLI2_BETA_OFST		GENMASK(6, 3)
++#define   VEPU540C_SYNT_SLI2_ALPH_OFST		GENMASK(10, 7)
++#define   VEPU540C_SYNT_SLI2_DIS_DBLK_IDC	GENMASK(12, 11)
++
++#define VEPU540C_PIC_LAST			0x0480
++
++#define VEPU540C_RC_FIRST			0x1000
++#define VEPU540C_ROI_QTHD(n)			(0x1030 + 4 * (n))
++#define   VEPU540C_ROI_QTHD_AREAS		8
++#define   VEPU540C_ROI_QTHD_BITS		6
++#define   VEPU540C_ROI_QTHD_PER_WORD		5
++#define VEPU540C_ROI_QTHD3			0x103c
++#define   VEPU540C_ROI_QTHD3_QPMAP_MODE		GENMASK(31, 30)
++#define VEPU540C_AQ_TTHD			0x1044
++#define VEPU540C_AQ_STEP			0x1054
++#define VEPU540C_MADI_ST_THD			0x1064
++#define VEPU540C_MADP_ST_THD0			0x1068
++#define VEPU540C_MADP_ST_THD1			0x106c
++#define VEPU540C_KLUT_OFST			0x107c
++#define   VEPU540C_KLUT_OFST_CHRM		GENMASK(3, 0)
++#define VEPU540C_RC_LAST			0x110c
++
++#define VEPU540C_PAR_FIRST			0x1700
++#define VEPU540C_IPRD_TTHDY4(n)			(0x1700 + 4 * (n))
++#define VEPU540C_IPRD_TTHDC8(n)			(0x1708 + 4 * (n))
++#define VEPU540C_IPRD_TTHDY8(n)			(0x1710 + 4 * (n))
++#define VEPU540C_IPRD_TTHD_UL			0x1718
++#define VEPU540C_IPRD_WGTY8			0x171c
++#define VEPU540C_IPRD_WGTY4			0x1720
++#define VEPU540C_IPRD_WGTY16			0x1724
++#define VEPU540C_IPRD_WGTC8			0x1728
++#define VEPU540C_RDO_QUANT			0x1730
++#define   VEPU540C_RDO_QUANT_BIAS_I		GENMASK(9, 0)
++#define   VEPU540C_RDO_QUANT_BIAS_P		GENMASK(19, 10)
++#define VEPU540C_ATR_THD0			0x1740
++#define VEPU540C_ATR_THD1			0x1744
++#define VEPU540C_LVL16_ATR_WGT			0x1750
++#define VEPU540C_LVL8_ATR_WGT			0x1754
++#define VEPU540C_LVL4_ATR_WGT			0x1758
++
++#define VEPU540C_CIME_SQI_CFG			0x1760
++#define   VEPU540C_CIME_SQI_CFG_PMV_NUM		BIT(0)
++#define   VEPU540C_CIME_SQI_CFG_FUSE		BIT(1)
++#define VEPU540C_CIME_MVD_TH			0x1764
++#define   VEPU540C_CIME_MVD_TH0			GENMASK(8, 0)
++#define   VEPU540C_CIME_MVD_TH1			GENMASK(18, 10)
++#define   VEPU540C_CIME_MVD_TH2			GENMASK(28, 20)
++#define VEPU540C_CIME_MADP_TH			0x1768
++#define VEPU540C_CIME_MULTI			0x176c
++#define VEPU540C_RIME_MVD_TH			0x1770
++#define   VEPU540C_RIME_MVD_TH0			GENMASK(2, 0)
++#define   VEPU540C_RIME_MVD_TH1			GENMASK(6, 4)
++#define VEPU540C_RIME_MADP_TH			0x1774
++#define VEPU540C_RIME_MULTI			0x1778
++#define   VEPU540C_RIME_MULTI0			GENMASK(9, 0)
++#define   VEPU540C_RIME_MULTI1			GENMASK(19, 10)
++#define   VEPU540C_RIME_MULTI2			GENMASK(29, 20)
++#define VEPU540C_CMV_ST_TH			0x177c
++#define VEPU540C_RDO_WGTA_QP(q)			(0x1900 + 4 * (q))
++#define VEPU540C_PAR_LAST			0x19cc
++
++#define VEPU540C_SQI_FIRST			0x2000
++#define VEPU540C_SMEAR_CFG			0x2014
++#define   VEPU540C_SMEAR_CFG_LVL16_MULTI	GENMASK(7, 0)
++#define VEPU540C_SMEAR_MADP_THD(n)		(0x2018 + 4 * (n))
++#define VEPU540C_SMEAR_CNT_THD(n)		(0x2030 + 4 * (n))
++#define VEPU540C_SMEAR_RESI_THD(n)		(0x2040 + 4 * (n))
++#define VEPU540C_SMEAR_ST_THD0			0x2050
++#define VEPU540C_SMEAR_ST_THD1			0x2054
++#define   VEPU540C_SMEAR_ST_THD1_CNT_BITS	4
++#define VEPU540C_B16_SKIP_THD(n)		(0x2070 + 4 * (n))
++#define VEPU540C_B16_SKIP_WGT(n)		(0x2078 + 4 * (n))
++#define VEPU540C_B16_INTER_THD(n)		(0x208c + 4 * (n))
++#define VEPU540C_B16_INTER_WGT			0x2094
++#define VEPU540C_B16_INTRA_THD(n)		(0x20a4 + 4 * (n))
++#define VEPU540C_B16_INTRA_WGT			0x20ac
++#define VEPU540C_B16_INTRA_CNT_THD		0x20b4
++#define VEPU540C_ATF_RESI_THD			0x20b8
++#define VEPU540C_SQI_LAST			0x20fc
++
++#define VEPU540C_SCL_FIRST			0x21e0
++#define VEPU540C_SCL_H264_TAB			0x2200
++#define   VEPU540C_SCL_H264_TAB_WORDS		576
++#define VEPU540C_SCL_LAST			0x2c7c
++
++#define VEPU540C_ST_BS_LGTH			0x4000
++#define VEPU540C_ST_QP_SUM			0x400c
++#define VEPU540C_ST_ENC				0x4020
++#define   VEPU540C_ST_ENC_BUSY			GENMASK(1, 0)
++
++#define VEPU540C_REGS_END			(VEPU540C_SCL_LAST + 4)
++
++#define VEPU540C_QP_MAX				51
++
++#endif
+diff --git a/drivers/media/platform/rockchip/rkvenc/rkvenc-vepu540c-tables.c b/drivers/media/platform/rockchip/rkvenc/rkvenc-vepu540c-tables.c
+new file mode 100644
+index 0000000..560cef8
+--- /dev/null
++++ b/drivers/media/platform/rockchip/rkvenc/rkvenc-vepu540c-tables.c
+@@ -0,0 +1,106 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Quantisation tables of the VEPU540C for H.264 flat scaling lists, in the
++ * layout of its SCL registers, as Rockchip MPP programs them.
++ */
++
++#include "rkvenc-vepu540c.h"
++
++const u32 vepu540c_h264_flat_scl[VEPU540C_SCL_H264_TAB_WORDS] = {
++	0x2fbe3333, 0x2fbe4189, 0x2fbe3333, 0x2fbe4189, 0x2ca42fbe, 0x2ca43c79,
++	0x2ca42fbe, 0x2ca43c79, 0x3c794189, 0x3c7951ec, 0x3c794189, 0x3c7951ec,
++	0x2ca42fbe, 0x2ca43c79, 0x2ca42fbe, 0x2ca43c79, 0x2fbe3333, 0x2fbe4189,
++	0x2fbe3333, 0x2fbe4189, 0x2ca42fbe, 0x2ca43c79, 0x2ca42fbe, 0x2ca43c79,
++	0x3c794189, 0x3c7951ec, 0x3c794189, 0x3c7951ec, 0x2ca42fbe, 0x2ca43c79,
++	0x2ca42fbe, 0x2ca43c79, 0x2b322e8c, 0x2b323a84, 0x2b322e8c, 0x2b323a84,
++	0x2a4a2b32, 0x2a4a37d2, 0x2a4a2b32, 0x2a4a37d2, 0x37d23a84, 0x37d24ae6,
++	0x37d23a84, 0x37d24ae6, 0x2a4a2b32, 0x2a4a37d2, 0x2a4a2b32, 0x2a4a37d2,
++	0x2b322e8c, 0x2b323a84, 0x2b322e8c, 0x2b323a84, 0x2a4a2b32, 0x2a4a37d2,
++	0x2a4a2b32, 0x2a4a37d2, 0x37d23a84, 0x37d24ae6, 0x37d23a84, 0x37d24ae6,
++	0x2a4a2b32, 0x2a4a37d2, 0x2a4a2b32, 0x2a4a37d2, 0x25cb2762, 0x25cb31a6,
++	0x25cb2762, 0x25cb31a6, 0x22ef25cb, 0x22ef2ed1, 0x22ef25cb, 0x22ef2ed1,
++	0x2ed131a6, 0x2ed13e6a, 0x2ed131a6, 0x2ed13e6a, 0x22ef25cb, 0x22ef2ed1,
++	0x22ef25cb, 0x22ef2ed1, 0x25cb2762, 0x25cb31a6, 0x25cb2762, 0x25cb31a6,
++	0x22ef25cb, 0x22ef2ed1, 0x22ef25cb, 0x22ef2ed1, 0x2ed131a6, 0x2ed13e6a,
++	0x2ed131a6, 0x2ed13e6a, 0x22ef25cb, 0x22ef2ed1, 0x22ef25cb, 0x22ef2ed1,
++	0x22e32492, 0x22e32ed0, 0x22e32492, 0x22e32ed0, 0x202422e3, 0x20242bfb,
++	0x202422e3, 0x20242bfb, 0x2bfb2ed0, 0x2bfb3a41, 0x2bfb2ed0, 0x2bfb3a41,
++	0x202422e3, 0x20242bfb, 0x202422e3, 0x20242bfb, 0x22e32492, 0x22e32ed0,
++	0x22e32492, 0x22e32ed0, 0x202422e3, 0x20242bfb, 0x202422e3, 0x20242bfb,
++	0x2bfb2ed0, 0x2bfb3a41, 0x2bfb2ed0, 0x2bfb3a41, 0x202422e3, 0x20242bfb,
++	0x202422e3, 0x20242bfb, 0x1e3c2000, 0x1e3c28f6, 0x1e3c2000, 0x1e3c28f6,
++	0x1cb21e3c, 0x1cb22631, 0x1cb21e3c, 0x1cb22631, 0x263128f6, 0x26313367,
++	0x263128f6, 0x26313367, 0x1cb21e3c, 0x1cb22631, 0x1cb21e3c, 0x1cb22631,
++	0x1e3c2000, 0x1e3c28f6, 0x1e3c2000, 0x1e3c28f6, 0x1cb21e3c, 0x1cb22631,
++	0x1cb21e3c, 0x1cb22631, 0x263128f6, 0x26313367, 0x263128f6, 0x26313367,
++	0x1cb21e3c, 0x1cb22631, 0x1cb21e3c, 0x1cb22631, 0x1aae1c72, 0x1aae239e,
++	0x1aae1c72, 0x1aae239e, 0x191c1aae, 0x191c21c0, 0x191c1aae, 0x191c21c0,
++	0x21c0239e, 0x21c02d32, 0x21c0239e, 0x21c02d32, 0x191c1aae, 0x191c21c0,
++	0x191c1aae, 0x191c21c0, 0x1aae1c72, 0x1aae239e, 0x1aae1c72, 0x1aae239e,
++	0x191c1aae, 0x191c21c0, 0x191c1aae, 0x191c21c0, 0x21c0239e, 0x21c02d32,
++	0x21c0239e, 0x21c02d32, 0x191c1aae, 0x191c21c0, 0x191c1aae, 0x191c21c0,
++	0x00be0033, 0x00be0089, 0x00be0033, 0x00be0089, 0x00a400be, 0x00a40079,
++	0x00a400be, 0x00a40079, 0x00790089, 0x007900ec, 0x00790089, 0x007900ec,
++	0x00a400be, 0x00a40079, 0x00a400be, 0x00a40079, 0x00be0033, 0x00be0089,
++	0x00be0033, 0x00be0089, 0x00a400be, 0x00a40079, 0x00a400be, 0x00a40079,
++	0x00790089, 0x007900ec, 0x00790089, 0x007900ec, 0x00a400be, 0x00a40079,
++	0x00a400be, 0x00a40079, 0x0032008c, 0x00320084, 0x0032008c, 0x00320084,
++	0x004a0032, 0x004a00d2, 0x004a0032, 0x004a00d2, 0x00d20084, 0x00d200e6,
++	0x00d20084, 0x00d200e6, 0x004a0032, 0x004a00d2, 0x004a0032, 0x004a00d2,
++	0x0032008c, 0x00320084, 0x0032008c, 0x00320084, 0x004a0032, 0x004a00d2,
++	0x004a0032, 0x004a00d2, 0x00d20084, 0x00d200e6, 0x00d20084, 0x00d200e6,
++	0x004a0032, 0x004a00d2, 0x004a0032, 0x004a00d2, 0x00cb0062, 0x00cb00a6,
++	0x00cb0062, 0x00cb00a6, 0x00ef00cb, 0x00ef00d1, 0x00ef00cb, 0x00ef00d1,
++	0x00d100a6, 0x00d1006a, 0x00d100a6, 0x00d1006a, 0x00ef00cb, 0x00ef00d1,
++	0x00ef00cb, 0x00ef00d1, 0x00cb0062, 0x00cb00a6, 0x00cb0062, 0x00cb00a6,
++	0x00ef00cb, 0x00ef00d1, 0x00ef00cb, 0x00ef00d1, 0x00d100a6, 0x00d1006a,
++	0x00d100a6, 0x00d1006a, 0x00ef00cb, 0x00ef00d1, 0x00ef00cb, 0x00ef00d1,
++	0x00e30092, 0x00e300d0, 0x00e30092, 0x00e300d0, 0x002400e3, 0x002400fb,
++	0x002400e3, 0x002400fb, 0x00fb00d0, 0x00fb0041, 0x00fb00d0, 0x00fb0041,
++	0x002400e3, 0x002400fb, 0x002400e3, 0x002400fb, 0x00e30092, 0x00e300d0,
++	0x00e30092, 0x00e300d0, 0x002400e3, 0x002400fb, 0x002400e3, 0x002400fb,
++	0x00fb00d0, 0x00fb0041, 0x00fb00d0, 0x00fb0041, 0x002400e3, 0x002400fb,
++	0x002400e3, 0x002400fb, 0x003c0000, 0x003c00f6, 0x003c0000, 0x003c00f6,
++	0x00b2003c, 0x00b20031, 0x00b2003c, 0x00b20031, 0x003100f6, 0x00310067,
++	0x003100f6, 0x00310067, 0x00b2003c, 0x00b20031, 0x00b2003c, 0x00b20031,
++	0x003c0000, 0x003c00f6, 0x003c0000, 0x003c00f6, 0x00b2003c, 0x00b20031,
++	0x00b2003c, 0x00b20031, 0x003100f6, 0x00310067, 0x003100f6, 0x00310067,
++	0x00b2003c, 0x00b20031, 0x00b2003c, 0x00b20031, 0x00ae0072, 0x00ae009e,
++	0x00ae0072, 0x00ae009e, 0x001c00ae, 0x001c00c0, 0x001c00ae, 0x001c00c0,
++	0x00c0009e, 0x00c00032, 0x00c0009e, 0x00c00032, 0x001c00ae, 0x001c00c0,
++	0x001c00ae, 0x001c00c0, 0x00ae0072, 0x00ae009e, 0x00ae0072, 0x00ae009e,
++	0x001c00ae, 0x001c00c0, 0x001c00ae, 0x001c00c0, 0x00c0009e, 0x00c00032,
++	0x00c0009e, 0x00c00032, 0x001c00ae, 0x001c00c0, 0x001c00ae, 0x001c00c0,
++	0x002f0033, 0x002f0041, 0x002f0033, 0x002f0041, 0x002c002f, 0x002c003c,
++	0x002c002f, 0x002c003c, 0x003c0041, 0x003c0051, 0x003c0041, 0x003c0051,
++	0x002c002f, 0x002c003c, 0x002c002f, 0x002c003c, 0x002f0033, 0x002f0041,
++	0x002f0033, 0x002f0041, 0x002c002f, 0x002c003c, 0x002c002f, 0x002c003c,
++	0x003c0041, 0x003c0051, 0x003c0041, 0x003c0051, 0x002c002f, 0x002c003c,
++	0x002c002f, 0x002c003c, 0x002b002e, 0x002b003a, 0x002b002e, 0x002b003a,
++	0x002a002b, 0x002a0037, 0x002a002b, 0x002a0037, 0x0037003a, 0x0037004a,
++	0x0037003a, 0x0037004a, 0x002a002b, 0x002a0037, 0x002a002b, 0x002a0037,
++	0x002b002e, 0x002b003a, 0x002b002e, 0x002b003a, 0x002a002b, 0x002a0037,
++	0x002a002b, 0x002a0037, 0x0037003a, 0x0037004a, 0x0037003a, 0x0037004a,
++	0x002a002b, 0x002a0037, 0x002a002b, 0x002a0037, 0x01250127, 0x01250131,
++	0x01250127, 0x01250131, 0x01220125, 0x0122012e, 0x01220125, 0x0122012e,
++	0x012e0131, 0x012e013e, 0x012e0131, 0x012e013e, 0x01220125, 0x0122012e,
++	0x01220125, 0x0122012e, 0x01250127, 0x01250131, 0x01250127, 0x01250131,
++	0x01220125, 0x0122012e, 0x01220125, 0x0122012e, 0x012e0131, 0x012e013e,
++	0x012e0131, 0x012e013e, 0x01220125, 0x0122012e, 0x01220125, 0x0122012e,
++	0x01220124, 0x0122012e, 0x01220124, 0x0122012e, 0x01200122, 0x0120012b,
++	0x01200122, 0x0120012b, 0x012b012e, 0x012b013a, 0x012b012e, 0x012b013a,
++	0x01200122, 0x0120012b, 0x01200122, 0x0120012b, 0x01220124, 0x0122012e,
++	0x01220124, 0x0122012e, 0x01200122, 0x0120012b, 0x01200122, 0x0120012b,
++	0x012b012e, 0x012b013a, 0x012b012e, 0x012b013a, 0x01200122, 0x0120012b,
++	0x01200122, 0x0120012b, 0x001e0020, 0x001e0028, 0x001e0020, 0x001e0028,
++	0x001c001e, 0x001c0026, 0x001c001e, 0x001c0026, 0x00260028, 0x00260033,
++	0x00260028, 0x00260033, 0x001c001e, 0x001c0026, 0x001c001e, 0x001c0026,
++	0x001e0020, 0x001e0028, 0x001e0020, 0x001e0028, 0x001c001e, 0x001c0026,
++	0x001c001e, 0x001c0026, 0x00260028, 0x00260033, 0x00260028, 0x00260033,
++	0x001c001e, 0x001c0026, 0x001c001e, 0x001c0026, 0x001a001c, 0x001a0023,
++	0x001a001c, 0x001a0023, 0x0019001a, 0x00190021, 0x0019001a, 0x00190021,
++	0x00210023, 0x0021002d, 0x00210023, 0x0021002d, 0x0019001a, 0x00190021,
++	0x0019001a, 0x00190021, 0x001a001c, 0x001a0023, 0x001a001c, 0x001a0023,
++	0x0019001a, 0x00190021, 0x0019001a, 0x00190021, 0x00210023, 0x0021002d,
++	0x00210023, 0x0021002d, 0x0019001a, 0x00190021, 0x0019001a, 0x00190021,
++};
+diff --git a/drivers/media/platform/rockchip/rkvenc/rkvenc-vepu540c.c b/drivers/media/platform/rockchip/rkvenc/rkvenc-vepu540c.c
+new file mode 100644
+index 0000000..0e117f0
+--- /dev/null
++++ b/drivers/media/platform/rockchip/rkvenc/rkvenc-vepu540c.c
+@@ -0,0 +1,586 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * VEPU540C back end of the RKVENC encoder, as in the RK3528: H.264 with one
++ * QP per picture. Every job writes the whole register image, with the
++ * tuning Rockchip MPP gives this block.
++ */
++
++#include <linux/completion.h>
++#include <linux/delay.h>
++#include <linux/io.h>
++#include <linux/reset.h>
++#include <linux/sizes.h>
++
++#include "rkvenc.h"
++
++#define VEPU540C_BS_MIN_SIZE		256
++#define VEPU540C_FORCE_CLEAR_US		5
++#define VEPU540C_SAFE_CLEAR_MS		100
++
++#define H264_PROFILE_BASELINE		66
++#define H264_PROFILE_MAIN		77
++#define H264_LEVEL_3			30
++#define H264_NAL_SLICE			1
++#define H264_NAL_IDR			5
++#define H264_SLICE_P			0
++#define H264_SLICE_I			2
++
++/* Coarse search window: the width fields count 4 pixels, the height 2 */
++#define CIME_SRCH_LFTW			12
++#define CIME_SRCH_RGTW			12
++#define CIME_SRCH_UPH			14
++#define CIME_SRCH_DWNH			15
++#define CIME_W_UNIT			4
++#define CIME_H_UNIT			2
++#define CIME_RAMA_SIZE			1796
++#define CIME_CTU_H2			2
++#define RME_SRCH			3
++#define SRGN_MAX_NUM			72
++#define CIME_DIST_THRE			1024
++
++#define RDO_MARK_MODE			0x100
++#define QNT_BIAS_I			683
++#define QNT_BIAS_P			341
++#define ATR_THD_QP			32
++#define CHRM_KLUT_OFST_I		6
++#define CHRM_KLUT_OFST_P		9
++#define ROI_QPMAP_MODE			1
++#define SMEAR_LVL16_MULTI		9
++
++static const s8 vepu540c_h264_aq_step_i[16] = {
++	-8, -7, -6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 8, 8,
++};
++
++static const u8 vepu540c_smear_madp_cnt[] = { 1, 5, 1, 3, 9, 10 };
++
++/* The front end reads the status in the bit layout of the RKVENC v1 */
++static_assert(VEPU540C_INT_ENC_DONE == RKVENC_INT_ENC_DONE);
++static_assert(VEPU540C_INT_SCLR_DONE == RKVENC_INT_SCLR_DONE);
++static_assert(VEPU540C_INT_BSF_OFLW == RKVENC_INT_OFLW);
++static_assert(!(VEPU540C_INT_USED & ~(RKVENC_INT_ENC_DONE |
++				      RKVENC_INT_SCLR_DONE |
++				      RKVENC_INT_ERRORS)));
++
++static const struct {
++	u16 first;
++	u16 last;
++} vepu540c_write_ranges[] = {
++	{ VEPU540C_INT_EN, VEPU540C_INT_MSK },
++	{ VEPU540C_DTRNS_MAP, VEPU540C_CTL_LAST },
++	{ VEPU540C_PIC_FIRST, VEPU540C_PIC_LAST },
++	{ VEPU540C_RC_FIRST, VEPU540C_RC_LAST },
++	{ VEPU540C_PAR_FIRST, VEPU540C_PAR_LAST },
++	{ VEPU540C_SQI_FIRST, VEPU540C_SQI_LAST },
++	{ VEPU540C_SCL_FIRST, VEPU540C_SCL_LAST },
++};
++
++static inline void vepu540c_set(struct rkvenc_vepu540c_img *img, u32 reg,
++				u32 val)
++{
++	img->regs[reg / 4] = val;
++}
++
++static void vepu540c_set_u8(struct rkvenc_vepu540c_img *img, u32 reg,
++			    const u8 *v, u32 n)
++{
++	u32 i;
++
++	for (i = 0; i < n; i++)
++		img->regs[reg / 4 + i / 4] |= (u32)v[i] << (8 * (i % 4));
++}
++
++static void vepu540c_set_s6(struct rkvenc_vepu540c_img *img, u32 reg,
++			    const s8 *v, u32 n)
++{
++	u32 i;
++
++	for (i = 0; i < n; i++)
++		img->regs[reg / 4 + i / 4] |= rkvenc_s2u(v[i], 6) << (8 * (i % 4));
++}
++
++/* Past this width the line cache spills into an external buffer */
++#define VEPU540C_EBUF_FROM_WIDTH	(3 * SZ_1K)
++#define VEPU540C_H264_EBUF_UNIT		64
++#define VEPU540C_H264_EBUF_UNITS_ON_CHIP 36
++#define VEPU540C_H264_EBUF_UNIT_BYTES	(56 * 16)
++
++static u32 vepu540c_ebuf_size(u32 width)
++{
++	u32 w = ALIGN(width, VEPU540C_H264_EBUF_UNIT);
++
++	if (w <= VEPU540C_EBUF_FROM_WIDTH)
++		return 0;
++	return (w / VEPU540C_H264_EBUF_UNIT - VEPU540C_H264_EBUF_UNITS_ON_CHIP) *
++	       VEPU540C_H264_EBUF_UNIT_BYTES;
++}
++
++static u32 vepu540c_rfp_hdr_size(u32 width, u32 height)
++{
++	return ALIGN(ALIGN(width, 64) * ALIGN(height, 64) / 64, SZ_8K);
++}
++
++static void vepu540c_slot_sizes(enum rkvenc_codec codec, u32 width,
++				u32 height, struct rkvenc_slot_sizes *sz)
++{
++	u32 aw = ALIGN(width, 64), ah = ALIGN(height, 64);
++
++	/* The body follows its header, which the core writes past its size */
++	sz->rfp_hdr = vepu540c_rfp_hdr_size(width, height) + aw * ah * 3 / 2;
++	sz->rfp_body = 0;
++	sz->dsp = ALIGN(aw / 64 * ah / 64 * 256, SZ_8K);
++	sz->cmv = 0;
++	sz->ebuf = vepu540c_ebuf_size(width);
++}
++
++static int vepu540c_frame_check(const struct rkvenc_frame *f)
++{
++	if (f->codec != RKVENC_CODEC_H264 || f->rc || f->aq)
++		return -EINVAL;
++
++	if (f->qp > VEPU540C_QP_MAX || f->qp_min > f->qp_max ||
++	    f->qp_max > VEPU540C_QP_MAX)
++		return -EINVAL;
++
++	if (f->bs.size < VEPU540C_BS_MIN_SIZE || f->bs.offset >= f->bs.size)
++		return -EINVAL;
++
++	return 0;
++}
++
++static void vepu540c_ctl_build(const struct rkvenc_frame *f,
++			       struct rkvenc_vepu540c_img *img)
++{
++	u32 int_en = VEPU540C_INT_USED;
++
++	if (!f->wdg_vs_load)
++		int_en &= ~VEPU540C_INT_WDG;
++	vepu540c_set(img, VEPU540C_INT_EN, int_en);
++	vepu540c_set(img, VEPU540C_DTRNS_MAP,
++		     FIELD_PREP(VEPU540C_DTRNS_MAP_BSW_BUS_EDIN, 7));
++	vepu540c_set(img, VEPU540C_ENC_WDG,
++		     FIELD_PREP(VEPU540C_ENC_WDG_VS_LOAD_THD, f->wdg_vs_load));
++	vepu540c_set(img, VEPU540C_FUNC_EN,
++		     VEPU540C_FUNC_EN_CKE | VEPU540C_FUNC_EN_RESETN_HW |
++		     VEPU540C_FUNC_EN_DONE_TMVP);
++}
++
++static void vepu540c_buffers_build(const struct rkvenc_frame *f,
++				   struct rkvenc_vepu540c_img *img)
++{
++	const struct rkvenc_src *src = &f->src;
++	const struct rkvenc_bs *bs = &f->bs;
++	u32 w16 = ALIGN(src->width, 16), h16 = ALIGN(src->height, 16);
++	u32 hdr = vepu540c_rfp_hdr_size(src->width, src->height);
++
++	vepu540c_set(img, VEPU540C_ENC_RSL,
++		     FIELD_PREP(VEPU540C_ENC_RSL_WD8_M1, w16 / 8 - 1) |
++		     FIELD_PREP(VEPU540C_ENC_RSL_HD8_M1, h16 / 8 - 1));
++	vepu540c_set(img, VEPU540C_SRC_FILL,
++		     FIELD_PREP(VEPU540C_SRC_FILL_W, w16 - src->width) |
++		     FIELD_PREP(VEPU540C_SRC_FILL_H, h16 - src->height));
++	vepu540c_set(img, VEPU540C_SRC_FMT,
++		     FIELD_PREP(VEPU540C_SRC_FMT_CFMT,
++				VEPU540C_SRC_FMT_CFMT_NV12) |
++		     VEPU540C_SRC_FMT_OUT_FMT);
++	vepu540c_set(img, VEPU540C_SRC_STRD0,
++		     FIELD_PREP(VEPU540C_SRC_STRD0_STRD, src->stride[0]));
++	vepu540c_set(img, VEPU540C_SRC_STRD1,
++		     FIELD_PREP(VEPU540C_SRC_STRD1_STRD, src->stride[1]));
++
++	/* NV12 has no third plane, the hardware gets the chroma one again */
++	vepu540c_set(img, VEPU540C_ADR_SRC0, src->plane[0]);
++	vepu540c_set(img, VEPU540C_ADR_SRC1, src->plane[1]);
++	vepu540c_set(img, VEPU540C_ADR_SRC2, src->plane[1]);
++
++	vepu540c_set(img, VEPU540C_ADR_RFPW_H, f->recon.rfp_hdr);
++	vepu540c_set(img, VEPU540C_ADR_RFPW_B, f->recon.rfp_hdr + hdr);
++	vepu540c_set(img, VEPU540C_ADR_DSPW, f->recon.dsp);
++	vepu540c_set(img, VEPU540C_ADR_RFPR_H, f->ref.rfp_hdr);
++	vepu540c_set(img, VEPU540C_ADR_RFPR_B, f->ref.rfp_hdr + hdr);
++	vepu540c_set(img, VEPU540C_ADR_DSPR, f->ref.dsp);
++
++	/* The reference wraps nowhere: its window is the whole address space */
++	vepu540c_set(img, VEPU540C_ADR_RFPT_H, U32_MAX);
++	vepu540c_set(img, VEPU540C_ADR_RFPB_H, 0);
++	vepu540c_set(img, VEPU540C_ADR_RFPT_B, U32_MAX);
++	vepu540c_set(img, VEPU540C_ADR_RFPB_B, 0);
++
++	vepu540c_set(img, VEPU540C_ADR_BSBT, bs->base + bs->size - 1);
++	vepu540c_set(img, VEPU540C_ADR_BSBB, bs->base);
++	vepu540c_set(img, VEPU540C_ADR_BSBS, bs->base + bs->offset);
++	vepu540c_set(img, VEPU540C_ADR_BSBR, bs->base);
++
++	if (f->recon.ebuf) {
++		vepu540c_set(img, VEPU540C_ADR_EBUFT,
++			     f->recon.ebuf + vepu540c_ebuf_size(src->width));
++		vepu540c_set(img, VEPU540C_ADR_EBUFB, f->recon.ebuf);
++	}
++}
++
++static void vepu540c_qp_build(const struct rkvenc_frame *f,
++			      struct rkvenc_vepu540c_img *img)
++{
++	u32 i, v;
++
++	vepu540c_set(img, VEPU540C_RC_QP,
++		     FIELD_PREP(VEPU540C_RC_QP_MAX, f->qp) |
++		     FIELD_PREP(VEPU540C_RC_QP_MIN, f->qp));
++
++	/* Each ROI area takes its QP minimum, then its maximum */
++	for (i = 0; i < 2 * VEPU540C_ROI_QTHD_AREAS; i++) {
++		v = i % 2 ? f->qp_max : f->qp_min;
++		img->regs[VEPU540C_ROI_QTHD(i / VEPU540C_ROI_QTHD_PER_WORD) / 4] |=
++			v << (VEPU540C_ROI_QTHD_BITS *
++			      (i % VEPU540C_ROI_QTHD_PER_WORD));
++	}
++	img->regs[VEPU540C_ROI_QTHD3 / 4] |=
++		FIELD_PREP(VEPU540C_ROI_QTHD3_QPMAP_MODE, ROI_QPMAP_MODE);
++
++	vepu540c_set_u8(img, VEPU540C_AQ_TTHD, rkvenc_h264_aq_thd,
++			ARRAY_SIZE(rkvenc_h264_aq_thd));
++	vepu540c_set_s6(img, VEPU540C_AQ_STEP,
++			f->intra ? vepu540c_h264_aq_step_i :
++				   rkvenc_h264_aq_step_p,
++			ARRAY_SIZE(vepu540c_h264_aq_step_i));
++
++	vepu540c_set(img, VEPU540C_MADI_ST_THD, rkvenc_bytes(5, 12, 20, 0));
++	vepu540c_set(img, VEPU540C_MADP_ST_THD0, rkvenc_pair(4 << 4, 9 << 4));
++	vepu540c_set(img, VEPU540C_MADP_ST_THD1, 15 << 4);
++}
++
++static void vepu540c_syntax_build(const struct rkvenc_frame *f,
++				  struct rkvenc_vepu540c_img *img)
++{
++	const struct rkvenc_h264_seq *seq = f->h264.seq;
++	const struct rkvenc_h264_pic *pic = &f->h264;
++	u32 rdo;
++
++	vepu540c_set(img, VEPU540C_ENC_PIC,
++		     VEPU540C_ENC_PIC_CUR_FRM_REF | VEPU540C_ENC_PIC_BS_SCP |
++		     FIELD_PREP(VEPU540C_ENC_PIC_QP, f->qp));
++
++	rdo = VEPU540C_RDO_CFG_CHRM_SPCL | VEPU540C_RDO_CFG_CCWA_E |
++	      VEPU540C_RDO_CFG_INTRA_COST_E | VEPU540C_RDO_CFG_ATF_E |
++	      VEPU540C_RDO_CFG_ATR_E;
++	if (seq->profile_idc == H264_PROFILE_BASELINE &&
++	    seq->level_idc <= H264_LEVEL_3)
++		rdo |= VEPU540C_RDO_CFG_RECT_SIZE;
++	if (seq->profile_idc < H264_PROFILE_MAIN && !seq->cabac)
++		rdo |= VEPU540C_RDO_CFG_VLC_LMT;
++	vepu540c_set(img, VEPU540C_RDO_CFG, rdo);
++	vepu540c_set(img, VEPU540C_IPRD_CSTS,
++		     FIELD_PREP(VEPU540C_IPRD_CSTS_RDO_MARK_MODE,
++				RDO_MARK_MODE));
++	vepu540c_set(img, VEPU540C_KLUT_OFST,
++		     FIELD_PREP(VEPU540C_KLUT_OFST_CHRM,
++				f->intra ? CHRM_KLUT_OFST_I :
++					   CHRM_KLUT_OFST_P));
++
++	vepu540c_set(img, VEPU540C_SYNT_NAL,
++		     FIELD_PREP(VEPU540C_SYNT_NAL_REF_IDC, pic->nal_ref_idc) |
++		     FIELD_PREP(VEPU540C_SYNT_NAL_UNIT_TYPE,
++				f->intra ? H264_NAL_IDR : H264_NAL_SLICE));
++	vepu540c_set(img, VEPU540C_SYNT_SPS,
++		     FIELD_PREP(VEPU540C_SYNT_SPS_MAX_FNUM,
++				seq->log2_max_frame_num_m4) |
++		     VEPU540C_SYNT_SPS_DRCT_8X8 |
++		     FIELD_PREP(VEPU540C_SYNT_SPS_MPOC_LM4,
++				seq->log2_max_poc_lsb_m4));
++	vepu540c_set(img, VEPU540C_SYNT_PPS,
++		     (seq->cabac ? VEPU540C_SYNT_PPS_ETPY_MODE : 0) |
++		     (seq->transform_8x8 ? VEPU540C_SYNT_PPS_TRNS_8X8 : 0) |
++		     FIELD_PREP(VEPU540C_SYNT_PPS_PIC_INIT_QP,
++				seq->pic_init_qp) |
++		     FIELD_PREP(VEPU540C_SYNT_PPS_CB_OFST,
++				rkvenc_s2u(seq->chroma_qp_offset, 5)) |
++		     FIELD_PREP(VEPU540C_SYNT_PPS_CR_OFST,
++				rkvenc_s2u(seq->chroma_qp_offset, 5)) |
++		     VEPU540C_SYNT_PPS_DBF_CP_FLG);
++	vepu540c_set(img, VEPU540C_SYNT_SLI0,
++		     FIELD_PREP(VEPU540C_SYNT_SLI0_SLI_TYPE,
++				f->intra ? H264_SLICE_I : H264_SLICE_P) |
++		     FIELD_PREP(VEPU540C_SYNT_SLI0_FRM_NUM, pic->frame_num));
++	vepu540c_set(img, VEPU540C_SYNT_SLI1,
++		     FIELD_PREP(VEPU540C_SYNT_SLI1_IDR_PID,
++				f->intra ? pic->idr_pic_id : 0) |
++		     FIELD_PREP(VEPU540C_SYNT_SLI1_POC_LSB, pic->poc_lsb));
++	vepu540c_set(img, VEPU540C_SYNT_SLI2,
++		     FIELD_PREP(VEPU540C_SYNT_SLI2_BETA_OFST,
++				rkvenc_s2u(seq->beta_offset, 4)) |
++		     FIELD_PREP(VEPU540C_SYNT_SLI2_ALPH_OFST,
++				rkvenc_s2u(seq->alpha_offset, 4)) |
++		     FIELD_PREP(VEPU540C_SYNT_SLI2_DIS_DBLK_IDC,
++				seq->dblk_idc));
++}
++
++/* Size the coarse search RAM as MPP does, for a global motion of zero */
++static void vepu540c_me_build(const struct rkvenc_frame *f,
++			      struct rkvenc_vepu540c_img *img)
++{
++	u32 lftw = CIME_SRCH_LFTW * CIME_W_UNIT;
++	u32 rgtw = CIME_SRCH_RGTW * CIME_W_UNIT;
++	u32 uph = CIME_SRCH_UPH * CIME_H_UNIT;
++	u32 dwnh = CIME_SRCH_DWNH * CIME_H_UNIT;
++	u32 line_w = 2 * DIV_ROUND_UP(ALIGN(f->src.width, 16), 64);
++	u32 srch_h2 = (uph + dwnh) / 2 + CIME_CTU_H2;
++	u32 srch_w8 = ((lftw + rgtw + 15) / 16 + 1) * 2;
++	u32 rama_h2 = round_up(srch_h2, 2);
++	u32 h2 = CIME_CTU_H2, ramb_h2 = srch_h2;
++
++	static_assert(CIME_SRCH_UPH * CIME_H_UNIT % 4 == 0);
++	static_assert(CIME_SRCH_LFTW * CIME_W_UNIT % 16 == 0);
++
++	while (CIME_RAMA_SIZE > (h2 - CIME_CTU_H2) * line_w + ramb_h2 * srch_w8 &&
++	       h2 < rama_h2) {
++		h2 += CIME_CTU_H2;
++		ramb_h2 = ramb_h2 > 2 * CIME_CTU_H2 ? ramb_h2 - CIME_CTU_H2 :
++						      CIME_CTU_H2;
++	}
++	if (CIME_RAMA_SIZE < (h2 - CIME_CTU_H2) * line_w + ramb_h2 * srch_w8)
++		h2 -= CIME_CTU_H2;
++
++	vepu540c_set(img, VEPU540C_ME_RNGE,
++		     FIELD_PREP(VEPU540C_ME_RNGE_CIME_DWNH, CIME_SRCH_DWNH) |
++		     FIELD_PREP(VEPU540C_ME_RNGE_CIME_UPH, CIME_SRCH_UPH) |
++		     FIELD_PREP(VEPU540C_ME_RNGE_CIME_RGTW, CIME_SRCH_RGTW) |
++		     FIELD_PREP(VEPU540C_ME_RNGE_CIME_LFTW, CIME_SRCH_LFTW));
++	vepu540c_set(img, VEPU540C_ME_CFG,
++		     FIELD_PREP(VEPU540C_ME_CFG_SRGN_MAX_NUM, SRGN_MAX_NUM) |
++		     FIELD_PREP(VEPU540C_ME_CFG_CIME_DIST_THRE,
++				CIME_DIST_THRE) |
++		     FIELD_PREP(VEPU540C_ME_CFG_RME_SRCH_H, RME_SRCH) |
++		     FIELD_PREP(VEPU540C_ME_CFG_RME_SRCH_V, RME_SRCH));
++	vepu540c_set(img, VEPU540C_ME_CACH,
++		     FIELD_PREP(VEPU540C_ME_CACH_CIME_SIZE_RAMA,
++				((h2 - CIME_CTU_H2) * line_w +
++				 CIME_CTU_H2 * srch_w8) / 2) |
++		     FIELD_PREP(VEPU540C_ME_CACH_CIME_HGT_RAMA, h2 / 2) |
++		     FIELD_PREP(VEPU540C_ME_CACH_CME_LINEBUF_W, line_w));
++}
++
++static void vepu540c_par_build(const struct rkvenc_frame *f,
++			       struct rkvenc_vepu540c_img *img)
++{
++	u32 i;
++
++	for (i = 0; i <= VEPU540C_QP_MAX; i++)
++		vepu540c_set(img, VEPU540C_RDO_WGTA_QP(i),
++			     rkvenc_h264_lambda[i + 1]);
++
++	vepu540c_set(img, VEPU540C_RDO_QUANT,
++		     FIELD_PREP(VEPU540C_RDO_QUANT_BIAS_I, QNT_BIAS_I) |
++		     FIELD_PREP(VEPU540C_RDO_QUANT_BIAS_P, QNT_BIAS_P));
++
++	for (i = 0; i < 2; i++) {
++		u32 thd = i ? rkvenc_pair(6, 8) : rkvenc_pair(1, 3);
++
++		vepu540c_set(img, VEPU540C_IPRD_TTHDY4(i), thd);
++		vepu540c_set(img, VEPU540C_IPRD_TTHDC8(i), thd);
++		vepu540c_set(img, VEPU540C_IPRD_TTHDY8(i), thd);
++	}
++	vepu540c_set(img, VEPU540C_IPRD_TTHD_UL, 4);
++	vepu540c_set(img, VEPU540C_IPRD_WGTY8, rkvenc_bytes(22, 23, 20, 22));
++	vepu540c_set(img, VEPU540C_IPRD_WGTY4, rkvenc_bytes(22, 26, 20, 22));
++	vepu540c_set(img, VEPU540C_IPRD_WGTY16, rkvenc_bytes(22, 26, 20, 22));
++	vepu540c_set(img, VEPU540C_IPRD_WGTC8, rkvenc_bytes(18, 21, 20, 19));
++
++	if (f->intra) {
++		vepu540c_set(img, VEPU540C_ATR_THD0, rkvenc_pair(1, 2));
++		vepu540c_set(img, VEPU540C_ATR_THD1, rkvenc_pair(6, ATR_THD_QP));
++		vepu540c_set(img, VEPU540C_LVL16_ATR_WGT,
++			     rkvenc_bytes(16, 16, 16, 0));
++		vepu540c_set(img, VEPU540C_LVL8_ATR_WGT,
++			     rkvenc_bytes(22, 21, 20, 0));
++		vepu540c_set(img, VEPU540C_LVL4_ATR_WGT,
++			     rkvenc_bytes(20, 18, 16, 0));
++	} else {
++		vepu540c_set(img, VEPU540C_ATR_THD0, rkvenc_pair(2, 4));
++		vepu540c_set(img, VEPU540C_ATR_THD1, rkvenc_pair(9, ATR_THD_QP));
++		vepu540c_set(img, VEPU540C_LVL16_ATR_WGT,
++			     rkvenc_bytes(25, 20, 16, 0));
++		vepu540c_set(img, VEPU540C_LVL8_ATR_WGT,
++			     rkvenc_bytes(25, 20, 18, 0));
++		vepu540c_set(img, VEPU540C_LVL4_ATR_WGT,
++			     rkvenc_bytes(25, 20, 16, 0));
++	}
++
++	vepu540c_set(img, VEPU540C_CIME_SQI_CFG,
++		     VEPU540C_CIME_SQI_CFG_PMV_NUM | VEPU540C_CIME_SQI_CFG_FUSE);
++	vepu540c_set(img, VEPU540C_CIME_MVD_TH,
++		     FIELD_PREP(VEPU540C_CIME_MVD_TH0, 16) |
++		     FIELD_PREP(VEPU540C_CIME_MVD_TH1, 48) |
++		     FIELD_PREP(VEPU540C_CIME_MVD_TH2, 80));
++	vepu540c_set(img, VEPU540C_CIME_MADP_TH, 16);
++	vepu540c_set(img, VEPU540C_CIME_MULTI, rkvenc_bytes(8, 12, 16, 20));
++	vepu540c_set(img, VEPU540C_RIME_MVD_TH,
++		     FIELD_PREP(VEPU540C_RIME_MVD_TH0, 1) |
++		     FIELD_PREP(VEPU540C_RIME_MVD_TH1, 2));
++	vepu540c_set(img, VEPU540C_RIME_MADP_TH, rkvenc_pair(8, 16));
++	vepu540c_set(img, VEPU540C_RIME_MULTI,
++		     FIELD_PREP(VEPU540C_RIME_MULTI0, 4) |
++		     FIELD_PREP(VEPU540C_RIME_MULTI1, 8) |
++		     FIELD_PREP(VEPU540C_RIME_MULTI2, 12));
++	vepu540c_set(img, VEPU540C_CMV_ST_TH, rkvenc_bytes(64, 96, 128, 0));
++}
++
++static void vepu540c_sqi_build(struct rkvenc_vepu540c_img *img)
++{
++	u32 i, cnt = 0;
++
++	vepu540c_set(img, VEPU540C_SMEAR_CFG,
++		     FIELD_PREP(VEPU540C_SMEAR_CFG_LVL16_MULTI,
++				SMEAR_LVL16_MULTI));
++	vepu540c_set(img, VEPU540C_SMEAR_MADP_THD(0), rkvenc_pair(0, 24));
++	vepu540c_set(img, VEPU540C_SMEAR_MADP_THD(1), rkvenc_pair(48, 64));
++	vepu540c_set(img, VEPU540C_SMEAR_MADP_THD(2), rkvenc_pair(16, 32));
++	vepu540c_set(img, VEPU540C_SMEAR_MADP_THD(3), rkvenc_pair(48, 96));
++	vepu540c_set(img, VEPU540C_SMEAR_MADP_THD(4), rkvenc_pair(48, 24));
++	vepu540c_set(img, VEPU540C_SMEAR_MADP_THD(5), rkvenc_pair(96, 48));
++	vepu540c_set(img, VEPU540C_SMEAR_CNT_THD(0), rkvenc_bytes(1, 3, 1, 3));
++	vepu540c_set(img, VEPU540C_SMEAR_CNT_THD(1), rkvenc_bytes(1, 4, 1, 4));
++	vepu540c_set(img, VEPU540C_SMEAR_CNT_THD(2), rkvenc_bytes(0, 3, 0, 3));
++	vepu540c_set(img, VEPU540C_SMEAR_CNT_THD(3), rkvenc_bytes(1, 3, 0, 0));
++	vepu540c_set(img, VEPU540C_SMEAR_RESI_THD(0),
++		     rkvenc_bytes(6, 9, 6, 9));
++	vepu540c_set(img, VEPU540C_SMEAR_RESI_THD(1),
++		     rkvenc_bytes(6, 11, 6, 8));
++	vepu540c_set(img, VEPU540C_SMEAR_RESI_THD(2),
++		     rkvenc_bytes(9, 20, 6, 20));
++	vepu540c_set(img, VEPU540C_SMEAR_RESI_THD(3),
++		     rkvenc_bytes(7, 16, 0, 0));
++	vepu540c_set(img, VEPU540C_SMEAR_ST_THD0, rkvenc_pair(10, 6));
++	for (i = 0; i < ARRAY_SIZE(vepu540c_smear_madp_cnt); i++)
++		cnt |= vepu540c_smear_madp_cnt[i] <<
++		       (i * VEPU540C_SMEAR_ST_THD1_CNT_BITS);
++	vepu540c_set(img, VEPU540C_SMEAR_ST_THD1, cnt);
++
++	vepu540c_set(img, VEPU540C_B16_SKIP_THD(0), rkvenc_pair(1, 10));
++	vepu540c_set(img, VEPU540C_B16_SKIP_THD(1), rkvenc_pair(15, 25));
++	vepu540c_set(img, VEPU540C_B16_SKIP_WGT(0),
++		     rkvenc_bytes(20, 16, 16, 16));
++	vepu540c_set(img, VEPU540C_B16_SKIP_WGT(1), 16);
++	vepu540c_set(img, VEPU540C_B16_INTER_THD(0), rkvenc_pair(20, 40));
++	vepu540c_set(img, VEPU540C_B16_INTER_THD(1), 72);
++	vepu540c_set(img, VEPU540C_B16_INTER_WGT,
++		     rkvenc_bytes(16, 16, 16, 16));
++	vepu540c_set(img, VEPU540C_B16_INTRA_THD(0), rkvenc_pair(20, 40));
++	vepu540c_set(img, VEPU540C_B16_INTRA_THD(1), 72);
++	vepu540c_set(img, VEPU540C_B16_INTRA_WGT,
++		     rkvenc_bytes(27, 25, 20, 16));
++	vepu540c_set(img, VEPU540C_B16_INTRA_CNT_THD,
++		     rkvenc_bytes(1, 4, 1, 4));
++	vepu540c_set(img, VEPU540C_ATF_RESI_THD, rkvenc_bytes(16, 16, 8, 8));
++}
++
++static int vepu540c_img_build(const struct rkvenc_frame *f,
++			      struct rkvenc_vepu540c_img *img)
++{
++	int ret;
++
++	ret = vepu540c_frame_check(f);
++	if (ret)
++		return ret;
++
++	memset(img, 0, sizeof(*img));
++
++	vepu540c_ctl_build(f, img);
++	vepu540c_buffers_build(f, img);
++	vepu540c_qp_build(f, img);
++	vepu540c_syntax_build(f, img);
++	vepu540c_me_build(f, img);
++	vepu540c_par_build(f, img);
++	vepu540c_sqi_build(img);
++	memcpy(&img->regs[VEPU540C_SCL_H264_TAB / 4], vepu540c_h264_flat_scl,
++	       sizeof(vepu540c_h264_flat_scl));
++
++	return 0;
++}
++
++static int vepu540c_run(struct rkvenc_dev *dev, const struct rkvenc_frame *f)
++{
++	struct rkvenc_vepu540c_img *img = &dev->img540c;
++	void __iomem *regs = dev->regs;
++	unsigned int i, a;
++	int ret;
++
++	ret = vepu540c_img_build(f, img);
++	if (WARN_ON(ret))
++		return ret;
++
++	writel(VEPU540C_INT_ALL, regs + VEPU540C_INT_CLR);
++
++	for (i = 0; i < ARRAY_SIZE(vepu540c_write_ranges); i++)
++		for (a = vepu540c_write_ranges[i].first;
++		     a <= vepu540c_write_ranges[i].last; a += 4)
++			writel(img->regs[a / 4], regs + a);
++
++	writel(FIELD_PREP(VEPU540C_ENC_STRT_CMD, VEPU540C_ENC_STRT_CMD_FRAME),
++	       regs + VEPU540C_ENC_STRT);
++	return 0;
++}
++
++static u32 vepu540c_irq_ack(struct rkvenc_dev *dev)
++{
++	u32 sta;
++
++	sta = readl(dev->regs + VEPU540C_INT_STA);
++	if (!sta)
++		return 0;
++
++	writel(sta, dev->regs + VEPU540C_INT_CLR);
++	/* Flush the posted clear before the interrupt line is sampled again */
++	readl(dev->regs + VEPU540C_INT_STA);
++	return sta & VEPU540C_INT_USED;
++}
++
++static void vepu540c_status_read(struct rkvenc_dev *dev, u32 *bytes,
++				 u32 *qp_sum)
++{
++	*bytes = readl(dev->regs + VEPU540C_ST_BS_LGTH);
++	*qp_sum = readl(dev->regs + VEPU540C_ST_QP_SUM);
++}
++
++static bool vepu540c_force_clear(struct rkvenc_dev *dev)
++{
++	void __iomem *regs = dev->regs;
++
++	writel(VEPU540C_INT_ALL, regs + VEPU540C_INT_MSK);
++	writel(VEPU540C_ENC_CLR_FORCE, regs + VEPU540C_ENC_CLR);
++	udelay(VEPU540C_FORCE_CLEAR_US);
++	writel(0, regs + VEPU540C_ENC_CLR);
++	writel(VEPU540C_INT_ALL, regs + VEPU540C_INT_CLR);
++	readl(regs + VEPU540C_INT_STA);
++	writel(0, regs + VEPU540C_INT_MSK);
++
++	return !(readl(regs + VEPU540C_ST_ENC) & VEPU540C_ST_ENC_BUSY);
++}
++
++static void vepu540c_recover(struct rkvenc_dev *dev)
++{
++	void __iomem *regs = dev->regs;
++
++	if (vepu540c_force_clear(dev))
++		return;
++
++	dev_err(dev->dev, "job did not stop on force clear, resetting\n");
++
++	writel(VEPU540C_INT_ALL & ~VEPU540C_INT_SCLR_DONE,
++	       regs + VEPU540C_INT_MSK);
++	writel(VEPU540C_INT_ALL, regs + VEPU540C_INT_CLR);
++
++	reinit_completion(&dev->sclr_done);
++	writel(VEPU540C_ENC_CLR_SAFE, regs + VEPU540C_ENC_CLR);
++	if (!wait_for_completion_timeout(&dev->sclr_done,
++					 msecs_to_jiffies(VEPU540C_SAFE_CLEAR_MS)))
++		dev_err(dev->dev, "safe clear timed out: reset at power-down\n");
++
++	writel(0, regs + VEPU540C_INT_MSK);
++}
++
++const struct rkvenc_hw_ops rkvenc_vepu540c_ops = {
++	.slot_sizes = vepu540c_slot_sizes,
++	.run = vepu540c_run,
++	.irq_ack = vepu540c_irq_ack,
++	.status_read = vepu540c_status_read,
++	.recover = vepu540c_recover,
++};
+diff --git a/drivers/media/platform/rockchip/rkvenc/rkvenc-vepu540c.h b/drivers/media/platform/rockchip/rkvenc/rkvenc-vepu540c.h
+new file mode 100644
+index 0000000..3009982
+--- /dev/null
++++ b/drivers/media/platform/rockchip/rkvenc/rkvenc-vepu540c.h
+@@ -0,0 +1,15 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef RKVENC_VEPU540C_H
++#define RKVENC_VEPU540C_H
++
++#include <linux/types.h>
++
++#include "rkvenc-vepu540c-regs.h"
++
++struct rkvenc_vepu540c_img {
++	u32 regs[VEPU540C_REGS_END / 4];
++};
++
++extern const u32 vepu540c_h264_flat_scl[VEPU540C_SCL_H264_TAB_WORDS];
++
++#endif
+diff --git a/drivers/media/platform/rockchip/rkvenc/rkvenc-vepu541.h b/drivers/media/platform/rockchip/rkvenc/rkvenc-vepu541.h
+index 33a1340..5cedeb2 100644
+--- a/drivers/media/platform/rockchip/rkvenc/rkvenc-vepu541.h
++++ b/drivers/media/platform/rockchip/rkvenc/rkvenc-vepu541.h
+@@ -37,6 +37,7 @@ struct rkvenc_slot {
+ 	u32 rfp_body;
+ 	u32 dsp;
+ 	u32 cmv;
++	u32 ebuf;
+ };
+ 
+ struct rkvenc_slot_sizes {
+@@ -44,6 +45,7 @@ struct rkvenc_slot_sizes {
+ 	u32 rfp_body;
+ 	u32 dsp;
+ 	u32 cmv;
++	u32 ebuf;
+ };
+ 
+ struct rkvenc_h264_seq {
+diff --git a/drivers/media/platform/rockchip/rkvenc/rkvenc.c b/drivers/media/platform/rockchip/rkvenc/rkvenc.c
+index 7957208..d99d00c 100644
+--- a/drivers/media/platform/rockchip/rkvenc/rkvenc.c
++++ b/drivers/media/platform/rockchip/rkvenc/rkvenc.c
+@@ -26,15 +26,12 @@
+ 
+ #define RKVENC_L1_CFG_START 0x00c
+ 
+-static const struct rkvenc_variant rkvenc_variant_rv1126 = {
+-	.vepu540 = false,
+-};
+-
+-static const struct rkvenc_variant rkvenc_variant_rk3568 = {
+-	.vepu540 = true,
+-};
++/* 8192x8192 encodes; 16384x8640 fails, as it does under Rockchip's MPP */
++#define RKVENC_RK3528_MAX_WIDTH		8192
++#define RKVENC_RK3528_MAX_HEIGHT	8192
+ 
+-int rkvenc_hw_run(struct rkvenc_dev *dev, const struct rkvenc_frame *f)
++static int rkvenc_vepu541_run(struct rkvenc_dev *dev,
++			      const struct rkvenc_frame *f)
+ {
+ 	struct rkvenc_img *img = &dev->img;
+ 	void __iomem *regs = dev->regs;
+@@ -58,21 +55,29 @@ int rkvenc_hw_run(struct rkvenc_dev *dev, const struct rkvenc_frame *f)
+ 		if (rkvenc_vepu541_l1_written(a))
+ 			writel(img->l1[a / 4], regs + a);
+ 
+-	/* A timed out job must not be judged by the previous status. */
+-	dev->irq_sta = 0;
+ 	writel(img->enc_strt, regs + RKVENC_ENC_STRT);
+-
+-	schedule_delayed_work(&dev->watchdog,
+-			      msecs_to_jiffies(RKVENC_WATCHDOG_MS));
+ 	return 0;
+ }
+ 
+-void rkvenc_hw_status_read(struct rkvenc_dev *dev, u32 *int_sta, u32 *bytes,
+-			   u32 *qp_sum)
++static u32 rkvenc_vepu541_irq_ack(struct rkvenc_dev *dev)
++{
++	u32 sta;
++
++	sta = readl(dev->regs + RKVENC_INT_STA);
++	if (!sta)
++		return 0;
++
++	writel(sta, dev->regs + RKVENC_INT_CLR);
++	/* Flush the posted clear before the interrupt line is sampled again */
++	readl(dev->regs + RKVENC_INT_STA);
++	return sta;
++}
++
++static void rkvenc_vepu541_status_read(struct rkvenc_dev *dev, u32 *bytes,
++				       u32 *qp_sum)
+ {
+ 	void __iomem *regs = dev->regs;
+ 
+-	*int_sta = dev->irq_sta;
+ 	*bytes = FIELD_GET(RKVENC_ST_BSL_LEN, readl(regs + RKVENC_ST_BSL));
+ 	*qp_sum = readl(regs + RKVENC_ST_SSE_QP) & GENMASK(23, 0);
+ }
+@@ -91,7 +96,7 @@ static bool rkvenc_hw_force_clear(struct rkvenc_dev *dev)
+ 	return !(readl(regs + RKVENC_ST_ENC) & GENMASK(1, 0));
+ }
+ 
+-void rkvenc_hw_recover(struct rkvenc_dev *dev)
++static void rkvenc_vepu541_recover(struct rkvenc_dev *dev)
+ {
+ 	void __iomem *regs = dev->regs;
+ 
+@@ -117,19 +122,67 @@ void rkvenc_hw_recover(struct rkvenc_dev *dev)
+ 	writel(0, regs + RKVENC_INT_MSK);
+ }
+ 
++static const struct rkvenc_hw_ops rkvenc_vepu541_ops = {
++	.slot_sizes = rkvenc_vepu541_slot_sizes,
++	.run = rkvenc_vepu541_run,
++	.irq_ack = rkvenc_vepu541_irq_ack,
++	.status_read = rkvenc_vepu541_status_read,
++	.recover = rkvenc_vepu541_recover,
++};
++
++static const struct rkvenc_variant rkvenc_variant_rv1126 = {
++	.vepu540 = false,
++	.ops = &rkvenc_vepu541_ops,
++};
++
++static const struct rkvenc_variant rkvenc_variant_rk3568 = {
++	.vepu540 = true,
++	.ops = &rkvenc_vepu541_ops,
++};
++
++static const struct rkvenc_variant rkvenc_variant_rk3528 = {
++	.ops = &rkvenc_vepu540c_ops,
++	.h264_only = true,
++	.max_width = RKVENC_RK3528_MAX_WIDTH,
++	.max_height = RKVENC_RK3528_MAX_HEIGHT,
++};
++
++int rkvenc_hw_run(struct rkvenc_dev *dev, const struct rkvenc_frame *f)
++{
++	int ret;
++
++	/* A timed out job must not be judged by the previous status. */
++	dev->irq_sta = 0;
++	ret = dev->variant->ops->run(dev, f);
++	if (ret)
++		return ret;
++
++	schedule_delayed_work(&dev->watchdog,
++			      msecs_to_jiffies(RKVENC_WATCHDOG_MS));
++	return 0;
++}
++
++void rkvenc_hw_status_read(struct rkvenc_dev *dev, u32 *int_sta, u32 *bytes,
++			   u32 *qp_sum)
++{
++	*int_sta = dev->irq_sta;
++	dev->variant->ops->status_read(dev, bytes, qp_sum);
++}
++
++void rkvenc_hw_recover(struct rkvenc_dev *dev)
++{
++	dev->variant->ops->recover(dev);
++}
++
+ static irqreturn_t rkvenc_irq(int irq, void *priv)
+ {
+ 	struct rkvenc_dev *dev = priv;
+ 	u32 sta;
+ 
+-	sta = readl(dev->regs + RKVENC_INT_STA);
++	sta = dev->variant->ops->irq_ack(dev);
+ 	if (!sta)
+ 		return IRQ_NONE;
+ 
+-	writel(sta, dev->regs + RKVENC_INT_CLR);
+-	/* Flush the posted clear before the interrupt line is sampled again */
+-	readl(dev->regs + RKVENC_INT_STA);
+-
+ 	if (sta & RKVENC_INT_SCLR_DONE)
+ 		complete(&dev->sclr_done);
+ 
+@@ -334,12 +387,39 @@ static void rkvenc_init_clocks_resets(struct rkvenc_dev *rkvenc)
+ 	rkvenc->num_resets = RKVENC_NUM_RESETS;
+ }
+ 
++static void rkvenc_max_size_read(struct rkvenc_dev *rkvenc)
++{
++	u32 ver, pic_size;
++
++	/* VERSION tells the 4K encoder from the 1080p one */
++	ver = readl(rkvenc->regs + RKVENC_VERSION);
++	pic_size = (ver >> 12) & 0xf;
++	switch (pic_size) {
++	case 0:
++		rkvenc->max_width = 4096;
++		rkvenc->max_height = 2304;
++		break;
++	case 1:
++		rkvenc->max_width = 1920;
++		rkvenc->max_height = 1088;
++		break;
++	default:
++		dev_warn(rkvenc->dev, "unknown VERSION pic_size %u (0x%08x)\n",
++			 pic_size, ver);
++		rkvenc->max_width = 4096;
++		rkvenc->max_height = 2304;
++		break;
++	}
++	if (pic_size != 0)
++		dev_info(rkvenc->dev, "RKVENC VERSION 0x%08x (pic_size %u)\n",
++			 ver, pic_size);
++}
++
+ static int rkvenc_probe(struct platform_device *pdev)
+ {
+ 	const struct rkvenc_variant *variant;
+ 	struct rkvenc_dev *rkvenc;
+ 	struct device *dev = &pdev->dev;
+-	u32 ver, pic_size;
+ 	int ret, irq;
+ 
+ 	variant = of_device_get_match_data(dev);
+@@ -402,28 +482,12 @@ static int rkvenc_probe(struct platform_device *pdev)
+ 	if (ret)
+ 		return ret;
+ 
+-	/* VERSION tells the 4K encoder from the 1080p one */
+-	ver = readl(rkvenc->regs + RKVENC_VERSION);
+-	pic_size = (ver >> 12) & 0xf;
+-	switch (pic_size) {
+-	case 0:
+-		rkvenc->max_width = 4096;
+-		rkvenc->max_height = 2304;
+-		break;
+-	case 1:
+-		rkvenc->max_width = 1920;
+-		rkvenc->max_height = 1088;
+-		break;
+-	default:
+-		dev_warn(dev, "unknown VERSION pic_size %u (0x%08x)\n",
+-			 pic_size, ver);
+-		rkvenc->max_width = 4096;
+-		rkvenc->max_height = 2304;
+-		break;
++	if (variant->max_width) {
++		rkvenc->max_width = variant->max_width;
++		rkvenc->max_height = variant->max_height;
++	} else {
++		rkvenc_max_size_read(rkvenc);
+ 	}
+-	if (pic_size != 0)
+-		dev_info(dev, "RKVENC VERSION 0x%08x (pic_size %u)\n",
+-			 ver, pic_size);
+ 
+ 	pm_runtime_put(dev);
+ 
+@@ -479,6 +543,7 @@ static void rkvenc_remove(struct platform_device *pdev)
+ static const struct of_device_id rkvenc_dt_match[] = {
+ 	{ .compatible = "rockchip,rv1126-rkvenc", .data = &rkvenc_variant_rv1126 },
+ 	{ .compatible = "rockchip,rk3568-rkvenc", .data = &rkvenc_variant_rk3568 },
++	{ .compatible = "rockchip,rk3528-rkvenc", .data = &rkvenc_variant_rk3528 },
+ 	{ /* sentinel */ },
+ };
+ MODULE_DEVICE_TABLE(of, rkvenc_dt_match);
+diff --git a/drivers/media/platform/rockchip/rkvenc/rkvenc.h b/drivers/media/platform/rockchip/rkvenc/rkvenc.h
+index 95b7ce8..72319ba 100644
+--- a/drivers/media/platform/rockchip/rkvenc/rkvenc.h
++++ b/drivers/media/platform/rockchip/rkvenc/rkvenc.h
+@@ -21,12 +21,13 @@
+ #include <media/v4l2-device.h>
+ #include <media/v4l2-mem2mem.h>
+ 
++#include "rkvenc-vepu540c.h"
+ #include "rkvenc-vepu541.h"
+ 
+ #define RKVENC_HDR_MAX		1024
+ 
+ #define RKVENC_SLOTS		2
+-#define RKVENC_SLOT_BUFS 4
++#define RKVENC_SLOT_BUFS 5
+ 
+ #define RKVENC_NUM_CLKS		3
+ #define RKVENC_NUM_RESETS	3
+@@ -35,12 +36,37 @@
+ 
+ struct rkvenc_dev;
+ 
++/**
++ * struct rkvenc_hw_ops - register level operations of one encoder core.
++ * @slot_sizes: size the reconstruction and reference buffers.
++ * @run: write the register image of a frame and start the job.
++ * @irq_ack: read and clear the interrupt status, in RKVENC_INT_* bits.
++ * @status_read: read the stream length and the QP sum of the last job.
++ * @recover: stop a failed job and bring the core back to idle.
++ */
++struct rkvenc_hw_ops {
++	void (*slot_sizes)(enum rkvenc_codec codec, u32 width, u32 height,
++			   struct rkvenc_slot_sizes *sz);
++	int (*run)(struct rkvenc_dev *dev, const struct rkvenc_frame *f);
++	u32 (*irq_ack)(struct rkvenc_dev *dev);
++	void (*status_read)(struct rkvenc_dev *dev, u32 *bytes, u32 *qp_sum);
++	void (*recover)(struct rkvenc_dev *dev);
++};
++
+ /**
+  * struct rkvenc_variant - per-SoC integration differences.
+  * @vepu540: RK3566/RK3568 "vepu540" rather than RV1109/RV1126 "vepu541".
++ * @ops: register level operations of the core.
++ * @h264_only: the core has no HEVC back end.
++ * @max_width: largest picture width, zero to read it from VERSION.
++ * @max_height: largest picture height, zero to read it from VERSION.
+  */
+ struct rkvenc_variant {
+ 	bool vepu540;
++	const struct rkvenc_hw_ops *ops;
++	bool h264_only;
++	u32 max_width;
++	u32 max_height;
+ };
+ 
+ struct rkvenc_dev {
+@@ -58,7 +84,10 @@ struct rkvenc_dev {
+ 
+ 	const struct rkvenc_variant *variant;
+ 
+-	struct rkvenc_img img;
++	union {
++		struct rkvenc_img img;
++		struct rkvenc_vepu540c_img img540c;
++	};
+ 
+ 	struct mutex vdev_lock;		/* serialises the video node ioctls */
+ 	spinlock_t irq_lock;
+@@ -182,6 +211,9 @@ void rkvenc_hw_recover(struct rkvenc_dev *dev);
+ int rkvenc_v4l2_init(struct rkvenc_dev *dev);
+ void rkvenc_v4l2_cleanup(struct rkvenc_dev *dev);
+ 
++/* rkvenc-vepu540c.c */
++extern const struct rkvenc_hw_ops rkvenc_vepu540c_ops;
++
+ /* rkvenc-v4l2.c */
+ extern const struct v4l2_m2m_ops rkvenc_m2m_ops;
+ 

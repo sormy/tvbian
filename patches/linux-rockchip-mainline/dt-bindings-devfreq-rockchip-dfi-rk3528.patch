@@ -1,0 +1,64 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] dt-bindings: devfreq: event: rockchip,dfi: Add RK3528
+
+Add the RK3528's DDR monitor. Rockchip's own RK3528 device tree gives
+it no interrupt, so require one only of the others.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ .../bindings/devfreq/event/rockchip,dfi.yaml  | 33 ++++++++++++-------
+ 1 file changed, 21 insertions(+), 12 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/devfreq/event/rockchip,dfi.yaml b/Documentation/devicetree/bindings/devfreq/event/rockchip,dfi.yaml
+index 50d3fab..e667e93 100644
+--- a/Documentation/devicetree/bindings/devfreq/event/rockchip,dfi.yaml
++++ b/Documentation/devicetree/bindings/devfreq/event/rockchip,dfi.yaml
+@@ -13,6 +13,7 @@ properties:
+   compatible:
+     enum:
+       - rockchip,rk3399-dfi
++      - rockchip,rk3528-dfi
+       - rockchip,rk3568-dfi
+       - rockchip,rk3588-dfi
+ 
+@@ -37,20 +38,28 @@ properties:
+ 
+ required:
+   - compatible
+-  - interrupts
+   - reg
+ 
+-if:
+-  properties:
+-    compatible:
+-      contains:
+-        enum:
+-          - rockchip,rk3399-dfi
+-
+-then:
+-  required:
+-    - clocks
+-    - clock-names
++allOf:
++  - if:
++      properties:
++        compatible:
++          contains:
++            enum:
++              - rockchip,rk3399-dfi
++    then:
++      required:
++        - clocks
++        - clock-names
++  - if:
++      not:
++        properties:
++          compatible:
++            contains:
++              const: rockchip,rk3528-dfi
++    then:
++      required:
++        - interrupts
+ 
+ additionalProperties: false
+ 

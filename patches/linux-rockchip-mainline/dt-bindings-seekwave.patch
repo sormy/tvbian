@@ -1,0 +1,55 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] dt-bindings: net: describe the Seekwave SDIO loader GPIOs
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+
+--- /dev/null
++++ b/Documentation/devicetree/bindings/net/wireless/seekwave,sv6160lite.yaml
+@@ -0,0 +1,36 @@
++# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
++%YAML 1.2
++---
++$id: http://devicetree.org/schemas/net/wireless/seekwave,sv6160lite.yaml#
++$schema: http://devicetree.org/meta-schemas/core.yaml#
++
++title: Seekwave SV6160 Lite SDIO firmware loader
++
++maintainers:
++  - Artem Butusov <art.sormy@gmail.com>
++
++description: |
++  Platform control for the Seekwave SDIO transport and firmware loader.
++  The reset line is also consumed by the MMC power-sequence provider.
++
++properties:
++  compatible:
++    const: seekwave,sv6160lite
++
++  reset-gpios:
++    maxItems: 1
++    description: Active-low radio reset shared with MMC power sequencing.
++
++  host-wake-gpios:
++    maxItems: 1
++    description: Wake indication from the radio.
++
++  chip-wake-gpios:
++    maxItems: 1
++    description: Wake request to the radio.
++
++required:
++  - compatible
++  - reset-gpios
++
++additionalProperties: false
+--- a/Documentation/devicetree/bindings/vendor-prefixes.yaml
++++ b/Documentation/devicetree/bindings/vendor-prefixes.yaml
+@@ -1485,6 +1485,8 @@
+     description: Seagate Technology PLC
+   "^seeed,.*":
+     description: Seeed Technology Co., Ltd
++  "^seekwave,.*":
++    description: Seekwave Technology Co., Ltd.
+   "^seirobotics,.*":
+     description: Shenzhen SEI Robotics Co., Ltd
+   "^semtech,.*":

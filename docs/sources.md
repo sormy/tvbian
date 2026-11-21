@@ -1,7 +1,8 @@
 # Upstream sources
 
 Every source TVBian builds from, and whether it moves on its own. The rule: **float what makes
-trustworthy releases, pin what has one maintainer, no releases, or can brick a box.** A floating
+trustworthy releases, pin what has one maintainer, no releases, or can brick a box.** Trusted:
+mainline Linux on kernel.org, and a vendor's kernel on the vendor's own GitHub account. A floating
 source resolves at build time; the release notes name what it resolved to.
 
 ## Kernels
@@ -14,6 +15,7 @@ source resolves at build time; the release notes name what it resolved to.
 | `sunxi64-next` | kernel.org stable     | newest stable tag, LibreELEC's series; opt-in |
 | `rk35xx`       | rockchip-linux/kernel | tip of `develop-6.1`, soaked                  |
 | `rk35xx-next`  | rockchip-linux/kernel | tip of the newest `develop-*`, soaked; opt-in |
+| `rk35xx-next2` | kernel.org stable     | newest stable tag; opt-in                     |
 
 Mainline floats to tags: kernel.org's own releases. Rockchip tags nothing, so the vendor kernels
 follow a branch tip, **soaked**: the newest commit at least 7 days old, so a commit pushed and

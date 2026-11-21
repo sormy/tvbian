@@ -1,0 +1,102 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Wed, 18 Nov 2026 00:17:11 -0500
+Subject: [PATCH] media: rockchip: rga: Add RK3528 RGA2E behind its IOMMU
+
+The RK3528's RGA2E programs as the RK3288's RGA2, but its memory goes
+through an IOMMU of its own rather than the RGA's internal MMU, as the
+vendor kernel drives it: given the internal MMU's tables, a job never
+completes. Add a variant without the internal MMU, leaving it disabled
+and handing the RGA the IOMMU's addresses.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ drivers/media/platform/rockchip/rga/rga-hw.c | 42 ++++++++++++++++----
+ drivers/media/platform/rockchip/rga/rga.c    |  4 ++
+ drivers/media/platform/rockchip/rga/rga.h    |  1 +
+ 3 files changed, 39 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/media/platform/rockchip/rga/rga-hw.c b/drivers/media/platform/rockchip/rga/rga-hw.c
+index 2e7ec8b..e2ba8eb 100644
+--- a/drivers/media/platform/rockchip/rga/rga-hw.c
++++ b/drivers/media/platform/rockchip/rga/rga-hw.c
+@@ -414,14 +414,17 @@ static void rga_cmd_set(struct rga_ctx *ctx,
+ {
+ 	struct rockchip_rga *rga = ctx->rga;
+ 
+-	rga_cmd_set_src_addr(ctx, src->dma_desc_pa);
+-	/*
+-	 * Due to hardware bug,
+-	 * src1 mmu also should be configured when using alpha blending.
+-	 */
+-	rga_cmd_set_src1_addr(ctx, dst->dma_desc_pa);
+-
+-	rga_cmd_set_dst_addr(ctx, dst->dma_desc_pa);
++	/* Behind an IOMMU the RGA's own MMU stays off, its addresses the IOMMU's */
++	if (rga_has_internal_iommu(rga)) {
++		rga_cmd_set_src_addr(ctx, src->dma_desc_pa);
++		/*
++		 * Due to hardware bug,
++		 * src1 mmu also should be configured when using alpha blending.
++		 */
++		rga_cmd_set_src1_addr(ctx, dst->dma_desc_pa);
++
++		rga_cmd_set_dst_addr(ctx, dst->dma_desc_pa);
++	}
+ 
+ 	rga_cmd_set_src_info(ctx, &src->dma_addrs);
+ 	rga_cmd_set_dst_info(ctx, &dst->dma_addrs);
+@@ -605,3 +608,26 @@ const struct rga_hw rga2_hw = {
+ 	.adjust_and_map_format = rga_adjust_and_map_format,
+ 	.enum_format = rga_enum_format,
+ };
++
++/* RK3528's RGA2E, whose memory goes through an IOMMU of its own */
++const struct rga_hw rga2e_hw = {
++	.card_type = "rga2",
++	.has_internal_iommu = false,
++	.cmdbuf_size = RGA_CMDBUF_SIZE,
++	.min_width = MIN_WIDTH,
++	.max_width = MAX_WIDTH,
++	.min_height = MIN_HEIGHT,
++	.max_height = MAX_HEIGHT,
++	.max_scaling_factor = MAX_SCALING_FACTOR,
++	.stride_alignment = 4,
++	.features = RGA_FEATURE_FLIP
++		  | RGA_FEATURE_ROTATE
++		  | RGA_FEATURE_BG_COLOR,
++
++	.setup_cmdbuf = rga_hw_setup_cmdbuf,
++	.start = rga_hw_start,
++	.handle_irq = rga_handle_irq,
++	.get_version = rga_get_version,
++	.adjust_and_map_format = rga_adjust_and_map_format,
++	.enum_format = rga_enum_format,
++};
+diff --git a/drivers/media/platform/rockchip/rga/rga.c b/drivers/media/platform/rockchip/rga/rga.c
+index 00a6322..ea445bb 100644
+--- a/drivers/media/platform/rockchip/rga/rga.c
++++ b/drivers/media/platform/rockchip/rga/rga.c
+@@ -912,6 +912,10 @@ static const struct dev_pm_ops rga_pm = {
+ };
+ 
+ static const struct of_device_id rockchip_rga_match[] = {
++	{
++		.compatible = "rockchip,rk3528-rga",
++		.data = &rga2e_hw,
++	},
+ 	{
+ 		.compatible = "rockchip,rk3288-rga",
+ 		.data = &rga2_hw,
+diff --git a/drivers/media/platform/rockchip/rga/rga.h b/drivers/media/platform/rockchip/rga/rga.h
+index 7bcdf36..77a675d 100644
+--- a/drivers/media/platform/rockchip/rga/rga.h
++++ b/drivers/media/platform/rockchip/rga/rga.h
+@@ -170,6 +170,7 @@ static inline bool rga_has_internal_iommu(const struct rockchip_rga *rga)
+ }
+ 
+ extern const struct rga_hw rga2_hw;
++extern const struct rga_hw rga2e_hw;
+ extern const struct rga_hw rga3_hw;
+ 
+ #endif

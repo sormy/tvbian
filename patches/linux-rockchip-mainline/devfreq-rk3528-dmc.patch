@@ -1,0 +1,521 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] PM / devfreq: rockchip: Add the RK3528 DMC driver
+
+The RK3528's trusted firmware trains the DDR at a few rates and changes
+between them on request, timing the switch to the display's blanking and
+raising an interrupt when it finishes late. Drive it through the
+firmware's own calls: its version, its parameter page, the rates it
+trained, and the rate change, with the lit output's type and line time
+where the display driver reports them, so the change lands in its
+blanking. The table's rows the firmware did not train are disabled, and
+a trained rate between rows takes the next row's voltage. Each rate
+holds the memory controller's supply at or above its row's voltage; on
+the RK3518 that rail is the CPU's too, which may need more. The vendor
+holds the DDR at its top trained rate, so the performance governor is
+the default; simple_ondemand scales it by the DFI's load, as the RK3399
+driver does.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ drivers/devfreq/Kconfig      |  15 ++
+ drivers/devfreq/Makefile     |   1 +
+ drivers/devfreq/rk3528_dmc.c | 453 +++++++++++++++++++++++++++++++++++
+ 3 files changed, 469 insertions(+)
+
+diff --git a/drivers/devfreq/Kconfig b/drivers/devfreq/Kconfig
+index c999c4a..ffbf13c 100644
+--- a/drivers/devfreq/Kconfig
++++ b/drivers/devfreq/Kconfig
+@@ -152,6 +152,21 @@ config ARM_RK3399_DMC_DEVFREQ
+ 	  It sets the frequency for the memory controller and reads the usage counts
+ 	  from hardware.
+ 
++config ARM_RK3528_DMC_DEVFREQ
++	tristate "ARM RK3528 DMC DEVFREQ Driver"
++	depends on (ARCH_ROCKCHIP && HAVE_ARM_SMCCC) || \
++		(COMPILE_TEST && HAVE_ARM_SMCCC)
++	select DEVFREQ_EVENT_ROCKCHIP_DFI
++	select DEVFREQ_GOV_PERFORMANCE
++	select DEVFREQ_GOV_SIMPLE_ONDEMAND
++	select PM_DEVFREQ_EVENT
++	select PM_OPP
++	help
++	  This adds the DEVFREQ driver for the RK3528 and RK3518 DMC (Dynamic
++	  Memory Controller). It scales the DDR through the trusted firmware,
++	  reads the usage counts from the DFI, and holds the memory
++	  controller's supply at each rate's voltage.
++
+ config ARM_SUN8I_A33_MBUS_DEVFREQ
+ 	tristate "sun8i/sun50i MBUS DEVFREQ Driver"
+ 	depends on ARCH_SUNXI || COMPILE_TEST
+diff --git a/drivers/devfreq/Makefile b/drivers/devfreq/Makefile
+index 404179d..65dc92d 100644
+--- a/drivers/devfreq/Makefile
++++ b/drivers/devfreq/Makefile
+@@ -14,6 +14,7 @@ obj-$(CONFIG_ARM_IMX_BUS_DEVFREQ)	+= imx-bus.o
+ obj-$(CONFIG_ARM_IMX8M_DDRC_DEVFREQ)	+= imx8m-ddrc.o
+ obj-$(CONFIG_ARM_MEDIATEK_CCI_DEVFREQ)	+= mtk-cci-devfreq.o
+ obj-$(CONFIG_ARM_RK3399_DMC_DEVFREQ)	+= rk3399_dmc.o
++obj-$(CONFIG_ARM_RK3528_DMC_DEVFREQ)	+= rk3528_dmc.o
+ obj-$(CONFIG_ARM_SUN8I_A33_MBUS_DEVFREQ)	+= sun8i-a33-mbus.o
+ obj-$(CONFIG_ARM_TEGRA_DEVFREQ)		+= tegra30-devfreq.o
+ 
+diff --git a/drivers/devfreq/rk3528_dmc.c b/drivers/devfreq/rk3528_dmc.c
+new file mode 100644
+index 0000000..cebd77e
+--- /dev/null
++++ b/drivers/devfreq/rk3528_dmc.c
+@@ -0,0 +1,453 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * RK3528 DDR frequency scaling: the trusted firmware retrains the DDR at
++ * each rate it lists, the DFI counts its load, and the logic rail follows
++ * the rate's OPP.
++ */
++
++#include <linux/arm-smccc.h>
++#include <linux/clk.h>
++#include <linux/completion.h>
++#include <linux/devfreq.h>
++#include <linux/devfreq-event.h>
++#include <linux/interrupt.h>
++#include <linux/io.h>
++#include <linux/irq.h>
++#include <linux/module.h>
++#include <linux/mutex.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++#include <linux/pm_opp.h>
++#include <linux/pm_qos.h>
++#include <linux/regulator/consumer.h>
++#include <linux/sizes.h>
++#include <linux/units.h>
++
++#include <soc/rockchip/pm_domains.h>
++#include <soc/rockchip/rockchip_scanout.h>
++#include <soc/rockchip/rockchip_sip.h>
++
++#include <drm/drm_mode.h>
++
++/* This firmware's DRAM calls, numbered unlike the RK3399's */
++#define RK3528_SIP_DRAM_SET_RATE	0x01
++#define RK3528_SIP_DRAM_GET_VERSION	0x08
++#define RK3528_SIP_DRAM_POST_SET_RATE	0x09
++#define RK3528_SIP_DRAM_GET_FREQ_INFO	0x0e
++#define RK3528_SIP_SHARE_MEM		0x82000009
++#define RK3528_SHARE_PAGE_DDR		2
++#define RK3528_SHARE_PAGES		2
++#define RK3528_SIP_MIN_VERSION		0x100
++#define RK3528_SIP_RATE_PENDING		-6
++
++/* The page the firmware reads its parameters from */
++#define RK3528_PARAM_HZ			0x00
++#define RK3528_PARAM_SCREEN		0x04
++#define RK3528_PARAM_WAIT_FLAG1		0x18
++#define RK3528_PARAM_WAIT_FLAG0		0x1c
++#define RK3528_PARAM_COMPLETE_HWIRQ	0x20
++#define RK3528_PARAM_FREQ_COUNT		0x2c
++#define RK3528_PARAM_FREQ_MHZ		0x30
++#define RK3528_MAX_FREQS		6
++#define RK3528_PARAM_LINE_NS		0x4c
++
++/* The firmware's screen types */
++#define RK3528_SCREEN_NONE		0
++#define RK3528_SCREEN_TVOUT		5
++#define RK3528_SCREEN_HDMI		6
++
++/* The vendor's: five 60 Hz frames for a rate the firmware finishes at blanking */
++#define RK3528_COMPLETE_TIMEOUT_MS	85
++#define RK3528_POLLING_MS		50
++#define RK3528_UPTHRESHOLD		40
++#define RK3528_DOWNDIFFERENTIAL		20
++
++struct rk3528_dmc {
++	struct device *dev;
++	struct devfreq *devfreq;
++	struct devfreq_dev_profile profile;
++	struct devfreq_simple_ondemand_data ondemand;
++	struct devfreq_event_dev *edev;
++	struct regulator *center;
++	void __iomem *params;
++	struct completion done;
++	struct pm_qos_request qos;
++	struct mutex lock;	/* one rate change at a time */
++	int complete_irq;
++	unsigned long rate;
++	struct dev_pm_opp_supply supply;
++};
++
++/*
++ * A floor, not a voltage: on the RK3518 the rail is the CPU's too, and a
++ * trained rate added between rows carries one voltage as its whole range.
++ */
++static int rk3528_dmc_vote(struct rk3528_dmc *dmc, const struct dev_pm_opp_supply *s)
++{
++	return regulator_set_voltage(dmc->center, s->u_volt, INT_MAX);
++}
++
++static struct arm_smccc_res rk3528_dmc_sip(u32 page, u32 call)
++{
++	struct arm_smccc_res res;
++
++	arm_smccc_smc(ROCKCHIP_SIP_DRAM_FREQ, page, 0, call, 0, 0, 0, 0, &res);
++	return res;
++}
++
++static irqreturn_t rk3528_dmc_complete_irq(int irq, void *data)
++{
++	struct rk3528_dmc *dmc = data;
++
++	rk3528_dmc_sip(RK3528_SHARE_PAGE_DDR, RK3528_SIP_DRAM_POST_SET_RATE);
++	complete(&dmc->done);
++	return IRQ_HANDLED;
++}
++
++/* The lit output, if a display driver reports one, for the firmware to switch at its blanking */
++static void rk3528_dmc_screen(struct rk3528_dmc *dmc)
++{
++	int (*scanout)(int *connector_type, u32 *line_ns);
++	u32 screen = RK3528_SCREEN_NONE, line_ns = 0;
++	int type;
++
++	scanout = symbol_get(rockchip_drm_scanout);
++	if (scanout) {
++		if (!scanout(&type, &line_ns)) {
++			if (type == DRM_MODE_CONNECTOR_HDMIA || type == DRM_MODE_CONNECTOR_HDMIB)
++				screen = RK3528_SCREEN_HDMI;
++			else if (type == DRM_MODE_CONNECTOR_Composite ||
++				 type == DRM_MODE_CONNECTOR_TV)
++				screen = RK3528_SCREEN_TVOUT;
++		}
++		symbol_put(rockchip_drm_scanout);
++	}
++
++	writel(screen, dmc->params + RK3528_PARAM_SCREEN);
++	writel(screen ? line_ns : 0, dmc->params + RK3528_PARAM_LINE_NS);
++}
++
++/* The firmware may defer the switch to the display's blanking and signal it */
++static int rk3528_dmc_set_rate(struct rk3528_dmc *dmc, unsigned long rate)
++{
++	unsigned long timeout = msecs_to_jiffies(RK3528_COMPLETE_TIMEOUT_MS);
++	struct arm_smccc_res res;
++
++	writel(rate, dmc->params + RK3528_PARAM_HZ);
++	rk3528_dmc_screen(dmc);
++	writel(1, dmc->params + RK3528_PARAM_WAIT_FLAG1);
++	writel(1, dmc->params + RK3528_PARAM_WAIT_FLAG0);
++
++	reinit_completion(&dmc->done);
++	res = rk3528_dmc_sip(RK3528_SHARE_PAGE_DDR, RK3528_SIP_DRAM_SET_RATE);
++	if ((long)res.a1 == RK3528_SIP_RATE_PENDING) {
++		enable_irq(dmc->complete_irq);
++		/* the firmware's interrupt is answered from WFI only */
++		cpu_latency_qos_update_request(&dmc->qos, 0);
++		if (!wait_for_completion_timeout(&dmc->done, timeout))
++			rk3528_dmc_sip(RK3528_SHARE_PAGE_DDR,
++				       RK3528_SIP_DRAM_POST_SET_RATE);
++		cpu_latency_qos_update_request(&dmc->qos, PM_QOS_DEFAULT_VALUE);
++		disable_irq(dmc->complete_irq);
++	}
++
++	return res.a0 ? -EIO : 0;
++}
++
++static int rk3528_dmc_target(struct device *dev, unsigned long *freq, u32 flags)
++{
++	struct rk3528_dmc *dmc = dev_get_drvdata(dev);
++	struct dev_pm_opp_supply supply;
++	struct dev_pm_opp *opp;
++	unsigned long rate;
++	int ret;
++
++	opp = devfreq_recommended_opp(dev, freq, flags);
++	if (IS_ERR(opp))
++		return PTR_ERR(opp);
++	rate = dev_pm_opp_get_freq(opp);
++	ret = dev_pm_opp_get_supplies(opp, &supply);
++	dev_pm_opp_put(opp);
++	if (ret)
++		return ret;
++
++	if (rate == dmc->rate)
++		return 0;
++
++	mutex_lock(&dmc->lock);
++	ret = rockchip_pmu_block();
++	if (ret)
++		goto unlock;
++
++	if (rate > dmc->rate) {
++		ret = rk3528_dmc_vote(dmc, &supply);
++		if (ret)
++			goto unblock;
++	}
++
++	ret = rk3528_dmc_set_rate(dmc, rate);
++	if (ret) {
++		rk3528_dmc_vote(dmc, &dmc->supply);
++		goto unblock;
++	}
++
++	if (rate < dmc->rate)
++		ret = rk3528_dmc_vote(dmc, &supply);
++
++	dmc->rate = rate;
++	dmc->supply = supply;
++	*freq = rate;
++unblock:
++	rockchip_pmu_unblock();
++unlock:
++	mutex_unlock(&dmc->lock);
++	return ret;
++}
++
++static int rk3528_dmc_get_dev_status(struct device *dev,
++				     struct devfreq_dev_status *stat)
++{
++	struct rk3528_dmc *dmc = dev_get_drvdata(dev);
++	struct devfreq_event_data edata;
++	int ret;
++
++	ret = devfreq_event_get_event(dmc->edev, &edata);
++	if (ret < 0)
++		return ret;
++
++	stat->current_frequency = dmc->rate;
++	stat->busy_time = edata.load_count;
++	stat->total_time = edata.total_count;
++	return 0;
++}
++
++static int rk3528_dmc_get_cur_freq(struct device *dev, unsigned long *freq)
++{
++	struct rk3528_dmc *dmc = dev_get_drvdata(dev);
++
++	*freq = dmc->rate;
++	return 0;
++}
++
++/*
++ * The firmware lists the rates it trained the DDR at: a listed rate between
++ * the table's rows takes the next row's voltage, and the other rows go.
++ */
++static int rk3528_dmc_trained_opps(struct rk3528_dmc *dmc)
++{
++	unsigned long trained[RK3528_MAX_FREQS], rate, volt;
++	struct dev_pm_opp *opp;
++	u32 count;
++	int i, ret;
++
++	if (rk3528_dmc_sip(RK3528_SHARE_PAGE_DDR, RK3528_SIP_DRAM_GET_FREQ_INFO).a0)
++		return -EIO;
++
++	count = readl(dmc->params + RK3528_PARAM_FREQ_COUNT);
++	if (!count || count > RK3528_MAX_FREQS)
++		return -EINVAL;
++	for (i = 0; i < count; i++)
++		trained[i] = readl(dmc->params + RK3528_PARAM_FREQ_MHZ + 4 * i) * HZ_PER_MHZ;
++
++	for (i = 0; i < count; i++) {
++		rate = trained[i];
++		opp = dev_pm_opp_find_freq_ceil(dmc->dev, &rate);
++		if (IS_ERR(opp)) {
++			dev_warn(dmc->dev, "no row at or above %lu Hz\n", trained[i]);
++			continue;
++		}
++		volt = dev_pm_opp_get_voltage(opp);
++		dev_pm_opp_put(opp);
++		if (rate == trained[i])
++			continue;
++		ret = dev_pm_opp_add(dmc->dev, trained[i], volt);
++		if (ret)
++			return ret;
++	}
++
++	for (rate = 0; !IS_ERR(opp = dev_pm_opp_find_freq_ceil(dmc->dev, &rate)); rate++) {
++		dev_pm_opp_put(opp);
++		for (i = 0; i < count && trained[i] != rate; i++)
++			;
++		if (i == count)
++			dev_pm_opp_disable(dmc->dev, rate);
++	}
++
++	return 0;
++}
++
++static int rk3528_dmc_firmware(struct rk3528_dmc *dmc, struct platform_device *pdev)
++{
++	struct arm_smccc_res res;
++	int ret;
++
++	res = rk3528_dmc_sip(0, RK3528_SIP_DRAM_GET_VERSION);
++	if (res.a0 || res.a1 < RK3528_SIP_MIN_VERSION)
++		return dev_err_probe(dmc->dev, -ENXIO, "firmware DRAM version %#lx\n", res.a1);
++
++	arm_smccc_smc(RK3528_SIP_SHARE_MEM, RK3528_SHARE_PAGES, RK3528_SHARE_PAGE_DDR,
++		      0, 0, 0, 0, 0, &res);
++	if (res.a0)
++		return dev_err_probe(dmc->dev, -ENOMEM, "no firmware parameter page\n");
++	dmc->params = devm_ioremap(dmc->dev, res.a1, RK3528_SHARE_PAGES * SZ_4K);
++	if (!dmc->params)
++		return -ENOMEM;
++	memset_io(dmc->params, 0, RK3528_SHARE_PAGES * SZ_4K);
++
++	dmc->complete_irq = platform_get_irq_byname(pdev, "complete");
++	if (dmc->complete_irq < 0)
++		return dmc->complete_irq;
++	ret = devm_request_irq(dmc->dev, dmc->complete_irq, rk3528_dmc_complete_irq,
++			       IRQF_NO_AUTOEN, dev_name(dmc->dev), dmc);
++	if (ret)
++		return ret;
++	writel(irqd_to_hwirq(irq_get_irq_data(dmc->complete_irq)),
++	       dmc->params + RK3528_PARAM_COMPLETE_HWIRQ);
++
++	if (rk3528_dmc_sip(RK3528_SHARE_PAGE_DDR, ROCKCHIP_SIP_CONFIG_DRAM_INIT).a0)
++		return dev_err_probe(dmc->dev, -EIO, "firmware DRAM init failed\n");
++
++	return 0;
++}
++
++static int rk3528_dmc_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct rk3528_dmc *dmc;
++	struct dev_pm_opp *opp;
++	struct clk *clk;
++	int ret;
++
++	dmc = devm_kzalloc(dev, sizeof(*dmc), GFP_KERNEL);
++	if (!dmc)
++		return -ENOMEM;
++	dmc->dev = dev;
++	mutex_init(&dmc->lock);
++	init_completion(&dmc->done);
++	platform_set_drvdata(pdev, dmc);
++
++	dmc->center = devm_regulator_get(dev, "center");
++	if (IS_ERR(dmc->center))
++		return dev_err_probe(dev, PTR_ERR(dmc->center), "no center supply\n");
++
++	clk = devm_clk_get(dev, NULL);
++	if (IS_ERR(clk))
++		return dev_err_probe(dev, PTR_ERR(clk), "no DDR clock\n");
++
++	/* the DFI's driver registers its event when it probes, which may be later */
++	dmc->edev = devfreq_event_get_edev_by_phandle(dev, "devfreq-events", 0);
++	if (IS_ERR(dmc->edev))
++		return dev_err_probe(dev, -EPROBE_DEFER, "no DFI yet\n");
++
++	ret = rk3528_dmc_firmware(dmc, pdev);
++	if (ret)
++		return ret;
++
++	ret = devm_pm_opp_of_add_table(dev);
++	if (ret)
++		return dev_err_probe(dev, ret, "no OPP table\n");
++	ret = rk3528_dmc_trained_opps(dmc);
++	if (ret)
++		return dev_err_probe(dev, ret, "no trained rates\n");
++
++	dmc->rate = clk_get_rate(clk);
++	opp = devfreq_recommended_opp(dev, &dmc->rate, 0);
++	if (IS_ERR(opp))
++		return PTR_ERR(opp);
++	dmc->rate = dev_pm_opp_get_freq(opp);
++	ret = dev_pm_opp_get_supplies(opp, &dmc->supply);
++	dev_pm_opp_put(opp);
++	if (ret)
++		return ret;
++	ret = rk3528_dmc_vote(dmc, &dmc->supply);
++	if (ret)
++		return dev_err_probe(dev, ret, "cannot vote the center rail\n");
++
++	cpu_latency_qos_add_request(&dmc->qos, PM_QOS_DEFAULT_VALUE);
++	ret = devfreq_event_enable_edev(dmc->edev);
++	if (ret)
++		goto remove_qos;
++
++	dmc->ondemand.upthreshold = RK3528_UPTHRESHOLD;
++	dmc->ondemand.downdifferential = RK3528_DOWNDIFFERENTIAL;
++	dmc->profile = (struct devfreq_dev_profile) {
++		.polling_ms	= RK3528_POLLING_MS,
++		.target		= rk3528_dmc_target,
++		.get_dev_status	= rk3528_dmc_get_dev_status,
++		.get_cur_freq	= rk3528_dmc_get_cur_freq,
++		.initial_freq	= dmc->rate,
++	};
++	/*
++	 * The vendor holds the DDR at its top trained rate, changing it only
++	 * for a system state; simple_ondemand stays a choice from sysfs.
++	 */
++	dmc->devfreq = devm_devfreq_add_device(dev, &dmc->profile,
++					       DEVFREQ_GOV_PERFORMANCE, &dmc->ondemand);
++	if (IS_ERR(dmc->devfreq)) {
++		ret = PTR_ERR(dmc->devfreq);
++		goto disable_edev;
++	}
++	devm_devfreq_register_opp_notifier(dev, dmc->devfreq);
++
++	dev_info(dev, "DDR at %lu MHz, center %lu uV\n", dmc->rate / HZ_PER_MHZ,
++		 dmc->supply.u_volt);
++	return 0;
++
++disable_edev:
++	devfreq_event_disable_edev(dmc->edev);
++remove_qos:
++	cpu_latency_qos_remove_request(&dmc->qos);
++	return ret;
++}
++
++static void rk3528_dmc_remove(struct platform_device *pdev)
++{
++	struct rk3528_dmc *dmc = platform_get_drvdata(pdev);
++
++	devfreq_event_disable_edev(dmc->edev);
++	cpu_latency_qos_remove_request(&dmc->qos);
++}
++
++static int rk3528_dmc_suspend(struct device *dev)
++{
++	struct rk3528_dmc *dmc = dev_get_drvdata(dev);
++	int ret;
++
++	ret = devfreq_event_disable_edev(dmc->edev);
++	if (ret < 0)
++		return ret;
++	return devfreq_suspend_device(dmc->devfreq);
++}
++
++static int rk3528_dmc_resume(struct device *dev)
++{
++	struct rk3528_dmc *dmc = dev_get_drvdata(dev);
++	int ret;
++
++	ret = devfreq_event_enable_edev(dmc->edev);
++	if (ret < 0)
++		return ret;
++	return devfreq_resume_device(dmc->devfreq);
++}
++
++static DEFINE_SIMPLE_DEV_PM_OPS(rk3528_dmc_pm, rk3528_dmc_suspend, rk3528_dmc_resume);
++
++static const struct of_device_id rk3528_dmc_of_match[] = {
++	{ .compatible = "rockchip,rk3528-dmc" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, rk3528_dmc_of_match);
++
++static struct platform_driver rk3528_dmc_driver = {
++	.probe	= rk3528_dmc_probe,
++	.remove	= rk3528_dmc_remove,
++	.driver	= {
++		.name		= "rk3528-dmc",
++		.pm		= pm_sleep_ptr(&rk3528_dmc_pm),
++		.of_match_table	= rk3528_dmc_of_match,
++	},
++};
++module_platform_driver(rk3528_dmc_driver);
++
++MODULE_DESCRIPTION("RK3528 DDR frequency scaling");
++MODULE_LICENSE("GPL");

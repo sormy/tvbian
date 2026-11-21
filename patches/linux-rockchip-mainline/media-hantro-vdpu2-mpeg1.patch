@@ -1,0 +1,96 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Tue, 17 Nov 2026 23:51:48 -0500
+Subject: [PATCH] media: verisilicon: Decode MPEG-1 on Rockchip VDPU2
+
+VDPU2 decodes MPEG-1 in a mode of its own, as Rockchip's MPP drives it:
+a sequence flag selects it, and a picture's full-pel vectors, which only
+MPEG-1 has, take whole-pixel motion vector accuracy. The flags extend
+the stateless MPEG-2 controls, whose other fields describe an MPEG-1
+picture as they stand.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ .../verisilicon/rockchip_vpu2_hw_mpeg2_dec.c       | 14 +++++++++++---
+ include/uapi/linux/v4l2-controls.h                 |  3 +++
+ 2 files changed, 14 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/media/platform/verisilicon/rockchip_vpu2_hw_mpeg2_dec.c b/drivers/media/platform/verisilicon/rockchip_vpu2_hw_mpeg2_dec.c
+index 50a3a3e..ce5ff8a 100644
+--- a/drivers/media/platform/verisilicon/rockchip_vpu2_hw_mpeg2_dec.c
++++ b/drivers/media/platform/verisilicon/rockchip_vpu2_hw_mpeg2_dec.c
+@@ -79,6 +79,9 @@
+ #define VDPU_REG_MV_ACCURACY_FWD(v)	((v) ? BIT(2) : 0)
+ #define VDPU_REG_MV_ACCURACY_BWD(v)	((v) ? BIT(1) : 0)
+ 
++#define VDPU_DEC_MODE_MPEG2		5
++#define VDPU_DEC_MODE_MPEG1		6
++
+ static void
+ rockchip_vpu2_mpeg2_dec_set_quantisation(struct hantro_dev *vpu,
+ 					 struct hantro_ctx *ctx)
+@@ -154,6 +157,7 @@ int rockchip_vpu2_mpeg2_dec_run(struct hantro_ctx *ctx)
+ 	struct vb2_v4l2_buffer *src_buf, *dst_buf;
+ 	const struct v4l2_ctrl_mpeg2_sequence *seq;
+ 	const struct v4l2_ctrl_mpeg2_picture *pic;
++	bool mpeg1, full_pel_fwd, full_pel_bwd;
+ 	u32 reg;
+ 
+ 	src_buf = hantro_get_src_buf(ctx);
+@@ -165,6 +169,7 @@ int rockchip_vpu2_mpeg2_dec_run(struct hantro_ctx *ctx)
+ 			      V4L2_CID_STATELESS_MPEG2_SEQUENCE);
+ 	pic = hantro_get_ctrl(ctx,
+ 			      V4L2_CID_STATELESS_MPEG2_PICTURE);
++	mpeg1 = seq->flags & V4L2_MPEG2_SEQ_FLAG_MPEG1;
+ 
+ 	reg = VDPU_REG_DEC_ADV_PRE_DIS(0) |
+ 	      VDPU_REG_DEC_SCMD_DIS(0) |
+@@ -181,7 +186,7 @@ int rockchip_vpu2_mpeg2_dec_run(struct hantro_ctx *ctx)
+ 	      VDPU_REG_STARTMB_Y(0);
+ 	vdpu_write_relaxed(vpu, reg, VDPU_SWREG(52));
+ 
+-	reg = VDPU_REG_DEC_MODE(5);
++	reg = VDPU_REG_DEC_MODE(mpeg1 ? VDPU_DEC_MODE_MPEG1 : VDPU_DEC_MODE_MPEG2);
+ 	vdpu_write_relaxed(vpu, reg, VDPU_SWREG(53));
+ 
+ 	reg = VDPU_REG_DEC_STRENDIAN_E(1) |
+@@ -224,13 +229,16 @@ int rockchip_vpu2_mpeg2_dec_run(struct hantro_ctx *ctx)
+ 	      VDPU_REG_FRAME_PRED_DCT(pic->flags & V4L2_MPEG2_PIC_FLAG_FRAME_PRED_DCT);
+ 	vdpu_write_relaxed(vpu, reg, VDPU_SWREG(122));
+ 
++	/* MPEG-1's vectors are of whole pixels where its picture flags say so */
++	full_pel_fwd = mpeg1 && pic->flags & V4L2_MPEG2_PIC_FLAG_FULL_PEL_FORWARD;
++	full_pel_bwd = mpeg1 && pic->flags & V4L2_MPEG2_PIC_FLAG_FULL_PEL_BACKWARD;
+ 	reg = VDPU_REG_ALT_SCAN_FLAG_E(pic->flags & V4L2_MPEG2_PIC_FLAG_ALT_SCAN) |
+ 	      VDPU_REG_FCODE_FWD_HOR(pic->f_code[0][0]) |
+ 	      VDPU_REG_FCODE_FWD_VER(pic->f_code[0][1]) |
+ 	      VDPU_REG_FCODE_BWD_HOR(pic->f_code[1][0]) |
+ 	      VDPU_REG_FCODE_BWD_VER(pic->f_code[1][1]) |
+-	      VDPU_REG_MV_ACCURACY_FWD(1) |
+-	      VDPU_REG_MV_ACCURACY_BWD(1);
++	      VDPU_REG_MV_ACCURACY_FWD(!full_pel_fwd) |
++	      VDPU_REG_MV_ACCURACY_BWD(!full_pel_bwd);
+ 	vdpu_write_relaxed(vpu, reg, VDPU_SWREG(136));
+ 
+ 	rockchip_vpu2_mpeg2_dec_set_quantisation(vpu, ctx);
+diff --git a/include/uapi/linux/v4l2-controls.h b/include/uapi/linux/v4l2-controls.h
+index affec0a..01c3985 100644
+--- a/include/uapi/linux/v4l2-controls.h
++++ b/include/uapi/linux/v4l2-controls.h
+@@ -1986,6 +1986,7 @@ struct v4l2_ctrl_vp8_frame {
+ /* Stateless MPEG-2 controls */
+ 
+ #define V4L2_MPEG2_SEQ_FLAG_PROGRESSIVE	0x01
++#define V4L2_MPEG2_SEQ_FLAG_MPEG1	0x02
+ 
+ #define V4L2_CID_STATELESS_MPEG2_SEQUENCE (V4L2_CID_CODEC_STATELESS_BASE+220)
+ /**
+@@ -2034,6 +2035,8 @@ struct v4l2_ctrl_mpeg2_sequence {
+ #define V4L2_MPEG2_PIC_FLAG_ALT_SCAN			0x0020
+ #define V4L2_MPEG2_PIC_FLAG_REPEAT_FIRST		0x0040
+ #define V4L2_MPEG2_PIC_FLAG_PROGRESSIVE			0x0080
++#define V4L2_MPEG2_PIC_FLAG_FULL_PEL_FORWARD		0x0100
++#define V4L2_MPEG2_PIC_FLAG_FULL_PEL_BACKWARD		0x0200
+ 
+ #define V4L2_CID_STATELESS_MPEG2_PICTURE (V4L2_CID_CODEC_STATELESS_BASE+221)
+ /**

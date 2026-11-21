@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Wed, 18 Nov 2026 08:15:02 -0500
+Subject: [PATCH] drm/rockchip: dw_hdmi: Allow RK3528 double-clocked modes
+
+The RK3528's VOP2 doubles its clock for a double-clocked mode, so its
+HDMI can carry 480i and 576i. Check the PHY clock at the doubled rate.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ drivers/gpu/drm/rockchip/dw_hdmi-rockchip.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/drivers/gpu/drm/rockchip/dw_hdmi-rockchip.c b/drivers/gpu/drm/rockchip/dw_hdmi-rockchip.c
+index 7140921..65f6976 100644
+--- a/drivers/gpu/drm/rockchip/dw_hdmi-rockchip.c
++++ b/drivers/gpu/drm/rockchip/dw_hdmi-rockchip.c
+@@ -214,6 +214,9 @@ dw_hdmi_rockchip_mode_valid(struct dw_hdmi *dw_hdmi, void *data,
+ 	struct rockchip_hdmi *hdmi = data;
+ 	int pclk = mode->clock * 1000;
+ 
++	if (mode->flags & DRM_MODE_FLAG_DBLCLK)
++		pclk *= 2;
++
+ 	if (hdmi->chip_data->max_tmds_clock &&
+ 	    mode->clock > hdmi->chip_data->max_tmds_clock)
+ 		return MODE_CLOCK_HIGH;
+@@ -601,6 +604,7 @@ dw_hdmi_rk3528_mode_valid(struct dw_hdmi *dw_hdmi, void *data,
+ 
+ static const struct dw_hdmi_plat_data rk3528_hdmi_drv_data = {
+ 	.mode_valid = dw_hdmi_rk3528_mode_valid,
++	.dblclk_allowed = true,
+ 	.phy_data = &rk3528_chip_data,
+ 	.phy_ops = &rk3528_hdmi_phy_ops,
+ 	.phy_name = "inno_dw_hdmi_phy2",

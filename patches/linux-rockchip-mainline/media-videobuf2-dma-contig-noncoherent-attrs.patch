@@ -1,0 +1,30 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] media: videobuf2-dma-contig: Drop NO_KERNEL_MAPPING on non-coherent alloc
+
+dma_alloc_noncontiguous() takes no attribute but
+DMA_ATTR_ALLOC_SINGLE_PAGES and warns and fails on any other. A queue
+that sets DMA_ATTR_NO_KERNEL_MAPPING and allows cache hints, as the
+rkvdec and Hantro decoders' capture queues do, therefore cannot
+allocate a single buffer once userspace asks for non-coherent memory.
+A non-coherent buffer is never mapped into the kernel at allocation
+anyway, only in vb2_dc_vaddr() on demand, so drop the attribute there.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ drivers/media/common/videobuf2/videobuf2-dma-contig.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/media/common/videobuf2/videobuf2-dma-contig.c b/drivers/media/common/videobuf2/videobuf2-dma-contig.c
+index 9ce6284..e4ddb4b 100644
+--- a/drivers/media/common/videobuf2/videobuf2-dma-contig.c
++++ b/drivers/media/common/videobuf2/videobuf2-dma-contig.c
+@@ -215,7 +215,8 @@ static int vb2_dc_alloc_non_coherent(struct vb2_dc_buf *buf)
+ 					       buf->size,
+ 					       buf->dma_dir,
+ 					       GFP_KERNEL | q->gfp_flags,
+-					       buf->attrs);
++					       buf->attrs &
++					       ~DMA_ATTR_NO_KERNEL_MAPPING);
+ 	if (!buf->dma_sgt)
+ 		return -ENOMEM;
+ 

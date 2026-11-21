@@ -1,0 +1,39 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Wed, 18 Nov 2026 00:17:11 -0500
+Subject: [PATCH] media: rockchip: rga: Leave a shared interrupt alone while
+ suspended
+
+Without the internal MMU the RGA requests its interrupt shared with its
+IOMMU, whose interrupts then reach rga_isr while the RGA is runtime
+suspended: reading RGA_INT with its clocks off hangs the bus, a hard
+lockup at boot. Answer only while the RGA is in use.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ drivers/media/platform/rockchip/rga/rga.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/drivers/media/platform/rockchip/rga/rga.c b/drivers/media/platform/rockchip/rga/rga.c
+index fbc9946..00a6322 100644
+--- a/drivers/media/platform/rockchip/rga/rga.c
++++ b/drivers/media/platform/rockchip/rga/rga.c
+@@ -59,6 +59,10 @@ static irqreturn_t rga_isr(int irq, void *prv)
+ {
+ 	struct rockchip_rga *rga = prv;
+ 
++	/* A line shared with an IOMMU fires while the RGA, unclocked, cannot be read */
++	if (pm_runtime_get_if_in_use(rga->dev) <= 0)
++		return IRQ_NONE;
++
+ 	if (rga->hw->handle_irq(rga)) {
+ 		struct vb2_v4l2_buffer *src, *dst;
+ 		struct rga_ctx *ctx = rga->curr;
+@@ -82,6 +86,7 @@ static irqreturn_t rga_isr(int irq, void *prv)
+ 		v4l2_m2m_job_finish(rga->m2m_dev, ctx->fh.m2m_ctx);
+ 	}
+ 
++	pm_runtime_put(rga->dev);
+ 	return IRQ_HANDLED;
+ }
+ 

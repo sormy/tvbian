@@ -18,6 +18,10 @@ below.
       (`wpewebkit` from sid) are in it too: they take the suite's newest source at build time, so
       the process notices the suite moving, rebuilds, drops what upstream now carries (`0002` at
       WebKit 2.56) and checks the rest still apply.
+- [ ] **Kernel configs normalized across families**: every kernel builds one common set of generic
+      options (filesystems, USB and Bluetooth devices, networking, input), each family adding only
+      its SoC's; today they build from 4066 generic options (`rk35xx-next`) to 6524 (`meson64`), and
+      their default CPU governors differ.
 - [ ] **Our Mesa in the published repo**: `extras/mesa` is unreleased, so a box installing Mesa gets
       Debian's, a third of Panfrost's on-screen speed at 2256×1504. Ours outranks Debian's by
       version once published.

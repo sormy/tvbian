@@ -1,0 +1,40 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] arm64: dts: rockchip: Add the RK3528 PMU GRF and DFI
+
+Describe the RK3528's PMU GRF and its DDR monitor, which reads the DRAM
+type from it.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ arch/arm64/boot/dts/rockchip/rk3528.dtsi | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/rockchip/rk3528.dtsi b/arch/arm64/boot/dts/rockchip/rk3528.dtsi
+index c0919aa..6c4fb8f 100644
+--- a/arch/arm64/boot/dts/rockchip/rk3528.dtsi
++++ b/arch/arm64/boot/dts/rockchip/rk3528.dtsi
+@@ -580,6 +580,11 @@
+ 			reg = <0x0 0xff360000 0x0 0x10000>;
+ 		};
+ 
++		pmu_grf: syscon@ff370000 {
++			compatible = "rockchip,rk3528-pmu-grf", "syscon";
++			reg = <0x0 0xff370000 0x0 0x10000>;
++		};
++
+ 		cru: clock-controller@ff4a0000 {
+ 			compatible = "rockchip,rk3528-cru";
+ 			reg = <0x0 0xff4a0000 0x0 0x30000>;
+@@ -717,6 +722,12 @@
+ 			status = "disabled";
+ 		};
+ 
++		dfi: dfi@ff930000 {
++			compatible = "rockchip,rk3528-dfi";
++			reg = <0x0 0xff930000 0x0 0x400>;
++			rockchip,pmu = <&pmu_grf>;
++		};
++
+ 		spi0: spi@ff9c0000 {
+ 			compatible = "rockchip,rk3528-spi",
+ 				     "rockchip,rk3066-spi";

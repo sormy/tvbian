@@ -1,0 +1,90 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Wed, 18 Nov 2026 08:15:02 -0500
+Subject: [PATCH] drm/bridge: dw-hdmi: Support double-clocked modes on opt-in
+
+CEA's 480i and 576i are double-clocked: DRM describes them at 13.5 MHz,
+each pixel sent twice on a 27 MHz link. Let a platform whose CRTC
+doubles its clock for such a mode opt in. The transmitter then runs at
+twice the mode's clock, and its pixel repeater and the AVI InfoFrame
+carry the repetition, as the Rockchip BSP kernel programs it.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ drivers/gpu/drm/bridge/synopsys/dw-hdmi.c | 15 +++++++++------
+ include/drm/bridge/dw_hdmi.h              |  1 +
+ 2 files changed, 10 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c b/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
+index 34c5f58..f508cfb 100644
+--- a/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
++++ b/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
+@@ -1290,7 +1290,7 @@ static void hdmi_video_packetize(struct dw_hdmi *hdmi)
+ 		  HDMI_VP_STUFF_PR_STUFFING_MASK, HDMI_VP_STUFF);
+ 
+ 	/* Data from pixel repeater block */
+-	if (hdmi_data->pix_repet_factor > 1) {
++	if (hdmi_data->pix_repet_factor > 0) {
+ 		vp_conf = HDMI_VP_CONF_PR_EN_ENABLE |
+ 			  HDMI_VP_CONF_BYPASS_SELECT_PIX_REPEATER;
+ 	} else { /* data from packetizer block */
+@@ -2002,6 +2002,8 @@ static void hdmi_av_composer(struct dw_hdmi *hdmi,
+ 	unsigned int vdisplay, hdisplay;
+ 
+ 	vmode->mpixelclock = mode->clock * 1000;
++	if (mode->flags & DRM_MODE_FLAG_DBLCLK)
++		vmode->mpixelclock *= 2;
+ 
+ 	dev_dbg(hdmi->dev, "final pixclk = %d\n", vmode->mpixelclock);
+ 
+@@ -2255,6 +2257,7 @@ static int dw_hdmi_setup(struct dw_hdmi *hdmi,
+ 			 const struct drm_connector *connector,
+ 			 const struct drm_display_mode *mode)
+ {
++	bool dblclk = mode->flags & DRM_MODE_FLAG_DBLCLK;
+ 	int ret;
+ 
+ 	hdmi_disable_overflow_interrupts(hdmi);
+@@ -2275,8 +2278,8 @@ static int dw_hdmi_setup(struct dw_hdmi *hdmi,
+ 	else
+ 		hdmi->hdmi_data.enc_out_encoding = V4L2_YCBCR_ENC_709;
+ 
+-	hdmi->hdmi_data.video_mode.mpixelrepetitionoutput = 0;
+-	hdmi->hdmi_data.video_mode.mpixelrepetitioninput = 0;
++	hdmi->hdmi_data.video_mode.mpixelrepetitionoutput = dblclk;
++	hdmi->hdmi_data.video_mode.mpixelrepetitioninput = dblclk;
+ 
+ 	if (hdmi->hdmi_data.enc_in_bus_format == MEDIA_BUS_FMT_FIXED)
+ 		hdmi->hdmi_data.enc_in_bus_format = MEDIA_BUS_FMT_RGB888_1X24;
+@@ -2295,7 +2298,7 @@ static int dw_hdmi_setup(struct dw_hdmi *hdmi,
+ 		drm_default_rgb_quant_range(mode) ==
+ 		HDMI_QUANTIZATION_RANGE_LIMITED;
+ 
+-	hdmi->hdmi_data.pix_repet_factor = 0;
++	hdmi->hdmi_data.pix_repet_factor = dblclk;
+ 	hdmi->hdmi_data.hdcp_enable = 0;
+ 	hdmi->hdmi_data.video_mode.mdataenablepolarity = true;
+ 
+@@ -2951,8 +2954,8 @@ dw_hdmi_bridge_mode_valid(struct drm_bridge *bridge,
+ 	const struct dw_hdmi_plat_data *pdata = hdmi->plat_data;
+ 	enum drm_mode_status mode_status = MODE_OK;
+ 
+-	/* We don't support double-clocked modes */
+-	if (mode->flags & DRM_MODE_FLAG_DBLCLK)
++	/* A double-clocked mode needs a CRTC that doubles its clock */
++	if (mode->flags & DRM_MODE_FLAG_DBLCLK && !pdata->dblclk_allowed)
+ 		return MODE_BAD;
+ 
+ 	if (pdata->mode_valid)
+diff --git a/include/drm/bridge/dw_hdmi.h b/include/drm/bridge/dw_hdmi.h
+index 8500dd4..8cf3654 100644
+--- a/include/drm/bridge/dw_hdmi.h
++++ b/include/drm/bridge/dw_hdmi.h
+@@ -137,6 +137,7 @@ struct dw_hdmi_plat_data {
+ 	unsigned long input_bus_encoding;
+ 	bool use_drm_infoframe;
+ 	bool ycbcr_420_allowed;
++	bool dblclk_allowed;
+ 
+ 	/*
+ 	 * Private data passed to all the .mode_valid() and .configure_phy()

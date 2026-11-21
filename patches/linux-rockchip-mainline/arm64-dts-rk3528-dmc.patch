@@ -1,0 +1,35 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] arm64: dts: rockchip: rk3528: Add the DMC
+
+The memory controller scales the DDR through the trusted firmware,
+counting its load with the DFI. Its rates and their voltages depend on
+the DDR a board carries, so the board fills the OPP table and names the
+controller's supply.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/arch/arm64/boot/dts/rockchip/rk3528.dtsi b/arch/arm64/boot/dts/rockchip/rk3528.dtsi
+index 2aad7bb..59b54c2 100644
+--- a/arch/arm64/boot/dts/rockchip/rk3528.dtsi
++++ b/arch/arm64/boot/dts/rockchip/rk3528.dtsi
+@@ -166,6 +166,20 @@
+ 		};
+ 	};
+ 
++	dmc: memory-controller {
++		compatible = "rockchip,rk3528-dmc";
++		interrupts = <GIC_SPI 17 IRQ_TYPE_LEVEL_HIGH>;
++		interrupt-names = "complete";
++		clocks = <&scmi_clk SCMI_CLK_DDR>;
++		devfreq-events = <&dfi>;
++		operating-points-v2 = <&dmc_opp_table>;
++		status = "disabled";
++	};
++
++	dmc_opp_table: opp-table-dmc {
++		compatible = "operating-points-v2";
++	};
++
+ 	pinctrl: pinctrl {
+ 		compatible = "rockchip,rk3528-pinctrl";
+ 		rockchip,grf = <&ioc_grf>;

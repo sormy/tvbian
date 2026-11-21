@@ -1,0 +1,34 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Wed, 18 Nov 2026 14:11:57 -0500
+Subject: [PATCH] dt-bindings: iommu: rockchip: Add
+ rockchip,disable-device-link-resume
+
+The RK3528 VOP's IOMMU answers register reads only once the VOP has
+turned its aclk pre auto gating off, so it must not be enabled on the
+runtime resume that precedes the VOP's probe. Let a node say so; the
+Rockchip BSP names the property so.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ .../devicetree/bindings/iommu/rockchip,iommu.yaml          | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/iommu/rockchip,iommu.yaml b/Documentation/devicetree/bindings/iommu/rockchip,iommu.yaml
+index 6ce41d1..bb7a33b 100644
+--- a/Documentation/devicetree/bindings/iommu/rockchip,iommu.yaml
++++ b/Documentation/devicetree/bindings/iommu/rockchip,iommu.yaml
+@@ -64,6 +64,13 @@ properties:
+       Some mmu instances may produce unexpected results
+       when the reset operation is used.
+ 
++  rockchip,disable-device-link-resume:
++    $ref: /schemas/types.yaml#/definitions/flag
++    description: |
++      Leave the mmu alone on runtime resume and suspend: only its master's
++      attach and detach enable and disable it. The registers of some mmu
++      instances answer only once their master has set itself up.
++
+ required:
+   - compatible
+   - reg

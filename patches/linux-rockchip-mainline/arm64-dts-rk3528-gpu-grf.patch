@@ -1,0 +1,24 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] arm64: dts: rockchip: rk3528: Add the GPU GRF
+
+The GRF block at 0xff310000 holds the GPU's PVTPLL count, which selects
+its OPP voltages by silicon bin.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/arch/arm64/boot/dts/rockchip/rk3528.dtsi b/arch/arm64/boot/dts/rockchip/rk3528.dtsi
+index 6c4fb8f..e2c2977 100644
+--- a/arch/arm64/boot/dts/rockchip/rk3528.dtsi
++++ b/arch/arm64/boot/dts/rockchip/rk3528.dtsi
+@@ -565,6 +565,11 @@
+ 			reg = <0x0 0xff300000 0x0 0x10000>;
+ 		};
+ 
++		gpu_grf: syscon@ff310000 {
++			compatible = "rockchip,rk3528-gpu-grf", "syscon";
++			reg = <0x0 0xff310000 0x0 0x10000>;
++		};
++
+ 		vpu_grf: syscon@ff340000 {
+ 			compatible = "rockchip,rk3528-vpu-grf", "syscon";
+ 			reg = <0x0 0xff340000 0x0 0x8000>;

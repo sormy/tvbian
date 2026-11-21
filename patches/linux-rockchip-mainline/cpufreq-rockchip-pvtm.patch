@@ -1,0 +1,385 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] cpufreq: rockchip: Select the RK3528 OPP bin by PVTM
+
+RK3528 and RK3518 OPP tables carry a voltage per silicon bin, and the
+vendor kernel picks the bin by each block's PVTPLL count at a set rate
+and voltage. Measure the CPU's and the GPU's the same way, from the
+vendor's own OPP table properties, and name each bin's opp-
+microvolt-L<n> columns before cpufreq-dt and the GPU's driver read their
+OPPs. The GPU is measured with its power domain on and its rate restored
+before the domain powers down. A count read off the bins' own rate and
+voltage, or none, gives no bin, and so does apply=0: each OPP then keeps
+opp-microvolt, the highest bin's.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/drivers/cpufreq/Kconfig.arm b/drivers/cpufreq/Kconfig.arm
+index a441668..bb78807 100644
+--- a/drivers/cpufreq/Kconfig.arm
++++ b/drivers/cpufreq/Kconfig.arm
+@@ -172,6 +172,19 @@ config ARM_RASPBERRYPI_CPUFREQ
+ 
+ 	  If in doubt, say N.
+ 
++config ARM_ROCKCHIP_CPUFREQ_PVTM
++	tristate "Rockchip PVTM bin selection for cpufreq-dt"
++	depends on ARCH_ROCKCHIP || COMPILE_TEST
++	depends on CPUFREQ_DT && MFD_SYSCON
++	select PM_OPP
++	help
++	  Measures the CPU's PVTM on RK3528 and RK3518 and runs each OPP at
++	  its silicon bin's voltage, read from the opp-microvolt-L<n>
++	  columns, before starting cpufreq-dt.
++
++	  To compile this driver as a module, choose M here: the
++	  module will be called rockchip-cpufreq-pvtm.
++
+ config ARM_S3C64XX_CPUFREQ
+ 	bool "Samsung S3C64XX"
+ 	depends on CPU_S3C6410 || COMPILE_TEST
+diff --git a/drivers/cpufreq/Makefile b/drivers/cpufreq/Makefile
+index 6c7a39b..f89cc7a 100644
+--- a/drivers/cpufreq/Makefile
++++ b/drivers/cpufreq/Makefile
+@@ -72,6 +72,7 @@ obj-$(CONFIG_PXA3xx)			+= pxa3xx-cpufreq.o
+ obj-$(CONFIG_ARM_QCOM_CPUFREQ_HW)	+= qcom-cpufreq-hw.o
+ obj-$(CONFIG_ARM_QCOM_CPUFREQ_NVMEM)	+= qcom-cpufreq-nvmem.o
+ obj-$(CONFIG_ARM_RASPBERRYPI_CPUFREQ) 	+= raspberrypi-cpufreq.o
++obj-$(CONFIG_ARM_ROCKCHIP_CPUFREQ_PVTM)	+= rockchip-cpufreq-pvtm.o
+ obj-$(CONFIG_ARM_S3C64XX_CPUFREQ)	+= s3c64xx-cpufreq.o
+ obj-$(CONFIG_ARM_S5PV210_CPUFREQ)	+= s5pv210-cpufreq.o
+ obj-$(CONFIG_ARM_SA1110_CPUFREQ)	+= sa1110-cpufreq.o
+diff --git a/drivers/cpufreq/cpufreq-dt-platdev.c b/drivers/cpufreq/cpufreq-dt-platdev.c
+index 371ca1f..c828889 100644
+--- a/drivers/cpufreq/cpufreq-dt-platdev.c
++++ b/drivers/cpufreq/cpufreq-dt-platdev.c
+@@ -188,6 +188,8 @@ static const struct of_device_id blocklist[] __initconst = {
+ 	{ .compatible = "qcom,sm8550", },
+ 	{ .compatible = "qcom,sm8650", },
+ 
++	{ .compatible = "rockchip,rk3528", },
++
+ 	{ .compatible = "st,stih407", },
+ 	{ .compatible = "st,stih410", },
+ 	{ .compatible = "st,stih418", },
+diff --git a/drivers/cpufreq/rockchip-cpufreq-pvtm.c b/drivers/cpufreq/rockchip-cpufreq-pvtm.c
+new file mode 100644
+index 0000000..f46f3f0
+--- /dev/null
++++ b/drivers/cpufreq/rockchip-cpufreq-pvtm.c
+@@ -0,0 +1,315 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Rockchip PVTM bin selection for cpufreq-dt and the GPU: reads each PVTPLL
++ * at the rate and voltage the vendor's bins were measured at, and names the
++ * bin's opp-microvolt-L<n> columns. Without a bin, each OPP keeps
++ * opp-microvolt.
++ */
++
++#include <linux/clk.h>
++#include <linux/cpu.h>
++#include <linux/delay.h>
++#include <linux/err.h>
++#include <linux/math.h>
++#include <linux/mfd/syscon.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/of_platform.h>
++#include <linux/platform_device.h>
++#include <linux/pm_domain.h>
++#include <linux/pm_opp.h>
++#include <linux/regmap.h>
++#include <linux/regulator/consumer.h>
++
++#define PVTM_SEL_CELLS 3	/* low, high, bin */
++#define PVTM_SETTLE_SAMPLES 64	/* a lightly loaded rail falls slowly to the measuring voltage */
++#define PVTM_SETTLE_DIV 200	/* consecutive counts within 0.5% */
++#define PVTM_VOLT_SLACK_UV 12500	/* one PWM regulator step either way */
++
++static struct platform_device *cpufreq_dt_pdev, *pvtm_pdev;
++static int gpu_token;
++
++static bool apply = true;
++module_param(apply, bool, 0444);
++MODULE_PARM_DESC(apply, "run each OPP at the measured bin's voltage (default: on)");
++
++/* The count follows the rail down: the first reading near its last is the measurement */
++static int rockchip_pvtm_settle(struct regmap *grf, u32 offset, u32 sample_us,
++				u32 *value)
++{
++	u32 last = 0;
++	int i, ret;
++
++	for (i = 0; i < PVTM_SETTLE_SAMPLES; i++) {
++		usleep_range(sample_us, sample_us + 100);
++		ret = regmap_read(grf, offset, value);
++		if (ret)
++			return ret;
++		if (last && abs((int)*value - (int)last) <= last / PVTM_SETTLE_DIV)
++			return 0;
++		last = *value;
++	}
++
++	return -ETIMEDOUT;
++}
++
++static int rockchip_pvtm_read(struct device *dev, struct device_node *np,
++			      struct clk *clk, const char *supply, u32 *value)
++{
++	u32 offset, freq_khz, volt_uv, sample_us;
++	struct regulator *reg;
++	unsigned long old_rate;
++	struct regmap *grf;
++	unsigned long rate_khz;
++	int old_volt, got_uv, ret;
++
++	if (of_property_read_u32(np, "rockchip,pvtm-offset", &offset) ||
++	    of_property_read_u32(np, "rockchip,pvtm-freq", &freq_khz) ||
++	    of_property_read_u32(np, "rockchip,pvtm-volt", &volt_uv) ||
++	    of_property_read_u32(np, "rockchip,pvtm-sample-time", &sample_us))
++		return -ENODEV;
++
++	grf = syscon_regmap_lookup_by_phandle(np, "rockchip,grf");
++	if (IS_ERR(grf))
++		return PTR_ERR(grf);
++
++	reg = regulator_get_optional(dev, supply);
++	if (IS_ERR(reg))
++		return PTR_ERR(reg);
++
++	old_rate = clk_get_rate(clk);
++	old_volt = regulator_get_voltage(reg);
++
++	/* The vendor's order: the rate first, then the measuring voltage */
++	ret = clk_set_rate(clk, freq_khz * 1000UL);
++	if (ret)
++		goto put_reg;
++
++	/* Exactly the bins' voltage: a range the boot voltage satisfies would leave it there */
++	ret = regulator_set_voltage(reg, volt_uv, volt_uv);
++	if (!ret) {
++		ret = rockchip_pvtm_settle(grf, offset, sample_us, value);
++		rate_khz = clk_get_rate(clk) / 1000;
++		got_uv = regulator_get_voltage(reg);
++		dev_info(dev, "pvtm %u at %lu kHz, %d uV\n", *value, rate_khz, got_uv);
++		if (!ret && (rate_khz != freq_khz ||
++			     abs(got_uv - (int)volt_uv) > PVTM_VOLT_SLACK_UV))
++			ret = -ERANGE;	/* not the conditions the bins were measured at */
++		regulator_set_voltage(reg, old_volt, old_volt);
++	}
++	clk_set_rate(clk, old_rate);
++put_reg:
++	regulator_put(reg);
++	return ret;
++}
++
++/* The first range holding the value names the bin, as the vendor's tables overlap */
++static int rockchip_pvtm_bin(struct device_node *np, u32 value)
++{
++	const char *prop = "rockchip,pvtm-voltage-sel";
++	int count = of_property_count_u32_elems(np, prop);
++	u32 low, high, bin;
++	int i;
++
++	if (count <= 0 || count % PVTM_SEL_CELLS)
++		return -EINVAL;
++
++	for (i = 0; i < count; i += PVTM_SEL_CELLS) {
++		of_property_read_u32_index(np, prop, i, &low);
++		of_property_read_u32_index(np, prop, i + 1, &high);
++		of_property_read_u32_index(np, prop, i + 2, &bin);
++		if (value >= low && value <= high)
++			return bin;
++	}
++
++	return -ERANGE;
++}
++
++/* The bin a device's OPP table names for its PVTM, or a negative error */
++static int rockchip_pvtm_measure(struct device *dev, struct clk *clk,
++				 const char *supply, u32 *value)
++{
++	struct device_node *np = dev_pm_opp_of_get_opp_desc_node(dev);
++	int ret;
++
++	if (!np)
++		return -ENOENT;
++
++	ret = rockchip_pvtm_read(dev, np, clk, supply, value);
++	if (!ret)
++		ret = rockchip_pvtm_bin(np, *value);
++	of_node_put(np);
++	return ret;
++}
++
++/*
++ * The GPU is measured powered, as its driver runs it, and back at its old
++ * rate before its domain powers down: a rate change with the domain off
++ * resets the RK3528. Its bin is named before the GPU's driver reads its OPPs.
++ */
++static void rockchip_pvtm_gpu(struct device *dev)
++{
++	struct device_node *np = of_find_compatible_node(NULL, NULL, "rockchip,rk3528-mali");
++	struct dev_pm_opp_config config = {};
++	struct platform_device *gpu;
++	struct clk *bus, *core;
++	char name[8];
++	int bin, ret;
++	u32 value;
++
++	gpu = np ? of_find_device_by_node(np) : NULL;
++	of_node_put(np);
++	if (!gpu)
++		return;
++
++	bus = clk_get(&gpu->dev, "bus");
++	core = clk_get(&gpu->dev, "core");
++	if (IS_ERR(bus) || IS_ERR(core)) {
++		bin = -ENODEV;
++		goto put_clk;
++	}
++
++	bin = dev_pm_domain_attach(&gpu->dev, PD_FLAG_ATTACH_POWER_ON);
++	if (bin)
++		goto put_clk;
++	bin = clk_prepare_enable(bus);
++	if (!bin) {
++		bin = clk_prepare_enable(core);
++		if (!bin) {
++			bin = rockchip_pvtm_measure(&gpu->dev, core, "mali", &value);
++			clk_disable_unprepare(core);
++		}
++		clk_disable_unprepare(bus);
++	}
++	dev_pm_domain_detach(&gpu->dev, true);
++
++	if (bin >= 0 && apply) {
++		snprintf(name, sizeof(name), "L%d", bin);
++		config.prop_name = name;
++		ret = dev_pm_opp_set_config(&gpu->dev, &config);
++		if (ret > 0) {
++			gpu_token = ret;
++			dev_info(dev, "gpu pvtm %u: bin %s\n", value, name);
++		}
++	} else {
++		dev_warn(dev, "GPU PVTM bin %d not applied: OPPs at their defaults\n", bin);
++	}
++put_clk:
++	if (!IS_ERR(core))
++		clk_put(core);
++	if (!IS_ERR(bus))
++		clk_put(bus);
++	put_device(&gpu->dev);
++}
++
++static int rockchip_pvtm_probe(struct platform_device *pdev)
++{
++	struct device *cpu_dev = get_cpu_device(0);
++	struct dev_pm_opp_config config = {};
++	char name[8];
++	int cpu, bin, ret;
++	struct clk *clk;
++	int *tokens;
++	u32 value;
++
++	if (!cpu_dev)
++		return -ENODEV;
++
++	clk = clk_get(cpu_dev, NULL);
++	if (IS_ERR(clk))
++		return PTR_ERR(clk);
++	bin = rockchip_pvtm_measure(cpu_dev, clk, "cpu", &value);
++	clk_put(clk);
++	if (bin == -EPROBE_DEFER)
++		return bin;
++
++	rockchip_pvtm_gpu(&pdev->dev);
++
++	tokens = devm_kcalloc(&pdev->dev, nr_cpu_ids, sizeof(*tokens), GFP_KERNEL);
++	if (!tokens)
++		return -ENOMEM;
++
++	if (bin >= 0 && apply) {
++		snprintf(name, sizeof(name), "L%d", bin);
++		config.prop_name = name;
++		dev_info(&pdev->dev, "pvtm %u: bin %s\n", value, name);
++
++		for_each_present_cpu(cpu) {
++			ret = dev_pm_opp_set_config(get_cpu_device(cpu), &config);
++			if (ret < 0)
++				goto clear;
++			tokens[cpu] = ret;
++		}
++	} else {
++		dev_warn(&pdev->dev, "PVTM bin %d not applied: OPPs at their defaults\n", bin);
++	}
++
++	cpufreq_dt_pdev = platform_device_register_simple("cpufreq-dt", -1, NULL, 0);
++	if (!IS_ERR(cpufreq_dt_pdev)) {
++		platform_set_drvdata(pdev, tokens);
++		return 0;
++	}
++	ret = PTR_ERR(cpufreq_dt_pdev);
++
++clear:
++	for_each_present_cpu(cpu)
++		if (tokens[cpu] > 0)
++			dev_pm_opp_clear_config(tokens[cpu]);
++	return ret;
++}
++
++static void rockchip_pvtm_remove(struct platform_device *pdev)
++{
++	int *tokens = platform_get_drvdata(pdev);
++	int cpu;
++
++	platform_device_unregister(cpufreq_dt_pdev);
++	if (gpu_token > 0)
++		dev_pm_opp_clear_config(gpu_token);
++	for_each_present_cpu(cpu)
++		if (tokens[cpu] > 0)
++			dev_pm_opp_clear_config(tokens[cpu]);
++}
++
++static struct platform_driver rockchip_pvtm_driver = {
++	.probe = rockchip_pvtm_probe,
++	.remove = rockchip_pvtm_remove,
++	.driver = {
++		.name = "rockchip-cpufreq-pvtm",
++	},
++};
++
++static const struct of_device_id rockchip_pvtm_machines[] __initconst = {
++	{ .compatible = "rockchip,rk3528", },
++	{ }
++};
++
++static int __init rockchip_pvtm_init(void)
++{
++	int ret;
++
++	if (!of_machine_device_match(rockchip_pvtm_machines))
++		return -ENODEV;
++
++	ret = platform_driver_register(&rockchip_pvtm_driver);
++	if (ret)
++		return ret;
++
++	pvtm_pdev = platform_device_register_simple("rockchip-cpufreq-pvtm", -1, NULL, 0);
++	ret = PTR_ERR_OR_ZERO(pvtm_pdev);
++	if (ret)
++		platform_driver_unregister(&rockchip_pvtm_driver);
++
++	return ret;
++}
++module_init(rockchip_pvtm_init);
++
++static void __exit rockchip_pvtm_exit(void)
++{
++	platform_device_unregister(pvtm_pdev);
++	platform_driver_unregister(&rockchip_pvtm_driver);
++}
++module_exit(rockchip_pvtm_exit);
++
++MODULE_DESCRIPTION("Rockchip PVTM bin selection for cpufreq-dt");
++MODULE_LICENSE("GPL");

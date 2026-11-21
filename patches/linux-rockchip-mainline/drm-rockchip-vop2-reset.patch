@@ -1,0 +1,101 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Wed, 18 Nov 2026 13:03:52 -0500
+Subject: [PATCH] drm/rockchip: vop2: Reset the VOP before its IOMMU translates
+
+A VOP left scanning out by the kernel before a reboot keeps its windows
+and timings: a reboot does not reset it on the RK3528. Once its clocks run
+again it resumes fetching, and with its IOMMU translating by then nothing
+is mapped: the page faults repeat as fast as they are taken and lock up a
+CPU. Take the VOP's resets, where it has them, and pulse them at bind,
+while the IOMMU still passes fetches through untranslated.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ drivers/gpu/drm/rockchip/rockchip_drm_vop2.c | 46 ++++++++++++++++++++
+ drivers/gpu/drm/rockchip/rockchip_drm_vop2.h |  1 +
+ 2 files changed, 47 insertions(+)
+
+diff --git a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
+index ad40e4c..fba7703 100644
+--- a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
++++ b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
+@@ -17,6 +17,7 @@
+ #include <linux/platform_device.h>
+ #include <linux/pm_runtime.h>
+ #include <linux/regmap.h>
++#include <linux/reset.h>
+ #include <linux/swab.h>
+ 
+ #include <drm/drm.h>
+@@ -3083,6 +3084,42 @@ static const struct regmap_config vop2_regmap_config = {
+ 	.cache_type	= REGCACHE_MAPLE,
+ };
+ 
++/* Long enough for the VOP to see its resets asserted */
++#define VOP2_RESET_US	10
++
++/*
++ * Whatever an earlier stage left the VOP scanning out resumes fetching once
++ * its clocks run, and an IOMMU translating by then maps none of it: the
++ * faults repeat as fast as they are taken. Clear it while the IOMMU passes
++ * the fetches through untranslated.
++ */
++static int vop2_reset(struct vop2 *vop2)
++{
++	int ret;
++
++	if (!vop2->resets)
++		return 0;
++
++	ret = clk_prepare_enable(vop2->hclk);
++	if (ret)
++		return ret;
++
++	ret = clk_prepare_enable(vop2->aclk);
++	if (ret)
++		goto err_hclk;
++
++	ret = reset_control_assert(vop2->resets);
++	if (!ret) {
++		udelay(VOP2_RESET_US);
++		ret = reset_control_deassert(vop2->resets);
++	}
++
++	clk_disable_unprepare(vop2->aclk);
++err_hclk:
++	clk_disable_unprepare(vop2->hclk);
++	return ret;
++}
++
+ static int vop2_bind(struct device *dev, struct device *master, void *data)
+ {
+ 	struct platform_device *pdev = to_platform_device(dev);
+@@ -3195,6 +3232,15 @@ static int vop2_bind(struct device *dev, struct device *master, void *data)
+ 		return dev_err_probe(drm->dev, PTR_ERR(vop2->pll_hdmiphy1),
+ 				     "failed to get pll_hdmiphy1\n");
+ 
++	vop2->resets = devm_reset_control_array_get_optional_exclusive(vop2->dev);
++	if (IS_ERR(vop2->resets))
++		return dev_err_probe(drm->dev, PTR_ERR(vop2->resets),
++				     "failed to get resets\n");
++
++	ret = vop2_reset(vop2);
++	if (ret)
++		return dev_err_probe(drm->dev, ret, "failed to reset\n");
++
+ 	vop2->irq = platform_get_irq(pdev, 0);
+ 	if (vop2->irq < 0)
+ 		return dev_err_probe(drm->dev, vop2->irq, "cannot find irq for vop2\n");
+diff --git a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.h b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.h
+index 0eb04dd..d822bcf 100644
+--- a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.h
++++ b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.h
+@@ -351,6 +351,7 @@ struct vop2 {
+ 	struct clk *pclk;
+ 	struct clk *pll_hdmiphy0;
+ 	struct clk *pll_hdmiphy1;
++	struct reset_control *resets;
+ 
+ 	/* optional internal rgb encoder */
+ 	struct rockchip_rgb *rgb;

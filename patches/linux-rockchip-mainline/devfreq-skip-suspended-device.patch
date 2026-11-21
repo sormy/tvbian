@@ -1,0 +1,34 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] PM / devfreq: Leave a suspended device's frequency for its resume
+
+A min_freq or max_freq written while a device is suspended reaches the
+driver at once: the QoS notifier reevaluates the target, and the
+driver's target() sets the clock of a block whose power domain may be
+off. On the RK3528, lima's GPU clock set to 800 MHz this way, with its
+domain down, resets the SoC.
+
+devfreq_suspend_device() already parks the device at its suspend
+frequency, and devfreq_resume_device() restores it and resumes the
+governor, which reevaluates the target. Leave the frequency alone in
+between.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ drivers/devfreq/devfreq.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/drivers/devfreq/devfreq.c b/drivers/devfreq/devfreq.c
+index 82dd9a4..e06e2dd 100644
+--- a/drivers/devfreq/devfreq.c
++++ b/drivers/devfreq/devfreq.c
+@@ -408,6 +408,10 @@ int devfreq_update_target(struct devfreq *devfreq, unsigned long freq)
+ 	if (!devfreq->governor)
+ 		return -EINVAL;
+ 
++	/* A suspended device is not clocked: its resume reevaluates the target */
++	if (atomic_read(&devfreq->suspend_count))
++		return 0;
++
+ 	/* Reevaluate the proper frequency */
+ 	err = devfreq->governor->get_target_freq(devfreq, &freq);
+ 	if (err)

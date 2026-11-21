@@ -1,0 +1,22 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] dt-bindings: media: rockchip-vpu: Add RK3528 VPU
+
+The RK3528 carries the RK3568's VDPU2, with a lower VP8 limit: add its
+compatible, falling back to the RK3568's.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/Documentation/devicetree/bindings/media/rockchip-vpu.yaml b/Documentation/devicetree/bindings/media/rockchip-vpu.yaml
+--- a/Documentation/devicetree/bindings/media/rockchip-vpu.yaml
++++ b/Documentation/devicetree/bindings/media/rockchip-vpu.yaml
+@@ -33,7 +33,9 @@ properties:
+           - const: rockchip,rk3228-vpu
+           - const: rockchip,rk3399-vpu
+       - items:
+-          - const: rockchip,rk3588-vpu121
++          - enum:
++              - rockchip,rk3528-vpu
++              - rockchip,rk3588-vpu121
+           - const: rockchip,rk3568-vpu
+ 
+   reg:

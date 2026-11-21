@@ -1,0 +1,62 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] media: rkvdec: Compress the VDPU381's collocated motion vectors
+
+The VDPU381 compresses the collocated motion vectors each picture writes
+and the next ones read, which Rockchip's MPP turns on for the RK3528 and
+RK3588 alike. The buffer the driver gives them, 128 bytes a 16x16 block,
+holds the compressed layout too. Turn it on for HEVC and VP9, and for
+H.264 where every picture is coded as a frame: MPP leaves it off for a
+stream that may code fields, and an MBAFF stream decodes wrong with it.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ .../platform/rockchip/rkvdec/rkvdec-vdpu381-h264.c | 3 +++
+ .../platform/rockchip/rkvdec/rkvdec-vdpu381-hevc.c | 1 +
+ .../platform/rockchip/rkvdec/rkvdec-vdpu381-vp9.c  | 1 +
+ 3 files changed, 5 insertions(+)
+
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-h264.c b/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-h264.c
+index da0dbf7..d663b3e 100644
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-h264.c
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-h264.c
+@@ -210,6 +210,7 @@ static void config_registers(struct rkvdec_ctx *ctx,
+ {
+ 	const struct v4l2_ctrl_h264_decode_params *dec_params = run->decode_params;
+ 	const struct v4l2_h264_dpb_entry *dpb = dec_params->dpb;
++	const struct v4l2_ctrl_h264_sps *sps = run->sps;
+ 	struct rkvdec_h264_ctx *h264_ctx = ctx->priv;
+ 	dma_addr_t priv_start_addr = h264_ctx->priv_tbl.dma;
+ 	const struct v4l2_pix_format_mplane *dst_fmt;
+@@ -233,6 +234,8 @@ static void config_registers(struct rkvdec_ctx *ctx,
+ 
+ 	/* Set config */
+ 	regs->common.reg011_important_en.buf_empty_en = 1;
++	regs->common.reg012_secondary_en.colmv_compress_en =
++		!!(sps->flags & V4L2_H264_SPS_FLAG_FRAME_MBS_ONLY);
+ 	regs->common.reg011_important_en.dec_clkgate_e = 1;
+ 	regs->common.reg011_important_en.dec_timeout_e = 1;
+ 	regs->common.reg011_important_en.pix_range_det_e = 1;
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-hevc.c b/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-hevc.c
+index 927d687..28e8727 100644
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-hevc.c
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-hevc.c
+@@ -406,6 +406,7 @@ static void config_registers(struct rkvdec_ctx *ctx,
+ 
+ 	/* Set config */
+ 	regs->common.reg011_important_en.buf_empty_en = 1;
++	regs->common.reg012_secondary_en.colmv_compress_en = 1;
+ 	regs->common.reg011_important_en.dec_clkgate_e = 1;
+ 	regs->common.reg011_important_en.dec_timeout_e = 1;
+ 	regs->common.reg011_important_en.pix_range_det_e = 1;
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-vp9.c b/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-vp9.c
+index 1669989..88f4396 100644
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-vp9.c
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-vp9.c
+@@ -482,6 +482,7 @@ static void config_registers(struct rkvdec_ctx *ctx,
+ 
+ 	/* Set config */
+ 	regs->common.reg011_important_en.buf_empty_en = 1;
++	regs->common.reg012_secondary_en.colmv_compress_en = 1;
+ 	regs->common.reg011_important_en.dec_clkgate_e = 1;
+ 	regs->common.reg011_important_en.dec_timeout_e = 1;
+ 

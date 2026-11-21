@@ -1,0 +1,81 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] dt-bindings: memory-controllers: Add the RK3528 DMC
+
+The RK3528's memory controller has its DDR rate changed by the trusted
+firmware, which signals a change it finished late with an interrupt.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ .../rockchip,rk3528-dmc.yaml                  | 64 +++++++++++++++++++
+ 1 file changed, 64 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/memory-controllers/rockchip,rk3528-dmc.yaml b/Documentation/devicetree/bindings/memory-controllers/rockchip,rk3528-dmc.yaml
+new file mode 100644
+index 0000000..a840227
+--- /dev/null
++++ b/Documentation/devicetree/bindings/memory-controllers/rockchip,rk3528-dmc.yaml
+@@ -0,0 +1,64 @@
++# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
++%YAML 1.2
++---
++$id: http://devicetree.org/schemas/memory-controllers/rockchip,rk3528-dmc.yaml#
++$schema: http://devicetree.org/meta-schemas/core.yaml#
++
++title: Rockchip RK3528 DMC (Dynamic Memory Controller)
++
++maintainers:
++  - Artem Butusov <art.sormy@gmail.com>
++
++description:
++  The DDR rate is changed by the trusted firmware, which trains the DDR at a
++  few rates and raises the "complete" interrupt when a change it deferred to
++  the display's blanking finishes.
++
++properties:
++  compatible:
++    const: rockchip,rk3528-dmc
++
++  interrupts:
++    maxItems: 1
++
++  interrupt-names:
++    items:
++      - const: complete
++
++  clocks:
++    maxItems: 1
++    description: The DDR clock, read for the rate at boot.
++
++  devfreq-events:
++    $ref: /schemas/types.yaml#/definitions/phandle
++    description: The DFI counting the DDR's load.
++
++  operating-points-v2: true
++
++  center-supply:
++    description: The memory controller's supply.
++
++required:
++  - compatible
++  - interrupts
++  - interrupt-names
++  - clocks
++  - devfreq-events
++  - operating-points-v2
++  - center-supply
++
++additionalProperties: false
++
++examples:
++  - |
++    #include <dt-bindings/interrupt-controller/arm-gic.h>
++
++    memory-controller {
++      compatible = "rockchip,rk3528-dmc";
++      interrupts = <GIC_SPI 17 IRQ_TYPE_LEVEL_HIGH>;
++      interrupt-names = "complete";
++      clocks = <&scmi_clk 20>;
++      devfreq-events = <&dfi>;
++      operating-points-v2 = <&dmc_opp_table>;
++      center-supply = <&vdd_logic>;
++    };

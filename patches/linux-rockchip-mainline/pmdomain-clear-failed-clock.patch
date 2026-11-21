@@ -1,0 +1,23 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] pmdomain: rockchip: clear failed clock before bulk cleanup
+
+When of_clk_get() fails, the clock array retains its error pointer.
+The error path passes the whole array to clk_bulk_put(), which tolerates
+NULL entries but warns when clk_put() receives an error pointer.
+
+Clear the failed entry before releasing the clocks acquired so far.
+The remaining entries are already zeroed by devm_kcalloc(). This avoids
+tainting the kernel on an ordinary deferred probe.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+--- a/drivers/pmdomain/rockchip/pm-domains.c
++++ b/drivers/pmdomain/rockchip/pm-domains.c
+@@ -851,6 +851,7 @@
+ 		pd->clks[i].clk = of_clk_get(node, i);
+ 		if (IS_ERR(pd->clks[i].clk)) {
+ 			error = PTR_ERR(pd->clks[i].clk);
++			pd->clks[i].clk = NULL;
+ 			dev_err(pmu->dev,
+ 				"%pOFn: failed to get clk at index %d: %d\n",
+ 				node, i, error);

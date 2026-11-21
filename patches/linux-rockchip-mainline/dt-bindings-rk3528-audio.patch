@@ -1,0 +1,70 @@
+From: W132D maintainers <tech@wenziwanka.com>
+Subject: [PATCH] dt-bindings: describe RK3528 SAI and PDM fallbacks
+
+Imported from w132d-linux-mainline d9bfd153f813.
+
+diff --git a/Documentation/devicetree/bindings/sound/rockchip,rk3576-sai.yaml b/Documentation/devicetree/bindings/sound/rockchip,rk3576-sai.yaml
+--- a/Documentation/devicetree/bindings/sound/rockchip,rk3576-sai.yaml
++++ b/Documentation/devicetree/bindings/sound/rockchip,rk3576-sai.yaml
+@@ -18,7 +18,11 @@
+ 
+ properties:
+   compatible:
+-    const: rockchip,rk3576-sai
++    oneOf:
++      - const: rockchip,rk3576-sai
++      - items:
++          - const: rockchip,rk3528-sai
++          - const: rockchip,rk3576-sai
+ 
+   reg:
+     maxItems: 1
+diff --git a/Documentation/devicetree/bindings/sound/rockchip,pdm.yaml b/Documentation/devicetree/bindings/sound/rockchip,pdm.yaml
+--- a/Documentation/devicetree/bindings/sound/rockchip,pdm.yaml
++++ b/Documentation/devicetree/bindings/sound/rockchip,pdm.yaml
+@@ -18,16 +18,30 @@
+ 
+ allOf:
+   - $ref: dai-common.yaml#
++  # RK3528 uses DMA completion without a separate PDM interrupt description.
++  - if:
++      not:
++        properties:
++          compatible:
++            contains:
++              const: rockchip,rk3528-pdm
++    then:
++      required:
++        - interrupts
+ 
+ properties:
+   compatible:
+-    enum:
+-      - rockchip,pdm
+-      - rockchip,px30-pdm
+-      - rockchip,rk1808-pdm
+-      - rockchip,rk3308-pdm
+-      - rockchip,rk3568-pdm
+-      - rockchip,rv1126-pdm
++    oneOf:
++      - enum:
++          - rockchip,pdm
++          - rockchip,px30-pdm
++          - rockchip,rk1808-pdm
++          - rockchip,rk3308-pdm
++          - rockchip,rk3568-pdm
++          - rockchip,rv1126-pdm
++      - items:
++          - const: rockchip,rk3528-pdm
++          - const: rockchip,rk3568-pdm
+ 
+   reg:
+     maxItems: 1
+@@ -79,7 +93,6 @@
+ required:
+   - compatible
+   - reg
+-  - interrupts
+   - clocks
+   - clock-names
+   - dmas

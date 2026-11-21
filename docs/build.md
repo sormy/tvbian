@@ -44,6 +44,7 @@ do the tools they need: `./build.sh tool <name>` builds one from `tools/<name>/`
 ./build.sh kernel kernel/meson64.conf   # host: the kernel, headers, its drivers, the metapackage
 ./build.sh board h96max-m20             # host: tvb-h96max-m20, after the U-Boot it ships
 ./build.sh kernel kernel/meson64-next.conf   # host: the same on the next series, opt-in
+./build.sh kernel kernel/rk35xx-next2.conf   # host: mainline beside the vendor kernels, opt-in
 ./build.sh firmware swt6621s            # host: tvb-firmware-swt6621s, from firmware/swt6621s/
 ./build.sh base                         # host: tvb-base, what every box gets
 ./build.sh keyring                      # host: tvb-archive-keyring

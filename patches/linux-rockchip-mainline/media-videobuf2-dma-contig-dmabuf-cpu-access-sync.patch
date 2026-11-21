@@ -1,0 +1,106 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] media: videobuf2-dma-contig: Sync non-coherent buffers on CPU access
+
+An exported non-coherent buffer is synced only when it is queued and
+dequeued, and not at all when userspace asks to skip that with
+V4L2_BUF_FLAG_NO_CACHE_INVALIDATE and V4L2_BUF_FLAG_NO_CACHE_CLEAN:
+begin_cpu_access and end_cpu_access do nothing. A dma-buf importer
+that reads the picture on the CPU, bracketing the read with
+DMA_BUF_IOCTL_SYNC as the dma-buf rules ask, then reads stale cache
+lines. Sync the buffer there as vb2_dc_finish() and vb2_dc_prepare()
+do, as videobuf2-dma-sg already does.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ drivers/media/common/videobuf2/videobuf2-dma-contig.c | 46 +++++++++++++++++++++++++-----------------
+ 1 file changed, 28 insertions(+), 18 deletions(-)
+
+diff --git a/drivers/media/common/videobuf2/videobuf2-dma-contig.c b/drivers/media/common/videobuf2/videobuf2-dma-contig.c
+index e4ddb4b..b8f789b 100644
+--- a/drivers/media/common/videobuf2/videobuf2-dma-contig.c
++++ b/drivers/media/common/videobuf2/videobuf2-dma-contig.c
+@@ -120,15 +120,8 @@ static unsigned int vb2_dc_num_users(void *buf_priv)
+ 	return refcount_read(&buf->refcount);
+ }
+ 
+-static void vb2_dc_prepare(void *buf_priv)
++static void vb2_dc_sync_for_device(struct vb2_dc_buf *buf)
+ {
+-	struct vb2_dc_buf *buf = buf_priv;
+-	struct sg_table *sgt = buf->dma_sgt;
+-
+-	/* This takes care of DMABUF and user-enforced cache sync hint */
+-	if (buf->vb->skip_cache_sync_on_prepare)
+-		return;
+-
+ 	if (!buf->non_coherent_mem)
+ 		return;
+ 
+@@ -137,18 +130,11 @@ static void vb2_dc_prepare(void *buf_priv)
+ 		flush_kernel_vmap_range(buf->vaddr, buf->size);
+ 
+ 	/* For both USERPTR and non-coherent MMAP */
+-	dma_sync_sgtable_for_device(buf->dev, sgt, buf->dma_dir);
++	dma_sync_sgtable_for_device(buf->dev, buf->dma_sgt, buf->dma_dir);
+ }
+ 
+-static void vb2_dc_finish(void *buf_priv)
++static void vb2_dc_sync_for_cpu(struct vb2_dc_buf *buf)
+ {
+-	struct vb2_dc_buf *buf = buf_priv;
+-	struct sg_table *sgt = buf->dma_sgt;
+-
+-	/* This takes care of DMABUF and user-enforced cache sync hint */
+-	if (buf->vb->skip_cache_sync_on_finish)
+-		return;
+-
+ 	if (!buf->non_coherent_mem)
+ 		return;
+ 
+@@ -157,7 +143,29 @@ static void vb2_dc_finish(void *buf_priv)
+ 		invalidate_kernel_vmap_range(buf->vaddr, buf->size);
+ 
+ 	/* For both USERPTR and non-coherent MMAP */
+-	dma_sync_sgtable_for_cpu(buf->dev, sgt, buf->dma_dir);
++	dma_sync_sgtable_for_cpu(buf->dev, buf->dma_sgt, buf->dma_dir);
++}
++
++static void vb2_dc_prepare(void *buf_priv)
++{
++	struct vb2_dc_buf *buf = buf_priv;
++
++	/* This takes care of DMABUF and user-enforced cache sync hint */
++	if (buf->vb->skip_cache_sync_on_prepare)
++		return;
++
++	vb2_dc_sync_for_device(buf);
++}
++
++static void vb2_dc_finish(void *buf_priv)
++{
++	struct vb2_dc_buf *buf = buf_priv;
++
++	/* This takes care of DMABUF and user-enforced cache sync hint */
++	if (buf->vb->skip_cache_sync_on_finish)
++		return;
++
++	vb2_dc_sync_for_cpu(buf);
+ }
+ 
+ /*********************************************/
+@@ -429,6 +437,7 @@ static int
+ vb2_dc_dmabuf_ops_begin_cpu_access(struct dma_buf *dbuf,
+ 				   enum dma_data_direction direction)
+ {
++	vb2_dc_sync_for_cpu(dbuf->priv);
+ 	return 0;
+ }
+ 
+@@ -436,6 +445,7 @@ static int
+ vb2_dc_dmabuf_ops_end_cpu_access(struct dma_buf *dbuf,
+ 				 enum dma_data_direction direction)
+ {
++	vb2_dc_sync_for_device(dbuf->priv);
+ 	return 0;
+ }
+ 

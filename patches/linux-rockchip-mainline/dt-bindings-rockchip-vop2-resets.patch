@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Wed, 18 Nov 2026 13:03:52 -0500
+Subject: [PATCH] dt-bindings: display: rockchip-vop2: Add resets
+
+A VOP that a reboot leaves scanning out has to be reset before its IOMMU
+translates; let the node name its resets.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ .../bindings/display/rockchip/rockchip-vop2.yaml           | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/display/rockchip/rockchip-vop2.yaml b/Documentation/devicetree/bindings/display/rockchip/rockchip-vop2.yaml
+index 93da1fb..b1770ed 100644
+--- a/Documentation/devicetree/bindings/display/rockchip/rockchip-vop2.yaml
++++ b/Documentation/devicetree/bindings/display/rockchip/rockchip-vop2.yaml
+@@ -123,6 +123,13 @@ properties:
+   power-domains:
+     maxItems: 1
+ 
++  resets:
++    description:
++      The VOP's own resets, its bus, register and pixel clock domains,
++      pulsed at bind to clear what an earlier stage left scanning out.
++    minItems: 1
++    maxItems: 6
++
+ required:
+   - compatible
+   - reg

@@ -1,0 +1,596 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Wed, 18 Nov 2026 00:32:06 -0500
+Subject: [PATCH] media: verisilicon: Decode MPEG-4 Part 2 and H.263 on
+ Rockchip VDPU2
+
+VDPU2 decodes an MPEG-4 Simple or Advanced Simple VOP, or an H.263
+picture, whole, parsing its video packet and GOB headers itself, with
+the registers Rockchip's MPP gives them: the VOL and VOP tools, the
+quantiser matrices in raster order, the direct mode TRB/TRD ratios, and
+one buffer of the last P-VOP's motion vectors for a B-VOP's direct mode.
+It takes the stateless MPEG-4 controls, refusing a VOL with sprites,
+data partitioning or reversible VLC, which it has no mode for. The
+RK3528's VDPU2 gains it, to 16CIF's 1152 lines, its decoded frames
+with it. A VOP without its VOL's time increment resolution is
+refused: the decoder parses video packet headers by it, and hangs
+without.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ drivers/media/platform/verisilicon/Makefile   |   2 +
+ drivers/media/platform/verisilicon/hantro.h   |   4 +
+ .../media/platform/verisilicon/hantro_drv.c   |  30 ++
+ .../media/platform/verisilicon/hantro_hw.h    |  15 +
+ .../media/platform/verisilicon/hantro_mpeg4.c |  44 +++
+ .../media/platform/verisilicon/hantro_v4l2.c  |   3 +
+ .../verisilicon/rockchip_vpu2_hw_mpeg4_dec.c  | 265 ++++++++++++++++++
+ .../platform/verisilicon/rockchip_vpu_hw.c    |  25 +-
+ 8 files changed, 386 insertions(+), 2 deletions(-)
+ create mode 100644 drivers/media/platform/verisilicon/hantro_mpeg4.c
+ create mode 100644 drivers/media/platform/verisilicon/rockchip_vpu2_hw_mpeg4_dec.c
+
+diff --git a/drivers/media/platform/verisilicon/Makefile b/drivers/media/platform/verisilicon/Makefile
+index f6f019d..f830887 100644
+--- a/drivers/media/platform/verisilicon/Makefile
++++ b/drivers/media/platform/verisilicon/Makefile
+@@ -18,6 +18,7 @@ hantro-vpu-y += \
+ 		hantro_h264.o \
+ 		hantro_hevc.o \
+ 		hantro_mpeg2.o \
++		hantro_mpeg4.o \
+ 		hantro_vp8.o \
+ 		hantro_vp9.o
+ 
+@@ -31,6 +32,7 @@ hantro-vpu-$(CONFIG_VIDEO_HANTRO_ROCKCHIP) += \
+ 		rockchip_vpu2_hw_jpeg_enc.o \
+ 		rockchip_vpu2_hw_h264_dec.o \
+ 		rockchip_vpu2_hw_mpeg2_dec.o \
++		rockchip_vpu2_hw_mpeg4_dec.o \
+ 		rockchip_vpu2_hw_vp8_dec.o \
+ 		rockchip_vpu981_hw_av1_dec.o \
+ 		rockchip_av1_filmgrain.o \
+diff --git a/drivers/media/platform/verisilicon/hantro.h b/drivers/media/platform/verisilicon/hantro.h
+index 0353de1..c0a40d3 100644
+--- a/drivers/media/platform/verisilicon/hantro.h
++++ b/drivers/media/platform/verisilicon/hantro.h
+@@ -39,6 +39,7 @@ struct hantro_postproc_ops;
+ #define HANTRO_HEVC_DECODER	BIT(19)
+ #define HANTRO_VP9_DECODER	BIT(20)
+ #define HANTRO_AV1_DECODER	BIT(21)
++#define HANTRO_MPEG4_DECODER	BIT(22)
+ #define HANTRO_DECODERS		0xffff0000
+ 
+ /**
+@@ -115,6 +116,7 @@ struct hantro_variant {
+  * @HANTRO_MODE_HEVC_DEC: HEVC decoder.
+  * @HANTRO_MODE_VP9_DEC: VP9 decoder.
+  * @HANTRO_MODE_AV1_DEC: AV1 decoder
++ * @HANTRO_MODE_MPEG4_DEC: MPEG-4 Part 2 and H.263 decoder
+  */
+ enum hantro_codec_mode {
+ 	HANTRO_MODE_NONE = -1,
+@@ -125,6 +127,7 @@ enum hantro_codec_mode {
+ 	HANTRO_MODE_HEVC_DEC,
+ 	HANTRO_MODE_VP9_DEC,
+ 	HANTRO_MODE_AV1_DEC,
++	HANTRO_MODE_MPEG4_DEC,
+ };
+ 
+ /*
+@@ -276,6 +279,7 @@ struct hantro_ctx {
+ 		struct hantro_hevc_dec_hw_ctx hevc_dec;
+ 		struct hantro_vp9_dec_hw_ctx vp9_dec;
+ 		struct hantro_av1_dec_hw_ctx av1_dec;
++		struct hantro_mpeg4_dec_hw_ctx mpeg4_dec;
+ 	};
+ };
+ 
+diff --git a/drivers/media/platform/verisilicon/hantro_drv.c b/drivers/media/platform/verisilicon/hantro_drv.c
+index b4904fe..3202146 100644
+--- a/drivers/media/platform/verisilicon/hantro_drv.c
++++ b/drivers/media/platform/verisilicon/hantro_drv.c
+@@ -20,6 +20,7 @@
+ #include <linux/slab.h>
+ #include <linux/videodev2.h>
+ #include <linux/workqueue.h>
++#include <media/mpeg4-ctrls.h>
+ #include <media/v4l2-event.h>
+ #include <media/v4l2-mem2mem.h>
+ #include <media/videobuf2-core.h>
+@@ -278,6 +279,14 @@ static int hantro_try_ctrl(struct v4l2_ctrl *ctrl)
+ 		/* We only support profile 0 */
+ 		if (dec_params->profile != 0)
+ 			return -EINVAL;
++	} else if (ctrl->id == V4L2_CID_STATELESS_MPEG4_VOL) {
++		const struct v4l2_ctrl_mpeg4_vol *vol = ctrl->p_new.p;
++
++		/* VDPU2 has no sprites, data partitioning or reversible VLC */
++		if (vol->sprite_enable != V4L2_MPEG4_SPRITE_NONE ||
++		    vol->flags & (V4L2_MPEG4_VOL_FLAG_DATA_PARTITIONED |
++				  V4L2_MPEG4_VOL_FLAG_REVERSIBLE_VLC))
++			return -EINVAL;
+ 	} else if (ctrl->id == V4L2_CID_STATELESS_AV1_SEQUENCE) {
+ 		const struct v4l2_ctrl_av1_sequence *sequence = ctrl->p_new.p_av1_sequence;
+ 
+@@ -454,6 +463,27 @@ static const struct hantro_ctrl controls[] = {
+ 		.cfg = {
+ 			.id = V4L2_CID_STATELESS_MPEG2_QUANTISATION,
+ 		},
++	}, {
++		.codec = HANTRO_MPEG4_DECODER,
++		.cfg = {
++			.id = V4L2_CID_STATELESS_MPEG4_VOL,
++			.ops = &hantro_ctrl_ops,
++		},
++	}, {
++		.codec = HANTRO_MPEG4_DECODER,
++		.cfg = {
++			.id = V4L2_CID_STATELESS_MPEG4_VOP,
++		},
++	}, {
++		.codec = HANTRO_MPEG4_DECODER,
++		.cfg = {
++			.id = V4L2_CID_STATELESS_MPEG4_QUANTISATION,
++		},
++	}, {
++		.codec = HANTRO_MPEG4_DECODER,
++		.cfg = {
++			.id = V4L2_CID_STATELESS_MPEG4_SLICE,
++		},
+ 	}, {
+ 		.codec = HANTRO_VP8_DECODER,
+ 		.cfg = {
+diff --git a/drivers/media/platform/verisilicon/hantro_hw.h b/drivers/media/platform/verisilicon/hantro_hw.h
+index 057f68d..366cb29 100644
+--- a/drivers/media/platform/verisilicon/hantro_hw.h
++++ b/drivers/media/platform/verisilicon/hantro_hw.h
+@@ -31,6 +31,7 @@
+ #define FMT_HD_HEIGHT		720
+ #define FMT_FHD_WIDTH		1920
+ #define FMT_FHD_HEIGHT		1088
++#define FMT_16CIF_HEIGHT	1152
+ #define FMT_UHD_WIDTH		3840
+ #define FMT_UHD_HEIGHT		2160
+ #define FMT_4K_WIDTH		4096
+@@ -176,6 +177,17 @@ struct hantro_mpeg2_dec_hw_ctx {
+ 	struct hantro_aux_buf qtable;
+ };
+ 
++/**
++ * struct hantro_mpeg4_dec_hw_ctx
++ *
++ * @qtable:		Quantization table
++ * @mv:		The last P-VOP's motion vectors, a B-VOP's direct mode
++ */
++struct hantro_mpeg4_dec_hw_ctx {
++	struct hantro_aux_buf qtable;
++	struct hantro_aux_buf mv;
++};
++
+ /**
+  * struct hantro_vp8_dec_hw_ctx
+  *
+@@ -566,6 +578,9 @@ size_t hantro_g2_chroma_compress_offset(struct hantro_ctx *ctx);
+ 
+ int hantro_g1_mpeg2_dec_run(struct hantro_ctx *ctx);
+ int rockchip_vpu2_mpeg2_dec_run(struct hantro_ctx *ctx);
++int rockchip_vpu2_mpeg4_dec_run(struct hantro_ctx *ctx);
++int hantro_mpeg4_dec_init(struct hantro_ctx *ctx);
++void hantro_mpeg4_dec_exit(struct hantro_ctx *ctx);
+ void hantro_mpeg2_dec_copy_qtable(u8 *qtable,
+ 				  const struct v4l2_ctrl_mpeg2_quantisation *ctrl);
+ int hantro_mpeg2_dec_init(struct hantro_ctx *ctx);
+diff --git a/drivers/media/platform/verisilicon/hantro_mpeg4.c b/drivers/media/platform/verisilicon/hantro_mpeg4.c
+new file mode 100644
+index 0000000..ff853bd
+--- /dev/null
++++ b/drivers/media/platform/verisilicon/hantro_mpeg4.c
+@@ -0,0 +1,44 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Hantro VPU codec driver: MPEG-4 Part 2 and H.263 decoding buffers
++ */
++
++#include "hantro.h"
++
++#define MPEG4_QTABLE_SIZE	(64 * 2)	/* intra, then inter */
++#define MPEG4_MV_BYTES_PER_MB	16
++
++static int hantro_mpeg4_alloc(struct hantro_dev *vpu, struct hantro_aux_buf *buf, size_t size)
++{
++	buf->size = size;
++	buf->cpu = dma_alloc_coherent(vpu->dev, size, &buf->dma, GFP_KERNEL);
++	return buf->cpu ? 0 : -ENOMEM;
++}
++
++int hantro_mpeg4_dec_init(struct hantro_ctx *ctx)
++{
++	struct hantro_mpeg4_dec_hw_ctx *mpeg4 = &ctx->mpeg4_dec;
++	struct hantro_dev *vpu = ctx->dev;
++	size_t mbs = MB_WIDTH(ctx->dst_fmt.width) * MB_HEIGHT(ctx->dst_fmt.height);
++	int ret;
++
++	ret = hantro_mpeg4_alloc(vpu, &mpeg4->qtable, MPEG4_QTABLE_SIZE);
++	if (ret)
++		return ret;
++
++	ret = hantro_mpeg4_alloc(vpu, &mpeg4->mv, mbs * MPEG4_MV_BYTES_PER_MB);
++	if (ret)
++		dma_free_coherent(vpu->dev, mpeg4->qtable.size, mpeg4->qtable.cpu,
++				  mpeg4->qtable.dma);
++	return ret;
++}
++
++void hantro_mpeg4_dec_exit(struct hantro_ctx *ctx)
++{
++	struct hantro_mpeg4_dec_hw_ctx *mpeg4 = &ctx->mpeg4_dec;
++	struct hantro_dev *vpu = ctx->dev;
++
++	dma_free_coherent(vpu->dev, mpeg4->mv.size, mpeg4->mv.cpu, mpeg4->mv.dma);
++	dma_free_coherent(vpu->dev, mpeg4->qtable.size, mpeg4->qtable.cpu,
++			  mpeg4->qtable.dma);
++}
+diff --git a/drivers/media/platform/verisilicon/hantro_v4l2.c b/drivers/media/platform/verisilicon/hantro_v4l2.c
+index 83af9fa..5212f09 100644
+--- a/drivers/media/platform/verisilicon/hantro_v4l2.c
++++ b/drivers/media/platform/verisilicon/hantro_v4l2.c
+@@ -20,6 +20,7 @@
+ #include <linux/pm_runtime.h>
+ #include <linux/videodev2.h>
+ #include <linux/workqueue.h>
++#include <media/mpeg4-ctrls.h>
+ #include <media/v4l2-ctrls.h>
+ #include <media/v4l2-event.h>
+ #include <media/v4l2-mem2mem.h>
+@@ -492,6 +493,7 @@ hantro_update_requires_request(struct hantro_ctx *ctx, u32 fourcc)
+ 		ctx->fh.m2m_ctx->out_q_ctx.q.requires_requests = false;
+ 		break;
+ 	case V4L2_PIX_FMT_MPEG2_SLICE:
++	case V4L2_PIX_FMT_MPEG4_SLICE:
+ 	case V4L2_PIX_FMT_VP8_FRAME:
+ 	case V4L2_PIX_FMT_H264_SLICE:
+ 	case V4L2_PIX_FMT_HEVC_SLICE:
+@@ -514,6 +516,7 @@ hantro_update_requires_hold_capture_buf(struct hantro_ctx *ctx, u32 fourcc)
+ 	switch (fourcc) {
+ 	case V4L2_PIX_FMT_JPEG:
+ 	case V4L2_PIX_FMT_MPEG2_SLICE:
++	case V4L2_PIX_FMT_MPEG4_SLICE:
+ 	case V4L2_PIX_FMT_VP8_FRAME:
+ 	case V4L2_PIX_FMT_HEVC_SLICE:
+ 	case V4L2_PIX_FMT_VP9_FRAME:
+diff --git a/drivers/media/platform/verisilicon/rockchip_vpu2_hw_mpeg4_dec.c b/drivers/media/platform/verisilicon/rockchip_vpu2_hw_mpeg4_dec.c
+new file mode 100644
+index 0000000..0208087
+--- /dev/null
++++ b/drivers/media/platform/verisilicon/rockchip_vpu2_hw_mpeg4_dec.c
+@@ -0,0 +1,265 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Hantro VPU codec driver: Rockchip VDPU2 MPEG-4 Part 2 and H.263 decoding,
++ * the registers as Rockchip's MPP programs them
++ */
++
++#include <linux/bitfield.h>
++#include <linux/math64.h>
++#include <media/mpeg4-ctrls.h>
++#include <media/v4l2-mem2mem.h>
++#include "hantro.h"
++#include "hantro_hw.h"
++
++#define VDPU_SWREG(nr)			((nr) * 4)
++#define VDPU_NUM_REGS			160
++#define VDPU_REG_CLR_CACHE		0x810
++
++#define VDPU_REG_QTABLE_BASE		VDPU_SWREG(61)
++#define VDPU_REG_DIR_MV_BASE		VDPU_SWREG(62)
++#define VDPU_REG_DEC_OUT_BASE		VDPU_SWREG(63)
++#define VDPU_REG_RLC_VLC_BASE		VDPU_SWREG(64)
++#define VDPU_REG_REFER0_BASE		VDPU_SWREG(131)
++#define VDPU_REG_REFER2_BASE		VDPU_SWREG(134)
++#define VDPU_REG_REFER3_BASE		VDPU_SWREG(135)
++#define VDPU_REG_REFER1_BASE		VDPU_SWREG(148)
++
++#define VDPU_REG_DEC_E(v)		((v) ? BIT(0) : 0)
++#define VDPU_REG_FILTERING_DIS(v)	((v) ? BIT(8) : 0)
++#define VDPU_REG_INIT_QP(v)		(((v) << 25) & GENMASK(30, 25))
++#define VDPU_REG_STREAM_LEN(v)		(((v) << 0) & GENMASK(23, 0))
++#define VDPU_REG_APF_THRESHOLD(v)	(((v) << 17) & GENMASK(30, 17))
++#define VDPU_REG_DEC_MODE(v)		(((v) << 0) & GENMASK(3, 0))
++#define VDPU_REG_DEC_STRENDIAN_E(v)	((v) ? BIT(5) : 0)
++#define VDPU_REG_DEC_STRSWAP32_E(v)	((v) ? BIT(4) : 0)
++#define VDPU_REG_DEC_OUTSWAP32_E(v)	((v) ? BIT(3) : 0)
++#define VDPU_REG_DEC_INSWAP32_E(v)	((v) ? BIT(2) : 0)
++#define VDPU_REG_DEC_OUT_ENDIAN(v)	((v) ? BIT(1) : 0)
++#define VDPU_REG_DEC_IN_ENDIAN(v)	((v) ? BIT(0) : 0)
++#define VDPU_REG_DEC_MAX_BURST(v)	(((v) << 16) & GENMASK(20, 16))
++#define VDPU_REG_PIC_INTERLACE_E(v)	((v) ? BIT(17) : 0)
++#define VDPU_REG_PIC_FIELDMODE_E(v)	((v) ? BIT(16) : 0)
++#define VDPU_REG_PIC_B_E(v)		((v) ? BIT(15) : 0)
++#define VDPU_REG_PIC_INTER_E(v)		((v) ? BIT(14) : 0)
++#define VDPU_REG_WRITE_MVS_E(v)		((v) ? BIT(10) : 0)
++#define VDPU_REG_DEC_TIMEOUT_E(v)	((v) ? BIT(5) : 0)
++#define VDPU_REG_DEC_CLK_GATE_E(v)	((v) ? BIT(4) : 0)
++#define VDPU_REG_PIC_MB_WIDTH(v)	(((v) << 23) & GENMASK(31, 23))
++#define VDPU_REG_MB_WIDTH_OFF(v)	(((v) << 19) & GENMASK(22, 19))
++#define VDPU_REG_PIC_MB_HEIGHT_P(v)	(((v) << 11) & GENMASK(18, 11))
++#define VDPU_REG_MB_HEIGHT_OFF(v)	(((v) << 7) & GENMASK(10, 7))
++#define VDPU_REG_TOPFIELDFIRST_E(v)	((v) ? BIT(5) : 0)
++#define VDPU_REG_STRM_START_BIT(v)	(((v) << 26) & GENMASK(31, 26))
++#define VDPU_REG_SYNC_MARKERS_E(v)	((v) ? BIT(25) : 0)
++#define VDPU_REG_QUANT_TYPE_1_E(v)	((v) ? BIT(24) : 0)
++#define VDPU_REG_INTRA_DC_VLC_THR(v)	(((v) << 16) & GENMASK(18, 16))
++#define VDPU_REG_VOP_TIME_INCR(v)	(((v) << 0) & GENMASK(15, 0))
++#define VDPU_REG_ALT_SCAN_FLAG_E(v)	((v) ? BIT(19) : 0)
++#define VDPU_REG_FCODE_FWD_HOR(v)	(((v) << 15) & GENMASK(18, 15))
++#define VDPU_REG_FCODE_FWD_VER(v)	(((v) << 11) & GENMASK(14, 11))
++#define VDPU_REG_FCODE_BWD_HOR(v)	(((v) << 7) & GENMASK(10, 7))
++#define VDPU_REG_FCODE_BWD_VER(v)	(((v) << 3) & GENMASK(6, 3))
++#define VDPU_REG_FWD_MV_Y_QPEL(v)	((v) ? BIT(2) : 0)
++#define VDPU_REG_ROUNDING(v)		((v) ? BIT(1) : 0)
++#define VDPU_REG_PREV_PIC_TYPE(v)	((v) ? BIT(0) : 0)
++#define VDPU_REG_TRB_PER_TRD(v)		(((v) << 0) & GENMASK(26, 0))
++#define VDPU_REG_PRED_TAP0(v)		(((v) << 22) & GENMASK(31, 22))
++#define VDPU_REG_PRED_TAP1(v)		(((v) << 12) & GENMASK(21, 12))
++#define VDPU_REG_PRED_TAP2(v)		(((v) << 2) & GENMASK(11, 2))
++#define VDPU_REG_PRED_TAP3(v)		(((v) << 22) & GENMASK(31, 22))
++
++#define VDPU_DEC_MODE_MPEG4		1
++#define VDPU_DEC_MODE_H263		2
++#define TRB_PER_TRD_SHIFT		27
++#define VDPU_APF_THRESHOLD		1
++/* MPEG-4's quarter-pixel interpolation filter, half of it, as MPP sets it */
++#define QPEL_TAP0			-1
++#define QPEL_TAP1			3
++#define QPEL_TAP2			-6
++#define QPEL_TAP3			20
++/* H.263 carries no VOL: MPP gives it the 29.97 Hz picture clock's resolution */
++#define H263_TIME_INCREMENT_RESOLUTION	30000
++
++static const u8 zigzag[64] = {
++	0,   1,  8, 16,  9,  2,  3, 10,
++	17, 24, 32, 25, 18, 11,  4,  5,
++	12, 19, 26, 33, 40, 48, 41, 34,
++	27, 20, 13,  6,  7, 14, 21, 28,
++	35, 42, 49, 56, 57, 50, 43, 36,
++	29, 22, 15, 23, 30, 37, 44, 51,
++	58, 59, 52, 45, 38, 31, 39, 46,
++	53, 60, 61, 54, 47, 55, 62, 63
++};
++
++/* TRB/TRD for direct mode, at 2^27, as the frame and either field period has it */
++static u32 trb_per_trd(s64 trb, s64 trd)
++{
++	return trd ? div64_s64((trb << TRB_PER_TRD_SHIFT) + trd - 1, trd) : 0;
++}
++
++static void rockchip_vpu2_mpeg4_dec_set_quantisation(struct hantro_ctx *ctx,
++						     const struct v4l2_ctrl_mpeg4_quantisation *q)
++{
++	u8 *qtable = ctx->mpeg4_dec.qtable.cpu;
++	int i;
++
++	for (i = 0; i < ARRAY_SIZE(zigzag); i++) {
++		qtable[zigzag[i]] = q->intra_quantiser_matrix[i];
++		qtable[zigzag[i] + 64] = q->non_intra_quantiser_matrix[i];
++	}
++}
++
++static void rockchip_vpu2_mpeg4_dec_set_refs(struct hantro_dev *vpu, struct hantro_ctx *ctx,
++					     const struct v4l2_ctrl_mpeg4_vop *vop,
++					     dma_addr_t current_addr, bool h263)
++{
++	dma_addr_t forward = current_addr, backward = current_addr, addr;
++
++	switch (vop->vop_coding_type) {
++	case V4L2_MPEG4_VOP_TYPE_B:
++		addr = hantro_get_ref(ctx, vop->backward_ref_ts);
++		if (addr)
++			backward = addr;
++		fallthrough;
++	case V4L2_MPEG4_VOP_TYPE_P:
++		addr = hantro_get_ref(ctx, vop->forward_ref_ts);
++		if (addr)
++			forward = addr;
++	}
++
++	vdpu_write_relaxed(vpu, forward, VDPU_REG_REFER0_BASE);
++	vdpu_write_relaxed(vpu, forward, VDPU_REG_REFER1_BASE);
++	if (h263)
++		return;
++	vdpu_write_relaxed(vpu, backward, VDPU_REG_REFER2_BASE);
++	vdpu_write_relaxed(vpu, backward, VDPU_REG_REFER3_BASE);
++}
++
++int rockchip_vpu2_mpeg4_dec_run(struct hantro_ctx *ctx)
++{
++	struct hantro_dev *vpu = ctx->dev;
++	const struct v4l2_ctrl_mpeg4_quantisation *q;
++	const struct v4l2_ctrl_mpeg4_slice *slice;
++	const struct v4l2_ctrl_mpeg4_vol *vol;
++	const struct v4l2_ctrl_mpeg4_vop *vop;
++	struct vb2_v4l2_buffer *src_buf, *dst_buf;
++	dma_addr_t current_addr;
++	bool h263, b, p;
++	u32 reg;
++	int i;
++
++	src_buf = hantro_get_src_buf(ctx);
++	dst_buf = hantro_get_dst_buf(ctx);
++
++	hantro_start_prepare_run(ctx);
++
++	/* As MPP: the decoder's cache cleared and every register written, none left to chance */
++	vdpu_write_relaxed(vpu, 1, VDPU_REG_CLR_CACHE);
++	for (i = 0; i < VDPU_NUM_REGS; i++)
++		vdpu_write_relaxed(vpu, 0, VDPU_SWREG(i));
++
++	vol = hantro_get_ctrl(ctx, V4L2_CID_STATELESS_MPEG4_VOL);
++	vop = hantro_get_ctrl(ctx, V4L2_CID_STATELESS_MPEG4_VOP);
++	q = hantro_get_ctrl(ctx, V4L2_CID_STATELESS_MPEG4_QUANTISATION);
++	slice = hantro_get_ctrl(ctx, V4L2_CID_STATELESS_MPEG4_SLICE);
++	h263 = vol->flags & V4L2_MPEG4_VOL_FLAG_SHORT_VIDEO_HEADER;
++	b = vop->vop_coding_type == V4L2_MPEG4_VOP_TYPE_B;
++	p = vop->vop_coding_type == V4L2_MPEG4_VOP_TYPE_P;
++
++	/* The decoder parses video packet headers by it: zero hangs it */
++	if (!h263 && !vop->vop_time_increment_resolution)
++		return -EINVAL;
++
++	vdpu_write_relaxed(vpu, VDPU_REG_FILTERING_DIS(1), VDPU_SWREG(50));
++
++	reg = VDPU_REG_INIT_QP(slice->quant_scale) |
++	      VDPU_REG_STREAM_LEN(vb2_get_plane_payload(&src_buf->vb2_buf, 0));
++	vdpu_write_relaxed(vpu, reg, VDPU_SWREG(51));
++
++	vdpu_write_relaxed(vpu, VDPU_REG_APF_THRESHOLD(VDPU_APF_THRESHOLD), VDPU_SWREG(52));
++
++	reg = VDPU_REG_DEC_MODE(h263 ? VDPU_DEC_MODE_H263 : VDPU_DEC_MODE_MPEG4);
++	vdpu_write_relaxed(vpu, reg, VDPU_SWREG(53));
++
++	reg = VDPU_REG_DEC_STRENDIAN_E(1) |
++	      VDPU_REG_DEC_STRSWAP32_E(1) |
++	      VDPU_REG_DEC_OUTSWAP32_E(1) |
++	      VDPU_REG_DEC_INSWAP32_E(1) |
++	      VDPU_REG_DEC_OUT_ENDIAN(1) |
++	      VDPU_REG_DEC_IN_ENDIAN(1);
++	vdpu_write_relaxed(vpu, reg, VDPU_SWREG(54));
++
++	vdpu_write_relaxed(vpu, VDPU_REG_DEC_MAX_BURST(16), VDPU_SWREG(56));
++
++	reg = VDPU_REG_PRED_TAP0(QPEL_TAP0) |
++	      VDPU_REG_PRED_TAP1(QPEL_TAP1) |
++	      VDPU_REG_PRED_TAP2(QPEL_TAP2);
++	vdpu_write_relaxed(vpu, reg, VDPU_SWREG(59));
++	vdpu_write_relaxed(vpu, VDPU_REG_PRED_TAP3(QPEL_TAP3), VDPU_SWREG(153));
++
++	reg = VDPU_REG_PIC_INTERLACE_E(vol->flags & V4L2_MPEG4_VOL_FLAG_INTERLACED) |
++	      VDPU_REG_PIC_B_E(b) |
++	      VDPU_REG_PIC_INTER_E(vop->vop_coding_type != V4L2_MPEG4_VOP_TYPE_I) |
++	      VDPU_REG_WRITE_MVS_E(p && !h263) |
++	      VDPU_REG_DEC_TIMEOUT_E(1) |
++	      VDPU_REG_DEC_CLK_GATE_E(1);
++	vdpu_write_relaxed(vpu, reg, VDPU_SWREG(57));
++
++	/* H.263 pictures may end inside a macroblock, MPEG-4's per MPP do not */
++	reg = VDPU_REG_PIC_MB_WIDTH(MB_WIDTH(vol->width)) |
++	      VDPU_REG_PIC_MB_HEIGHT_P(MB_HEIGHT(vol->height)) |
++	      VDPU_REG_MB_WIDTH_OFF(h263 ? vol->width & (MB_DIM - 1) : 0) |
++	      VDPU_REG_MB_HEIGHT_OFF(h263 ? vol->height & (MB_DIM - 1) : 0) |
++	      VDPU_REG_TOPFIELDFIRST_E(vop->flags & V4L2_MPEG4_VOP_FLAG_TOP_FIELD_FIRST);
++	vdpu_write_relaxed(vpu, reg, VDPU_SWREG(120));
++
++	reg = VDPU_REG_STRM_START_BIT(slice->data_bit_offset) |
++	      VDPU_REG_SYNC_MARKERS_E(1) |
++	      VDPU_REG_QUANT_TYPE_1_E(vol->flags & V4L2_MPEG4_VOL_FLAG_QUANT_TYPE) |
++	      VDPU_REG_INTRA_DC_VLC_THR(vop->intra_dc_vlc_thr) |
++	      VDPU_REG_VOP_TIME_INCR(h263 ? H263_TIME_INCREMENT_RESOLUTION :
++				     vop->vop_time_increment_resolution);
++	vdpu_write_relaxed(vpu, reg, VDPU_SWREG(122));
++
++	/* MPP keeps the low bit of the last reference's type: whether it was predicted */
++	reg = VDPU_REG_ALT_SCAN_FLAG_E(vop->flags & V4L2_MPEG4_VOP_FLAG_ALTERNATE_VERTICAL_SCAN) |
++	      VDPU_REG_FCODE_FWD_HOR(h263 ? 1 : vop->vop_fcode_forward) |
++	      VDPU_REG_FCODE_FWD_VER(h263 ? 1 : vop->vop_fcode_forward) |
++	      VDPU_REG_FCODE_BWD_HOR(b ? vop->vop_fcode_backward : 0) |
++	      VDPU_REG_FCODE_BWD_VER(b ? vop->vop_fcode_backward : 0) |
++	      VDPU_REG_FWD_MV_Y_QPEL(vol->flags & V4L2_MPEG4_VOL_FLAG_QUARTER_SAMPLE) |
++	      VDPU_REG_ROUNDING(!b && !h263 && vop->flags & V4L2_MPEG4_VOP_FLAG_ROUNDING_TYPE) |
++	      VDPU_REG_PREV_PIC_TYPE(vop->last_ref_coding_type & 1);
++	vdpu_write_relaxed(vpu, reg, VDPU_SWREG(136));
++
++	if (b) {
++		vdpu_write_relaxed(vpu, VDPU_REG_TRB_PER_TRD(trb_per_trd(vop->trb, vop->trd)),
++				   VDPU_SWREG(137));
++		vdpu_write_relaxed(vpu, VDPU_REG_TRB_PER_TRD(trb_per_trd(2 * vop->trb - 1,
++									 2 * vop->trd - 1)),
++				   VDPU_SWREG(138));
++		vdpu_write_relaxed(vpu, VDPU_REG_TRB_PER_TRD(trb_per_trd(2 * vop->trb + 1,
++									 2 * vop->trd + 1)),
++				   VDPU_SWREG(139));
++	}
++
++	/* H.263 has no matrices, B pictures or direct mode: MPP leaves those registers zero */
++	if (!h263) {
++		rockchip_vpu2_mpeg4_dec_set_quantisation(ctx, q);
++		vdpu_write_relaxed(vpu, ctx->mpeg4_dec.qtable.dma, VDPU_REG_QTABLE_BASE);
++		vdpu_write_relaxed(vpu, ctx->mpeg4_dec.mv.dma, VDPU_REG_DIR_MV_BASE);
++	}
++
++	vdpu_write_relaxed(vpu, vb2_dma_contig_plane_dma_addr(&src_buf->vb2_buf, 0),
++			   VDPU_REG_RLC_VLC_BASE);
++	current_addr = vb2_dma_contig_plane_dma_addr(&dst_buf->vb2_buf, 0);
++	vdpu_write_relaxed(vpu, current_addr, VDPU_REG_DEC_OUT_BASE);
++	rockchip_vpu2_mpeg4_dec_set_refs(vpu, ctx, vop, current_addr, h263);
++
++	hantro_end_prepare_run(ctx);
++
++	reg = vdpu_read(vpu, VDPU_SWREG(57)) | VDPU_REG_DEC_E(1);
++	vdpu_write(vpu, reg, VDPU_SWREG(57));
++
++	return 0;
++}
+diff --git a/drivers/media/platform/verisilicon/rockchip_vpu_hw.c b/drivers/media/platform/verisilicon/rockchip_vpu_hw.c
+index 0916e38..f4009f9 100644
+--- a/drivers/media/platform/verisilicon/rockchip_vpu_hw.c
++++ b/drivers/media/platform/verisilicon/rockchip_vpu_hw.c
+@@ -8,6 +8,8 @@
+ 
+ #include <linux/clk.h>
+ 
++#include <media/mpeg4-ctrls.h>
++
+ #include "hantro.h"
+ #include "hantro_jpeg.h"
+ #include "hantro_g1_regs.h"
+@@ -293,7 +295,7 @@ static const struct hantro_fmt rk3528_vpu_dec_fmts[] = {
+ 			.max_width = FMT_FHD_WIDTH,
+ 			.step_width = MB_DIM,
+ 			.min_height = FMT_MIN_HEIGHT,
+-			.max_height = FMT_FHD_HEIGHT,
++			.max_height = FMT_16CIF_HEIGHT,
+ 			.step_height = MB_DIM,
+ 		},
+ 	},
+@@ -336,6 +338,19 @@ static const struct hantro_fmt rk3528_vpu_dec_fmts[] = {
+ 			.step_height = MB_DIM,
+ 		},
+ 	},
++	{
++		.fourcc = V4L2_PIX_FMT_MPEG4_SLICE,
++		.codec_mode = HANTRO_MODE_MPEG4_DEC,
++		.max_depth = 2,
++		.frmsize = {
++			.min_width = FMT_MIN_WIDTH,
++			.max_width = FMT_FHD_WIDTH,
++			.step_width = MB_DIM,
++			.min_height = FMT_MIN_HEIGHT,
++			.max_height = FMT_16CIF_HEIGHT,
++			.step_height = MB_DIM,
++		},
++	},
+ };
+ 
+ static const struct hantro_fmt rk3399_vpu_dec_fmts[] = {
+@@ -650,6 +665,12 @@ static const struct hantro_codec_ops rk3399_vpu_codec_ops[] = {
+ 		.init = hantro_vp8_dec_init,
+ 		.exit = hantro_vp8_dec_exit,
+ 	},
++	[HANTRO_MODE_MPEG4_DEC] = {
++		.run = rockchip_vpu2_mpeg4_dec_run,
++		.reset = rockchip_vpu2_dec_reset,
++		.init = hantro_mpeg4_dec_init,
++		.exit = hantro_mpeg4_dec_exit,
++	},
+ };
+ 
+ static const struct hantro_codec_ops rk3568_vepu_codec_ops[] = {
+@@ -830,7 +851,7 @@ const struct hantro_variant rk3528_vpu_variant = {
+ 	.dec_offset = 0x400,
+ 	.dec_fmts = rk3528_vpu_dec_fmts,
+ 	.num_dec_fmts = ARRAY_SIZE(rk3528_vpu_dec_fmts),
+-	.codec = HANTRO_MPEG2_DECODER |
++	.codec = HANTRO_MPEG2_DECODER | HANTRO_MPEG4_DECODER |
+ 		 HANTRO_VP8_DECODER | HANTRO_H264_DECODER,
+ 	.codec_ops = rk3399_vpu_codec_ops,
+ 	.irqs = rockchip_vdpu2_irqs,

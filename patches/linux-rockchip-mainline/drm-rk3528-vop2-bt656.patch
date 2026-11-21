@@ -1,0 +1,78 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] drm/rockchip: vop2: route the RK3528 RGB interface to BT.656
+
+On the RK3528 the RGB interface only feeds the BT.656 decoder of the
+CVBS TV encoder. Enable the BT.656 encoder with it, set its clock
+polarity and Y/C order, and run the port's dclk at four times the
+double-clocked mode, as the Rockchip BSP does: 108 MHz for 720x576i and
+720x480i, from which the CRU derives the encoder's 27 MHz and 108 MHz
+clocks. The endpoint is ROCKCHIP_VOP2_EP_RGB0.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.h b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.h
+--- a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.h
++++ b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.h
+@@ -695,6 +695,11 @@ enum dst_factor_mode {
+ #define RK3568_SYS_DSP_INFACE_EN_HDMI			BIT(1)
+ #define RK3568_SYS_DSP_INFACE_EN_RGB			BIT(0)
+ 
++#define RK3528_SYS_DSP_INFACE_EN_BT656			BIT(7)
++
++#define RK3528_DSP_IF_CTRL__BT656_DCLK_POL		BIT(6)
++#define RK3528_DSP_IF_CTRL__BT656_YC_SWAP		BIT(5)
++
+ #define RK3588_SYS_DSP_INFACE_EN_MIPI1_MUX		GENMASK(22, 21)
+ #define RK3588_SYS_DSP_INFACE_EN_MIPI0_MUX		GENMASK(20, 20)
+ #define RK3588_SYS_DSP_INFACE_EN_EDP_HDMI1_MUX		GENMASK(19, 18)
+diff --git a/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c b/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c
+--- a/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c
++++ b/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c
+@@ -2501,12 +2501,47 @@ static const struct vop2_ops rk3588_vop_ops = {
+ 	.setup_overlay = rk3568_vop2_setup_overlay,
+ };
+ 
++/*
++ * The RGB interface of the RK3528 only feeds the BT.656 decoder of the TVE.
++ * Its modes are double-clocked, and the TVE samples at four times that.
++ */
++#define RK3528_BT656_DCLK_UPSAMPLE	4
++
++static unsigned long rk3528_set_bt656_mux(struct vop2_video_port *vp, u32 polflags)
++{
++	struct vop2 *vop2 = vp->vop2;
++	struct drm_display_mode *mode = &vp->crtc.state->adjusted_mode;
++	u32 die, dic, dip;
++
++	die = vop2_readl(vop2, RK3568_DSP_IF_EN);
++	die &= ~RK3568_SYS_DSP_INFACE_EN_RGB_MUX;
++	die |= RK3568_SYS_DSP_INFACE_EN_RGB | RK3528_SYS_DSP_INFACE_EN_BT656 |
++	       FIELD_PREP(RK3568_SYS_DSP_INFACE_EN_RGB_MUX, vp->id);
++
++	dic = vop2_readl(vop2, RK3568_DSP_IF_CTRL);
++	dic &= ~(RK3528_DSP_IF_CTRL__BT656_DCLK_POL | RK3528_DSP_IF_CTRL__BT656_YC_SWAP);
++	if (!(polflags & POLFLAG_DCLK_INV))
++		dic |= RK3528_DSP_IF_CTRL__BT656_DCLK_POL;
++
++	dip = vop2_readl(vop2, RK3568_DSP_IF_POL);
++	dip |= RK3568_DSP_IF_POL__CFG_DONE_IMD;
++
++	vop2_writel(vop2, RK3568_DSP_IF_EN, die);
++	vop2_writel(vop2, RK3568_DSP_IF_CTRL, dic);
++	vop2_writel(vop2, RK3568_DSP_IF_POL, dip);
++
++	return mode->crtc_clock * 1000LL * RK3528_BT656_DCLK_UPSAMPLE;
++}
++
+ static unsigned long rk3528_set_intf_mux(struct vop2_video_port *vp, int id, u32 polflags)
+ {
+ 	struct vop2 *vop2 = vp->vop2;
+ 	unsigned long clock;
+ 	u32 dip;
+ 
++	if (id == ROCKCHIP_VOP2_EP_RGB0)
++		return rk3528_set_bt656_mux(vp, polflags);
++
+ 	clock = rk3568_set_intf_mux(vp, id, polflags);
+ 	if (!clock)
+ 		return 0;

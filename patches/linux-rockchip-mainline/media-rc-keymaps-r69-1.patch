@@ -1,0 +1,97 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] media: rc: keymaps: Add the R69-1 remote
+
+The R69-1's stock remote, NEC, address 0x05. Map each button as
+its label reads: the four app keys as the colour keys, and the mouse
+button, which toggles a pointer in the vendor's software, as
+KEY_TOUCHPAD_TOGGLE for a pointer mode to follow.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/drivers/media/rc/keymaps/Makefile b/drivers/media/rc/keymaps/Makefile
+--- a/drivers/media/rc/keymaps/Makefile
++++ b/drivers/media/rc/keymaps/Makefile
+@@ -104,6 +104,7 @@ obj-$(CONFIG_RC_MAP) += \
+ 			rc-proteus-2309.o \
+ 			rc-purpletv.o \
+ 			rc-pv951.o \
++			rc-r69-1.o \
+ 			rc-rc6-mce.o \
+ 			rc-real-audio-220-32-keys.o \
+ 			rc-reddo.o \
+diff --git a/drivers/media/rc/keymaps/rc-r69-1.c b/drivers/media/rc/keymaps/rc-r69-1.c
+new file mode 100644
+--- /dev/null
++++ b/drivers/media/rc/keymaps/rc-r69-1.c
+@@ -0,0 +1,60 @@
++// SPDX-License-Identifier: GPL-2.0+
++
++#include <media/rc-map.h>
++#include <linux/module.h>
++
++/*
++ * Keymap for the R69-1's stock remote. The app keys,
++ * YouTube, Netflix, Prime Video and Google Play, are the colour keys. The
++ * mouse button toggles a pointer mode, as the vendor's software does with it.
++ */
++
++static struct rc_map_table r69_1[] = {
++	{ 0x05f7, KEY_POWER },
++	{ 0x05f6, KEY_MUTE },
++	{ 0x0504, KEY_RED },
++	{ 0x054b, KEY_GREEN },
++	{ 0x0514, KEY_YELLOW },
++	{ 0x054c, KEY_BLUE },
++	{ 0x05fd, KEY_VOLUMEUP },
++	{ 0x05fc, KEY_VOLUMEDOWN },
++	{ 0x05ff, KEY_CHANNELUP },
++	{ 0x05fe, KEY_CHANNELDOWN },
++	{ 0x05d2, KEY_HOMEPAGE },
++	{ 0x05e5, KEY_BACK },
++	{ 0x05e4, KEY_BACKSPACE },
++	{ 0x05ba, KEY_UP },
++	{ 0x05b9, KEY_DOWN },
++	{ 0x05b8, KEY_LEFT },
++	{ 0x05b7, KEY_RIGHT },
++	{ 0x05bb, KEY_OK },
++	{ 0x05b5, KEY_MENU },
++	{ 0x054d, KEY_CONFIG },
++	{ 0x055b, KEY_SEARCH },
++	{ 0x05d0, KEY_TOUCHPAD_TOGGLE },
++};
++
++static struct rc_map_list r69_1_map = {
++	.map = {
++		.scan     = r69_1,
++		.size     = ARRAY_SIZE(r69_1),
++		.rc_proto = RC_PROTO_NEC,
++		.name     = RC_MAP_R69_1,
++	}
++};
++
++static int __init init_rc_map_r69_1(void)
++{
++	return rc_map_register(&r69_1_map);
++}
++
++static void __exit exit_rc_map_r69_1(void)
++{
++	rc_map_unregister(&r69_1_map);
++}
++
++module_init(init_rc_map_r69_1)
++module_exit(exit_rc_map_r69_1)
++
++MODULE_LICENSE("GPL");
++MODULE_DESCRIPTION("R69-1 remote controller keytable");
+diff --git a/include/media/rc-map.h b/include/media/rc-map.h
+--- a/include/media/rc-map.h
++++ b/include/media/rc-map.h
+@@ -307,6 +307,7 @@ struct rc_map *rc_map_get(const char *name);
+ #define RC_MAP_PROTEUS_2309              "rc-proteus-2309"
+ #define RC_MAP_PURPLETV                  "rc-purpletv"
+ #define RC_MAP_PV951                     "rc-pv951"
++#define RC_MAP_R69_1                     "rc-r69-1"
+ #define RC_MAP_RC6_MCE                   "rc-rc6-mce"
+ #define RC_MAP_REAL_AUDIO_220_32_KEYS    "rc-real-audio-220-32-keys"
+ #define RC_MAP_REDDO                     "rc-reddo"

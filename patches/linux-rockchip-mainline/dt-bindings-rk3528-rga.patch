@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Tue, 17 Nov 2026 23:54:52 -0500
+Subject: [PATCH] dt-bindings: media: rockchip-rga: Add RK3528 compatible
+
+The RK3528 has the RGA2E of the RK3568, on the RK3288's programming
+interface.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ Documentation/devicetree/bindings/media/rockchip-rga.yaml | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/Documentation/devicetree/bindings/media/rockchip-rga.yaml b/Documentation/devicetree/bindings/media/rockchip-rga.yaml
+index 7bd92f7..fc717e1 100644
+--- a/Documentation/devicetree/bindings/media/rockchip-rga.yaml
++++ b/Documentation/devicetree/bindings/media/rockchip-rga.yaml
+@@ -28,6 +28,7 @@ properties:
+       - items:
+           - enum:
+               - rockchip,rk3228-rga
++              - rockchip,rk3528-rga
+               - rockchip,rk3568-rga
+               - rockchip,rk3588-rga
+           - const: rockchip,rk3288-rga

@@ -1,0 +1,104 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] media: rockchip: rkvenc: Recover the core and its IOMMU after a timeout
+
+A job that never raises its interrupt is finished by the watchdog, but
+the core is left as it stopped: still on the bus, waiting on a write its
+IOMMU faulted, which keeps the IOMMU stalled. Every later job fails
+until a reboot. Stop the core through the variant's own clears, then
+attach and detach an empty domain, as rkvdec does on an error, so the
+IOMMU is reset and the next job runs. A core the clears leave busy is
+reset when its power domain goes down, behind the PMU's idle request; a
+CRU reset pulsed under a busy core hangs the bus.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ .../media/platform/rockchip/rkvenc/rkvenc.c   | 28 +++++++++++++++++++
+ .../media/platform/rockchip/rkvenc/rkvenc.h   |  1 +
+ 2 files changed, 29 insertions(+)
+
+diff --git a/drivers/media/platform/rockchip/rkvenc/rkvenc.c b/drivers/media/platform/rockchip/rkvenc/rkvenc.c
+index 00778e9..7957208 100644
+--- a/drivers/media/platform/rockchip/rkvenc/rkvenc.c
++++ b/drivers/media/platform/rockchip/rkvenc/rkvenc.c
+@@ -8,6 +8,7 @@
+ #include <linux/completion.h>
+ #include <linux/delay.h>
+ #include <linux/interrupt.h>
++#include <linux/iommu.h>
+ #include <linux/module.h>
+ #include <linux/platform_device.h>
+ #include <linux/pm_runtime.h>
+@@ -246,6 +247,22 @@ static irqreturn_t rkvenc_irq_thread(int irq, void *priv)
+ 	return IRQ_HANDLED;
+ }
+ 
++/*
++ * A core stuck on the bus keeps its IOMMU stalled: stop the core through its
++ * own clears, then attach and detach an empty domain, which resets the IOMMU
++ * and reloads the default domain's table. A core the clears leave busy is
++ * reset when its power domain goes down, behind the PMU's idle request.
++ */
++static void rkvenc_hw_reset(struct rkvenc_dev *dev)
++{
++	rkvenc_hw_recover(dev);
++
++	if (dev->empty_domain) {
++		iommu_attach_device(dev->empty_domain, dev->dev);
++		iommu_detach_device(dev->empty_domain, dev->dev);
++	}
++}
++
+ static void rkvenc_watchdog_work(struct work_struct *work)
+ {
+ 	struct rkvenc_dev *dev = container_of(to_delayed_work(work),
+@@ -263,6 +280,7 @@ static void rkvenc_watchdog_work(struct work_struct *work)
+ 	spin_unlock_irqrestore(&dev->irq_lock, flags);
+ 
+ 	dev_err(dev->dev, "RKVENC encode timed out\n");
++	rkvenc_hw_reset(dev);
+ 	rkvenc_finish_job(dev, ctx, VB2_BUF_STATE_ERROR);
+ }
+ 
+@@ -409,6 +427,12 @@ static int rkvenc_probe(struct platform_device *pdev)
+ 
+ 	pm_runtime_put(dev);
+ 
++	if (iommu_get_domain_for_dev(dev)) {
++		rkvenc->empty_domain = iommu_paging_domain_alloc(dev);
++		if (IS_ERR(rkvenc->empty_domain))
++			rkvenc->empty_domain = NULL;
++	}
++
+ 	ret = v4l2_device_register(dev, &rkvenc->v4l2_dev);
+ 	if (ret) {
+ 		dev_err(dev, "Failed to register V4L2 device\n");
+@@ -433,6 +457,8 @@ err_release_m2m:
+ err_unreg_v4l2:
+ 	v4l2_device_unregister(&rkvenc->v4l2_dev);
+ err_pm_disable:
++	if (rkvenc->empty_domain)
++		iommu_domain_free(rkvenc->empty_domain);
+ 	pm_runtime_disable(dev);
+ 	return ret;
+ }
+@@ -446,6 +472,8 @@ static void rkvenc_remove(struct platform_device *pdev)
+ 	v4l2_m2m_release(rkvenc->m2m_dev);
+ 	v4l2_device_unregister(&rkvenc->v4l2_dev);
+ 	pm_runtime_disable(&pdev->dev);
++	if (rkvenc->empty_domain)
++		iommu_domain_free(rkvenc->empty_domain);
+ }
+ 
+ static const struct of_device_id rkvenc_dt_match[] = {
+diff --git a/drivers/media/platform/rockchip/rkvenc/rkvenc.h b/drivers/media/platform/rockchip/rkvenc/rkvenc.h
+index df5905a..95b7ce8 100644
+--- a/drivers/media/platform/rockchip/rkvenc/rkvenc.h
++++ b/drivers/media/platform/rockchip/rkvenc/rkvenc.h
+@@ -65,6 +65,7 @@ struct rkvenc_dev {
+ 	struct completion sclr_done;
+ 	u32 irq_sta;
+ 	struct delayed_work watchdog;
++	struct iommu_domain *empty_domain;
+ 	bool job_running;
+ 	struct rkvenc_ctx *job_ctx;
+ 	u32 max_width;

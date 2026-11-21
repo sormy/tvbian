@@ -1,0 +1,27 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] media: rkvdec: Allow cache hints on the capture queue
+
+A CPU that reads decoded pictures, to convert, scale or hash them,
+reads them uncached: dma-contig allocates the capture queue coherent,
+and mapping a 4K picture for the CPU takes about 14 ms on the RK3528.
+Let userspace ask for non-coherent buffers with
+V4L2_MEMORY_FLAG_NON_COHERENT; videobuf2 then syncs them for the CPU
+when they are dequeued and for the device when they are queued.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ .../platform/rockchip/rkvdec/rkvdec.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec.c b/drivers/media/platform/rockchip/rkvdec/rkvdec.c
+index dd0f1b5..7899b68 100644
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec.c
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec.c
+@@ -1379,6 +1379,7 @@ static int rkvdec_queue_init(void *priv,
+ 
+ 	dst_vq->bidirectional = true;
+ 	dst_vq->mem_ops = &vb2_dma_contig_memops;
++	dst_vq->allow_cache_hints = 1;
+ 	dst_vq->dma_attrs = DMA_ATTR_ALLOC_SINGLE_PAGES |
+ 			    DMA_ATTR_NO_KERNEL_MAPPING;
+ 	dst_vq->type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;

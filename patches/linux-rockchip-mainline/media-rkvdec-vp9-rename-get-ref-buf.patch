@@ -1,0 +1,164 @@
+From patchwork Sun Jul 26 20:25:34 2026
+Content-Type: text/plain; charset="utf-8"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+X-Patchwork-Submitter: Venkata Atchuta Bheemeswara Sarma Darbha
+ <vdarbha0473@gmail.com>
+X-Patchwork-Id: 14711508
+Return-Path: 
+ <linux-rockchip-bounces+linux-rockchip=archiver.kernel.org@lists.infradead.org>
+X-Spam-Checker-Version: SpamAssassin 3.4.0 (2014-02-07) on
+	aws-us-west-2-korg-lkml-1.web.codeaurora.org
+Received: from bombadil.infradead.org (bombadil.infradead.org
+ [198.137.202.133])
+	(using TLSv1.2 with cipher ECDHE-RSA-AES256-GCM-SHA384 (256/256 bits))
+	(No client certificate requested)
+	by smtp.lore.kernel.org (Postfix) with ESMTPS id 9EA83C53209
+	for <linux-rockchip@archiver.kernel.org>;
+ Sun, 26 Jul 2026 20:28:53 +0000 (UTC)
+DKIM-Signature: v=1; a=rsa-sha256; q=dns/txt; c=relaxed/relaxed;
+	d=lists.infradead.org; s=bombadil.20210309; h=Sender:
+	Content-Transfer-Encoding:Content-Type:List-Subscribe:List-Help:List-Post:
+	List-Archive:List-Unsubscribe:List-Id:Cc:To:In-Reply-To:References:Message-Id
+	:MIME-Version:Subject:Date:From:Reply-To:Content-ID:Content-Description:
+	Resent-Date:Resent-From:Resent-Sender:Resent-To:Resent-Cc:Resent-Message-ID:
+	List-Owner; bh=5upgeel3O2T+8dboGpy92KLogcG5hEdNWjDcyZJyERU=; b=NMqKx6NV9HsCRb
+	z+EG8sLxY+5UxxdHOveIil9r7eMk6zfOMAc6huDfLrW4chg2V3Apaq3eSwEqrnFRMe956v0HeUWXQ
+	Rt9ANZSbcukPBvW3/RaC8eZd4y9VrqlsgBjAPTH+o328ayXVVsv+u++ghT73KTwRKg9oKarC/Po2k
+	jCLY7SDAHITzmBOecCsZJu6Zy0kktcONy9aPhf/4s8Ry2cbQOSwcVlj24N2onHdFv57n+nJfSQKyP
+	NqEz6mk3TZUct0ERdajuz+hzVhU1rvNqXusXhGLtWJlfflk6yID28EbC6JshGGMv91P3qkogPwNhI
+	0EFKWzLHuPvwYV7HBZXw==;
+Received: from localhost ([::1] helo=bombadil.infradead.org)
+	by bombadil.infradead.org with esmtp (Exim 4.99.1 #2 (Red Hat Linux))
+	id 1wo5Sr-00000001b0U-3OLD;
+	Sun, 26 Jul 2026 20:28:49 +0000
+Received: from mail-pj2-x03.google.com ([2607:f8b0:4864:39::3])
+	by bombadil.infradead.org with esmtps (Exim 4.99.1 #2 (Red Hat Linux))
+	id 1wo5Sn-00000001axF-2YQs
+	for linux-rockchip@lists.infradead.org;
+	Sun, 26 Jul 2026 20:28:47 +0000
+Received: by mail-pj2-x03.google.com with SMTP id
+ 98e67ed59e1d1-381072761d4so1424696a91.0
+        for <linux-rockchip@lists.infradead.org>;
+ Sun, 26 Jul 2026 13:28:45 -0700 (PDT)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=gmail.com; s=20251104; t=1785097725; x=1785702525;
+ darn=lists.infradead.org;
+        h=cc:to:in-reply-to:references:message-id:content-transfer-encoding
+         :content-type:mime-version:subject:date:from:from:to:cc:subject:date
+         :message-id:reply-to:content-type;
+        bh=e73x8QdchDSqnuT6U4OkhZ4rgK0OXUwrGO2cGkRXz7o=;
+        b=GgzFh+h/Px7VcvvY4ZbzBKPh9LKDvkqxTwXbAqd5NtFQPH/5w8+PXwjqQKrlEK6HW/
+         zOtAjpyELex40bDboDXe/bI6fF57giVrsZfiXBPnFqBFPz4JWYlWgR6dLtbUN7xdE/HY
+         7gEdO/o3h/kMrA8w8vqCTqeorMRbc0PdrXi6jsWX94QGld1Ij5hl3sXzZsOyV1M9h04u
+         hfhcJdvyHQZHH0KrDJC50dsefVgR9eJEs8eKscwZ4fMjT51crkcfcWdXYLgGZgkgRdQ6
+         Onaqm3y5pWCqOlwpDqMuOANdw9AvGBAlraCIdpT27B6R9HP7pv/oGd3Gnu8bj7mRm19T
+         30Aw==
+X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=1e100.net; s=20251104; t=1785097725; x=1785702525;
+        h=cc:to:in-reply-to:references:message-id:content-transfer-encoding
+         :content-type:mime-version:subject:date:from:x-gm-gg
+         :x-gm-message-state:from:to:cc:subject:date:message-id:reply-to
+         :content-type;
+        bh=e73x8QdchDSqnuT6U4OkhZ4rgK0OXUwrGO2cGkRXz7o=;
+        b=jC5txm55viLNWorc26cDihusvJ2ntjOOma9GcWc1+gAWltApkghc1pqROt9O6ZaSq5
+         fwInj9/WC9M1RuQnRIEb6hBH33LxO15smFQFwfV7BWfoZuvIcIksu4o6ON50mVgVNTn7
+         3sWGTpHjL8kdT81M/M8hO2U4QVaj1OP5yrLLuAqCBomkkKfuhdaTSiYFOfa73Sh6xa/o
+         j0QxscUa+yuUBvGNu1M/jMQP7uTQiYO0SL7mliOrz9+KVg5j5vh7ZZZjWqRnmCV9Yorg
+         AcTS0pW83KnhO163bFpE+df/VnZarTW5sNlkJ6PFVJBA9gfahSo8kHYL+A7iOxt5Lhy/
+         lc1A==
+X-Forwarded-Encrypted: i=1;
+ AHgh+RoOj05EBcXriIqmBzwKAaSyWrsi1cZ71pARGHhfx+/4vObGetUtxCmxxQ1ccEkw37WKOwy7joiYXkSUAqqLYg==@lists.infradead.org
+X-Gm-Message-State: AOJu0YxE1/ZJDVIon6d1pVZDizIMevMLFOGUUDMMFyhtxdF2PKnPSbZZ
+	X0lwbE5W+05ItuKo6HCsQxNpAP5viYwHeShc5U3MrS7D/FBQm/GA/xJTFoDmVWQYwsKQoA==
+X-Gm-Gg: AR+sD13pcQkLHMroJLD1zC0TBKcGgG5O8Q5zJ9N4GMaPgZlnYiJpH5c890ZfbNWJyZs
+	P7XHOK9BmO7uiC3r7nYsN5/Gl325bEAWlvooG5fI+DcMOke3w20a2HuwCQcAYshoBULKKLGeByr
+	BThdh/RW0B1HZ+G04jSEir0qDgDsjwwKfyJmrO1UDqoYRywonSZdVKeLhA67Yk6O5UHkJouN9Uw
+	WhX7eY+l82Zbl1wexefiWXprFaSPJQC9nBMMabmUUgyDp9IzxCdWi2JPqFWbQxK2MMiWrsazZsj
+	7sDmUj+neKy+0aCPx4WhBbNBQ14cX6LRlb82ZZOi3dW8mxk364m5FonF9DbLssLoGjzncEBjaVZ
+	Wgh/nwkUybwLYOP4BmZWmJSAnIBlzKcy+YNNLTf6ITWDKWKjEELEcf6K7NMgPL6GvqyJP9p44T6
+	Ns0kwCLP+eI2YEgG9SPxf4VtEihHeSeJBCI5zNrbB9Gs0VsV3i
+X-Received: by 2002:a17:90a:ec85:b0:38d:dfd1:7a8 with SMTP id
+ 98e67ed59e1d1-38f293d3c03mr5635996a91.2.1785097724483;
+        Sun, 26 Jul 2026 13:28:44 -0700 (PDT)
+Received: from [127.0.1.1] ([2601:647:4d7d:1e60:c46f:4bb9:6cdd:73bd])
+        by smtp.gmail.com with ESMTPSA id
+ a92af1059eb24-13e6461ef84sm132697c88.14.2026.07.26.13.28.43
+        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);
+        Sun, 26 Jul 2026 13:28:44 -0700 (PDT)
+From: Venkata Atchuta Bheemeswara Sarma Darbha <vdarbha0473@gmail.com>
+Date: Sun, 26 Jul 2026 15:25:34 -0500
+Subject: [PATCH 1/4] media: rkvdec: vp9: Changing get_ref_buf function name
+ to get_ref_buf_vp9
+MIME-Version: 1.0
+Message-Id: <20260726-b4-add-rkvdec2-vp9-vdpu381-v1-1-180fb2d1f10c@gmail.com>
+References: <20260726-b4-add-rkvdec2-vp9-vdpu381-v1-0-180fb2d1f10c@gmail.com>
+In-Reply-To: <20260726-b4-add-rkvdec2-vp9-vdpu381-v1-0-180fb2d1f10c@gmail.com>
+To: Detlev Casanova <detlev.casanova@collabora.com>,
+ Ezequiel Garcia <ezequiel@vanguardiasur.com.ar>,
+ Mauro Carvalho Chehab <mchehab@kernel.org>,
+ Heiko Stuebner <heiko@sntech.de>
+Cc: linux-media@vger.kernel.org, linux-rockchip@lists.infradead.org,
+ linux-arm-kernel@lists.infradead.org, linux-kernel@vger.kernel.org,
+ Nicolas Dufresne <nicolas.dufresne@collabora.com>,
+ Venkata Atchuta Bheemeswara Sarma Darbha <vdarbha0473@gmail.com>
+X-Mailer: b4 0.15.2
+X-CRM114-Version: 20100106-BlameMichelson ( TRE 0.9.0 (BSD) ) MR-646709E3 
+X-CRM114-CacheID: sfid-20260726_132845_653429_493FEF96 
+X-CRM114-Status: GOOD (  12.00  )
+X-BeenThere: linux-rockchip@lists.infradead.org
+X-Mailman-Version: 2.1.34
+Precedence: list
+List-Id: Upstream kernel work for Rockchip platforms
+ <linux-rockchip.lists.infradead.org>
+List-Unsubscribe: <http://lists.infradead.org/mailman/options/linux-rockchip>,
+ <mailto:linux-rockchip-request@lists.infradead.org?subject=unsubscribe>
+List-Archive: <http://lists.infradead.org/pipermail/linux-rockchip/>
+List-Post: <mailto:linux-rockchip@lists.infradead.org>
+List-Help: <mailto:linux-rockchip-request@lists.infradead.org?subject=help>
+List-Subscribe: <http://lists.infradead.org/mailman/listinfo/linux-rockchip>,
+ <mailto:linux-rockchip-request@lists.infradead.org?subject=subscribe>
+Sender: "Linux-rockchip" <linux-rockchip-bounces@lists.infradead.org>
+Errors-To: 
+ linux-rockchip-bounces+linux-rockchip=archiver.kernel.org@lists.infradead.org
+
+This change is in preparation for the upcoming commits and to denote
+that this function is not to be confused with the similar function
+found in rkvdec's hevc.
+
+Signed-off-by: Venkata Atchuta Bheemeswara Sarma Darbha <vdarbha0473@gmail.com>
+---
+ drivers/media/platform/rockchip/rkvdec/rkvdec-vp9.c | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec-vp9.c b/drivers/media/platform/rockchip/rkvdec/rkvdec-vp9.c
+index 2751f5396ee8..d4243ce230c7 100644
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec-vp9.c
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec-vp9.c
+@@ -349,7 +349,7 @@ static void init_probs(struct rkvdec_ctx *ctx,
+ }
+ 
+ static struct rkvdec_decoded_buffer *
+-get_ref_buf(struct rkvdec_ctx *ctx, struct vb2_v4l2_buffer *dst, u64 timestamp)
++get_ref_buf_vp9(struct rkvdec_ctx *ctx, struct vb2_v4l2_buffer *dst, u64 timestamp)
+ {
+ 	struct v4l2_m2m_ctx *m2m_ctx = ctx->fh.m2m_ctx;
+ 	struct vb2_queue *cap_q = &m2m_ctx->cap_q_ctx.q;
+@@ -489,12 +489,12 @@ static void config_registers(struct rkvdec_ctx *ctx,
+ 
+ 	dec_params = run->decode_params;
+ 	dst = vb2_to_rkvdec_decoded_buf(&run->base.bufs.dst->vb2_buf);
+-	ref_bufs[0] = get_ref_buf(ctx, &dst->base.vb, dec_params->last_frame_ts);
+-	ref_bufs[1] = get_ref_buf(ctx, &dst->base.vb, dec_params->golden_frame_ts);
+-	ref_bufs[2] = get_ref_buf(ctx, &dst->base.vb, dec_params->alt_frame_ts);
++	ref_bufs[0] = get_ref_buf_vp9(ctx, &dst->base.vb, dec_params->last_frame_ts);
++	ref_bufs[1] = get_ref_buf_vp9(ctx, &dst->base.vb, dec_params->golden_frame_ts);
++	ref_bufs[2] = get_ref_buf_vp9(ctx, &dst->base.vb, dec_params->alt_frame_ts);
+ 
+ 	if (vp9_ctx->last.valid)
+-		last = get_ref_buf(ctx, &dst->base.vb, vp9_ctx->last.timestamp);
++		last = get_ref_buf_vp9(ctx, &dst->base.vb, vp9_ctx->last.timestamp);
+ 	else
+ 		last = dst;
+ 
+

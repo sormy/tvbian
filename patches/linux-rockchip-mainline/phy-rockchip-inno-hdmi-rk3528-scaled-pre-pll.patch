@@ -1,0 +1,199 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] phy: rockchip: inno-hdmi: Scale the RK3528 pre-PLL to any pixel clock
+
+The pre-PLL takes its settings from a table of pixel clocks, and a rate
+the table lacks fails determine_rate, so the mode is dropped: a 3:2
+panel's native 2256x1504 at 235.7 MHz never reaches the mode list.
+
+On the RK3528, take such a rate's dividers from the table entry nearest
+to it whose TMDS clock is its pixel clock, and scale the VCO through the
+fractional feedback divider. The pixel and TMDS clocks both divide the
+VCO, so both land on the rate. Refuse a VCO outside the range the
+table's entries span.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+--- a/drivers/phy/rockchip/phy-rockchip-inno-hdmi.c
++++ b/drivers/phy/rockchip/phy-rockchip-inno-hdmi.c
+@@ -12,6 +12,7 @@
+ #include <linux/io.h>
+ #include <linux/interrupt.h>
+ #include <linux/kernel.h>
++#include <linux/math64.h>
+ #include <linux/module.h>
+ #include <linux/nvmem-consumer.h>
+ #include <linux/of.h>
+@@ -226,6 +227,22 @@
+ 
+ struct inno_hdmi_phy_drv_data;
+ 
++struct pre_pll_config {
++	unsigned long pixclock;
++	unsigned long tmdsclock;
++	u8 prediv;
++	u16 fbdiv;
++	u8 tmds_div_a;
++	u8 tmds_div_b;
++	u8 tmds_div_c;
++	u8 pclk_div_a;
++	u8 pclk_div_b;
++	u8 pclk_div_c;
++	u8 pclk_div_d;
++	u8 vco_div_5_en;
++	u32 fracdiv;
++};
++
+ struct inno_hdmi_phy {
+ 	struct device *dev;
+ 	struct regmap *regmap;
+@@ -246,22 +263,7 @@
+ 	unsigned long pixclock;
+ 	unsigned long tmdsclock;
+ 	unsigned long opts_tmds_char_rate;
+-};
+-
+-struct pre_pll_config {
+-	unsigned long pixclock;
+-	unsigned long tmdsclock;
+-	u8 prediv;
+-	u16 fbdiv;
+-	u8 tmds_div_a;
+-	u8 tmds_div_b;
+-	u8 tmds_div_c;
+-	u8 pclk_div_a;
+-	u8 pclk_div_b;
+-	u8 pclk_div_c;
+-	u8 pclk_div_d;
+-	u8 vco_div_5_en;
+-	u32 fracdiv;
++	struct pre_pll_config scaled_cfg;
+ };
+ 
+ struct post_pll_config {
+@@ -289,6 +291,7 @@
+ 	const struct inno_hdmi_phy_ops	*ops;
+ 	const struct clk_ops		*clk_ops;
+ 	const struct phy_config		*phy_cfg_table;
++	bool				scales_pre_pll;
+ };
+ 
+ static const struct pre_pll_config pre_pll_cfg_table[] = {
+@@ -656,10 +659,56 @@
+  * cannot do full validation of the configuration. Instead, we do a simple check
+  * that the pre-pll table contains an entry for the requested TMDS char rate.
+  */
++/* The VCO in units of the reference over 2^24: the feedback divider over the pre-divider */
++static u64 inno_hdmi_phy_pre_pll_vco(const struct pre_pll_config *cfg)
++{
++	return div_u64(((u64)cfg->fbdiv << 24) + cfg->fracdiv, cfg->prediv);
++}
++
++/*
++ * A pixel clock the table lacks, with TMDS at the same rate: the dividers of
++ * its nearest such entry, the VCO scaled through the fractional feedback
++ * divider, within the VCO range the table's entries span.
++ */
++static int inno_hdmi_phy_scale_pre_pll(unsigned long rate,
++				       struct pre_pll_config *scaled)
++{
++	const struct pre_pll_config *cfg, *near = NULL;
++	u64 vco, vco_min = U64_MAX, vco_max = 0, fb;
++
++	for (cfg = pre_pll_cfg_table; cfg->pixclock; cfg++) {
++		if (cfg->tmdsclock != cfg->pixclock || cfg->vco_div_5_en)
++			continue;
++		vco = inno_hdmi_phy_pre_pll_vco(cfg);
++		vco_min = min(vco_min, vco);
++		vco_max = max(vco_max, vco);
++		if (!near || abs_diff(cfg->pixclock, rate) < abs_diff(near->pixclock, rate))
++			near = cfg;
++	}
++	if (!near)
++		return -EINVAL;
++
++	fb = mul_u64_u32_div(((u64)near->fbdiv << 24) + near->fracdiv, rate,
++			     near->pixclock);
++	vco = div_u64(fb, near->prediv);
++	if (vco < vco_min || vco > vco_max)
++		return -EINVAL;
++
++	*scaled = *near;
++	scaled->pixclock = rate;
++	scaled->tmdsclock = rate;
++	scaled->fbdiv = fb >> 24;
++	scaled->fracdiv = fb & GENMASK(23, 0);
++
++	return 0;
++}
++
+ static int inno_hdmi_phy_validate(struct phy *phy, enum phy_mode mode,
+ 				  int submode, union phy_configure_opts *opts)
+ {
++	struct inno_hdmi_phy *inno = phy_get_drvdata(phy);
+ 	const struct pre_pll_config *cfg = pre_pll_cfg_table;
++	struct pre_pll_config scaled;
+ 	unsigned long tmdsclock;
+ 
+ 	if (!(mode == PHY_MODE_HDMI && submode == PHY_HDMI_MODE_TMDS))
+@@ -676,6 +725,9 @@
+ 		if (cfg->tmdsclock == tmdsclock)
+ 			return 0;
+ 
++	if (inno->plat_data->scales_pre_pll)
++		return inno_hdmi_phy_scale_pre_pll(tmdsclock, &scaled);
++
+ 	return -EINVAL;
+ }
+ 
+@@ -794,10 +846,14 @@
+ 		if (cfg->pixclock == rate && cfg->tmdsclock == tmdsclock)
+ 			break;
+ 
+-	if (cfg->pixclock == 0)
+-		return ERR_PTR(-EINVAL);
++	if (cfg->pixclock)
++		return cfg;
+ 
+-	return cfg;
++	if (inno->plat_data->scales_pre_pll && tmdsclock == rate &&
++	    !inno_hdmi_phy_scale_pre_pll(rate, &inno->scaled_cfg))
++		return &inno->scaled_cfg;
++
++	return ERR_PTR(-EINVAL);
+ }
+ 
+ static int inno_hdmi_phy_rk3228_clk_is_prepared(struct clk_hw *hw)
+@@ -1134,13 +1190,24 @@
+ 	return ret;
+ }
+ 
++static int inno_hdmi_phy_rk3528_clk_determine_rate(struct clk_hw *hw,
++						   struct clk_rate_request *req)
++{
++	struct pre_pll_config scaled;
++
++	if (!inno_hdmi_phy_rk3328_clk_determine_rate(hw, req))
++		return 0;
++
++	return inno_hdmi_phy_scale_pre_pll(req->rate, &scaled);
++}
++
+ /* Same pre-PLL as RK3328, just a different power-up sequence */
+ static const struct clk_ops inno_hdmi_phy_rk3528_clk_ops = {
+ 	.prepare = inno_hdmi_phy_rk3328_clk_prepare,
+ 	.unprepare = inno_hdmi_phy_rk3328_clk_unprepare,
+ 	.is_prepared = inno_hdmi_phy_rk3328_clk_is_prepared,
+ 	.recalc_rate = inno_hdmi_phy_rk3328_clk_recalc_rate,
+-	.determine_rate = inno_hdmi_phy_rk3328_clk_determine_rate,
++	.determine_rate = inno_hdmi_phy_rk3528_clk_determine_rate,
+ 	.set_rate = inno_hdmi_phy_rk3528_clk_set_rate,
+ };
+ 
+@@ -1571,6 +1638,7 @@
+ 	.ops = &rk3528_hdmi_phy_ops,
+ 	.clk_ops = &inno_hdmi_phy_rk3528_clk_ops,
+ 	.phy_cfg_table = rk3528_phy_cfg,
++	.scales_pre_pll = true,
+ };
+ 
+ static const struct regmap_config inno_hdmi_phy_regmap_config = {

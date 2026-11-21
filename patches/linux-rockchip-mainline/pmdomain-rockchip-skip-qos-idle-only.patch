@@ -1,0 +1,170 @@
+From patchwork Tue Mar 31 18:02:22 2026
+Content-Type: text/plain; charset="utf-8"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+X-Patchwork-Submitter: Daniel Bozeman <daniel@orb.net>
+X-Patchwork-Id: 14505197
+Return-Path: 
+ <linux-rockchip-bounces+linux-rockchip=archiver.kernel.org@lists.infradead.org>
+X-Spam-Checker-Version: SpamAssassin 3.4.0 (2014-02-07) on
+	aws-us-west-2-korg-lkml-1.web.codeaurora.org
+Received: from bombadil.infradead.org (bombadil.infradead.org
+ [198.137.202.133])
+	(using TLSv1.2 with cipher ECDHE-RSA-AES256-GCM-SHA384 (256/256 bits))
+	(No client certificate requested)
+	by smtp.lore.kernel.org (Postfix) with ESMTPS id A4DF3FF60F4
+	for <linux-rockchip@archiver.kernel.org>;
+ Tue, 31 Mar 2026 18:02:56 +0000 (UTC)
+DKIM-Signature: v=1; a=rsa-sha256; q=dns/txt; c=relaxed/relaxed;
+	d=lists.infradead.org; s=bombadil.20210309; h=Sender:
+	Content-Transfer-Encoding:Content-Type:List-Subscribe:List-Help:List-Post:
+	List-Archive:List-Unsubscribe:List-Id:MIME-Version:Message-ID:Date:Subject:Cc
+	:To:From:Reply-To:Content-ID:Content-Description:Resent-Date:Resent-From:
+	Resent-Sender:Resent-To:Resent-Cc:Resent-Message-ID:In-Reply-To:References:
+	List-Owner; bh=NursfaNkK3xIk9YKBhu7IEe+IZOigf/GF8oA0ImdC6o=; b=yUqsCj0YeVD4Ab
+	CmwzvDBLNMe0Iqyzk3yERum61UV/BGUsKoutPoLRA0WSq8RclHoWVUheZMhw7JrmMbzIAQCdOZmFQ
+	SLtkDareRkH/fbK5G82i9FQIA0SfCz6OVZ1BPnHSXmDi/gEdyoS5w3Hx0kFPBWS0qv5tR2XH9qZfm
+	+Hh9stpIpH7tZn2X5/KMpF50cxfJ9z7wxSqDbde6iiCHnmFjxt5LYy0ctnMXEFsyUzDCIpQkSiPvd
+	x74JgcPY8Ny414IO4fMIUhUXyVYvII+WIwBHG7o7RlQVqPBLUZZELjC2DWLHsCJVn4KaxlBff3Jdo
+	5/ibTbqrYXopndG7QJKA==;
+Received: from localhost ([::1] helo=bombadil.infradead.org)
+	by bombadil.infradead.org with esmtp (Exim 4.98.2 #2 (Red Hat Linux))
+	id 1w7dQP-0000000DOH5-3aBy;
+	Tue, 31 Mar 2026 18:02:49 +0000
+Received: from desiato.infradead.org ([2001:8b0:10b:1:d65d:64ff:fe57:4e05])
+	by bombadil.infradead.org with esmtps (Exim 4.98.2 #2 (Red Hat Linux))
+	id 1w7dQP-0000000DOGm-13jI
+	for linux-rockchip@bombadil.infradead.org;
+	Tue, 31 Mar 2026 18:02:49 +0000
+DKIM-Signature: v=1; a=rsa-sha256; q=dns/txt; c=relaxed/relaxed;
+	d=infradead.org; s=desiato.20200630; h=Content-Transfer-Encoding:MIME-Version
+	:Message-ID:Date:Subject:Cc:To:From:Sender:Reply-To:Content-Type:Content-ID:
+	Content-Description:In-Reply-To:References;
+	bh=sWjwEy9m9KvnFnDU5TKVoimvwkRXdMUl6feyPSdFKhg=; b=FBJFdQiqDueOskRDnkfdwrtsCK
+	yKA1AL5uqc9qQg95cKNDDo0ubcog9iareCe135tUpYrWl4U20v+pnAvYFb33idwgwmr9ys5V+Ghhn
+	TOF9iapofx49yuhFea3jerl9L7LwRoQW+TiGNRqzVdt8uronAkuW+dl9wpuk6tMjw3kwUe/vuBNq7
+	F7b4BAz8+PZqo3osbem0G8Yl4mOIchXDG0a78r4RaIsZC2s4+DzKOhTEnQvjXsy6Nl7wFaz7OwM2X
+	qELGNFvfi4aFYFgm0S4G7saQkYEy1rpvbsRMNKm8nFD/175pQZvqoMkaidcRhr1Zb10iYEyXkr/wZ
+	ZQRMXXjw==;
+Received: from mail-pl1-x630.google.com ([2607:f8b0:4864:20::630])
+	by desiato.infradead.org with esmtps (Exim 4.98.2 #2 (Red Hat Linux))
+	id 1w7dQM-0000000GSgN-0Fvf
+	for linux-rockchip@lists.infradead.org;
+	Tue, 31 Mar 2026 18:02:47 +0000
+Received: by mail-pl1-x630.google.com with SMTP id
+ d9443c01a7336-2aae146b604so35534485ad.3
+        for <linux-rockchip@lists.infradead.org>;
+ Tue, 31 Mar 2026 11:02:44 -0700 (PDT)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=orb-net.20230601.gappssmtp.com; s=20230601; t=1774980163;
+ x=1775584963; darn=lists.infradead.org;
+        h=content-transfer-encoding:mime-version:message-id:date:subject:cc
+         :to:from:from:to:cc:subject:date:message-id:reply-to;
+        bh=sWjwEy9m9KvnFnDU5TKVoimvwkRXdMUl6feyPSdFKhg=;
+        b=VWfF5hNkBymX0+s0C7Iyj8Sw2kuAstvJPlqGmB8OxJAqNiVN58sqgk4OZiBZRNC7yl
+         9IUxElq9DTKU6ZTVkzoHdipFvztBMR4xjOSiQ2SJern19odg0kzsFIQn/wI5L3QQAipH
+         4c1c58zNHbwT8EllKyYXFug49EUuNws8ar15n2Om7MlA2WV2JEuYJ9S5sKcPO2DiUU0M
+         ltx/LHbC9wjgglWKwRw479do2T+RWF5ghE727YthDjofIdGjm2Pi90IKBT8VejpmkTYw
+         LdiMrxr5cx97ybd1jYiwVan00bZI36Je9Mjbs+uFQ3X1SPbTTpjuSHbeudLtZ44oV+A1
+         1QZA==
+X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=1e100.net; s=20251104; t=1774980163; x=1775584963;
+        h=content-transfer-encoding:mime-version:message-id:date:subject:cc
+         :to:from:x-gm-gg:x-gm-message-state:from:to:cc:subject:date
+         :message-id:reply-to;
+        bh=sWjwEy9m9KvnFnDU5TKVoimvwkRXdMUl6feyPSdFKhg=;
+        b=tYkIF4FlfBzmWxb7lM4W4s8Tx4b35PvAkdZMSGMOyRAmhKT2mPvFXC0QV9sk0Gv2mK
+         TPiZM38cJhE5P3oKXBcYY4GFUGDuSxroGgGH1W+7bcLrlFUR1eFGNoH0iLodCTHSMJbw
+         aJQy3zA5lNcUHdKrGJl0wopEaE63LomCbUnrNni3sGsyUo9ke1sGG1XKnV5uTHnObh9T
+         qJJP4SpGy1rXdIAFT5274Xcu+aJFM2TPCfh+we2CMFggnpBLlRc0JdxQvVwnNbCjEzuB
+         3XLB3VrvhVm1ByL6RdjgVtFnlZY23BbuSPxP3Y3rI1DVenvClqs7nI8vwSjoYgzvgxDt
+         YUWQ==
+X-Forwarded-Encrypted: i=1;
+ AJvYcCVu7owyIGbV3GQQy+Jcj8L1M/44jDHtlYepd5G97NHkluSFyMTMyzb5SosmvtAe0AWMRYOqf07kUkdAxxtNZg==@lists.infradead.org
+X-Gm-Message-State: AOJu0Yxer7LsSlUyeORmiArs7kzTyBrVaQrPrl1le0aHUPUke4+qZEgP
+	Rw3hD2Vq4/s1bpQeXV4Uj8ylVjiMv4pF7Sw8vpOl48wMrOAQb3loAQivx4EO0OOcUzo=
+X-Gm-Gg: ATEYQzyBm8jGLe6eWCJe0+lMHr7Y7bIehTgplU/zDcrqDQASf2De/lNMSJwsIlnv4A6
+	08+tL7T9xMHB0fnMVYZ/I4zYrjJfrgBWAUs2TwGMeNftX8lr1JCwNt6YjIJpJ7Eaw750PtnBDFa
+	ACWMa5TJWf8txbF9x8VHswRSuMr15X/XDmDwfvBqOiIXIJksc/Pxyb10lyvGoh501jpWf9CQKl4
+	YUSkLCq0dmHcq0CrEdjjScthMwqDaZnPdqXpWc7fILXSiHXMpVTb8tsvgwy/HMPSjGMf0/xs34w
+	kbjDoRRCswOPSOsQ67liXQK1c3I2A8gMi3vQbbKc1MAUB+iGB8uFimdcdhpKmdZP6ppeOowEpAE
+	wNVVCrRp2tR/2FK6xHso2aDlSlHxiFiu6xozRJyalfIRZQvonyV7GXjCJ4ShsWF+Xw2bAcmLmtd
+	U8sYdOl+96K3TMj68RB9BMo8ajTeNiGjdQl2QanCRoC90ogvi3T0fhOyLZmEjQ2VM9FBWGXgq/D
+	Y+r0g==
+X-Received: by 2002:a17:903:a86:b0:2b0:571f:6f07 with SMTP id
+ d9443c01a7336-2b269d05c7bmr1235555ad.39.1774980163386;
+        Tue, 31 Mar 2026 11:02:43 -0700 (PDT)
+Received: from claude-dev.lan ([50.125.94.20])
+        by smtp.gmail.com with ESMTPSA id
+ d9443c01a7336-2b242680132sm125240315ad.32.2026.03.31.11.02.42
+        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);
+        Tue, 31 Mar 2026 11:02:43 -0700 (PDT)
+From: Daniel Bozeman <daniel@orb.net>
+To: ulf.hansson@linaro.org,
+	heiko@sntech.de
+Cc: linux-pm@vger.kernel.org,
+	linux-arm-kernel@lists.infradead.org,
+	linux-rockchip@lists.infradead.org,
+	linux-kernel@vger.kernel.org,
+	Daniel Bozeman <daniel@orb.net>
+Subject: [PATCH 1/2] pmdomain/rockchip: skip QoS operations for idle-only
+ domains
+Date: Tue, 31 Mar 2026 18:02:22 +0000
+Message-ID: <20260331180223.1682283-1-daniel@orb.net>
+X-Mailer: git-send-email 2.43.0
+MIME-Version: 1.0
+X-CRM114-Version: 20100106-BlameMichelson ( TRE 0.8.0 (BSD) ) MR-646709E3 
+X-CRM114-CacheID: sfid-20260331_190246_246136_AF60D7C9 
+X-CRM114-Status: GOOD (  10.93  )
+X-BeenThere: linux-rockchip@lists.infradead.org
+X-Mailman-Version: 2.1.34
+Precedence: list
+List-Id: Upstream kernel work for Rockchip platforms
+ <linux-rockchip.lists.infradead.org>
+List-Unsubscribe: <http://lists.infradead.org/mailman/options/linux-rockchip>,
+ <mailto:linux-rockchip-request@lists.infradead.org?subject=unsubscribe>
+List-Archive: <http://lists.infradead.org/pipermail/linux-rockchip/>
+List-Post: <mailto:linux-rockchip@lists.infradead.org>
+List-Help: <mailto:linux-rockchip-request@lists.infradead.org?subject=help>
+List-Subscribe: <http://lists.infradead.org/mailman/listinfo/linux-rockchip>,
+ <mailto:linux-rockchip-request@lists.infradead.org?subject=subscribe>
+Sender: "Linux-rockchip" <linux-rockchip-bounces@lists.infradead.org>
+Errors-To: 
+ linux-rockchip-bounces+linux-rockchip=archiver.kernel.org@lists.infradead.org
+
+Idle-only power domains (pwr_mask == 0) cannot actually be powered
+on or off. rockchip_do_pmu_set_power_domain() already returns early
+for these domains, but rockchip_pd_power() still attempts QoS save
+and idle requests before reaching that check.
+
+On RK3528, the idle-only domains (PD_RKVENC, PD_VO, PD_VPU) have
+QoS registers that may be inaccessible when the generic power domain
+framework attempts to power them off, leading to synchronous external
+aborts.
+
+Return early from rockchip_pd_power() when pwr_mask is zero, matching
+the existing guard in rockchip_do_pmu_set_power_domain().
+
+Fixes: 1fe767a56c32 ("soc: rockchip: power-domain: allow domains only handling idle requests")
+Signed-off-by: Daniel Bozeman <daniel@orb.net>
+---
+ drivers/pmdomain/rockchip/pm-domains.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+
+base-commit: bc330699801d3b4f99110365512caed5adcfaca3
+
+diff --git a/drivers/pmdomain/rockchip/pm-domains.c b/drivers/pmdomain/rockchip/pm-domains.c
+index 490bbb1d1d..2eecae092a 100644
+--- a/drivers/pmdomain/rockchip/pm-domains.c
++++ b/drivers/pmdomain/rockchip/pm-domains.c
+@@ -640,6 +640,9 @@ static int rockchip_pd_power(struct rockchip_pm_domain *pd, bool power_on)
+ 	if (rockchip_pmu_domain_is_on(pd) == power_on)
+ 		return 0;
+ 
++	if (pd->info->pwr_mask == 0)
++		return 0;
++
+ 	ret = clk_bulk_enable(pd->num_clks, pd->clks);
+ 	if (ret < 0) {
+ 		dev_err(pmu->dev, "failed to enable clocks\n");

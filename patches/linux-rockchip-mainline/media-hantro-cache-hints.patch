@@ -1,0 +1,28 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] media: verisilicon: Allow cache hints on a decoder's capture queue
+
+A CPU that reads decoded pictures, to convert, scale or hash them,
+reads them uncached: dma-contig allocates the capture queue coherent.
+Let userspace ask a decoder for non-coherent buffers with
+V4L2_MEMORY_FLAG_NON_COHERENT; videobuf2 then syncs them for the CPU
+when they are dequeued and for the device when they are queued. An
+encoder's capture queue holds the bitstream, which the kernel fills in
+for JPEG, and keeps its coherent buffers.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ drivers/media/platform/verisilicon/hantro_drv.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/drivers/media/platform/verisilicon/hantro_drv.c b/drivers/media/platform/verisilicon/hantro_drv.c
+index 3202146..00f30f8 100644
+--- a/drivers/media/platform/verisilicon/hantro_drv.c
++++ b/drivers/media/platform/verisilicon/hantro_drv.c
+@@ -239,6 +239,7 @@ queue_init(void *priv, struct vb2_queue *src_vq, struct vb2_queue *dst_vq)
+ 	if (!ctx->is_encoder) {
+ 		dst_vq->dma_attrs |= DMA_ATTR_NO_KERNEL_MAPPING;
+ 		dst_vq->max_num_buffers = MAX_POSTPROC_BUFFERS;
++		dst_vq->allow_cache_hints = 1;
+ 	}
+ 
+ 	dst_vq->type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;

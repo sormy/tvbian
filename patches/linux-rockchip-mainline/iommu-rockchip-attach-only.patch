@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Wed, 18 Nov 2026 14:11:57 -0500
+Subject: [PATCH] iommu/rockchip: Leave an attach-only IOMMU alone on runtime
+ PM
+
+The RK3528 VOP's IOMMU answers register reads only once the VOP has set
+itself up, yet the driver core resumes it, as the VOP's supplier, before
+the VOP's probe: the first read never completes and locks up the CPU.
+With rockchip,disable-device-link-resume, runtime resume and suspend
+leave the IOMMU alone, and the master's attach and detach, which run
+with the master set up, enable and disable it.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ drivers/iommu/rockchip-iommu.c | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/iommu/rockchip-iommu.c b/drivers/iommu/rockchip-iommu.c
+index 21af2f6..228208b 100644
+--- a/drivers/iommu/rockchip-iommu.c
++++ b/drivers/iommu/rockchip-iommu.c
+@@ -112,6 +112,7 @@ struct rk_iommu {
+ 	struct clk_bulk_data *clocks;
+ 	int num_clocks;
+ 	bool reset_disabled;
++	bool attach_only; /* enabled and disabled by its master's attach alone */
+ 	struct iommu_device iommu;
+ 	struct list_head node; /* entry in rk_iommu_domain.iommus */
+ 	struct iommu_domain *domain; /* domain to which iommu is attached */
+@@ -1259,6 +1260,8 @@ static int rk_iommu_probe(struct platform_device *pdev)
+ 
+ 	iommu->reset_disabled = device_property_read_bool(dev,
+ 					"rockchip,disable-mmu-reset");
++	iommu->attach_only = device_property_read_bool(dev,
++					"rockchip,disable-device-link-resume");
+ 
+ 	/*
+ 	 * Take every clock the devicetree provides.  Most IOMMU instances
+@@ -1332,7 +1335,7 @@ static int __maybe_unused rk_iommu_suspend(struct device *dev)
+ {
+ 	struct rk_iommu *iommu = dev_get_drvdata(dev);
+ 
+-	if (iommu->domain == &rk_identity_domain)
++	if (iommu->domain == &rk_identity_domain || iommu->attach_only)
+ 		return 0;
+ 
+ 	rk_iommu_disable(iommu);
+@@ -1343,7 +1346,7 @@ static int __maybe_unused rk_iommu_resume(struct device *dev)
+ {
+ 	struct rk_iommu *iommu = dev_get_drvdata(dev);
+ 
+-	if (iommu->domain == &rk_identity_domain)
++	if (iommu->domain == &rk_identity_domain || iommu->attach_only)
+ 		return 0;
+ 
+ 	return rk_iommu_enable(iommu);
