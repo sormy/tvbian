@@ -553,3 +553,7 @@ real time on Cedrus whatever the driver: about 25 fps flat out, 180 of 288 frame
   contexts alone, a `VideoProc` context takes its pipeline buffer alone, and the suite's
   `gstreamer.va-plugin` fails on a crash or a blacklist. GStreamer gets a registry of its own. The
   H313 then 90 pass, none failing; the M20 as the driver before this change on every check.
+- NV15 narrowing read each row into a buffer of its own first, against uncached decoder memory;
+  MPP's buffers are allocated cacheable and `rkvdec`'s CAPTURE takes cache hints since this week, so
+  the copy only cost. The R69-1 on next2, 1080p HEVC Main 10, 300 pictures to NV12 by `VideoProc`:
+  2.7 s of user time with the copy, 1.9 s without, every picture identical between the two.

@@ -221,26 +221,18 @@ struct narrow_rows {
     bool nv15;
 };
 
-/* an NV15 row copied whole into cached memory first: an engine's picture may be uncached, where
- * the narrowing's overlapping loads read it several times over */
+/* straight from the engine's memory, which every engine here maps cached */
 static void *narrow_rows(void *arg)
 {
     const struct narrow_rows *r = arg;
-    size_t bytes = (size_t)(r->first + r->count + NV15_SAMPLES_PER_GROUP - 1) /
-                   NV15_SAMPLES_PER_GROUP * NV15_BYTES_PER_GROUP;
-    uint8_t *row_copy = r->nv15 ? malloc(bytes) : NULL;
     for (unsigned row = 0; row < r->rows; row++) {
         const uint8_t *src = r->src + row * r->src_pitch;
         uint8_t *dst = r->dst + (size_t)row * r->dst_pitch;
-        if (!r->nv15) {
+        if (r->nv15)
+            narrow_nv15_row(dst, src, r->first, r->count);
+        else
             narrow_p010_row(dst, src, r->first, r->count);
-            continue;
-        }
-        if (row_copy)
-            src = memcpy(row_copy, src, bytes);
-        narrow_nv15_row(dst, src, r->first, r->count);
     }
-    free(row_copy);
     return NULL;
 }
 

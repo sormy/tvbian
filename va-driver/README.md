@@ -188,8 +188,7 @@ Key: ✓ offered, ✗ the engine can but this driver cannot yet, ➖ the engine 
     which `sun50i-iommu` maps write-only, and Cedrus reads back the picture it writes (deblocking)
     and its references. So the memory is Cedrus's own buffers, asked for non-coherent where the
     queue takes cache hints: the CPU reads them cached, each read syncing the dma-buf, and the suite
-    decodes as with coherent ones. `rkvdec` and Hantro take no cache hints, so a picture read back
-    there is read uncached.
+    decodes as with coherent ones. `rkvdec` and Hantro take them too on `rk35xx-next2`.
   - A new surface is laid out as the decoder writes its size, asked on a handle of its own with
     OUTPUT at that size (`TRY_FMT` on CAPTURE): a client reads one surface's layout and takes it for
     all, `rkvdec`'s 720p VP9 is 768 rows high, and a size change would otherwise leave it reading
@@ -202,8 +201,8 @@ Key: ✓ offered, ✗ the engine can but this driver cannot yet, ➖ the engine 
     VOP a request, from the 64-bit word holding the first macroblock. The VOP carries the VOL's
     `vop_time_increment_resolution`, which VDPU2 parses packet headers by.
   - 10-bit comes as P010 on Cedrus and NV15 on `rkvdec`, which lists NV15 only once its SPS says 10
-    bits; an NV15 picture read back is narrowed or widened by the CPU, each row copied into cached
-    memory first.
+    bits; an NV15 picture read back is narrowed or widened by NEON, straight from the decoder's
+    cached memory.
 - **Formats the GPUs sample:** Cedrus's tiled NV12 (`NV12_32L32`) is read only by the display
   engine; Panfrost samples linear NV12, P010 and AFBC, Lima linear NV12.
   - On the H616, Panfrost (Mali-G31) takes all three.
