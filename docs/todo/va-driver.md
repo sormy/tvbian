@@ -65,8 +65,8 @@ settings.
       `patches/ffmpeg/0039`; a meson build of its own, and no licence yet.
 - [ ] **Chromium's sandbox**: every engine's device opened in `vaInitialize`, before the sandbox
       closes; today each opens at its first context.
-- [ ] **`VideoProc`**: scaling for Jellyfin's `scale_vaapi`, and NV12 to ARGB where Chromium's GL
-      cannot import NV12.
+- [ ] **`VideoProc` scaling**: for Jellyfin's `scale_vaapi`, and NV12 to ARGB where Chromium's GL
+      cannot import NV12; it converts 8-bit and 10-bit at one size today.
 - [ ] **CBR from the first second on `sunxi-h616`**: Cedrus-enc's first frame is ten times its
       share, its first second 2.7 times the target.
 - [ ] **CBR on `meson-gxl`**: its encoder lists VBR alone, and WebKit asks for CBR.

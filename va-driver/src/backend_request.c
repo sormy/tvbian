@@ -999,7 +999,7 @@ static int request_lend_backing(struct driver *drv, VASurfaceID id, struct surfa
 {
     for (unsigned i = 0; i < drv->contexts.capacity; i++) {
         const struct context *ctx = drv->contexts.items[i];
-        struct request_ctx *rq = ctx && !is_encode(ctx->config->offer->entrypoint) &&
+        struct request_ctx *rq = ctx && ctx->config->offer->entrypoint == VAEntrypointVLD &&
                                          !is_stateful(ctx)
                                      ? ctx->engine
                                      : NULL;

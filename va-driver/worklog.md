@@ -520,3 +520,24 @@ real time on Cedrus whatever the driver: about 25 fps flat out, 180 of 288 frame
   MPP or `cedrus`, `rkvdec` or `hantro-vpu`; on the M20 it stays unset. `MOZ_ENABLE_WAYLAND` is not
   needed: ESR 153 takes Wayland by itself. Only the H313's GPU runs Firefox here; `lima` lacks
   GLES 3.
+- mpv on the M2 Plus's own screen, `rk35xx-next2`, in labwc on HDMI, flips counted by
+  `drm_vblank_event_delivered` over 10 s, 1080p60 clips. `--vo=dmabuf-wayland` with the output at
+  1920x1080: H.264, HEVC and VP9 600 flips, 0 dropped, the decoded NV12 on the primary plane, no GPU
+  and no copy. At the panel's 2256x1504 the picture is scaled, labwc draws it on the Mali-450 and
+  flips 30 a second. `--vo=gpu`: `lima` refuses the import (`EGL_BAD_ALLOC`), mpv decodes on the CPU
+  and drops 654 of 958. HEVC Main 10 does not play: the P010 surface goes to `scale_vaapi` for NV12,
+  and the driver has no `VideoProc`.
+- `VideoProc`, `src/vpp.c`: NV12 or P010 into the output surface's format at its size, on the CPU; a
+  source region at the top left is taken, as FFmpeg's HEVC surfaces are taller than the picture. The
+  suite's `vpp.*` turns HEVC Main 10 and VP9 profile 2 to NV12 by `scale_vaapi`: 53.7 and 58.8 dB on
+  the host, HEVC Main 10 53.7 on the M2 Plus. mpv `--vo=dmabuf-wayland` on the M2 Plus, output
+  1920x1080, HEVC Main 10 at 30 fps: 301 flips in 10 s, VA decode, mpv at 39% of a core. A first try
+  narrowed rkvdec's 10-bit to NV12 surfaces instead; its box runs used an old package, so they
+  showed nothing, and the conversion serves every client that asks, so it went.
+- `VideoProc` crashed GStreamer's `va` plugin on the request backend: registering `vapostproc`, it
+  exports a surface with only a `VideoProc` context open, and `request_lend_backing` took that
+  context for a decoder and read its codec. A crashed plugin is blacklisted, so every `va` element
+  went: the suite said only "lists a driver only on a DRM render node". Lending now looks at decode
+  contexts alone, a `VideoProc` context takes its pipeline buffer alone, and the suite's
+  `gstreamer.va-plugin` fails on a crash or a blacklist. GStreamer gets a registry of its own. The
+  H313 then 90 pass, none failing; the M20 as the driver before this change on every check.

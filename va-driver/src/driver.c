@@ -108,6 +108,8 @@ static unsigned rt_formats_of(VAProfile profile)
     case VAProfileHEVCMain10:
     case VAProfileVP9Profile2:
         return VA_RT_FORMAT_YUV420_10;
+    case VAProfileNone:
+        return VA_RT_FORMAT_YUV420 | VA_RT_FORMAT_YUV420_10;
     default:
         return VA_RT_FORMAT_YUV420;
     }
@@ -118,7 +120,9 @@ static const struct offer *find_offer(struct driver *drv, VAProfile profile,
 {
     unsigned count = drv->num_offers;
     const struct offer *offers = drv->offers;
-    *profile_known = false;
+    *profile_known = profile == VAProfileNone;
+    if (profile == VAProfileNone)
+        return is_video_proc(entrypoint) ? &video_proc_offer : NULL;
     for (unsigned i = 0; i < count; i++) {
         *profile_known |= offers[i].profile == profile;
         if (offers[i].profile == profile && offers[i].entrypoint == entrypoint)
@@ -139,6 +143,7 @@ static VAStatus query_config_profiles(VADriverContextP ctx, VAProfile *profiles,
         if (!listed)
             profiles[n++] = offers[i].profile;
     }
+    profiles[n++] = VAProfileNone;
     *num_profiles = n;
     return VA_STATUS_SUCCESS;
 }
@@ -149,6 +154,8 @@ static VAStatus query_config_entrypoints(VADriverContextP ctx, VAProfile profile
     unsigned count = DRIVER(ctx)->num_offers;
     const struct offer *offers = DRIVER(ctx)->offers;
     int n = 0;
+    if (profile == VAProfileNone)
+        entrypoints[n++] = VAEntrypointVideoProc;
     for (unsigned i = 0; i < count; i++)
         if (offers[i].profile == profile)
             entrypoints[n++] = offers[i].entrypoint;
@@ -324,7 +331,7 @@ static VAStatus create_context(VADriverContextP ctx, VAConfigID config_id, int w
     c->width = width;
     c->height = height;
     int ret = 0;
-    if (!is_encode(config->offer->entrypoint)) {
+    if (!is_encode(config->offer->entrypoint) && !is_video_proc(config->offer->entrypoint)) {
         c->capture = picture_capture_open();
         c->codec_state = calloc(1, config->codec->state_size ? config->codec->state_size : 1);
         ret = c->codec_state ? drv->backend->decoder_open(drv, c) : -ENOMEM;
@@ -474,10 +481,14 @@ static VAStatus render_picture(VADriverContextP ctx, VAContextID context_id, VAB
     if (!c)
         return VA_STATUS_ERROR_INVALID_CONTEXT;
     bool encoding = is_encode(c->config->offer->entrypoint);
+    bool processing = is_video_proc(c->config->offer->entrypoint);
     for (int i = 0; i < num_buffers; i++) {
         const struct va_buffer *b = handle_get(drv, &drv->buffers, buffers[i]);
         if (!b)
             return VA_STATUS_ERROR_INVALID_BUFFER;
+        /* video processing takes its pipeline alone: no codec reads the rest */
+        if (processing && b->type != VAProcPipelineParameterBufferType)
+            return VA_STATUS_ERROR_UNSUPPORTED_BUFFERTYPE;
         if (!encoding)
             picture_capture_buffer(c->capture, b);
         VAStatus status = encoding ? encode_render(drv, c, b) : picture_add_buffer(c, b);
@@ -556,8 +567,10 @@ static VAStatus end_picture(VADriverContextP ctx, VAContextID context_id)
     struct context *c = handle_get(drv, &drv->contexts, context_id);
     if (!c)
         return VA_STATUS_ERROR_INVALID_CONTEXT;
-    return is_encode(c->config->offer->entrypoint) ? encode_end_picture(drv, c)
-                                                    : decode_end_picture(drv, c);
+    VAEntrypoint entrypoint = c->config->offer->entrypoint;
+    return is_encode(entrypoint)       ? encode_end_picture(drv, c)
+           : is_video_proc(entrypoint) ? vpp_end_picture(ctx, c)
+                                       : decode_end_picture(drv, c);
 }
 
 /* what a decoder has no use for */
@@ -742,8 +755,9 @@ VA_INIT_NAME(VA_MAJOR_VERSION, VA_MINOR_VERSION)(VADriverContextP ctx)
     ctx->pDriverData = drv;
     ctx->version_major = VA_MAJOR_VERSION;
     ctx->version_minor = VA_MINOR_VERSION;
-    ctx->max_profiles = drv->num_offers;
-    ctx->max_entrypoints = drv->num_offers;
+    /* every offer, and video processing */
+    ctx->max_profiles = drv->num_offers + 1;
+    ctx->max_entrypoints = drv->num_offers + 1;
     ctx->max_attributes = MAX_ATTRIBUTES;
     ctx->max_image_formats = 2;
     ctx->max_subpic_formats = 1;
@@ -752,5 +766,6 @@ VA_INIT_NAME(VA_MAJOR_VERSION, VA_MINOR_VERSION)(VADriverContextP ctx)
     snprintf(vendor, sizeof(vendor), VENDOR "%s", drv->backend->name);
     ctx->str_vendor = vendor;
     fill_vtable(ctx->vtable);
+    vpp_vtable(ctx->vtable_vpp);
     return VA_STATUS_SUCCESS;
 }

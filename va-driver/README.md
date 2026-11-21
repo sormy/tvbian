@@ -365,7 +365,9 @@ VA carries none of these whole.
   - A V4L2 encoder taking dma-bufs reads a surface laid out as it reads in place; others get a copy.
   - FFmpeg 7.1 lists `h264_v4l2m2m` before `h264_vaapi`, and Firefox takes the first, so on `meson`
     it may pick the stock wrapper. A driver cannot change that.
-- **VideoProc:** not supported. No engine here scales cheaply.
+- **VideoProc:** a picture converted to NV12 or P010 on the CPU, at the output's size from the
+  source's top left, for a client that shows 8-bit only (mpv's `dmabuf-wayland`, `scale_vaapi`).
+  Filters, scaling and rotation are refused: no engine here scales cheaply.
 
 ## Build
 

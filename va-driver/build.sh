@@ -24,7 +24,7 @@ MPP_REPO=https://github.com/rockchip-linux/mpp.git
 # its 1.1.0 release
 MPP_COMMIT=c08762ebfadeb4e986d2fed993bc7a54862d3ebe
 MPP_PATCH=/repo/patches/mpp/0001-osal-run-the-singletons-init-when-called-not-at-load.patch
-FRONT_END="driver picture surface pixels encode bitstream settings h264 hevc vp8 vp9 mpeg2 jpeg mpeg4 vc1"
+FRONT_END="driver picture surface pixels encode vpp bitstream settings h264 hevc vp8 vp9 mpeg2 jpeg mpeg4 vc1"
 # the host's test engine: FFmpeg's release, its H.264 decoder able to hand out in decode order
 FFMPEG_VERSION=9.0.2
 FFMPEG_PATCH=/repo/patches/ffmpeg/0039-avcodec-h264dec-add-a-decode_order-option.patch

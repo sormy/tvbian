@@ -329,7 +329,15 @@ int dmabuf_alloc(size_t size);
 uint8_t *backing_map(struct backing *b);
 int surface_bind_picture(struct surface *s, struct engine_picture *picture);
 void surface_free(struct surface *s);
+/* src's picture from its top left into dst's own memory, as dst's format, at dst's size */
+VAStatus surface_convert(VADriverContextP ctx, VASurfaceID src_id, VASurfaceID dst_id);
 void surface_vtable(struct VADriverVTable *vt);
+
+/* vpp.c: a picture converted to another surface's format, at its own size */
+extern const struct offer video_proc_offer;
+bool is_video_proc(VAEntrypoint entrypoint);
+VAStatus vpp_end_picture(VADriverContextP ctx, struct context *c);
+void vpp_vtable(struct VADriverVTableVPP *vt);
 
 /* encode.c */
 bool is_encode(VAEntrypoint entrypoint);

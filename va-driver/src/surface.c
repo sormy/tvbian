@@ -762,6 +762,43 @@ static VAStatus get_image(VADriverContextP ctx, VASurfaceID surface_id, int x, i
     return status;
 }
 
+VAStatus surface_convert(VADriverContextP ctx, VASurfaceID src_id, VASurfaceID dst_id)
+{
+    struct driver *drv = DRIVER(ctx);
+    VAStatus synced = sync_surface(ctx, src_id);
+    if (synced != VA_STATUS_SUCCESS)
+        return synced;
+    struct surface *src = handle_get(drv, &drv->surfaces, src_id);
+    struct surface *dst = handle_get(drv, &drv->surfaces, dst_id);
+    if (is_compressed(src))
+        return VA_STATUS_ERROR_UNIMPLEMENTED;
+    pthread_mutex_lock(&drv->lock);
+    int ret = surface_ensure_backing(dst);
+    struct nv12_planes out = ret ? (struct nv12_planes){ 0 } : planes_of_backing(dst);
+    if (!ret && !out.luma)
+        ret = -ENOMEM;
+    if (!ret) {
+        sync_backing(dst->backing, DMA_BUF_SYNC_START);
+        if (src->backing) {
+            struct nv12_planes in = planes_of_backing(src);
+            const struct source from = {
+                .layout = in.ten_bit ? LAYOUT_P010 : LAYOUT_NV12,
+                .data = { in.luma, in.chroma },
+                .pitch = { in.luma_pitch, in.chroma_pitch },
+            };
+            sync_backing(src->backing, DMA_BUF_SYNC_START);
+            ret = in.luma ? pixels_copy(&from, 0, 0, &out) : -ENOMEM;
+            sync_backing(src->backing, DMA_BUF_SYNC_END);
+        } else {
+            ret = src->picture ? pixels_from_engine(src->picture, 0, 0, &out) : -EINVAL;
+        }
+        sync_backing(dst->backing, DMA_BUF_SYNC_END);
+    }
+    dst->delivered = !ret;
+    pthread_mutex_unlock(&drv->lock);
+    return ret ? VA_STATUS_ERROR_OPERATION_FAILED : VA_STATUS_SUCCESS;
+}
+
 static VAStatus put_image(VADriverContextP ctx, VASurfaceID surface_id, VAImageID image_id,
                           int src_x, int src_y, unsigned src_width, unsigned src_height,
                           int dest_x, int dest_y, unsigned dest_width, unsigned dest_height)

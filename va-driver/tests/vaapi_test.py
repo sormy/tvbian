@@ -204,6 +204,9 @@ ENCODES: dict[str, tuple[set[str], str, str, int]] = {
     "jpeg": ({"JPEGBaseline/EncPicture"}, "mjpeg_vaapi", "mjpeg", JPEG_FRAMES),
 }
 TEN_BIT_SURFACES = ["p010le", "nv12"]
+# 10-bit clips a client that shows 8-bit alone turns to NV12 by video processing, as mpv does
+VPP_CLIPS = ["hevc-main10", "vp9-p2"]
+VPP_TO_NV12 = "scale_vaapi=format=nv12,hwdownload,format=nv12,"
 # clips a family's engine may refuse, as MPP does: refused, or decoded right, never broken
 REFUSED: dict[str, set[str]] = {
     "sunxi-h616": {"mpeg4-interlaced"},
@@ -283,6 +286,8 @@ class Setup:
             env["LIBVA_DRIVER_NAME"] = self.driver_name
         # GStreamer's va plugin loads only the drivers it knows unless told otherwise
         env["GST_VA_ALL_DRIVERS"] = "1"
+        # a registry of its own: one cached by a crashing build holds the va plugin blacklisted
+        env["GST_REGISTRY"] = str(self.work / "gst-registry.bin")
         if not self.on_box:
             env["VAAPI_ENGINE"] = "lavc"
             env["DISPLAY"] = self.device
@@ -490,6 +495,12 @@ def refusal_case(setup: Setup, key: str, path: Path) -> Iterator[Line]:
 
 
 def psnr_y(setup: Setup, decoded: list[str], chain: str, clip: Path, sample: str) -> float | None:
+    return psnr_and_log(setup, decoded, chain, clip, sample)[0]
+
+
+def psnr_and_log(
+    setup: Setup, decoded: list[str], chain: str, clip: Path, sample: str
+) -> tuple[float | None, str]:
     """Luma PSNR of the decoded input, through the chain, against the clip's software decode."""
     # one timebase for both, as psnr pairs pictures by time and the inputs' timebases differ
     pace = "settb=AVTB,setpts=N"
@@ -501,7 +512,9 @@ def psnr_y(setup: Setup, decoded: list[str], chain: str, clip: Path, sample: str
         env=setup.env(),
     )
     found = re.search(r"PSNR y:(inf|[\d.]+)", log)
-    return None if not found else float("inf") if found.group(1) == "inf" else float(found.group(1))
+    if not found:
+        return None, log
+    return float("inf") if found.group(1) == "inf" else float(found.group(1)), log
 
 
 def decode_case(setup: Setup, name: str, clip: Clip, offers: set[str]) -> Iterator[Line]:
@@ -563,6 +576,23 @@ def software_frames(setup: Setup, path: Path, sample: str) -> list[str]:
         setup.env(),
     )
     return frames
+
+
+def vpp_case(setup: Setup, offers: set[str]) -> Iterator[Line]:
+    """A 10-bit decode turned to NV12 on its surfaces, against the clip's software decode."""
+    for name in VPP_CLIPS:
+        clip = CLIPS[name]
+        path = setup.clips / f"{name}.{clip.container}"
+        key = f"vpp.{name}"
+        if f"{clip.profile}/VLD" not in offers or "None/VideoProc" not in offers:
+            yield key, "unoffered"
+            continue
+        decoded = decode_args(setup) + ["-i", str(path)]
+        y, log = psnr_and_log(setup, decoded, VPP_TO_NV12, path, "yuv420p")
+        if y is None:
+            yield key, f"failed: {last_line(log)}"
+        else:
+            yield key, f"{'pass' if y >= LOSSY_FLOOR_DB else 'failed'}: Y PSNR {y} dB"
 
 
 def judged(
@@ -779,6 +809,17 @@ def mpv_case(setup: Setup, offers: set[str]) -> Iterator[Line]:
 def gst_element(setup: Setup, element: str) -> bool:
     rc, _ = run(["gst-inspect-1.0", element], env=setup.env())
     return rc == 0
+
+
+# GStreamer's word that a plugin crashed while it registered its elements, so it lists none
+GST_PLUGIN_CRASHED = re.compile(r"segmentation fault|blacklisted", re.I)
+
+
+def gst_plugin_case(setup: Setup) -> Iterator[Line]:
+    """GStreamer's va plugin loads with the driver: a crash in its probe hides every element."""
+    rc, log = run(["gst-inspect-1.0", "va"], env=setup.env())
+    crashed = GST_PLUGIN_CRASHED.search(log)
+    yield "gstreamer.va-plugin", f"failed: {crashed.group(0)}" if crashed else "pass"
 
 
 def gst_decoder(profile: str) -> str | None:
@@ -1502,12 +1543,14 @@ def suite(setup: Setup) -> Iterator[Line]:
         return
     for name, clip in CLIPS.items():
         yield from decode_case(setup, name, clip, offers)
+    yield from vpp_case(setup, offers)
     for name in ENCODES:
         yield from encode_case(setup, name, offers, [])
     yield from encode_case(setup, "h264", offers, ["-b:v", "2M"])
     if "mpv" not in missing:
         yield from mpv_case(setup, offers)
     if "gst-launch-1.0" not in missing:
+        yield from gst_plugin_case(setup)
         for name, clip in CLIPS.items():
             yield from gstreamer_decode_case(setup, name, clip, offers)
         for name in ENCODES:
