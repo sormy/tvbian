@@ -12,7 +12,14 @@ from conversions import Conversions, gpio, speed_bins, voltage_bins  # noqa: E40
 from dtcx import Base  # noqa: E402
 from dts import Node, Prop, Source, compatibles, unit, walk  # noqa: E402
 from mainline import MESON_FUNCTION, Mainline, amend, numeric_units, touching  # noqa: E402
-from translate import Report, rests, selected_functions, translate, unthrottled  # noqa: E402
+from translate import (  # noqa: E402
+    Report,
+    rests,
+    selected_functions,
+    translate,
+    unselected,
+    unthrottled,
+)
 from vocabulary import Pattern, Vocabulary, fill  # noqa: E402
 
 FACTORY = """/dts-v1/;
@@ -621,6 +628,22 @@ class BoardTest(unittest.TestCase):
         group = nodes["/soc/pinctrl@300b000/uart1-x-a-pins"]  # @0 as the label letters it
         self.assertEqual(group.labels, ["uart1_pins_a"])
         self.assertEqual(values(group), {"pins": '"PG6"', "function": '"uart1"'})
+
+    def test_a_node_left_without_its_pin_groups_goes_one_written_empty_stays(self) -> None:
+        unused = Node("wifi-host-wake-irq", ["wifi_host_wake_irq"])
+        used = Node("uart2m1-xfer", ["uart2m1_xfer"])
+        pinctrl = Node(
+            "pinctrl",
+            children=[
+                Node("wireless-wlan", children=[unused]),
+                Node("uart2", children=[used]),
+                Node("written-empty"),
+            ],
+        )
+        user = Node("serial", props=[Prop.of("pinctrl-0", "<&uart2m1_xfer>")])
+        root = Node("/", children=[pinctrl, user])
+        unselected(root, {id(unused), id(used)})
+        self.assertEqual([c.name for c in pinctrl.children], ["uart2", "written-empty"])
 
     def test_a_vendor_pin_group_nothing_selects_is_not_written(self) -> None:
         nodes, _ = board()

@@ -611,12 +611,20 @@ def unreferenced(root: Node, shells: set[int]) -> None:
 
 def unselected(root: Node, groups: set[int]) -> None:
     """Each vendor pin group nothing in the finished tree references, gone: it configures no pin,
-    and the vendor's template lists groups for blocks the board has not got."""
+    and the vendor's template lists groups for blocks the board has not got. A node that held only
+    such groups goes with them; one written empty stays."""
     referenced = set(REFERENCE.findall(Source([], root).render()))
-    for _, node in [("/", root), *walk(root)]:
+
+    def emptied(node: Node) -> bool:
+        held = bool(node.children)
         node.children = [
-            c for c in node.children if id(c) not in groups or set(c.labels) & referenced
+            c
+            for c in node.children
+            if (id(c) not in groups or set(c.labels) & referenced) and not emptied(c)
         ]
+        return held and not node.children and not node.props
+
+    emptied(root)
 
 
 def variant(address: str) -> str:

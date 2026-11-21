@@ -106,7 +106,15 @@ for BOARD in $BOARDS; do
 		VIEW=1
 	fi
 
-	mv "$tmp/factory_$NAME.dts" "$DIR/factory_$NAME.dts"
+	# a tree for another kernel shares its board's factory blob, and so its decompile: a link
+	if [ -L "$DIR/factory_$NAME.dtb" ]; then
+		SHARED="$(dirname "$(readlink "$DIR/factory_$NAME.dtb")")/factory_$NAME.dts"
+		cmp -s "$tmp/factory_$NAME.dts" "$DIR/$SHARED" ||
+			{ echo "$BOARD: factory_$NAME.dts differs from $SHARED, which its blob's link shares"; exit 1; }
+		ln -sfn "$SHARED" "$DIR/factory_$NAME.dts"
+	else
+		mv "$tmp/factory_$NAME.dts" "$DIR/factory_$NAME.dts"
+	fi
 	[ "$PATCH_BASE" = "$tmp/factory_$NAME.dts" ] || mv "$PATCH_BASE" "$DIR/$(basename "$PATCH_BASE")"
 	cp "$tmp/$NAME.dts" "$DIR/$NAME.dts"
 	# U-Boot's build compiles uboot.dts itself; the kernel's board.dtb is what the package ships
