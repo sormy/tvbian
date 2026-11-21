@@ -557,3 +557,9 @@ real time on Cedrus whatever the driver: about 25 fps flat out, 180 of 288 frame
   MPP's buffers are allocated cacheable and `rkvdec`'s CAPTURE takes cache hints since this week, so
   the copy only cost. The R69-1 on next2, 1080p HEVC Main 10, 300 pictures to NV12 by `VideoProc`:
   2.7 s of user time with the copy, 1.9 s without, every picture identical between the two.
+- 2026-11-20: next2 on the RK3528 and RK3518 runs the GPU at 800 MHz on 22 mV less than vendor, and
+  is suspected of the M2 Plus's power-on resets; every next2 result on them is void until that is
+  fixed, the entries above included. Measured again on the R69-1 under vendor 6.1: NV15 narrowed to
+  NV12 by `VideoProc` without the row copy, 300 pictures identical to the build with it, 2.5 s of
+  user time against 3.2; the suite 89 pass, none failing, 10-bit 30 of 30 identical, `vpp.*` 53.7
+  and 58.8 dB, GStreamer 10-bit 63 dB.
