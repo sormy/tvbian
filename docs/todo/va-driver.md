@@ -66,6 +66,10 @@ settings.
       `patches/ffmpeg/0039`; a meson build of its own, and no licence yet.
 - [ ] **Chromium's sandbox**: every engine's device opened in `vaInitialize`, before the sandbox
       closes; today each opens at its first context.
+- [ ] **AFBC on `rk35xx-next2`**: `rkvdec` writes `AN68` and `AN6a`, 16x16 sparse, not split, for
+      H.264, HEVC and VP9; the driver offers Cedrus's split AFBC alone. The modifier by the formats
+      CAPTURE lists, for a client that lists it; VOP2 scans it on Cluster0.
+- [ ] **MPP's FBC**: AFBC from MPP on the vendor kernel, for a client that lists the modifier.
 - [ ] **`VideoProc` scaling**: for Jellyfin's `scale_vaapi`, and NV12 to ARGB where Chromium's GL
       cannot import NV12; it converts 8-bit and 10-bit at one size today.
 - [ ] **CBR from the first second on `sunxi-h616`**: Cedrus-enc's first frame is ten times its
