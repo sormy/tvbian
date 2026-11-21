@@ -1,4 +1,4 @@
-/* pixels.c: NV15 to NV12 and P010, from any offset and width, against the samples packed. */
+/* pixels.c: NV15 and P010 to NV12 and P010, from any offset and width, against the samples. */
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -67,27 +67,36 @@ static void check_copy(const struct source *src, unsigned x, unsigned y, unsigne
 int main(void)
 {
     static uint8_t packed_luma[HEIGHT][PITCH], packed_chroma[HEIGHT / 2][PITCH];
+    static uint16_t p010_luma[HEIGHT][WIDTH], p010_chroma[HEIGHT / 2][WIDTH];
     srand(1);
     for (unsigned r = 0; r < HEIGHT; r++) {
         for (unsigned i = 0; i < WIDTH; i++)
             luma[r][i] = (uint16_t)(rand() & 0x3ff);
         pack(packed_luma[r], luma[r], WIDTH);
+        for (unsigned i = 0; i < WIDTH; i++)
+            p010_luma[r][i] = (uint16_t)(luma[r][i] << P010_SHIFT);
     }
     for (unsigned r = 0; r < HEIGHT / 2; r++) {
         for (unsigned i = 0; i < WIDTH; i++)
             chroma[r][i] = (uint16_t)(rand() & 0x3ff);
         pack(packed_chroma[r], chroma[r], WIDTH);
+        for (unsigned i = 0; i < WIDTH; i++)
+            p010_chroma[r][i] = (uint16_t)(chroma[r][i] << P010_SHIFT);
     }
-    const struct source src = { LAYOUT_NV15,
-                                { packed_luma[0], packed_chroma[0], NULL },
-                                { PITCH, PITCH, 0 } };
+    const struct source nv15 = { LAYOUT_NV15,
+                                 { packed_luma[0], packed_chroma[0], NULL },
+                                 { PITCH, PITCH, 0 } };
+    const struct source p010 = { LAYOUT_P010,
+                                 { (uint8_t *)p010_luma[0], (uint8_t *)p010_chroma[0], NULL },
+                                 { sizeof(p010_luma[0]), sizeof(p010_chroma[0]), 0 } };
     /* whole groups, a head and a tail out of step with the groups, an odd width, and rows wide
      * enough for several vector steps */
     const unsigned cases[][4] = { { 0, 0, 32, 4 }, { 2, 2, 31, 3 }, { 6, 0, 29, 6 },
                                   { 0, 0, 96, 2 }, { 2, 0, 93, 5 } };
-    for (unsigned c = 0; c < sizeof(cases) / sizeof(cases[0]); c++) {
-        check_copy(&src, cases[c][0], cases[c][1], cases[c][2], cases[c][3], false);
-        check_copy(&src, cases[c][0], cases[c][1], cases[c][2], cases[c][3], true);
-    }
+    for (unsigned c = 0; c < sizeof(cases) / sizeof(cases[0]); c++)
+        for (unsigned ten_bit = 0; ten_bit < 2; ten_bit++) {
+            check_copy(&nv15, cases[c][0], cases[c][1], cases[c][2], cases[c][3], ten_bit);
+            check_copy(&p010, cases[c][0], cases[c][1], cases[c][2], cases[c][3], ten_bit);
+        }
     return unit_report("pixels");
 }

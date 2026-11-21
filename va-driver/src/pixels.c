@@ -32,14 +32,50 @@ static bool is_ten_bit(enum layout layout)
     return layout == LAYOUT_I010 || layout == LAYOUT_P010 || layout == LAYOUT_NV15;
 }
 
+static uint16_t nv15_sample(const uint8_t *src, unsigned i)
+{
+    const uint8_t *group = src + (i / NV15_SAMPLES_PER_GROUP) * NV15_BYTES_PER_GROUP;
+    unsigned bit = (i % NV15_SAMPLES_PER_GROUP) * NV15_SAMPLE_BITS;
+    unsigned pair = group[bit / 8] | group[bit / 8 + 1] << 8;
+    return (uint16_t)(((pair >> (bit % 8)) & NV15_SAMPLE_MASK) << P010_SHIFT);
+}
+
+#if defined(__aarch64__)
+/* 8 samples from two groups' 10 bytes: each the 16-bit word at its first byte, shifted down to its
+ * bits; the 16-byte load needs 13 samples left */
+#define NEON_UNPACK_SAMPLES 8
+#define NEON_UNPACK_READ_SAMPLES 13
+
+static unsigned nv15_unpack_neon(uint16_t *dst, const uint8_t *src, unsigned i, unsigned end)
+{
+    static const uint8_t words[16] = { 0, 1, 1, 2, 2, 3, 3, 4, 5, 6, 6, 7, 7, 8, 8, 9 };
+    static const int16_t shifts[8] = { 0, -2, -4, -6, 0, -2, -4, -6 };
+    const uint8x16_t index = vld1q_u8(words);
+    const int16x8_t shift = vld1q_s16(shifts);
+    const uint16x8_t mask = vdupq_n_u16(NV15_SAMPLE_MASK);
+    for (; i + NEON_UNPACK_READ_SAMPLES <= end;
+         i += NEON_UNPACK_SAMPLES, dst += NEON_UNPACK_SAMPLES) {
+        uint8x16_t in = vld1q_u8(src + i / NV15_SAMPLES_PER_GROUP * NV15_BYTES_PER_GROUP);
+        uint16x8_t words16 = vreinterpretq_u16_u8(vqtbl1q_u8(in, index));
+        vst1q_u16(dst, vshlq_n_u16(vandq_u16(vshlq_u16(words16, shift), mask), P010_SHIFT));
+    }
+    return i;
+}
+#endif
+
+/* NV15 samples first.. as P010's: whole groups 8 samples at a time */
 static void nv15_unpack(uint16_t *dst, const uint8_t *src, unsigned first, unsigned count)
 {
-    for (unsigned i = first; i < first + count; i++) {
-        const uint8_t *group = src + (i / NV15_SAMPLES_PER_GROUP) * NV15_BYTES_PER_GROUP;
-        unsigned bit = (i % NV15_SAMPLES_PER_GROUP) * NV15_SAMPLE_BITS;
-        unsigned pair = group[bit / 8] | group[bit / 8 + 1] << 8;
-        *dst++ = ((pair >> (bit % 8)) & NV15_SAMPLE_MASK) << P010_SHIFT;
-    }
+    unsigned i = first, end = first + count;
+    for (; i < end && i % NV15_SAMPLES_PER_GROUP; i++)
+        *dst++ = nv15_sample(src, i);
+#if defined(__aarch64__)
+    unsigned from = i;
+    i = nv15_unpack_neon(dst, src, i, end);
+    dst += i - from;
+#endif
+    for (; i < end; i++)
+        *dst++ = nv15_sample(src, i);
 }
 
 static void copy_luma_row(uint8_t *dst, const struct source *s, unsigned x, unsigned y,
@@ -162,52 +198,78 @@ static void narrow_nv15_row(uint8_t *dst, const uint8_t *src, unsigned first, un
     }
 }
 
-/* NV15 rows to 8-bit, as one plane's share */
-struct nv15_rows {
+/* P010 samples first.. to 8-bit: each sample's high byte */
+static void narrow_p010_row(uint8_t *dst, const uint8_t *src, unsigned first, unsigned count)
+{
+    const uint8_t *bytes = src + (size_t)first * sizeof(uint16_t);
+    unsigned i = 0;
+#if defined(__aarch64__)
+    for (; i + NEON_SAMPLES <= count; i += NEON_SAMPLES)
+        vst1q_u8(dst + i, vld2q_u8(bytes + (size_t)i * sizeof(uint16_t)).val[1]);
+#endif
+    for (; i < count; i++)
+        dst[i] = bytes[(size_t)i * sizeof(uint16_t) + 1];
+}
+
+/* 10-bit rows to 8-bit, as one plane's share */
+struct narrow_rows {
     uint8_t *dst;
     unsigned dst_pitch;
     const uint8_t *src;
     ptrdiff_t src_pitch;
     unsigned first, count, rows;
+    bool nv15;
 };
 
-/* each row copied whole into cached memory first: an engine's picture may be uncached, where the
- * narrowing's overlapping loads read it several times over */
-static void *narrow_nv15_rows(void *arg)
+/* an NV15 row copied whole into cached memory first: an engine's picture may be uncached, where
+ * the narrowing's overlapping loads read it several times over */
+static void *narrow_rows(void *arg)
 {
-    const struct nv15_rows *r = arg;
+    const struct narrow_rows *r = arg;
     size_t bytes = (size_t)(r->first + r->count + NV15_SAMPLES_PER_GROUP - 1) /
                    NV15_SAMPLES_PER_GROUP * NV15_BYTES_PER_GROUP;
-    uint8_t *row_copy = malloc(bytes);
+    uint8_t *row_copy = r->nv15 ? malloc(bytes) : NULL;
     for (unsigned row = 0; row < r->rows; row++) {
         const uint8_t *src = r->src + row * r->src_pitch;
+        uint8_t *dst = r->dst + (size_t)row * r->dst_pitch;
+        if (!r->nv15) {
+            narrow_p010_row(dst, src, r->first, r->count);
+            continue;
+        }
         if (row_copy)
             src = memcpy(row_copy, src, bytes);
-        narrow_nv15_row(r->dst + (size_t)row * r->dst_pitch, src, r->first, r->count);
+        narrow_nv15_row(dst, src, r->first, r->count);
     }
     free(row_copy);
     return NULL;
 }
 
 /* the luma's top half on a second core, the rest here: a 4K picture is 12 MB to narrow */
-static void narrow_nv15(const struct source *s, unsigned x, unsigned y, const struct nv12_planes *d)
+static void narrow_ten_bit(const struct source *s, unsigned x, unsigned y,
+                           const struct nv12_planes *d)
 {
     unsigned top = d->height / 2, pairs = (d->width + 1) / 2;
-    struct nv15_rows upper = { d->luma, d->luma_pitch, s->data[0] + (ptrdiff_t)y * s->pitch[0],
-                               s->pitch[0], x, d->width, top };
-    struct nv15_rows lower = upper;
+    bool nv15 = s->layout == LAYOUT_NV15;
+    struct narrow_rows upper = { d->luma, d->luma_pitch, s->data[0] + (ptrdiff_t)y * s->pitch[0],
+                                 s->pitch[0], x, d->width, top, nv15 };
+    struct narrow_rows lower = upper;
     lower.dst += (size_t)top * d->luma_pitch;
     lower.src += (ptrdiff_t)top * s->pitch[0];
     lower.rows = d->height - top;
-    struct nv15_rows chroma = { d->chroma, d->chroma_pitch,
-                                s->data[1] + (ptrdiff_t)(y / 2) * s->pitch[1], s->pitch[1],
-                                x / 2 * 2, 2 * pairs, (d->height + 1) / 2 };
+    struct narrow_rows chroma = { d->chroma,
+                                  d->chroma_pitch,
+                                  s->data[1] + (ptrdiff_t)(y / 2) * s->pitch[1],
+                                  s->pitch[1],
+                                  x / 2 * 2,
+                                  2 * pairs,
+                                  (d->height + 1) / 2,
+                                  nv15 };
     pthread_t helper;
-    bool helped = !pthread_create(&helper, NULL, narrow_nv15_rows, &upper);
+    bool helped = !pthread_create(&helper, NULL, narrow_rows, &upper);
     if (!helped)
-        narrow_nv15_rows(&upper);
-    narrow_nv15_rows(&lower);
-    narrow_nv15_rows(&chroma);
+        narrow_rows(&upper);
+    narrow_rows(&lower);
+    narrow_rows(&chroma);
     if (helped)
         pthread_join(helper, NULL);
 }
@@ -226,8 +288,8 @@ int pixels_copy(const struct source *s, unsigned x, unsigned y, const struct nv1
     bool narrow = is_ten_bit(s->layout) && !dst->ten_bit;
     bool convert = is_ten_bit(s->layout) != dst->ten_bit;
     unsigned pairs = (dst->width + 1) / 2;
-    if (narrow && s->layout == LAYOUT_NV15) {
-        narrow_nv15(s, x, y, dst);
+    if (narrow && (s->layout == LAYOUT_NV15 || s->layout == LAYOUT_P010)) {
+        narrow_ten_bit(s, x, y, dst);
         return 0;
     }
     uint8_t *staged = convert ? malloc(2 * pairs * sizeof(uint16_t)) : NULL;

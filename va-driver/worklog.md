@@ -540,6 +540,12 @@ real time on Cedrus whatever the driver: about 25 fps flat out, 180 of 288 frame
   30 of 30 identical, 56 and 61 dB narrowed; `vpp.*` 53.7 and 58.8 dB; GStreamer's own
   `gst-plugins-bad`, without `0001`, decodes both at 63 dB, where it failed with NV12 alone. WebKit
   taking P010 from MPP is not tested: no WebKit browser on the R69-1.
+- `pixels.c` narrows P010 by NEON (`vld2q_u8`, the high bytes) on two cores, as it does NV15, and
+  unpacks NV15 to P010 by NEON, two groups a step through one table lookup. 1080p HEVC Main 10, 300
+  pictures, on the R69-1 by `ffmpeg -benchmark`: decode alone 2.7 ms of CPU a picture; `VideoProc`
+  to NV12 9 ms more, about 3 of them the kernel's cache upkeep; a P010 download 47 ms a picture in
+  C, which since MPP lists P010 every reading client paid, and 17 ms by NEON, identical to software.
+  mpv on HEVC Main 10 on the M2 Plus stayed at 39 to 40% of a core, its source there not read back.
 - `VideoProc` crashed GStreamer's `va` plugin on the request backend: registering `vapostproc`, it
   exports a surface with only a `VideoProc` context open, and `request_lend_backing` took that
   context for a decoder and read its codec. A crashed plugin is blacklisted, so every `va` element
