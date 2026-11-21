@@ -45,3 +45,33 @@ verified. Display, IR wake and LED behaviour remain untested.
 | --------------- | ----------------------------------------------------------- |
 | `deep`, factory | Woken by the remote over IR, 3 of 3; past the watchdog      |
 | `s2idle`        | Nothing wakes it: IR belongs to ATF (`remote_support_psci`) |
+
+## Mainline tree
+
+`next2/` holds the tree for the mainline kernel, `kernel/rk35xx-next2.conf`, beside the vendor tree
+until it replaces it. Its `board.patch` applies to the factory tree translated against mainline
+7.3.4; `./build.sh board-dtb h96max-m2-plus/next2` builds it.
+
+| Block                  | Change                                           |
+| ---------------------- | ------------------------------------------------ |
+| CPU OPPs               | 408–2016 MHz, every bin's voltages; PVTM picks   |
+| `vdd_logic`, `vdd_gpu` | Scaled by the DDR's and the GPU's OPPs           |
+| GPU OPPs               | Factory's 300–800 MHz; suspended at 300          |
+| GPU cooling            | The factory's map, at the CPU's trip             |
+| GPU power              | The factory model's coefficient, 724             |
+| Media                  | Decoders, JPEG, encoder and their IOMMUs enabled |
+| Composite              | TVE enabled                                      |
+| HDMI DDC               | `i2c2`; the HDMI pin group keeps CEC only        |
+| Audio                  | acodec and HDMI cards                            |
+| IR                     | `gpio-ir-receiver` on `GPIO4_C6`, `pwm3` off     |
+| Radio power            | PCM pins unpulled at enable; 200 ms power-off    |
+| Radio reset            | Active low, as `mmc-pwrseq` drives it            |
+| USB 3                  | `usb_host0_xhci` as host                         |
+| Watchdog, UART0        | Enabled                                          |
+
+Each CPU and GPU OPP runs at the chip's bin's voltage, every bin with its own column, a bin the
+factory leaves to the default given that. Each PWM regulator, CPU, GPU and logic, takes its vendor
+`active` pins as its default: without them the rail stays at its power-on voltage. The logic rail
+follows the DMC's vote. The radio's PCM pins are SAI0's, which mainline lacks: without the pins the
+card fails to initialise. The factory DDC pins sit under dw-hdmi, which refuses address 0x37: DDC/CI
+needs the plain I2C controller.

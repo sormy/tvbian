@@ -1,0 +1,48 @@
+--- factory_board_translated.dts
++++ board.dts
+@@ -14,11 +14,11 @@
+ #include <dt-bindings/soc/rockchip,vop2.h>
+ 
+ / {
+-	compatible = "rockchip,rk3528";
+ 	interrupt-parent = <&gic>;
+ 	#address-cells = <2>;
+ 	#size-cells = <2>;
+-	model = "Rockchip RK3518 EVB1 DDR4 V10 Board";
++	model = "H96 Max 3518D (3518_DG_ZX_V01)";
++	compatible = "h96max-3518d,rk3518-tvbox", "rockchip,rk3528";
+ 
+ 	aliases {
+ 		ethernet0 = &gmac0;
+@@ -1786,12 +1786,14 @@
+ 		vin-supply = <&vcc5v0_sys>;
+ 	};
+ 
++	/* A warm reboot resets the radio only with its 200 ms power-off. */
+ 	sdio_pwrseq: sdio-pwrseq {
+ 		compatible = "mmc-pwrseq-simple";
+ 		pinctrl-names = "default";
+ 		post-power-on-delay-ms = <200>;
+ 		reset-gpios = <&gpio3 RK_PB2 GPIO_ACTIVE_LOW>;
+ 		status = "okay";
++		power-off-delay-us = <200000>;
+ 		pinctrl-0 = <&wifi_enable_h>, <&clkm1_32k_out>, <&i2s0m0_lrck>, <&i2s0m0_sclk>, <&i2s0m0_sdi>, <&i2s0m0_sdo>;
+ 	};
+ 
+@@ -3007,7 +3009,7 @@
+ 			clocks = <&cru TCLK_WDT_NS>, <&cru PCLK_WDT_NS>;
+ 			clock-names = "tclk", "pclk";
+ 			interrupts = <GIC_SPI 28 IRQ_TYPE_LEVEL_HIGH>;
+-			status = "disabled";
++			status = "okay";
+ 		};
+ 
+ 		tsadc: tsadc@ffad0000 {
+@@ -3515,6 +3517,7 @@
+ 	ir-receiver {
+ 		compatible = "gpio-ir-receiver";
+ 		gpios = <&gpio4 RK_PC6 GPIO_ACTIVE_LOW>;
++		linux,rc-map-name = "rc-h96max-m2-plus";
+ 		pinctrl-names = "default";
+ 		pinctrl-0 = <&ir_rx_gpio>;
+ 	};

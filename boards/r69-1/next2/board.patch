@@ -1,0 +1,70 @@
+--- factory_board_translated.dts
++++ board.dts
+@@ -14,11 +14,11 @@
+ #include <dt-bindings/soc/rockchip,vop2.h>
+ 
+ / {
+-	compatible = "rockchip,rk3528";
+ 	interrupt-parent = <&gic>;
+ 	#address-cells = <2>;
+ 	#size-cells = <2>;
+-	model = "Rockchip RK3518 EVB1 DDR4 V10 Board";
++	model = "R69-1 (XR821_V1.1)";
++	compatible = "r69-1,rk3518-tvbox", "rockchip,rk3528";
+ 
+ 	aliases {
+ 		ethernet0 = &gmac0;
+@@ -1792,17 +1792,18 @@
+ 	sdio_pwrseq: sdio-pwrseq {
+ 		compatible = "mmc-pwrseq-simple";
+ 		pinctrl-names = "default";
+-		pinctrl-0 = <&wifi_enable_h>, <&clkm1_32k_out>;
+ 		post-power-on-delay-ms = <200>;
+ 		reset-gpios = <&gpio3 RK_PB2 GPIO_ACTIVE_LOW>;
+ 		status = "okay";
++		pinctrl-0 = <&wifi_enable_h>, <&clkm1_32k_out>;
+ 	};
+ 
+ 	leds {
+ 		compatible = "gpio-leds";
+ 
++		/* lit when driven low, measured: the factory tree's active-high leaves it dark while up */
+ 		normal_led: led-power {
+-			gpios = <&gpio4 RK_PC1 GPIO_ACTIVE_HIGH>;
++			gpios = <&gpio4 RK_PC1 GPIO_ACTIVE_LOW>;
+ 			default-state = "on";
+ 			retain-state-suspended;
+ 			retain-state-shutdown;
+@@ -2948,7 +2949,7 @@
+ 			clocks = <&cru TCLK_WDT_NS>, <&cru PCLK_WDT_NS>;
+ 			clock-names = "tclk", "pclk";
+ 			interrupts = <GIC_SPI 28 IRQ_TYPE_LEVEL_HIGH>;
+-			status = "disabled";
++			status = "okay";
+ 		};
+ 
+ 		tsadc: tsadc@ffad0000 {
+@@ -3237,6 +3238,15 @@
+ 			pinctrl-names = "default";
+ 			pinctrl-0 = <&sdio1_bus4>, <&sdio1_cmd>, <&sdio1_clk>;
+ 			sd-uhs-sdr104;
++			#address-cells = <1>;
++			#size-cells = <0>;
++
++			/* The radio's MAC tail from the SoC id: its efuse holds none. */
++			wifi@1 {
++				reg = <1>;
++				nvmem-cells = <&otp_id>;
++				nvmem-cell-names = "soc-id";
++			};
+ 		};
+ 
+ 		sdmmc: mmc@ffc30000 {
+@@ -3504,6 +3514,7 @@
+ 	ir-receiver {
+ 		compatible = "gpio-ir-receiver";
+ 		gpios = <&gpio4 RK_PC6 GPIO_ACTIVE_LOW>;
++		linux,rc-map-name = "rc-r69-1";
+ 		pinctrl-names = "default";
+ 		pinctrl-0 = <&ir_rx_gpio>;
+ 	};

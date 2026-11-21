@@ -1,0 +1,51 @@
+--- factory_board_translated.dts
++++ board.dts
+@@ -14,11 +14,11 @@
+ #include <dt-bindings/soc/rockchip,vop2.h>
+ 
+ / {
+-	compatible = "rockchip,rk3528";
+ 	interrupt-parent = <&gic>;
+ 	#address-cells = <2>;
+ 	#size-cells = <2>;
+-	model = "Rockchip RK3528 EVB2 DDR3 V10 Board";
++	model = "H96 Max RK3528 (RK3528_DDR3_8X4_V12)";
++	compatible = "h96max-rk3528,rk3528-tvbox", "rockchip,rk3528";
+ 
+ 	aliases {
+ 		ethernet0 = &gmac0;
+@@ -2070,8 +2070,8 @@
+ 	sdio_pwrseq: sdio-pwrseq {
+ 		compatible = "mmc-pwrseq-simple";
+ 		pinctrl-names = "default";
++		reset-gpios = <&gpio4 RK_PA4 GPIO_ACTIVE_LOW>;
+ 		pinctrl-0 = <&wifi_enable_h>, <&clkm1_32k_out>;
+-		reset-gpios = <&gpio4 RK_PA4 GPIO_ACTIVE_LOW>;
+ 	};
+ 
+ 	reserved-memory {
+@@ -3208,7 +3208,7 @@
+ 			clocks = <&cru TCLK_WDT_NS>, <&cru PCLK_WDT_NS>;
+ 			clock-names = "tclk", "pclk";
+ 			interrupts = <GIC_SPI 28 IRQ_TYPE_LEVEL_HIGH>;
+-			status = "disabled";
++			status = "okay";
+ 		};
+ 
+ 		tsadc: tsadc@ffad0000 {
+@@ -3499,6 +3499,15 @@
+ 			reset-names = "reset";
+ 			max-frequency = <150000000>;
+ 			status = "disabled";
++			#address-cells = <1>;
++			#size-cells = <0>;
++
++			/* The radio's MAC tail from the SoC id: its efuse holds none. */
++			wifi@1 {
++				reg = <1>;
++				nvmem-cells = <&otp_id>;
++				nvmem-cell-names = "soc-id";
++			};
+ 		};
+ 
+ 		sdmmc: mmc@ffc30000 {
