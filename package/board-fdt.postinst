@@ -1,0 +1,14 @@
+#!/bin/sh
+# /etc/kernel/postinst.d/tvb-board-fdt <version>: the tree that kernel's menu entry boots, a link
+# to the board's tree translated for it; runs before zz-u-boot-menu writes the menu
+set -e
+links=${TVB_FDT_LINKS:-/usr/lib/tvb/fdt}
+case "$1" in
+*-next2) tree=board-next2.dtb ;;
+*) tree=board.dtb ;;
+esac
+# a kernel with no tree to boot stops its install before the menu makes it the default
+[ -f "$(dirname "$links")/$tree" ] ||
+  { echo "tvb-board-fdt: $1 boots $tree, which this board does not ship" >&2; exit 1; }
+mkdir -p "$links/$1"
+ln -sfn "../../$tree" "$links/$1/board.dtb"

@@ -17,6 +17,16 @@ LIB=$ROOT/usr/lib/tvb
 rm -rf "$ROOT" && mkdir -p "$ROOT/DEBIAN" "$LIB"
 
 cp "$BOARDS_DIR/$BOARD/board.dtb" "$LIB/board.dtb"
+# a board with a tree for the mainline next2 kernel ships it beside its own: each kernel's menu
+# entry boots the tree it was translated for, through a per-kernel link the kernel hooks below keep
+NEXT2=$BOARDS_DIR/$BOARD/next2
+FDT_LINKS=/usr/lib/tvb/fdt
+if [ -f "$NEXT2/board.dtb" ]; then
+  cp "$NEXT2/board.dtb" "$LIB/board-next2.dtb"
+  # one command line for every kernel: next2's UART console, which the vendor kernels, their UART0
+  # the FIQ debugger's, skip
+  BOARD_CMDLINE="$BOARD_CMDLINE console=ttyS0,1500000n8"
+fi
 echo "$BOARD_ID" >"$LIB/board-id"
 echo "$BOARD_NAME" >"$LIB/board-name"
 [ -z "${BOARD_PCB:-}" ] || echo "$BOARD_PCB" >"$LIB/board-pcb"
@@ -28,8 +38,19 @@ echo "$BOARD_NAME" >"$LIB/board-name"
 bash /repo/package/install-list.sh "$BOARDS_DIR/$BOARD/package.list" "$BOARDS_DIR" "$ROOT"
 
 mkdir -p "$ROOT/usr/share/u-boot-menu/conf.d"
+if [ -f "$LIB/board-next2.dtb" ]; then
+  FDT="U_BOOT_FDT_DIR=$FDT_LINKS/
+U_BOOT_FDT=board.dtb"
+  for hook in postinst postrm; do
+    mkdir -p "$ROOT/etc/kernel/$hook.d"
+    cp "/repo/package/board-fdt.$hook" "$ROOT/etc/kernel/$hook.d/tvb-board-fdt"
+  done
+else
+  FDT=U_BOOT_FDT=/usr/lib/tvb/board.dtb
+fi
 cat >"$ROOT/usr/share/u-boot-menu/conf.d/tvb.conf" <<CONF
-U_BOOT_FDT=/usr/lib/tvb/board.dtb
+$FDT
+U_BOOT_MENU_LABEL=TVBian
 U_BOOT_TIMEOUT=10
 U_BOOT_PARAMETERS="$BOARD_CMDLINE $TVB_CMDLINE"
 CONF
@@ -37,10 +58,24 @@ CONF
 cat >"$ROOT/DEBIAN/postinst" <<'SCRIPT'
 #!/bin/sh
 set -e
+[ "$1" = configure ] || exit 0
+# the kernels installed before this package each take their tree's link; one this board has no
+# tree for is left without, as the hook says
+if [ -x /etc/kernel/postinst.d/tvb-board-fdt ]; then
+  for version in $(linux-version list); do
+    /etc/kernel/postinst.d/tvb-board-fdt "$version" || true
+  done
+fi
 # extlinux.conf names the tree, which the kernel's own hook cannot see before this package exists
-[ "$1" != configure ] || [ ! -x /usr/sbin/u-boot-update ] || u-boot-update
+[ ! -x /usr/sbin/u-boot-update ] || u-boot-update
 SCRIPT
 chmod 0755 "$ROOT/DEBIAN/postinst"
+cat >"$ROOT/DEBIAN/postrm" <<SCRIPT
+#!/bin/sh
+set -e
+[ "\$1" != purge ] || rm -rf $FDT_LINKS
+SCRIPT
+chmod 0755 "$ROOT/DEBIAN/postrm"
 
 {
   printf 'Package: tvb-%s\nVersion: %s\nArchitecture: arm64\n' "$BOARD" "$VERSION"

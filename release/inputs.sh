@@ -35,7 +35,9 @@ files() {
         (. "uboot/$BOARD_UBOOT.conf"; echo ${PATCHES:-} ${TFA_PATCHES:-}; [ -z "${SOC:-}" ] || echo "uboot/$SOC-u-boot.dtsi")
       fi
       [ ! -f "boards/$2/factory_idbloader.bin" ] || echo "boards/$2/factory_idbloader.bin"
-      [ ! -f "boards/$2/factory_boot0.bin" ] || echo "boards/$2/factory_boot0.bin" ;;
+      [ ! -f "boards/$2/factory_boot0.bin" ] || echo "boards/$2/factory_boot0.bin"
+      [ ! -f "boards/$2/next2/board.dtb" ] ||
+        echo "boards/$2/next2/board.dtb" "boards/$2/next2/board.conf" package/board-fdt.postinst package/board-fdt.postrm ;;
     firmware)
       echo "firmware/$2/firmware.conf" "firmware/$2/package.list" package/firmware.sh package/install-list.sh
       sed -E 's/#.*//' "firmware/$2/package.list" | awk 'NF && $1 != "link" {print "firmware/" $2}' ;;

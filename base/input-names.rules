@@ -1,7 +1,7 @@
 # event* numbering is probe-order dependent; a rule for a device a box lacks never matches, but two
 # rules naming one link must not both match on one box, or they race for it
 
-# Rockchip
+# Rockchip; *.pwm is the vendor kernel's IR receiver, mainline's is gpio_ir_recv below
 SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="*.pwm",          SYMLINK+="input/ir-remote"
 SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="adc-keys",       SYMLINK+="input/recovery-button"
 SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="hdmi_cec_key",   SYMLINK+="input/cec-powerkey"
@@ -11,6 +11,9 @@ SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="bt-powerkey",    SYMLINK+="i
 # Allwinner
 SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="sunxi-ir",       SYMLINK+="input/ir-remote"
 SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="gpio-keys",      SYMLINK+="input/recovery-button"
+
+# every family: an IR receiver on a GPIO, where the SoC's own has no driver (Rockchip on mainline)
+SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="gpio_ir_recv",   SYMLINK+="input/ir-remote"
 
 # every family: the TV remote over CEC, then the Bluetooth remote, one link per interface; its keys
 # arrive on consumer control

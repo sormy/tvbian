@@ -355,5 +355,6 @@ guess, a test or another board's tree.
   explicit reboot you can watch, and keep a known-good DTB where one file copy restores it.
 - **When a box won't boot after a DTB change:** power off, pull the SD (if it boots from eMMC, boot
   an SD instead), mount its rootfs on the host and `e2cp` the known-good `board.dtb` back. The boot
-  loader reads `/usr/lib/tvb/board.dtb`, the one copy. On serial the two failure shapes differ: a
+  loader reads `/usr/lib/tvb/board.dtb`, the one copy, or `board-next2.dtb` for a next2 kernel, each
+  through its kernel's link in `/usr/lib/tvb/fdt/`. On serial the two failure shapes differ: a
   silent stop is a hang, a repeating U-Boot banner is a reset loop.

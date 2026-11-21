@@ -59,8 +59,16 @@ mmdebstrap --variant=minbase --mode=root --architectures=arm64 \
 echo uninitialized >"$ROOT/etc/machine-id"
 # the build container's DNS; NetworkManager writes the box's own
 rm -f "$ROOT/etc/resolv.conf"
-grep -q "fdt /usr/lib/tvb/board.dtb" "$ROOT/boot/extlinux/extlinux.conf" ||
-  { echo "✗ extlinux.conf names no board tree"; exit 1; }
+FDT_ENTRIES=$(awk '$1 == "fdt" {print $2}' "$ROOT/boot/extlinux/extlinux.conf")
+[ -n "$FDT_ENTRIES" ] || { echo "✗ extlinux.conf names no board tree"; exit 1; }
+for fdt in $FDT_ENTRIES; do
+  case "$fdt" in
+    /usr/lib/tvb/board.dtb | /usr/lib/tvb/fdt/*/board.dtb)
+      [ -f "$ROOT$fdt" ] && continue ;;
+  esac
+  echo "✗ extlinux.conf names an invalid board tree: $fdt"
+  exit 1
+done
 # a box without an RTC starts its first boot at this file's time, not systemd's months-old build
 # date, so no file in the image is from its future
 touch "$ROOT/usr/lib/clock-epoch"

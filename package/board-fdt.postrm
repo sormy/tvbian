@@ -1,0 +1,4 @@
+#!/bin/sh
+# /etc/kernel/postrm.d/tvb-board-fdt <version>: the removed kernel's tree link
+set -e
+rm -rf "${TVB_FDT_LINKS:-/usr/lib/tvb/fdt}/$1"
