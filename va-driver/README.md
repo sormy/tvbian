@@ -121,9 +121,10 @@ Key: ✓ offered, ✗ the engine can but this driver cannot yet, ➖ the engine 
   unpacking into P010. Lima cannot sample P010 either way.
 - **What clients ask for (host, the CPU engine):** FFmpeg and mpv `--hwdec=vaapi-copy` take P010
   whenever a 10-bit config lists it, even second; with NV12 listed alone both decode HEVC Main 10
-  and VP9 profile 2 into NV12 surfaces, FFmpeg's `hwdownload` and its automatic copy alike. Hence
-  NV12 alone on `rk35xx`. GStreamer's `va` decoders take only a 10-bit format for a 10-bit stream:
-  `extras/gst-plugins-bad` carries the patch that lets them narrow too.
+  and VP9 profile 2 into NV12 surfaces, FFmpeg's `hwdownload` and its automatic copy alike. Every
+  10-bit config lists P010 first, so the target decides: one that shows 10-bit takes the picture as
+  it is, one that shows 8-bit asks `VideoProc` to narrow it. GStreamer's `va` decoders take only a
+  10-bit format for a 10-bit stream, which every config lists.
 - **`sunxi-h616` AFBC:** HEVC and VP9 decode into Cedrus's AFBC (`AS12`, `AS01`) when every render
   target listed `DRM_FORMAT_MOD_ARM_AFBC(16x16 | SPARSE | SPLIT)` in
   `VASurfaceAttribDRMFormatModifiers` and the render node is Panfrost's; linear otherwise, and never
@@ -418,8 +419,8 @@ local Mesa build needs that build's `libglx-mesa0` installed beside them. Exit s
 
 - **Decode** passes on identical frames, or on Y PSNR ≥ 50 dB where the engine's IDCT or a 10-bit
   picture narrowed to 8 bits differs. On a box the engine's interrupts must move. A 10-bit clip
-  downloads as P010, or NV12 where the engine narrows. GStreamer's frames are judged against the
-  same software decode; it has no MPEG-4, H.263 or VC-1 decoder.
+  downloads as P010. GStreamer's frames are judged against the same software decode; it has no
+  MPEG-4, H.263 or VC-1 decoder.
 - **A size change mid-stream** (`vp9-switch`, `h264-switch`, `hevc-switch`): 360p, 720p, 360p, a key
   frame each, at widths GStreamer writes unpadded. FFmpeg's pictures and GStreamer's, which change
   size as they come, against FFmpeg's software decode, each picture at its own size. A switch is a
@@ -454,9 +455,9 @@ Interlaced MPEG-4 on `meson-gxl` is the decoder's, as through `ffmpeg9`; `vc1-ap
 one wrong picture through after a drain, open. Every other offer passes, decode and encode.
 
 - **Bit-exact on a box:** H.264 (all 9 clips) everywhere; HEVC Main and VP9 profile 0 everywhere,
-  odd sizes included; HEVC Main 10 and VP9 profile 2 on `sunxi-h616`; VP8; VC-1 Advanced on
-  `sunxi-h616` and interlaced on `meson-gxl`. HEVC Main 10 and VP9 profile 2 narrow to 8 bits on
-  `rk35xx` (56, 61 dB) and `meson-gxl` (61, 65 dB).
+  odd sizes included; HEVC Main 10 and VP9 profile 2 on `sunxi-h616` and `rk35xx`; VP8; VC-1
+  Advanced on `sunxi-h616` and interlaced on `meson-gxl`. HEVC Main 10 and VP9 profile 2 come out of
+  `meson-gxl`'s decoder as 8 bits (61, 65 dB).
 - **Within 50 dB:** MPEG-2, MPEG-4 and H.263 at 50–74 dB, the engines' IDCT; JPEG 71–77 dB.
 - **`meson-gxl` held pictures:** FFmpeg's command line syncs each picture before the next packet;
   with `meson-codecs` `0037` every MPEG-2 and MPEG-4 clip but the interlaced one comes out whole.

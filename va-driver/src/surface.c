@@ -402,8 +402,7 @@ static VAStatus query_surface_attributes(VADriverContextP ctx, VAConfigID config
     if (*num_attribs < NUM_SURFACE_ATTRIBS)
         return VA_STATUS_ERROR_MAX_NUM_EXCEEDED;
     bool ten_bit = config->rt_format == VA_RT_FORMAT_YUV420_10;
-    bool narrows = ten_bit && engine && engine->narrows_ten_bit;
-    uint32_t listed_fourcc = narrows ? VA_FOURCC_NV12 : surface_fourcc_of(config->rt_format);
+    uint32_t listed_fourcc = surface_fourcc_of(config->rt_format);
     const struct {
         VASurfaceAttribType type;
         uint32_t flags;
@@ -430,9 +429,8 @@ static VAStatus query_surface_attributes(VADriverContextP ctx, VAConfigID config
                        .value.i = values[i].value },
         };
     }
-    /* 10-bit configs take 8-bit surfaces too, for clients that probe with NV12; an engine that
-     * narrows lists NV12 alone, as FFmpeg and mpv take P010 whenever it is listed */
-    if (ten_bit && !narrows)
+    /* 10-bit configs take 8-bit surfaces too, for clients that probe with NV12 */
+    if (ten_bit)
         attribs[n++] = (VASurfaceAttrib){
             .type = VASurfaceAttribPixelFormat,
             .flags = VA_SURFACE_ATTRIB_GETTABLE | VA_SURFACE_ATTRIB_SETTABLE,

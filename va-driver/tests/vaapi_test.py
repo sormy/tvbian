@@ -538,7 +538,7 @@ def decode_case(setup: Setup, name: str, clip: Clip, offers: set[str]) -> Iterat
     base = ["ffmpeg", "-nostdin", "-hide_banner", "-v", "error"]
     software = software_frames(setup, path, sample)
     irqs = irq_count()
-    # a 10-bit config's surfaces are P010, or NV12 on an engine that narrows
+    # a 10-bit config's surfaces are P010, or NV12 for a client that asks it
     hardware: list[str] = []
     log = download = ""
     for surface_format in TEN_BIT_SURFACES if clip.ten_bit else ["nv12"]:

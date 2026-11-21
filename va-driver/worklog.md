@@ -534,6 +534,12 @@ real time on Cedrus whatever the driver: about 25 fps flat out, 180 of 288 frame
   1920x1080, HEVC Main 10 at 30 fps: 301 flips in 10 s, VA decode, mpv at 39% of a core. A first try
   narrowed rkvdec's 10-bit to NV12 surfaces instead; its box runs used an old package, so they
   showed nothing, and the conversion serves every client that asks, so it went.
+- MPP no longer narrows 10-bit on its own (`narrows_ten_bit` gone): every 10-bit config lists P010
+  first and NV12 second, a P010 surface exports MPP's NV15 as it is, and a client that shows 8-bit
+  only asks `VideoProc`. The R69-1, vendor 6.12: 83 pass, 76 before. HEVC Main 10 and VP9 profile 2
+  30 of 30 identical, 56 and 61 dB narrowed; `vpp.*` 53.7 and 58.8 dB; GStreamer's own
+  `gst-plugins-bad`, without `0001`, decodes both at 63 dB, where it failed with NV12 alone. WebKit
+  taking P010 from MPP is not tested: no WebKit browser on the R69-1.
 - `VideoProc` crashed GStreamer's `va` plugin on the request backend: registering `vapostproc`, it
   exports a surface with only a `VideoProc` context open, and `request_lend_backing` took that
   context for a decoder and read its codec. A crashed plugin is blacklisted, so every `va` element

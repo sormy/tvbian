@@ -2,8 +2,8 @@
  * Rockchip MPP: the rebuilt bitstream into libmpp's decoder, which hands each picture out once
  * decoded (MPP_DEC_SET_IMMEDIATE_OUT), into cacheable buffers it allocates as it needs them: a
  * picture a surface holds keeps its buffer. Encode through MPP's encoder, reading the surface's own dma-buf.
- * MPP decodes 10-bit only as NV15: a 10-bit surface exports it as it is, for display planes; an
- * 8-bit surface gets it unpacked by the CPU, which also copies 8-bit pictures into surfaces' memory.
+ * MPP decodes 10-bit only as NV15: a P010 surface exports it as it is, for display planes; a client
+ * that shows 8-bit only has VideoProc narrow it. The CPU copies 8-bit pictures into surfaces' memory.
  */
 #include <errno.h>
 #include <linux/dma-buf.h>
@@ -912,7 +912,6 @@ const struct backend backend_mpp = {
     .copy_picture = cpu_copy_picture,
     .plan_layout = plan_mpp_layout,
     .decodes_into_backing = true,
-    .narrows_ten_bit = true,
     .encoder_open = mpp_encoder_open,
     .encode = mpp_encode,
     .encoder_close = mpp_encoder_close,

@@ -22,7 +22,7 @@ settings.
 - [ ] **`meson-gxl` VC-1 with slices refuses every wrong picture after a drain**: `vc1-ap-slices`
       lets one through at 17 dB.
 - [ ] **Every family at `ffmpeg9`'s native rate through VA-API**, decoding only, frames left on the
-      GPU: `rk35xx` HEVC Main 10 at 88 to 89%, each picture narrowed by the CPU.
+      GPU: `rk35xx` HEVC Main 10 at 88 to 89% when narrowed by the CPU; as P010 not measured.
 - [ ] **`meson-gxl` VP9 4K without a copy**: the decoder grants only the 16 CAPTURE buffers it holds
       itself, so every picture is copied out for the surfaces to hold.
 - [ ] **The suite times VA against `ffmpeg9`'s native path**, clip by clip, not only against the
@@ -57,8 +57,9 @@ settings.
       container lacks; a Linux host or CI could pass `vgem`'s node in.
 - [ ] **HEVC 1080p60 in WebKit on `rk35xx-next2` now and then decodes nothing**: one Falkon file run
       of several, the others at full rate.
-- [ ] **10-bit by capability on MPP**: `narrows_ten_bit` lists NV12 alone for every client; P010
-      where the client's GPU samples it.
+- [ ] **`extras/gst-plugins-bad` dropped**: its `0001` lets GStreamer narrow where a driver lists no
+      10-bit format, and every 10-bit config lists P010 now; GStreamer 10-bit on Debian's own plugin
+      is measured on the R69-1 alone.
 - [ ] **Held pictures detected**: `backend_v4l2m2m.c` assumes them by codec; a decoder seen holding
       one should switch the workaround on.
 - [ ] **Standalone build**: `build.sh` reads repo paths, and the host engine needs

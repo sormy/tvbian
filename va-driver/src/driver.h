@@ -235,8 +235,6 @@ struct backend {
     /* the codecs it decodes scaled, by 1 << codec_kind, and the factors it takes */
     uint32_t scaled_codecs;
     unsigned max_scale_factor;
-    /* 10-bit pictures go to 8-bit surfaces unless the client asks for 10-bit ones */
-    bool narrows_ten_bit;
     /* a stateless engine takes VA's parameters as they are, in place of decode() */
     int (*decode_picture)(struct driver *drv, struct context *ctx, const struct picture *pic);
     void (*decoder_close)(struct context *ctx);
