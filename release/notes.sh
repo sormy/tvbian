@@ -25,6 +25,8 @@ version() { awk -v c="kernel/$1.conf" '$1 == "kernel" && $2 == c { sub(/-[0-9]+$
     # shellcheck source=/dev/null
     . "boards/$board/board.conf"
     next=$(version "$BOARD_KERNEL-next")
+    # mainline beside the vendor kernels, where the board ships its tree
+    preview=$([ -d "boards/$board/next2" ] && version "$BOARD_KERNEL-next2" || true)
     # the board's own chips, firmware and driver both; the SoC's, named after its maker, go unsaid
     soc=$(vendor "$BOARD_FAMILY")
     extras=$(tr ' ' '\n' <<<"$BOARD_DEPENDS" | sed -n 's/^tvb-firmware-//p' | grep -vix "$soc" |
@@ -47,12 +49,15 @@ version() { awk -v c="kernel/$1.conf" '$1 == "kernel" && $2 == c { sub(/-[0-9]+$
       box="$box<br>↳ ${alias%%$'\t'*}"
       pcb="$pcb<br>${alias#*$'\t'}"
     done
-    echo "| $box | $pcb | $(vendor "$BOARD_FAMILY") ($BOARD_KERNEL) | Debian ${TVB_BUILD_SUITE:?} | $(version "$BOARD_KERNEL"), $(origin "$BOARD_KERNEL") | ${next:+$next, $(origin "$BOARD_KERNEL-next")} | $extras | \`$(basename "$img")\` |"
+    echo "| $box | $pcb | $(vendor "$BOARD_FAMILY") ($BOARD_KERNEL) | Debian ${TVB_BUILD_SUITE:?} | $(version "$BOARD_KERNEL"), $(origin "$BOARD_KERNEL") | ${next:+$next, $(origin "$BOARD_KERNEL-next")}${preview:+<br>$preview, mainline preview} | $extras | \`$(basename "$img")\` |"
   done
   echo
   echo "✅ tested by TVBian · 👤 tested by a user · ❓ not tested · ❌ tested, broken"
   echo
   next=$(for k in kernel/*-next.conf; do basename "$k" -next.conf; done | paste -sd'|')
-  echo "Next kernel: \`sudo apt install linux-image-tvb-<$next>-next\`"
+  previews=$(for k in kernel/*-next2.conf; do
+    [ -e "$k" ] && printf ', %s mainline preview `linux-image-tvb-%s`' "$(vendor "$(basename "$k" -next2.conf)")" "$(basename "$k" .conf)"
+  done || true)
+  echo "Next kernel: \`sudo apt install linux-image-tvb-<$next>-next\`$previews"
 } >"$REL/notes.md"
 echo "✓ release notes"
