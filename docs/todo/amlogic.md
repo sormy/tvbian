@@ -9,6 +9,8 @@ What spans the family's boards.
       U-Boot, which sets `local-mac-address`. ❓ `env export` in this U-Boot; a RAM address neither
       relocates over.
 
+- [ ] **A TV remote's keys over HDMI CEC as input events.** `CONFIG_MEDIA_CEC_RC` cannot be set in
+      `meson64` or `meson64-next`: it needs `RC_CORE` built in where `CEC_CORE` is.
 - [ ] **No kernel self-tests in meson64.** 146 of its 4433 modules are KUnit and test modules, from
       Armbian's config: off in `kernel/meson64.fragment` (`CONFIG_KUNIT`), then a boot on the M20.
       The rest of its breadth stays: USB Wi-Fi, tuners and cameras are why a box is general.

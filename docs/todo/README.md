@@ -196,6 +196,8 @@ below.
 - [ ] **`tools/validate/`: JSON out.** `box.py`'s sub-suites and `regression.py`, the one runner,
       are done; left: each line tied to its `docs/bring-up/` check ID, JSON out with `report` and
       `matrix` for a board's `board.md`, as `video.py` has.
+- [ ] **`regression.py deploy` gives every box the deqp runner**: with no `deqp` deb in
+      `build/out/debs/` it ships none, and the step fails as a GPU fault (`exit 127`).
 - [ ] **A composite grabber**: a USB composite capture stick on a host, so composite's picture is
       checked unattended, not only its writeback and encoder registers.
 

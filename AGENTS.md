@@ -27,6 +27,8 @@ our boxes. A board's key names its model (`h96max-m20`), never its SoC.
 | `base/`             | `tvb-base`: what every box gets, and its `package.list`                                        |
 | `firmware/<chip>/`  | a chip's firmware, packaged as `tvb-firmware-<chip>`                                           |
 | `docs/<board>/`     | `worklog.md` (history), `dtb.md` (tree changes), `board.md` (usage)                            |
+| `docs/<family>/`    | `worklog.md`: the family's work no single box owns                                             |
+| `docs/<chip>/`      | `worklog.md`: a Wi-Fi/BT chip's driver work, whatever board carries it                         |
 | `stock/<board>/`    | factory evidence: dumps, logs, partition maps                                                  |
 | `backup/`           | `<board>-stock.img.xz`, the factory eMMC (gitignored)                                          |
 | `patches/<topic>/`  | every patch to an upstream's code, one folder per upstream, with its upstream status           |
@@ -88,6 +90,7 @@ another, so nothing rots when one is rewritten.
 | `docs/va-driver.md`                      | Debian's programs in hardware; what the VA driver adds               |
 | `va-driver/README.md`                    | the VA-API driver: what each engine offers, how VA maps onto it      |
 | `va-driver/worklog.md`                   | the VA-API driver's dated history, wrong turns included              |
+| `session/<name>/worklog.md`              | a session's dated history                                            |
 | `docs/emmc-layout.md`                    | the measured eMMC map: every replicated structure and its sectors    |
 | `docs/build.md`                          | `./build.sh`: hosts, steps, outputs, and making a release            |
 | `docs/release-checklist.md`              | what a new package needs to build and publish: extras, new steps     |
@@ -107,6 +110,8 @@ another, so nothing rots when one is rewritten.
 | `docs/<board>/board.md`                  | that board's identity, measured numbers, known gaps                  |
 | `docs/<board>/dtb.md`                    | that board's device-tree changes, tried and reverted ones too        |
 | `docs/<board>/worklog*.md`               | dated history, wrong turns included; split by topic once it grows    |
+| `docs/<family>/worklog.md`               | a kernel, translator rules, SoC blocks: no single box's work         |
+| `docs/<chip>/worklog.md`                 | a Wi-Fi/BT chip's driver, on every board that carries it             |
 | `tools/dtcx/README.md`                   | a blob decompiled as its vendor wrote it: named constants, decimal   |
 | `tools/amlcmd/README.md`                 | the Amlogic burning-mode client we wrote, and its worklog            |
 | `tools/validate/README.md`               | a running box against the bring-up criteria, one script a component  |
@@ -190,7 +195,9 @@ cannot be backed, say so rather than rounding up.
   Then back to the work.
 - **Worklogs are written as work happens** — dated entries, wrong turns included. They are the raw
   material everything else derives from, and what the next port follows. Beside each, `steering.md`
-  logs where the docs or rules steered wrong.
+  logs where the docs or rules steered wrong. A box's results go in its board's worklog; a Wi-Fi/BT
+  chip's driver work in its chip's; a feature's, a session or the VA driver, in its own folder; the
+  rest no single box owns, in its family's.
 - **Narrative lives in `docs/`**, never in scripts, payload files or DTB tables. Those stay terse.
 - **Measured numbers live in `docs/<board>/board.md`** — they're per-unit and they decay.
 - **The claim, not its proof.** Dates, evidence and the session's narration go in the worklog; a

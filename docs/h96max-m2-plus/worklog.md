@@ -619,3 +619,97 @@ MPP 1.1.0's `osal/mpp_soc.c`, the `rk3528` entry, against `patches/ffmpeg/`; not
   2160p60 1428.
 - VP9 sizes through `tvb-va-driver`, 10 frames each: profile 0 at 8192×4320 identical to software;
   profile 2 at 1920×1080, 3840×2160, 4096×2304 and 8192×4320, 64, 65, 62 and 58 dB as NV12.
+
+## 2026-11-17 — the M2 Plus on the new kernel (va-api's run)
+
+- VP9 through rkvdec: bit-exact against libvpx at 1080p and 4K, 60 of 60 frames each, through
+  FFmpeg's `v4l2request` and through `tvb-va-driver`; native/VA 1080p60 329/319 fps, 4K30 85/83,
+  4K60 89/87.
+- VP8 at 4K on Hantro: refused at setup, no broken frames.
+- `rk_iommu ff740800.iommu: FORCE_RESET command timed out`: gone with `rockchip,disable-mmu-reset`.
+- H.264 through `tvb-va-driver`: bit-exact at 1080p and 4K, 91–97% of native (driver fix, va-api's).
+- PVTM read 1486, bin L6, where vendor reads 1362, bin L2: 2016 MHz ran at 1025 mV against
+  vendor's 1075. Back to vendor on a tree without `rockchip,pvtm-offset` (`fbf40e65`, every OPP at
+  its highest bin).
+- Wrong turn: the rail's settling. Mainline starts it near 1.1 V and a lightly loaded PWM rail falls
+  slowly, so 1.1 ms after the request it might still be above 900 mV. The settled read: 1480, still
+  L6. The safe tree stays.
+- Node numbers move between boots: rkvdec and Hantro swapped `video2` and `video3`.
+
+## 2026-11-17 — PVTM matches vendor on the R69-1
+
+- The PVTM driver asked for 900 mV with a range up to `INT_MAX`, which the boot voltage already met,
+  so the regulator core left the rail where it was.
+
+## 2026-11-19 — the CPU clock is not its request on next2
+
+- `perf stat` on a pinned busy loop, next2: 408 and 600 MHz as asked, 816 runs 1043, 1008 runs 1282,
+  1200 and 1416 run 1419, 1608 to 2016 run 1478. Vendor 6.1: 1200 runs 1219, 1608 1589, 2016 1742.
+- `SIP_PVTPLL_CFG` `GET_INFO` and `VOLT_SEL` from next2's PVTM driver changed nothing.
+- Same BL31, the CPU pinned: `core_grf` 0x04, the ring setting, is 8 at 1200 MHz and 7 at 1608 and
+  2016 on both kernels; 0x08 and 0x0c match. The PVTPLL's rate (0x14): next2 1424 at 900 mV, 1485 at
+  1014 mV, 1486 at 1100 mV; vendor 1215 at 873 mV, 1591 at 1000 mV, 1753 at 1073 mV. next2 runs
+  slower at one ring setting while it claims the higher rail, and does not speed up from 1014 to
+  1100 mV: the rail likely did not reach what the regulator reported above about 1 V.
+- The rail's PWM (`ffa90010`, `rockchip,rk3528-pwm` on both) reads back 1667, 2917 and 3875 ns of
+  5000 on next2 (`/sys/kernel/debug/pwm`); vendor's registers: period 0x78, duty 0x22, 0x43, 0x56
+  (1400, 2800, 3600 ns), control 0x13. A raw read on next2 gave 0x13 at every offset; not repeated,
+  the block possibly clock-gated.
+- With the PWM pins muxed: PVTM 1352, bin L2, as vendor 6.1 reads 1364 (L2); the earlier 1486 (L6)
+  was the stuck rail. `BOARD_PVTM=off` removed. At 2016 MHz the CPU measures 1738 at 1073 mV; CPU
+  and GPU stress 5 min pass at 78 °C.
+- `hpd-gpios`: without it, GPIO0 `DR_L` bit 2 clear, the pin reading 0, HDMI-A-1 `disconnected` with
+  a screen on it, greetd `failed` at its start limit. With it: `connected`, the screen's modes read,
+  the `hdmi-hpd` interrupt registered, greetd active. Earlier "hotplug works" came from forced
+  connectors, never a cable.
+- HDMI audio silent on next2, heard on vendor 6.1. The controller's CTS measured 471400 on next2,
+  twice the 235700 vendor writes by hand (`rockchip,cts-manual`); writing it by hand on next2 did
+  not bring sound, nor did `HDCP_KEEPOUT`. With the SAI's slots 32 bits wide: sound on the panel,
+  the controller's own CTS 235700.
+- Unexplained: a reset during a next2 boot, minutes after audio and DDC/CI tests, with no pstore
+  record: the `console-ramoops-0` of 05:02 UTC, `reboot: Restarting system`, is the deploy script's
+  own reboot of the boot before. A reset with no record is the watchdog's or a hang's. Not the
+  rollback guard (the boot was accepted), nor the tvbian or va-api sessions. The same tests,
+  repeated on later boots, reset nothing.
+
+## 2026-11-20 — the GPU's clock and throttling, vendor against next2
+
+- The next2 soak resets with `GLB_RST_ST` 0x0, a power-on reset, where a soft reboot reads 0x1. The
+  vitals at the reset: 99 °C, CPU 2016 MHz, GPU 800 MHz.
+- Under glmark2 plus `stress-ng --cpu 4`:
+
+| Under load           | vendor 6.1 (our tree)       | next2                  |
+| -------------------- | --------------------------- | ---------------------- |
+| devfreq              | 800 MHz                     | 800 MHz                |
+| the GPU's core clock | `aclk_gpu_mali` 498 MHz max | `scmi_clk_gpu` 800 MHz |
+| `vdd_gpu`            | 873 mV                      | 851 mV                 |
+| glmark2 score        | 36                          | 50                     |
+
+- Wrong turn: the 300 MHz `scmi_clk_gpu` on vendor 6.1 first read as vendor clamping the GPU. Its
+  enable count is 0: our vendor tree runs the GPU on `aclk_gpu_mali`.
+- next2's 850 mV at 800 MHz is the L8 row: GPU PVTM 1175 and 1170 on two boots, past the table's 891
+  top. The read matches the vendor's: SCMI to 800 MHz, 900 mV, 1100 µs, offset 0x18 in `gpu_grf`
+  (0x10018 in the vendor's GRF). The CPU's 1351 against vendor's 1361 bins L2 on both. OTP byte 0x09
+  is 0x29: `mbist-vmin` index 1 for the CPU, GPU and logic, floors 825, 825 and 850 mV, none above
+  their L-row here. `opp-info` at 0x32, 0x38 and 0x3e is zero.
+- Thermal on next2, idle: `power_allocator`, sustainable 638 mW, cooling bound to the 110 °C
+  `target` trip. The soak spent 123 samples of 254 at ≥95 °C at 2016 MHz and 800 MHz: below the
+  target, so no throttling. `/sys/kernel/debug/energy_model/` lists only `cpu0`.
+- With `drm-lima-devfreq-cooling-energy-model.patch`: `energy_model/` lists `ff700000.gpu`, 148 mW
+  at 300 MHz to 418 mW at 800 MHz. With the trips lowered to 60 and 70 °C under glmark2 and
+  `stress-ng --cpu 4`, the GPU's cooling went to state 4 (300 MHz) and the CPU's to 2 (1608 MHz),
+  holding 63 °C; both back to 0 once the load stopped.
+
+## 2026-11-21 — the patched next2 under the soak
+
+- The energy-model patch and the GPU's coefficient in: the 1800 s soak completes with no reset (55
+  min up), peak 105.5 °C; ping loss 0.43 %; its only failure is the Seekwave `SKW_CMD_GET_STA`
+  length warning `known.conf` already lists. From 95 °C the allocator holds the GPU at 300 MHz
+  (state 4) and the CPU at 1608-1800 MHz (state 2), around 103 °C.
+- glmark2's default suite, off-screen: 49 cold at 64 °C; 34 at 98-100 °C with `stress-ng --cpu 4`
+  running, the GPU at 300 MHz. Vendor 6.1, its GPU capped at 498 MHz by our tree, scored 36 in the
+  regression's GPU step.
+
+## 2026-11-21 — next2 on the boards' own `cma=16M`
+
+- The full regression on next2, the VOP behind its IOMMU: CMA peak 2.8 MiB.

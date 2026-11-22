@@ -9,6 +9,9 @@ stock.
 
 In order: each stage is the way back for the next.
 
+0. **The SoC's datasheet first**, else its reference manual or product brief. Each capability it
+   lists is brought up, a row in `docs/todo/<family>.md`, or ➖ with its reason. Its title, revision
+   and source go in the family's worklog.
 1. **The service-mode tool**, built from source in `tools/`, on macOS and Linux: a closed or
    x86-64-only vendor tool is patched open, as `rkdeveloptool` was, or rewritten, as `amlcmd` was.
    Its loader carries the board's own DRAM settings. Proven by a full read and a restore that boots
@@ -37,9 +40,10 @@ In order: each stage is the way back for the next.
    - Pin `soc` to mainline's SoC dtsi at a tag, and `soc-patches` to the `-next` conf (the superset
      both kernels' trees are written from).
    - Run `translate.py --report` on every factory tree in the family. Give each reported token one
-     generic outcome, never one board's value: a conversion; `none`, only with evidence that dropping
-     it is safe (a mainline driver's source at the pinned tag, or the vendor BSP's); `unsupported`
-     when no mainline binding describes the block; `unresolved` when only a board can answer.
+     generic outcome, never one board's value: a conversion; `none`, only with evidence that
+     dropping it is safe (a mainline driver's source at the pinned tag, or the vendor BSP's);
+     `unsupported` when no mainline binding describes the block; `unresolved` when only a board can
+     answer.
    - A wrong stock value stays as the vendor wrote it; the fix goes in that board's patch. A board's
      patch is the diff from its translation to its final tree; blocks the board lacks are disabled,
      not deleted.
@@ -56,8 +60,10 @@ In order: each stage is the way back for the next.
      patch; anything else is a bug.
    - **The final tree has an upstream view**: `tools/dtcx/upstream.py --prove board.dtb` writes the
      SoC dtsi plus only the board's changes, and proves it describes the dtb
-     (`tools/dtcx/README.md`). Its size is what an upstream board file would be; a block in it that no
-     board fact explains is a bug.
+     (`tools/dtcx/README.md`). Its size is what an upstream board file would be; a block in it that
+     no board fact explains is a bug.
+   - **The view's base is tried, not assumed** (`BOARD_KERNEL_DTB_UPSTREAM`): build the view over
+     each upstream board of the SoC and keep the one that shrinks it most; else the SoC dtsi.
    - **Fix translation bugs in the tool**, with a test that fails without the fix, then re-run every
      board's translation: unchanged, or changed only as intended. A conf refactor must leave every
      tree byte-identical.
@@ -84,6 +90,8 @@ In order: each stage is the way back for the next.
 
 ## Check
 
+- [ ] **F0** Every capability the SoC's datasheet lists is brought up, a row in the family's todo
+      page, or ➖ with its reason
 - [ ] **F1** The service-mode tool builds from source, on macOS and Linux
 - [ ] **F2** 👤 It reads a box in full
 - [ ] **F3** 👤 It restores a box, which boots stock

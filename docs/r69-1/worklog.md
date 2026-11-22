@@ -1968,3 +1968,42 @@ nothing failed. The previous tree is kept at `/root/board.dtb.known-good`.
 - `validate.sh` and `reboots.sh` 5 on 6.1.172 and 6.12.69, tree `d76e65a4`: 51 lines each. Wi-Fi
   187/191 and 186/183 Mbit/s at 40 MHz HE; BLE scan 26 and 23; no MMC error, failed unit or IOMMU
   fault; every reboot back. `dmesg` warnings 143 and 155, most from `[drm]`, as before.
+
+## 2026-11-17 — PVTM matches vendor on the R69-1
+
+- Vendor 6.1 `pvtm=1552`, `pvtm-volt-sel=5`; next2 `pvtm 1545 at 1416000 kHz, 950750 uV`, bin 5.
+
+## 2026-11-17 — the vocabulary: unresolved as the last resort
+
+- With the BSP's `active` PWM pin state mapped to `default`, PWM5 took the Ethernet LED's pin
+  (`could not request pin 144`). With it `none`, the box boots clean on tree `2e010ce8`.
+
+## 2026-11-19 — the CPU clock is not its request on next2
+
+- Vendor 6.12 runs a Python loop 19% slower than the 3518D at 1416 MHz.
+
+## 2026-11-21 — next2 on the boards' own `cma=16M`
+
+- The full regression on next2, the VOP behind its IOMMU: CMA peak 2.3 MiB.
+
+## 2026-11-21 — one Wi-Fi MAC on every kernel
+
+- The AIC8800 took `8a:00:33:65:64:b6` on vendor 6.1, from `system_serial`, and `8a:00:33:d3:75:46`
+  on next2, from the `soc-id` cell: a second DHCP lease, and `cnc` pointing at the stale one.
+- `99-stable-mac.patch` on the root `serial-number`, each kernel installed with its own modules:
+  `8a:00:33:65:64:b6` at 192.168.1.241, "from soc serial", on 6.1, 6.12 and 7.3.5.
+
+## 2026-11-21 — Bluetooth on next2, and what the translator dropped
+
+- No `hci0` on 7.3.5 before the `rk-bluetooth` conversion. With it: `hci0` UP RUNNING, a scan finds
+  devices on both kernels.
+- Bluetooth address `8A:00:33:65:64:B7` on 6.1 and 7.3.5, Wi-Fi's + 1.
+- Parity, 6.1 against 7.3.5: inputs 6 against 2, cooling 3 against 2, rfkill 3 against 2.
+
+## 2026-11-21 — AIC8800 `96` and `97` on the vendor kernels
+
+- 6.1.172 with `96`: `custregd` reads `N`, the phy at the global US domain; `iw reg set DE` moves it
+  to DE and back to US, the 5200 MHz link kept.
+- 6.12.69 with `97`: two unload and load cycles of `aic8800_fdrv`, each with an address after 4 s,
+  where 6.12 failed `wifi.reloads` 2 of 2 runs before. Each release logs
+  `aicwf_sdio_release: reg:0 write failed!`; the next load is unaffected.

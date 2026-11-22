@@ -10,7 +10,7 @@ send upstream.
 | ------ | ------------------------------------------------------------------------------- |
 | `0001` | two Python 2 calls in `libfdt.i_shipped` that swig 4.3+ no longer papers over   |
 | `0002` | a hardcoded `-shared`, where Mach-O needs `-bundle -undefined dynamic_lookup`   |
-| `0003` | Ethernet on the `cpuid`-derived address instead of vendor storage's `LAN_MAC`   |
+| `0003` | Ethernet on vendor storage's `LAN_MAC`, the `cpuid`-derived address without one |
 | `0004` | H616: two 3/4-populated ranks mapped contiguous, sized at boot                  |
 | `0005` | sunxi: Ethernet and Wi-Fi on secure storage's `mac` and `wifi_mac`, not the SID |
 | `0006` | sunxi: the Bluetooth address on the tree's `bluetooth0` alias                   |

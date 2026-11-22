@@ -2451,3 +2451,42 @@ card once the same DDR blob was on its eMMC. The eMMC's FIT is 2026.10 again.
   each. Wi-Fi 400/402 and 399/401 Mbit/s up/down at 80 MHz HE; BLE scan 32 and 22; no MMC error,
   failed unit or IOMMU fault; every reboot back. The kernels number the SD and SDIO hosts
   differently (`mmc1`/`mmc2` swap); both run SDR104.
+
+## 2026-11-15 — next2 preparation: readback
+
+- 6.1.172 is installed beside the running 6.12.69; both extlinux entries use
+  `/usr/lib/tvb/board.dtb`, the vendor tree.
+- `board-next2.*` translated from `boards/h96max-3518/factory_board.dts`; no sibling board's
+  settings copied. Semantic diff: `build/rebase/h96max-3518-next2-semdiff.txt`; boot options:
+  `build/rebase/h96max-3518-boot-options.log`.
+- `board-next2.patch` applies with zero fuzz; the rebuilt DTB compares canonically identical.
+- The `tvb-next2` entry takes its arguments from the saved vendor entry, plus `ttyS0,1500000n8`,
+  `keep_bootcon` and `clk_ignore_unused` for the first headless boot.
+
+## 2026-11-19 — the CPU clock is not its request on next2
+
+- With the PWM pins muxed: `pwm1m0-pins` claimed, PVTM bins L5 (CPU) and L6 (GPU), CPU and GPU
+  stress 5 min pass at 55 °C.
+- 7% under the 3518D at one ring and duty: CPU ring 0x7 on 900 mV gives 1354 MHz against 1454, at
+  every GPU step, though their PVTMs at 950 mV differ by 1% (1561 against 1577-1588). Vendor 6.12:
+  1398 on 914 mV. The chip, or its regulator, is the slower. On next2 it cannot reach 1416 MHz (ring
+  0x7 is the shortest the firmware picks) and runs 1200 on ring 0x7 too, at 1350.
+- The next2 release package installed, the hand installer's guard and restore hook removed: next2
+  (default once installed), vendor 6.12 and 6.1 each boot their own tree through the link
+  (`opp-table-cpu` against `cpu0-opp-table`), CMA 128 MiB, no failed unit.
+
+## 2026-11-21 — next2 on the boards' own `cma=16M`
+
+- The full regression on next2, the VOP behind its IOMMU: CMA peak 2.3 MiB.
+
+## 2026-11-21 — one Seekwave conf for every kernel
+
+- A stray `tvb-h96max-h313` board package had renamed the box `h96max-h313`; removed, the name
+  restored.
+
+## 2026-11-21 — the Seekwave address: the chip's, else the SoC serial
+
+- `0014`'s SoC-serial fallback would give `fe:fd:fc:e6:88:4d`; with `0014` on 6.1, 6.12 and 7.3.5
+  the box kept `fe:fd:fc:99:08:5f`, BT `FE:FD:FC:99:08:60`, no oops: the chip's eFUSE address.
+- The retired `tvb-swt6621s-mainline-modules` package was still installed beside the new one:
+  purged. The next2 module loaded is `tvb-swt6621s-modules`', byte for byte.

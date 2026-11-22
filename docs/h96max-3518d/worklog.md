@@ -3207,3 +3207,32 @@ driver loads, brings in `skw_sdio_lite`, and the devices it creates bring in the
   error, failed unit or IOMMU fault; every reboot back. A first pass lost every reboot: as `art`,
   `reboots.sh` ran `systemctl reboot` without `sudo`, refused, so the box never went down; it now
   reboots through `sudo -n`.
+
+## 2026-11-17 — glmark2 off a headless box: void
+
+- glmark2 on next2 at a synthetic 1080p60 screen through `edid_override`: 38.
+
+## 2026-11-19 — the CPU clock is not its request on next2
+
+- `perf stat` on a pinned busy loop, next2: 1200 MHz runs 1602 (1362 with the `SIP_PVTPLL_CFG`
+  calls), 1416 runs 1597–1602, at 900 mV.
+- With the PWM pins muxed: 1200 MHz runs 1282, 1416 runs 1457, on 900 mV; stress-ng
+  `--cpu 4 --verify` 5 min passes at 63 °C, and with glmark2 beside it at 76 °C (81 and 93 °C on the
+  stuck rail); glmark2 133; no kernel error.
+- CPU ring 0x7 on 900 mV gives 1454 MHz at every GPU step; vendor 6.12 1463 on 900 mV. The CPU PVTM
+  at 950 mV reads 1577-1588 and sits on the L5/L6 bin boundary: 1577 read L5, 1580 L6.
+- `phy-rockchip-inno-hdmi-rk3528-scaled-pre-pll.patch`, a 3:2 panel's EDID as an override:
+  `modetest` sets 2256x1504-60.00Hz, `clk_hdmiphy_pixel_io` and `dclk_vop0` at 235700000, no pre-PLL
+  lock failure. The picture on the panel itself: untested.
+
+## 2026-11-21 — next2 on the boards' own `cma=16M`
+
+- The full regression on next2, the VOP behind its IOMMU: CMA peak 2.2 MiB.
+
+## 2026-11-21 — one Seekwave conf for every kernel
+
+- Module packages from today's 6.1 rebuild over the 31 October 6.1 kernel of the same version
+  string: the Wi-Fi module did not load, and the Wi-Fi-only box came up offline until a USB Ethernet
+  adapter brought it back.
+- Each kernel installed with its own modules: Wi-Fi associates at -43 dBm, 360 Mbit/s HE, and
+  Bluetooth comes up on 6.1, 6.12 and 7.3.5; no `EBUSY` or symbol errors.
