@@ -1,0 +1,7 @@
+[Unit]
+Description=Schedule front-panel display updates
+
+[Timer]
+OnActiveSec=1s
+OnCalendar=minutely
+AccuracySec=1s

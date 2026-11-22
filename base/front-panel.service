@@ -1,0 +1,9 @@
+[Unit]
+Description=Update the front-panel display
+ConditionPathExists=/sys/class/leds/display/message
+ConditionPathExists=/sys/class/leds/display::colon/brightness
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/default/tvb-front-panel
+ExecStart=/usr/lib/tvb/front-panel

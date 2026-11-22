@@ -1,0 +1,174 @@
+Subject: [PATCH] auxdisplay: build TM16xx I2C against TVBian kernels
+
+diff --git a/drivers/auxdisplay/Kbuild b/drivers/auxdisplay/Kbuild
+new file mode 100644
+index 0000000..e26590f
+--- /dev/null
++++ b/drivers/auxdisplay/Kbuild
+@@ -0,0 +1,14 @@
++# SPDX-License-Identifier: GPL-2.0
++ccflags-y += -include $(src)/tm16xx_compat.h
++
++obj-m += tm16xx.o tm16xx_i2c.o
++tm16xx-y := tm16xx_core.o
++
++ifeq ($(VERSION).$(PATCHLEVEL),6.1)
++ccflags-y += -DTVB_RK35XX_VENDOR
++endif
++
++ifneq ($(filter 6.1 6.12,$(VERSION).$(PATCHLEVEL)),)
++ccflags-y += -DTVB_TOKEN_NAMESPACE
++obj-m += line-display.o
++endif
+diff --git a/drivers/auxdisplay/line-display.c b/drivers/auxdisplay/line-display.c
+index 4e22373..f70a2aa 100644
+--- a/drivers/auxdisplay/line-display.c
++++ b/drivers/auxdisplay/line-display.c
+@@ -481,7 +481,7 @@ out_free_buf:
+ 	kfree(linedisp->buf);
+ 	return err;
+ }
+-EXPORT_SYMBOL_NS_GPL(linedisp_attach, "LINEDISP");
++EXPORT_SYMBOL_NS_GPL(linedisp_attach, LINEDISP_NAMESPACE);
+ 
+ /**
+  * linedisp_detach - detach a character line display
+@@ -504,7 +504,7 @@ void linedisp_detach(struct device *dev)
+ 	kfree(linedisp->message);
+ 	kfree(linedisp->buf);
+ }
+-EXPORT_SYMBOL_NS_GPL(linedisp_detach, "LINEDISP");
++EXPORT_SYMBOL_NS_GPL(linedisp_detach, LINEDISP_NAMESPACE);
+ 
+ /**
+  * linedisp_register - register a character line display
+@@ -576,7 +576,7 @@ out_put_device:
+ 	put_device(&linedisp->dev);
+ 	return err;
+ }
+-EXPORT_SYMBOL_NS_GPL(linedisp_register, "LINEDISP");
++EXPORT_SYMBOL_NS_GPL(linedisp_register, LINEDISP_NAMESPACE);
+ 
+ /**
+  * linedisp_unregister - unregister a character line display
+@@ -590,7 +590,7 @@ void linedisp_unregister(struct linedisp *linedisp)
+ 	timer_delete_sync(&linedisp->timer);
+ 	put_device(&linedisp->dev);
+ }
+-EXPORT_SYMBOL_NS_GPL(linedisp_unregister, "LINEDISP");
++EXPORT_SYMBOL_NS_GPL(linedisp_unregister, LINEDISP_NAMESPACE);
+ 
+ MODULE_DESCRIPTION("Character line display core support");
+ MODULE_LICENSE("GPL");
+diff --git a/drivers/auxdisplay/line-display.h b/drivers/auxdisplay/line-display.h
+index 36853b6..103a42b 100644
+--- a/drivers/auxdisplay/line-display.h
++++ b/drivers/auxdisplay/line-display.h
+@@ -13,7 +13,11 @@
+ #define _LINEDISP_H
+ 
+ #include <linux/device.h>
++#ifdef TVB_RK35XX_VENDOR
++#include <linux/timer.h>
++#else
+ #include <linux/timer_types.h>
++#endif
+ 
+ #include <linux/map_to_7segment.h>
+ #include <linux/map_to_14segment.h>
+diff --git a/drivers/auxdisplay/tm16xx_compat.h b/drivers/auxdisplay/tm16xx_compat.h
+index 5bee25f..e9667c0 100644
+--- a/drivers/auxdisplay/tm16xx_compat.h
++++ b/drivers/auxdisplay/tm16xx_compat.h
+@@ -11,6 +11,7 @@
+ 
+ #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0)
+ 
++#ifndef TVB_RK35XX_VENDOR
+ static inline int __devm_mutex_init(struct device *dev, struct mutex *lock)
+ {
+ 	/*
+@@ -29,6 +30,7 @@ static inline int __devm_mutex_init(struct device *dev, struct mutex *lock)
+ })
+ 
+ DEFINE_FREE(fwnode_handle, struct fwnode_handle *, fwnode_handle_put(_T))
++#endif
+ 
+ static __always_inline __maybe_unused
+ unsigned long bitmap_read(const unsigned long *map, unsigned long start, unsigned long nbits)
+@@ -51,22 +53,12 @@ unsigned long bitmap_read(const unsigned long *map, unsigned long start, unsigne
+ 
+ #endif
+ 
+-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
+-
+-/* Redefine namespace macros for older kernels to accept quoted strings */
+-#undef EXPORT_SYMBOL_NS
+-#undef EXPORT_SYMBOL_NS_GPL
+-#undef MODULE_IMPORT_NS
+-
+-#define EXPORT_SYMBOL_NS(sym, ns) \
+-	__EXPORT_SYMBOL(sym, "", ns)
+-
+-#define EXPORT_SYMBOL_NS_GPL(sym, ns) \
+-	__EXPORT_SYMBOL(sym, "GPL", ns)
+-
+-#define MODULE_IMPORT_NS(ns) \
+-	MODULE_INFO(import_ns, ns)
+-
++#ifdef TVB_TOKEN_NAMESPACE
++#define TM16XX_NAMESPACE TM16XX
++#define LINEDISP_NAMESPACE LINEDISP
++#else
++#define TM16XX_NAMESPACE "TM16XX"
++#define LINEDISP_NAMESPACE "LINEDISP"
+ #endif
+ 
+ #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 16, 0)
+diff --git a/drivers/auxdisplay/tm16xx_core.c b/drivers/auxdisplay/tm16xx_core.c
+index 03e9484..48c1fcd 100644
+--- a/drivers/auxdisplay/tm16xx_core.c
++++ b/drivers/auxdisplay/tm16xx_core.c
+@@ -450,7 +450,7 @@ unregister_leds:
+ 	led_classdev_unregister(main);
+ 	return ret;
+ }
+-EXPORT_SYMBOL_NS_GPL(tm16xx_probe, "TM16XX");
++EXPORT_SYMBOL_NS_GPL(tm16xx_probe, TM16XX_NAMESPACE);
+ 
+ void tm16xx_remove(struct tm16xx_display *display)
+ {
+@@ -480,9 +480,9 @@ void tm16xx_remove(struct tm16xx_display *display)
+ 	schedule_work(&display->flush_init);
+ 	flush_work(&display->flush_init);
+ }
+-EXPORT_SYMBOL_NS_GPL(tm16xx_remove, "TM16XX");
++EXPORT_SYMBOL_NS_GPL(tm16xx_remove, TM16XX_NAMESPACE);
+ 
+ MODULE_AUTHOR("Jean-François Lessard");
+ MODULE_DESCRIPTION("TM16xx LED Display Controllers");
+ MODULE_LICENSE("GPL");
+-MODULE_IMPORT_NS("LINEDISP");
++MODULE_IMPORT_NS(LINEDISP_NAMESPACE);
+diff --git a/drivers/auxdisplay/tm16xx_i2c.c b/drivers/auxdisplay/tm16xx_i2c.c
+index 29031ce..0e916a1 100644
+--- a/drivers/auxdisplay/tm16xx_i2c.c
++++ b/drivers/auxdisplay/tm16xx_i2c.c
+@@ -320,7 +320,11 @@ static struct i2c_driver tm16xx_i2c_driver = {
+ 		.name = "tm16xx-i2c",
+ 		.of_match_table = tm16xx_i2c_of_match,
+ 	},
++#ifdef TVB_RK35XX_VENDOR
++	.probe_new = tm16xx_i2c_probe,
++#else
+ 	.probe = tm16xx_i2c_probe,
++#endif
+ 	.remove = tm16xx_i2c_remove,
+ 	.shutdown = tm16xx_i2c_remove,
+ 	.id_table = tm16xx_i2c_id,
+@@ -330,4 +334,4 @@ module_i2c_driver(tm16xx_i2c_driver);
+ MODULE_AUTHOR("Jean-François Lessard");
+ MODULE_DESCRIPTION("TM16xx-i2c LED Display Controllers");
+ MODULE_LICENSE("GPL");
+-MODULE_IMPORT_NS("TM16XX");
++MODULE_IMPORT_NS(TM16XX_NAMESPACE);

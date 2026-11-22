@@ -198,6 +198,9 @@ below.
       `matrix` for a board's `board.md`, as `video.py` has.
 - [ ] **`regression.py deploy` gives every box the deqp runner**: with no `deqp` deb in
       `build/out/debs/` it ships none, and the step fails as a GPU fault (`exit 127`).
+- [ ] **What every box gets, in `tvb-base`**: `tvb-install`, `led-sleep`, `led-shutdown`, and
+      `powerkey.conf` if it is generic, out of `boards/common/`, with `Replaces` and `Breaks` against
+      each board package that ships them now.
 - [ ] **A composite grabber**: a USB composite capture stick on a host, so composite's picture is
       checked unattended, not only its writeback and encoder registers.
 

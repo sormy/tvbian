@@ -1,0 +1,54 @@
+#!/bin/sh
+set -eu
+
+display=/sys/class/leds/display
+colon=/sys/class/leds/display::colon
+blink_ms=500
+brightness=${DISPLAY_BRIGHTNESS:-3}
+colon_mode=${DISPLAY_COLON:-blinking}
+timezone=${DISPLAY_TIMEZONE:-}
+
+case "$brightness" in
+    [1-8]) ;;
+    *) echo "DISPLAY_BRIGHTNESS must be 1 through 8" >&2; exit 1 ;;
+esac
+case "$colon_mode" in
+    on | off | blinking) ;;
+    *) echo "DISPLAY_COLON must be on, off or blinking" >&2; exit 1 ;;
+esac
+if [ -n "$timezone" ]; then
+    case "$timezone" in
+        /* | *..*) echo "DISPLAY_TIMEZONE must be a zoneinfo name" >&2; exit 1 ;;
+    esac
+    if [ ! -f "/usr/share/zoneinfo/$timezone" ]; then
+        echo "Unknown DISPLAY_TIMEZONE: $timezone" >&2
+        exit 1
+    fi
+    export TZ="$timezone"
+fi
+case "${DISPLAY_CLOCK:-24h}" in
+    12h) digits=$(date +%l%M) ;;
+    24h) digits=$(date +%H%M) ;;
+    off) digits='    '; colon_mode=off ;;
+    *) echo "DISPLAY_CLOCK must be 12h, 24h or off" >&2; exit 1 ;;
+esac
+
+printf '%s\n' "$brightness" > "$display/brightness"
+printf '%s\n' "$digits" > "$display/message"
+case "$colon_mode" in
+    blinking)
+        if ! grep -Fq '[timer]' "$colon/trigger"; then
+            printf 'timer\n' > "$colon/trigger"
+            printf '%s\n' "$blink_ms" > "$colon/delay_on"
+            printf '%s\n' "$blink_ms" > "$colon/delay_off"
+        fi
+        ;;
+    on | off)
+        printf 'none\n' > "$colon/trigger"
+        if [ "$colon_mode" = on ]; then
+            printf '1\n' > "$colon/brightness"
+        else
+            printf '0\n' > "$colon/brightness"
+        fi
+        ;;
+esac

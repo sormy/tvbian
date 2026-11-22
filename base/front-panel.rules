@@ -1,0 +1,1 @@
+ACTION=="add", SUBSYSTEM=="leds", KERNEL=="display", TAG+="systemd", ENV{SYSTEMD_WANTS}+="tvb-front-panel.timer"

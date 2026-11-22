@@ -36,3 +36,8 @@ link ../tvb-journal-spill.timer /usr/lib/systemd/system/timers.target.wants/tvb-
 # apt: our repo's build of a package wins over Debian's while we carry it
 0644 apt-pin.pref              /etc/apt/preferences.d/tvb
 0755 board-check               /usr/lib/tvb/board-check
+# a front-panel display's clock, started where the panel's driver binds
+0644 front-panel.rules         /usr/lib/udev/rules.d/70-tvb-front-panel.rules
+0644 front-panel.service       /usr/lib/systemd/system/tvb-front-panel.service
+0644 front-panel.timer         /usr/lib/systemd/system/tvb-front-panel.timer
+0755 front-panel               /usr/lib/tvb/front-panel
