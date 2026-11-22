@@ -1,0 +1,27 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] skw: refuse recovery without a boot device
+
+A chip exception schedules skw_recovery_mode(), which reloads the chip
+through the boot device. When that device failed to probe, boot_data is
+NULL and the first exception oopses on it, and an oops panics the box.
+Refuse recovery then: the radio stays down, the box stays up.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+
+diff --git a/drivers/seekwaveplatform_lite/sdio/skw_sdio_main.c b/drivers/seekwaveplatform_lite/sdio/skw_sdio_main.c
+index e6ace19..1e524f3 100644
+--- a/drivers/seekwaveplatform_lite/sdio/skw_sdio_main.c
++++ b/drivers/seekwaveplatform_lite/sdio/skw_sdio_main.c
+@@ -2083,6 +2083,12 @@ int skw_recovery_mode(void)
+ {
+ 	int ret=0;
+ 	struct skw_sdio_data_t *skw_sdio = skw_sdio_get_data();
++
++	/* the boot device reloads the chip: without it, refuse rather than oops the box */
++	if (!skw_sdio || !skw_sdio->boot_data) {
++		skw_sdio_err("no boot device: the chip cannot be recovered\n");
++		return -ENODEV;
++	}
+ 	skw_sdio_info("the CHIPID:%s \n", (char *)&skw_sdio->chip_id);
+ 	ret = skw_sdio_recovery_debug_status();
+ #ifdef CONFIG_SKW_FREE_FIRMWARE_MEM_SUPPORT

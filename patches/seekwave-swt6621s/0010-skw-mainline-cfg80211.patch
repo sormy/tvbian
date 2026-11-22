@@ -1,0 +1,603 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] skw: adapt wireless callbacks to mainline 7.3
+
+Use wireless_dev callbacks and cfg80211-owned cookies. Follow the updated
+association response, beacon, action-frame and timer APIs, each guarded by
+the release that changed it, so the driver still builds for 6.1 and 6.12.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+
+diff --git a/drivers/swt6621s_wifi/Makefile b/drivers/swt6621s_wifi/Makefile
+index 809408f..cd70c98 100644
+--- a/drivers/swt6621s_wifi/Makefile
++++ b/drivers/swt6621s_wifi/Makefile
+@@ -40,9 +40,6 @@ ifneq ($(CONFIG_SWT6621S_EXTERNAL_REGDB),y)
+ ccflags-y += -DCONFIG_SWT6621S_REGD_SELF_MANAGED
+ endif
+ 
+-ifeq ($(CONFIG_ARCH_ROCKCHIP),y)
+-ccflags-y += -DCONFIG_PLATFORM_ROCKCHIP
+-endif
+ 
+ ifneq ($(filter y,$(CONFIG_ANDROID_BINDER_IPC) $(CONFIG_SKW_ANDROID)),)
+ ccflags-y += -D__SKW_ANDROID__
+diff --git a/drivers/swt6621s_wifi/skw_cfg80211.c b/drivers/swt6621s_wifi/skw_cfg80211.c
+index 7a2a4c0..40fbc21 100644
+--- a/drivers/swt6621s_wifi/skw_cfg80211.c
++++ b/drivers/swt6621s_wifi/skw_cfg80211.c
+@@ -1608,8 +1608,13 @@ static int skw_cfg80211_start_ap(struct wiphy *wiphy, struct net_device *dev,
+ 	iface->sap.cfg.vht_cap = SKW_KMEMDUP(settings->vht_cap,
+ 				sizeof(*settings->vht_cap), GFP_KERNEL);
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 2, 0)
++	iface->sap.ht_required = settings->beacon.ht_required;
++	iface->sap.vht_required = settings->beacon.vht_required;
++#else
+ 	iface->sap.ht_required = settings->ht_required;
+ 	iface->sap.vht_required = settings->vht_required;
++#endif
+ 
+ #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 3, 0)
+ 	iface->sap.cfg.crypto.wep_keys = NULL;
+@@ -1686,7 +1691,7 @@ static int skw_sap_del_sta(struct wiphy *wiphy, struct net_device *dev,
+ 	ret = skw_cmd_del_sta(wiphy, dev, mac, subtype, reason, tx);
+ 	if (!ret) {
+ 		skw_peer_ctx_bind(iface, ctx, NULL);
+-		cfg80211_del_sta(dev, mac, GFP_KERNEL);
++		skw_compat_del_sta(dev->ieee80211_ptr, mac, GFP_KERNEL);
+ 	}
+ 
+ 	return ret;
+@@ -1893,8 +1898,8 @@ int skw_change_station(struct wiphy *wiphy, struct net_device *dev,
+ 				memset(&info, 0x0, sizeof(info));
+ 				ctx->peer->flags |= SKW_PEER_FLAGS_AUTHORIZED;
+ 
+-				cfg80211_new_sta(iface->ndev, ctx->peer->addr,
+-						&info, GFP_KERNEL);
++				skw_compat_new_sta(&iface->wdev, ctx->peer->addr,
++						   &info, GFP_KERNEL);
+ 			}
+ 		}
+ 
+@@ -3226,7 +3231,7 @@ int skw_sta_leave(struct wiphy *wiphy, struct net_device *dev,
+ 
+ 	memset(&iface->wmm, 0x0, sizeof(iface->wmm));
+ 
+-	del_timer_sync(&iface->sta.core.timer);
++	timer_delete_sync(&iface->sta.core.timer);
+ 
+ 	skw_set_state(&iface->sta.core.sm, SKW_STATE_NONE);
+ 	iface->sta.core.sm.flags = 0;
+@@ -3475,7 +3480,7 @@ static int skw_assoc(struct wiphy *wiphy, struct net_device *dev,
+ 
+ 		core->cbss = NULL;
+ 
+-		del_timer_sync(&core->timer);
++		timer_delete_sync(&core->timer);
+ 
+ 		skw_unjoin(wiphy, dev, req->bss->bssid, SKW_LEAVE, false);
+ 		skw_set_state(&core->sm, SKW_STATE_NONE);
+@@ -3839,24 +3844,37 @@ static int skw_cfg80211_disconnect(struct wiphy *wiphy,
+ 	return ret;
+ }
+ 
++
++/* before 7.3, cfg80211 takes the cookie from the driver */
++#if LINUX_VERSION_CODE < KERNEL_VERSION(7, 3, 0)
+ static u64 skw_tx_cookie(void)
+ {
+ 	static u64 skw_cookie;
+-
+ 	if (WARN_ON(++skw_cookie == 0))
+ 		skw_cookie++;
+-
+ 	return skw_cookie;
+ }
++#endif
+ 
+ static int skw_remain_on_channel(struct wiphy *wiphy, struct wireless_dev *wdev,
+ 				 struct ieee80211_channel *chan,
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 3, 0)
++				 unsigned int duration, u64 cookie, const u8 *rx_addr)
++#else
+ 				 unsigned int duration, u64 *cookie)
++#endif
+ {
+ 	int ret;
+ 	struct skw_roc_param roc;
+-	u64 tx_cookie = skw_tx_cookie();
+ 	struct skw_iface *iface = SKW_WDEV_TO_IFACE(wdev);
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 3, 0)
++	u64 tx_cookie = cookie;
++
++	if (rx_addr && !ether_addr_equal(rx_addr, iface->addr))
++		return -EOPNOTSUPP;
++#else
++	u64 tx_cookie = *cookie = skw_tx_cookie();
++#endif
+ 
+ 	skw_dbg("iface: %u, chan: %u, band: %u duration: %d, cookie: %llu\n",
+ 		iface->id, chan->hw_value, chan->band, duration, tx_cookie);
+@@ -3865,7 +3883,7 @@ static int skw_remain_on_channel(struct wiphy *wiphy, struct wireless_dev *wdev,
+ 	roc.channel_num = chan->hw_value;
+ 	roc.band = to_skw_band(chan->band);
+ 	roc.duration = duration;
+-	roc.cookie = *cookie = tx_cookie;
++	roc.cookie = tx_cookie;
+ 	//TBD: define the referenced value
+ 	if (chan->flags & IEEE80211_CHAN_NO_HT40MINUS)
+ 		roc.channel_type = 2;
+@@ -3939,7 +3957,11 @@ int skw_mgmt_tx(struct wiphy *wiphy, struct skw_iface *iface,
+ {
+ 	int ret, total_len;
+ 	struct skw_mgmt_tx_param *param = NULL;
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 3, 0)
++	u64 tx_cookie = *cookie;
++#else
+ 	u64 tx_cookie = skw_tx_cookie();
++#endif
+ 	u16 fc = SKW_MGMT_SFC(mgmt->frame_control);
+ 
+ 	if (!chan || !iface)
+@@ -3994,15 +4016,25 @@ static inline bool is_skw_rrm_report(const void *buf, int buf_len)
+ 	if (!ieee80211_is_action(mgmt->frame_control))
+ 		return false;
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 1, 0)
++	if (buf_len < IEEE80211_MIN_ACTION_SIZE(measurement))
++		return false;
++#else
+ 	if (buf_len < IEEE80211_MIN_ACTION_SIZE +
+ 		      sizeof(mgmt->u.action.u.measurement))
+ 		return false;
++#endif
+ 
+ 	if (mgmt->u.action.category != SKW_WLAN_CATEGORY_RADIO_MEASUREMENT)
+ 		return false;
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 1, 0)
++	if (mgmt->u.action.action_code != WLAN_ACTION_SPCT_MSR_RPRT)
++		return false;
++#else
+ 	if (mgmt->u.action.u.measurement.action_code != WLAN_ACTION_SPCT_MSR_RPRT)
+ 		return false;
++#endif
+ 
+ 	return true;
+ }
+@@ -4032,8 +4064,13 @@ static int __skw_cfg80211_mgmt_tx(struct wiphy *wiphy, struct skw_iface *iface,
+ 
+ 	if (!skw_cmd_data_len_in_limit(skw, frame_len + sizeof(struct skw_mgmt_tx_param))) {
+ 		if (is_skw_rrm_report(frame, frame_len)) {
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 1, 0)
++			int head_offset = offsetof(struct ieee80211_mgmt,
++					u.action.measurement.element_id);
++#else
+ 			int head_offset = offsetof(struct ieee80211_mgmt,
+ 					u.action.u.measurement.element_id);
++#endif
+ 
+ 			int ret = -E2BIG;
+ 			int elem_len = 0, next_len = 0;
+@@ -4142,12 +4179,20 @@ unlock:
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 14, 0)
+ static int skw_cfg80211_mgmt_tx(struct wiphy *wiphy, struct wireless_dev *wdev,
+ 				struct cfg80211_mgmt_tx_params *params,
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 3, 0)
++				u64 cookie)
++#else
+ 				u64 *cookie)
++#endif
+ {
+ 	struct skw_iface *iface = SKW_WDEV_TO_IFACE(wdev);
+ 
+ 	return __skw_cfg80211_mgmt_tx(wiphy, iface, params->chan,
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 3, 0)
++				      params->wait, &cookie,
++#else
+ 				      params->wait, cookie,
++#endif
+ 				      params->dont_wait_for_ack,
+ 				      params->buf, params->len);
+ }
+@@ -4297,7 +4342,11 @@ static int skw_leave_ibss(struct wiphy *wiphy, struct net_device *dev)
+ 			&params, sizeof(params), NULL, 0);
+ }
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
++static int skw_set_wiphy_params(struct wiphy *wiphy, int radio_idx, u32 changed)
++#else
+ static int skw_set_wiphy_params(struct wiphy *wiphy, u32 changed)
++#endif
+ {
+ 	int ret = 0;
+ 	struct skw_tlv_conf conf;
+@@ -5326,6 +5375,9 @@ static int skw_change_bss(struct wiphy *wiphy, struct net_device *dev,
+ }
+ 
+ static int skw_set_monitor_channel(struct wiphy *wiphy,
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)
++		struct net_device *dev,
++#endif
+ 		struct cfg80211_chan_def *chandef)
+ {
+ 	return skw_cmd_monitor(wiphy, chandef, SKW_MONITOR_COMMON);
+@@ -5742,6 +5794,77 @@ static int skw_cfg80211_stop_ap(struct wiphy *wiphy, struct net_device *dev)
+ 
+ #endif /* Linux */
+ 
++/* from 7.1 cfg80211 hands key and station ops the wireless_dev, not its net_device */
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 1, 0)
++#define SKW_OP(name) skw_mainline_##name
++static int skw_mainline_get_key(struct wiphy *wiphy,
++		struct wireless_dev *wdev, int link_id, u8 key_idx, bool pairwise, const u8 *mac_addr, void *cookie, void (*callback)(void *, struct key_params *))
++{
++	if (!wdev->netdev)
++		return -EOPNOTSUPP;
++	return skw_cfg80211_get_key(wiphy, wdev->netdev, link_id, key_idx, pairwise, mac_addr, cookie, callback);
++}
++
++static int skw_mainline_add_key(struct wiphy *wiphy,
++		struct wireless_dev *wdev, int link_id, u8 key_idx, bool pairwise, const u8 *addr, struct key_params *params)
++{
++	if (!wdev->netdev)
++		return -EOPNOTSUPP;
++	return skw_cfg80211_add_key(wiphy, wdev->netdev, link_id, key_idx, pairwise, addr, params);
++}
++
++static int skw_mainline_del_key(struct wiphy *wiphy,
++		struct wireless_dev *wdev, int link_id, u8 key_idx, bool pairwise, const u8 *addr)
++{
++	if (!wdev->netdev)
++		return -EOPNOTSUPP;
++	return skw_cfg80211_del_key(wiphy, wdev->netdev, link_id, key_idx, pairwise, addr);
++}
++
++
++static int skw_mainline_set_default_mgmt_key(struct wiphy *wiphy,
++		struct wireless_dev *wdev, int link_id, u8 key_idx)
++{
++	if (!wdev->netdev)
++		return -EOPNOTSUPP;
++	return skw_cfg80211_set_default_mgmt_key(wiphy, wdev->netdev, link_id, key_idx);
++}
++
++static int skw_mainline_add_station(struct wiphy *wiphy,
++		struct wireless_dev *wdev, const u8 *mac, struct station_parameters *params)
++{
++	if (!wdev->netdev)
++		return -EOPNOTSUPP;
++	return skw_cfg80211_add_station(wiphy, wdev->netdev, mac, params);
++}
++
++static int skw_mainline_change_station(struct wiphy *wiphy,
++		struct wireless_dev *wdev, const u8 *mac, struct station_parameters *params)
++{
++	if (!wdev->netdev)
++		return -EOPNOTSUPP;
++	return skw_cfg80211_change_station(wiphy, wdev->netdev, mac, params);
++}
++
++static int skw_mainline_del_station(struct wiphy *wiphy,
++		struct wireless_dev *wdev, struct station_del_parameters *params)
++{
++	if (!wdev->netdev)
++		return -EOPNOTSUPP;
++	return skw_cfg80211_del_station(wiphy, wdev->netdev, params);
++}
++
++static int skw_mainline_get_station(struct wiphy *wiphy,
++		struct wireless_dev *wdev, const u8 *mac, struct station_info *sinfo)
++{
++	if (!wdev->netdev)
++		return -EOPNOTSUPP;
++	return skw_cfg80211_get_station(wiphy, wdev->netdev, mac, sinfo);
++}
++#else
++#define SKW_OP(name) skw_cfg80211_##name
++#endif
++
+ static struct cfg80211_ops skw_cfg80211_ops  = {
+ 	.add_virtual_intf = skw_cfg80211_add_virtual_intf,
+ 	.del_virtual_intf = skw_cfg80211_del_virtual_intf,
+@@ -5750,18 +5873,18 @@ static struct cfg80211_ops skw_cfg80211_ops  = {
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 5, 0)
+ 	.abort_scan = skw_abort_scan,
+ #endif
+-	.get_key = skw_cfg80211_get_key,
+-	.add_key = skw_cfg80211_add_key,
+-	.del_key = skw_cfg80211_del_key,
++	.get_key = SKW_OP(get_key),
++	.add_key = SKW_OP(add_key),
++	.del_key = SKW_OP(del_key),
+ 	.set_default_key = skw_cfg80211_set_default_key,
+-	.set_default_mgmt_key = skw_cfg80211_set_default_mgmt_key,
++	.set_default_mgmt_key = SKW_OP(set_default_mgmt_key),
+ 	.change_beacon = skw_cfg80211_change_beacon,
+ 	.start_ap = skw_cfg80211_start_ap,
+ 	.stop_ap = skw_cfg80211_stop_ap,
+-	.add_station = skw_cfg80211_add_station,
+-	.change_station = skw_cfg80211_change_station,
+-	.del_station = skw_cfg80211_del_station,
+-	.get_station = skw_cfg80211_get_station,
++	.add_station = SKW_OP(add_station),
++	.change_station = SKW_OP(change_station),
++	.del_station = SKW_OP(del_station),
++	.get_station = SKW_OP(get_station),
+ 	.auth = skw_cfg80211_auth,
+ 	.assoc = skw_cfg80211_assoc,
+ 	.deauth = skw_cfg80211_deauth,
+@@ -5806,7 +5929,9 @@ static struct cfg80211_ops skw_cfg80211_ops  = {
+ 	.suspend = skw_cfg80211_suspend,
+ 	.resume = skw_cfg80211_resume,
+ 	.set_wakeup = skw_set_wakeup,
++#if LINUX_VERSION_CODE < KERNEL_VERSION(7, 3, 0)
+ 	.probe_client = skw_probe_client,
++#endif
+ 	.dump_survey = skw_dump_survey,
+ 	.set_monitor_channel = skw_set_monitor_channel,
+ 	.change_bss = skw_change_bss,
+diff --git a/drivers/swt6621s_wifi/skw_compat.h b/drivers/swt6621s_wifi/skw_compat.h
+index d17a2f8..9c3ee97 100644
+--- a/drivers/swt6621s_wifi/skw_compat.h
++++ b/drivers/swt6621s_wifi/skw_compat.h
+@@ -375,6 +375,13 @@ static inline int skw_set_wiphy_regd_sync(struct wiphy *wiphy,
+ #endif
+ }
+ 
++/* cfg80211's association response, named _data from 6.7 */
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 7, 0)
++#define skw_rx_assoc_resp cfg80211_rx_assoc_resp_data
++#else
++#define skw_rx_assoc_resp cfg80211_rx_assoc_resp
++#endif
++
+ #ifdef __SKW_ANDROID__
+ static inline void skw_compat_rx_assoc_resp(struct net_device *dev,
+ 			struct cfg80211_bss *bss, const u8 *buf, size_t len,
+@@ -394,7 +401,7 @@ static inline void skw_compat_rx_assoc_resp(struct net_device *dev,
+ 
+ 	cfg80211_rx_assoc_resp(dev, &assoc_resp);
+ #elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 74)
+-	struct cfg80211_rx_assoc_resp assoc_resp = {
++	struct skw_rx_assoc_resp assoc_resp = {
+ 		.buf = buf,
+ 		.len = len,
+ 		.req_ies = req_ies,
+@@ -520,7 +527,7 @@ static inline void skw_compat_rx_assoc_resp(struct net_device *dev,
+ 			int uapsd, const u8 *req_ies, size_t req_ies_len)
+ {
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
+-	struct cfg80211_rx_assoc_resp assoc_resp = {
++	struct skw_rx_assoc_resp assoc_resp = {
+ 		.buf = buf,
+ 		.len = len,
+ 		.req_ies = req_ies,
+@@ -707,4 +714,24 @@ static inline void skw_compat_cfg80211_cac_event(struct net_device *ndev,
+ #endif
+ }
+ 
++/* cfg80211 names a station's interface by its wireless_dev from 7.1 */
++static inline void skw_compat_new_sta(struct wireless_dev *wdev, const u8 *mac,
++				      struct station_info *sinfo, gfp_t gfp)
++{
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 1, 0)
++	cfg80211_new_sta(wdev, mac, sinfo, gfp);
++#else
++	cfg80211_new_sta(wdev->netdev, mac, sinfo, gfp);
++#endif
++}
++
++static inline void skw_compat_del_sta(struct wireless_dev *wdev, const u8 *mac, gfp_t gfp)
++{
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 1, 0)
++	cfg80211_del_sta(wdev, mac, gfp);
++#else
++	cfg80211_del_sta(wdev->netdev, mac, gfp);
++#endif
++}
++
+ #endif
+diff --git a/drivers/swt6621s_wifi/skw_core.c b/drivers/swt6621s_wifi/skw_core.c
+index caaccb1..9bb8b76 100644
+--- a/drivers/swt6621s_wifi/skw_core.c
++++ b/drivers/swt6621s_wifi/skw_core.c
+@@ -1538,21 +1538,12 @@ static void skw_buffer_deinit(struct skw_core *skw)
+ 
+ static struct wakeup_source *skw_wakeup_source_init(const char *name)
+ {
+-	struct wakeup_source *ws;
+-
+-	ws = wakeup_source_create(name);
+-	if (ws)
+-		wakeup_source_add(ws);
+-
+-	return ws;
++	return wakeup_source_register(NULL, name);
+ }
+ 
+ static void skw_wakeup_source_deinit(struct wakeup_source *ws)
+ {
+-	if (ws) {
+-		wakeup_source_remove(ws);
+-		wakeup_source_destroy(ws);
+-	}
++	wakeup_source_unregister(ws);
+ }
+ 
+ static void skw_hw_hal_init(struct skw_core *skw, struct sv6160_platform_data *pdata)
+@@ -1759,7 +1750,11 @@ static int skw_core_init(struct skw_core *skw, struct platform_device *pdev, int
+ 	atomic_set(&skw->txqlen_pending, 0);
+ 
+ 	spin_lock_init(&skw->dfs.skw_pool_lock);
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)
++	hrtimer_setup(&skw->timer, skw_tx_timer_callback, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
++#else
+ 	hrtimer_init(&skw->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
++#endif
+ 	spin_lock_init(&skw->timer_lock);
+ 	INIT_LIST_HEAD(&skw->dfs.skw_pulse_pool);
+ 	INIT_LIST_HEAD(&skw->dfs.skw_pseq_pool);
+@@ -2513,7 +2508,7 @@ static int skw_drv_remove(struct platform_device *pdev)
+ static struct platform_driver skw_drv = {
+ 	.probe = skw_drv_probe,
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
+-	.remove_new = skw_drv_remove_new,
++	.remove = skw_drv_remove_new,
+ #else
+ 	.remove = skw_drv_remove,
+ #endif
+diff --git a/drivers/swt6621s_wifi/skw_iface.c b/drivers/swt6621s_wifi/skw_iface.c
+index 54aa16e..953eaa4 100644
+--- a/drivers/swt6621s_wifi/skw_iface.c
++++ b/drivers/swt6621s_wifi/skw_iface.c
+@@ -753,7 +753,7 @@ static void skw_mode_deinit(struct wiphy *wiphy, struct skw_iface *iface,
+ 			SKW_KFREE(iface->sta.conn);
+ 		}
+ 
+-		del_timer_sync(&iface->sta.core.timer);
++		timer_delete_sync(&iface->sta.core.timer);
+ 		cancel_work_sync(&iface->sta.work);
+ 
+ 		skw_set_state(&iface->sta.core.sm, SKW_STATE_NONE);
+diff --git a/drivers/swt6621s_wifi/skw_mlme.c b/drivers/swt6621s_wifi/skw_mlme.c
+index 1f34b7b..d87c460 100644
+--- a/drivers/swt6621s_wifi/skw_mlme.c
++++ b/drivers/swt6621s_wifi/skw_mlme.c
+@@ -240,7 +240,7 @@ static void skw_mlme_ap_assoc_cb(struct skw_iface *iface,
+ #endif
+ 		}
+ 
+-		cfg80211_new_sta(iface->ndev, client->addr,
++		skw_compat_new_sta(&iface->wdev, client->addr,
+ 				 &info, GFP_KERNEL);
+ 		SKW_KFREE(client->assoc_req_ie);
+ 		client->assoc_req_ie = NULL;
+@@ -849,7 +849,7 @@ int skw_mlme_ap_rx_mgmt(struct skw_iface *iface, u16 fc, int freq,
+ 
+ 		if (client->state >= SKW_STATE_ASSOCED) {
+ 			//notify hostapd to update state and delete sta
+-			cfg80211_del_sta(iface->ndev, client->addr, GFP_KERNEL);
++			skw_compat_del_sta(&iface->wdev, client->addr, GFP_KERNEL);
+ 		} else if (client->state >= SKW_STATE_AUTHED) {
+ 			//just delete local sta info
+ 			skw_mlme_ap_del_sta(iface->wdev.wiphy,
+diff --git a/drivers/swt6621s_wifi/skw_msg.c b/drivers/swt6621s_wifi/skw_msg.c
+index b7aa9f3..f5f4023 100644
+--- a/drivers/swt6621s_wifi/skw_msg.c
++++ b/drivers/swt6621s_wifi/skw_msg.c
+@@ -660,7 +660,7 @@ void skw_del_sta_event(struct skw_iface *iface, const u8 *addr, u16 reason)
+ 				 -5400, (void *)&mgmt,
+ 				 SKW_DEAUTH_FRAME_LEN, 0, GFP_ATOMIC);
+ 	} else {
+-		cfg80211_del_sta(iface->ndev, addr, GFP_KERNEL);
++		skw_compat_del_sta(&iface->wdev, addr, GFP_KERNEL);
+ 	}
+ }
+ 
+diff --git a/drivers/swt6621s_wifi/skw_recovery.c b/drivers/swt6621s_wifi/skw_recovery.c
+index f68579c..5670f35 100644
+--- a/drivers/swt6621s_wifi/skw_recovery.c
++++ b/drivers/swt6621s_wifi/skw_recovery.c
+@@ -89,7 +89,7 @@ static int skw_recovery_sta(struct wiphy *wiphy, struct skw_recovery_data *rd,
+ 			continue;
+ 
+ 		if (ether_addr_equal(peer->addr, core->bss.bssid)) {
+-			del_timer_sync(&core->timer);
++			timer_delete_sync(&core->timer);
+ 			cancel_work_sync(&iface->sta.work);
+ 
+ 			ret = skw_cmd_unjoin(wiphy, dev, peer->addr,
+diff --git a/drivers/swt6621s_wifi/skw_rx.c b/drivers/swt6621s_wifi/skw_rx.c
+index 265ff8a..e0dd962 100644
+--- a/drivers/swt6621s_wifi/skw_rx.c
++++ b/drivers/swt6621s_wifi/skw_rx.c
+@@ -885,7 +885,7 @@ static void skw_reorder_force_release(struct skw_tid_rx *tid_rx,
+ 	    atomic_read(&tid_rx->reorder->ref_cnt) == tid_rx->ref_cnt &&
+ 	    (ieee80211_sn_less(tid_rx->reorder->expired.sn, to_sn) ||
+ 	     ieee80211_sn_less(to_sn, tid_rx->win_start)))
+-		del_timer(&tid_rx->reorder->timer);
++		timer_delete(&tid_rx->reorder->timer);
+ 
+ 	while (ieee80211_sn_less(tid_rx->win_start, target)) {
+ 		struct sk_buff_head *list;
+@@ -952,7 +952,7 @@ static void skw_reorder_release(struct skw_reorder_rx *reorder,
+ 	for (i = 0; i < tid_rx->win_size; i++) {
+ 		if (tid_rx->stored_num == 0) {
+ 			if (timer_pending(&reorder->timer))
+-				del_timer(&reorder->timer);
++				timer_delete(&reorder->timer);
+ 
+ 			break;
+ 		}
+@@ -986,7 +986,7 @@ static void skw_reorder_release(struct skw_reorder_rx *reorder,
+ 
+ 			if (timer_pending(&reorder->timer) &&
+ 			    reorder->expired.sn == tid_rx->win_start)
+-				del_timer(&reorder->timer);
++				timer_delete(&reorder->timer);
+ 
+ 			if (SKW_SKB_RXCB(skb)->amsdu_flags & SKW_AMSDU_FLAG_TAINT) {
+ 				__skb_queue_purge(list);
+@@ -1188,7 +1188,7 @@ static void skw_ampdu_reorder(struct skw_core *skw, struct skw_rx_desc *desc,
+ 
+ 		if (timer_pending(&reorder->timer) &&
+ 			reorder->expired.sn == tid_rx->win_start)
+-			del_timer(&reorder->timer);
++			timer_delete(&reorder->timer);
+ 
+ 		tid_rx->win_start = ieee80211_sn_inc(tid_rx->win_start);
+ 
+@@ -1216,7 +1216,7 @@ out:
+ 			skw_set_reorder_timer(tid_rx, desc->sn);
+ 	} else {
+ 		if (timer_pending(&reorder->timer))
+-			del_timer(&reorder->timer);
++			timer_delete(&reorder->timer);
+ 	}
+ }
+ 
+@@ -1645,7 +1645,7 @@ int skw_del_tid_rx(struct skw_peer *peer, u16 tid)
+ 
+ 	smp_wmb();
+ 
+-	del_timer_sync(&reorder->timer);
++	timer_delete_sync(&reorder->timer);
+ 
+ 	if (tid_rx) {
+ #ifdef CONFIG_SWT6621S_GKI_DRV
+diff --git a/drivers/swt6621s_wifi/skw_tdls.c b/drivers/swt6621s_wifi/skw_tdls.c
+index bc62aaf..b8e1513 100644
+--- a/drivers/swt6621s_wifi/skw_tdls.c
++++ b/drivers/swt6621s_wifi/skw_tdls.c
+@@ -923,13 +923,13 @@ skw_tdls_build_send_direct(struct net_device *dev,
+ 
+ 	switch (action_code) {
+ 	case WLAN_PUB_ACTION_TDLS_DISCOVER_RES:
+-		skb_put(skb, 1 + sizeof(mgmt->u.action.u.tdls_discover_resp));
++		skb_put(skb, 2 + sizeof(mgmt->u.action.tdls_discover_resp));
+ 		mgmt->u.action.category = WLAN_CATEGORY_PUBLIC;
+-		mgmt->u.action.u.tdls_discover_resp.action_code =
++		mgmt->u.action.action_code =
+ 			WLAN_PUB_ACTION_TDLS_DISCOVER_RES;
+-		mgmt->u.action.u.tdls_discover_resp.dialog_token =
++		mgmt->u.action.tdls_discover_resp.dialog_token =
+ 			dialog_token;
+-		mgmt->u.action.u.tdls_discover_resp.capability =
++		mgmt->u.action.tdls_discover_resp.capability =
+ 			status_code ? 0 : (WLAN_CAPABILITY_SHORT_SLOT_TIME |
+ 			 WLAN_CAPABILITY_SHORT_PREAMBLE);
+ 		break;
+diff --git a/drivers/swt6621s_wifi/skw_timer.c b/drivers/swt6621s_wifi/skw_timer.c
+index 11421ad..e13b82a 100644
+--- a/drivers/swt6621s_wifi/skw_timer.c
++++ b/drivers/swt6621s_wifi/skw_timer.c
+@@ -220,7 +220,7 @@ void skw_timer_deinit(struct skw_core *skw)
+ {
+ 	LIST_HEAD(flush_list);
+ 
+-	del_timer(&skw->timer_data.timer);
++	timer_delete(&skw->timer_data.timer);
+ 
+ 	spin_lock_bh(&skw->timer_data.lock);
+ 	list_replace_init(&skw->timer_data.list, &flush_list);

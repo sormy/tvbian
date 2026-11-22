@@ -1,7 +1,7 @@
 # seekwave-swt6621s — driver patches
 
-Fixes for the Wi-Fi/BT driver shared by the H96 Max and H96 Max 3518D, applied in filename order to
-the pinned source by `modules/swt6621s.conf`.
+Fixes for the SWT6621S Wi-Fi/BT driver, applied in filename order to the pinned source by
+`modules/swt6621s.conf`, which builds it for every Rockchip kernel.
 
 - `0002` — uplink latching at 6 Mbit/s until re-association.
   [PR #1](https://github.com/retro98boy/seekwave-swt6621s/pull/1)
@@ -22,3 +22,34 @@ the pinned source by `modules/swt6621s.conf`.
 Every patch here applies to pinned commit `b1b15016`; after a bump,
 `./build.sh kernel kernel/rk35xx.conf` builds the module from them, which is how to check they still
 apply.
+
+- `0013` — a chip exception's recovery reloads the chip through the boot device; when that device
+  failed to probe, it dereferenced NULL and the oops rebooted the box. Recovery is refused instead:
+  the radio stays down, the box up. Not submitted upstream.
+- `0014` — with no address passed and none in the chip's eFUSE, the driver drew a random one each
+  probe: a new host on every boot. It takes the SoC serial's low bytes under its own `fe:fd:fc`
+  instead, random only without a serial. Not submitted upstream.
+
+## Mainline
+
+`0008`–`0012` port the driver to mainline 7.3 for `rk35xx-next2`, each change guarded by the release
+that made it, so the one series builds for the vendor kernels too:
+
+| Patch  | Mainline change                      |
+| ------ | ------------------------------------ |
+| `0008` | Namespace strings, padded copies     |
+| `0009` | GPIO descriptors, module source path |
+| `0010` | cfg80211, timer and wakeup APIs      |
+| `0011` | No one-shot flag without a thread    |
+| `0012` | Per-CPU TX workqueue named           |
+
+The GPIO port reads a tree's mainline names (`reset`, `host-wake`, `chip-wake`) and, on a kernel
+that still has `of_get_named_gpio`, a vendor tree's `gpio_chip_en`, `gpio_host_wake` and
+`gpio_chip_wake`; a vendor tree's SDIO power sequence also holds the reset line, which both drive.
+It keeps raw handshake levels and shares the active-low reset with MMC power sequencing. Numeric
+GPIO and debug overrides are refused. From 7.3 cfg80211 supplies transmit cookies and the driver
+keeps them through firmware commands; before it, the driver makes its own. A receive address it
+cannot configure is refused.
+
+On the H96 Max 3518D, Wi-Fi associates and Bluetooth comes up on 6.1, 6.12 and 7.3.5. These patches
+are not submitted upstream.

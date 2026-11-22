@@ -1,0 +1,25 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] skw: name the TX dynamic workqueue per-CPU
+
+Mainline requires WQ_PERCPU or WQ_UNBOUND and warns otherwise. Per-CPU is
+what the queue already was, and what a queue without either flag is before
+6.17 named it.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+
+diff --git a/drivers/swt6621s_wifi/skw_tx.c b/drivers/swt6621s_wifi/skw_tx.c
+index d196d62..b8ecaa6 100644
+--- a/drivers/swt6621s_wifi/skw_tx.c
++++ b/drivers/swt6621s_wifi/skw_tx.c
+@@ -1429,7 +1429,11 @@ static int __skw_tx_init(struct skw_core *skw)
+ 		return -EFAULT;
+ 	}
+ 
++	/* per-CPU, the default before 6.17 named it */
+ 	skw->tx_dy = alloc_workqueue("skwifid_dywq.%d",
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
++			WQ_PERCPU |
++#endif
+ 			WQ_HIGHPRI | WQ_SYSFS,
+ 			0, skw->idx);
+ 	if (!skw->tx_dy) {

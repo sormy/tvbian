@@ -1,0 +1,30 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] skw: drop IRQF_ONESHOT from the host-wake interrupts
+
+Both handlers run in hard interrupt context. Without a thread the flag
+never applied; mainline now warns about it and taints the kernel.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+
+diff --git a/drivers/seekwaveplatform_lite/sdio/skw_sdio_main.c b/drivers/seekwaveplatform_lite/sdio/skw_sdio_main.c
+index b9fbcf1..e6ace19 100644
+--- a/drivers/seekwaveplatform_lite/sdio/skw_sdio_main.c
++++ b/drivers/seekwaveplatform_lite/sdio/skw_sdio_main.c
+@@ -265,7 +265,7 @@ static int skw_sdio_host_wake_irq_init(struct gpio_desc *gpio_num)
+ 	skw_sdio_info("gpio_irq %d\n", skw_sdio->irq_num);
+ 	if (skw_sdio->irq_num) {
+ 		ret = request_irq(skw_sdio->irq_num, skw_host_wake_irq_handler,
+-				skw_sdio->irq_trigger_type | IRQF_ONESHOT, "skw-gpio-irq", NULL);
++				skw_sdio->irq_trigger_type, "skw-gpio-irq", NULL);
+ 		if (ret != 0) {
+ 			free_irq(skw_sdio->irq_num, NULL);
+ 			skw_sdio_err("%s request gpio irq fail ret=%d\n", __func__, ret);
+@@ -705,7 +705,7 @@ static int skw_sdio_host_irq_init(struct gpio_desc *irq_gpio_num)
+ 		desc_to_gpio(skw_sdio->gpio_out), skw_sdio->irq_num);
+ 	if (skw_sdio->irq_num) {
+ 		ret = request_irq(skw_sdio->irq_num, skw_gpio_irq_handler,
+-				skw_sdio->irq_trigger_type | IRQF_ONESHOT, "skw-gpio-irq", NULL);
++				skw_sdio->irq_trigger_type, "skw-gpio-irq", NULL);
+ 		if (ret != 0) {
+ 			free_irq(skw_sdio->irq_num, NULL);
+ 			skw_sdio_err(" request gpio irq fail ret=%d\n", ret);

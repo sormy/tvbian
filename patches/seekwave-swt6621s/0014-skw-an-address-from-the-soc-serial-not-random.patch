@@ -1,0 +1,48 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] skw: an address from the SoC's serial, not a random one
+
+With no address passed and none in the chip's eFUSE, the driver draws
+a random one at each probe, so the box joins the network as a new host
+on every boot. Take the low bytes from the SoC serial number the
+bootloader puts in the tree instead, under the driver's own fe:fd:fc,
+as the AIC8800 driver does; random only where there is no serial.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+
+diff --git a/drivers/swt6621s_wifi/skw_core.c b/drivers/swt6621s_wifi/skw_core.c
+index 9bb8b76..bd280e0 100644
+--- a/drivers/swt6621s_wifi/skw_core.c
++++ b/drivers/swt6621s_wifi/skw_core.c
+@@ -1447,6 +1447,15 @@ int skw_sync_chip_info(struct wiphy *wiphy, struct skw_chip_info *chip)
+ 	return 0;
+ }
+ 
++/* the SoC's serial number the bootloader writes, the same on every kernel */
++static bool skw_soc_serial(u64 *serial)
++{
++	const char *text;
++
++	return !of_property_read_string(of_root, "serial-number", &text) &&
++	       !kstrtou64(text, 16, serial) && *serial;
++}
++
+ static void skw_setup_mac_address(struct wiphy *wiphy, u8 *user_mac, u8 *hw_mac)
+ {
+ 	int i;
+@@ -1458,7 +1467,15 @@ static void skw_setup_mac_address(struct wiphy *wiphy, u8 *user_mac, u8 *hw_mac)
+ 	} else if (hw_mac && is_valid_ether_addr(hw_mac)) {
+ 		skw_ether_copy(addr, hw_mac);
+ 	} else {
+-		eth_random_addr(addr);
++		u64 serial;
++
++		if (skw_soc_serial(&serial)) {
++			addr[3] = serial >> 40;
++			addr[4] = serial >> 32;
++			addr[5] = serial;
++		} else {
++			eth_random_addr(addr);
++		}
+ 		addr[0] = 0xFE;
+ 		addr[1] = 0xFD;
+ 		addr[2] = 0xFC;

@@ -1,0 +1,165 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] skw: use mainline namespace and bounded-copy APIs
+
+Mainline takes string namespace names and no longer exports strncpy.
+Keep the fixed-width copy and padding with strscpy_pad, which every
+kernel the driver builds for has.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+
+diff --git a/drivers/seekwaveplatform_lite/sdio/skw_sdio_rx.c b/drivers/seekwaveplatform_lite/sdio/skw_sdio_rx.c
+index 62e0098..0f07eba 100644
+--- a/drivers/seekwaveplatform_lite/sdio/skw_sdio_rx.c
++++ b/drivers/seekwaveplatform_lite/sdio/skw_sdio_rx.c
+@@ -825,10 +825,10 @@ static int skw_sdio_handle_packet(struct skw_sdio_data_t *skw_sdio,
+ 		}else if (!strncmp("trunk_W", cmd, 7)) {
+ 			memset(firmware_version, 0 , sizeof(firmware_version));
+ 			if (strlen(cmd) > strlen(firmware_version)) {
+-				strncpy(firmware_version, cmd, sizeof(firmware_version)-1);
++				memcpy_and_pad(firmware_version, sizeof(firmware_version)-1, cmd, strnlen(cmd, sizeof(firmware_version)-1), 0);
+ 				firmware_version[sizeof(firmware_version)-1] = '\0';
+ 			} else {
+-				strncpy(firmware_version, cmd, strlen(cmd));
++				memcpy_and_pad(firmware_version, strlen(cmd), cmd, strnlen(cmd, strlen(cmd)), 0);
+ 				//strcpy(firmware_version, cmd);
+ 			}
+ 			cmd = strstr(firmware_version, "slp=");
+@@ -1054,10 +1054,10 @@ static int skw_sdio2_handle_packet(struct skw_sdio_data_t *skw_sdio,
+ 		}else if (!strncmp("trunk_W", cmd, 7)) {
+ 			memset(firmware_version, 0 , sizeof(firmware_version));
+ 			if (strlen(cmd) > strlen(firmware_version)) {
+-				strncpy(firmware_version, cmd, sizeof(firmware_version)-1);
++				memcpy_and_pad(firmware_version, sizeof(firmware_version)-1, cmd, strnlen(cmd, sizeof(firmware_version)-1), 0);
+ 				firmware_version[sizeof(firmware_version)-1] = '\0';
+ 			} else {
+-				strncpy(firmware_version, cmd, strlen(cmd));
++				memcpy_and_pad(firmware_version, strlen(cmd), cmd, strnlen(cmd, strlen(cmd)), 0);
+ 				//strcpy(firmware_version, cmd);
+ 			}
+ 			cmd = strstr(firmware_version, "slp=");
+diff --git a/drivers/seekwaveplatform_lite/skwutil/skw_boot.h b/drivers/seekwaveplatform_lite/skwutil/skw_boot.h
+index 453d0b0..63f1965 100644
+--- a/drivers/seekwaveplatform_lite/skwutil/skw_boot.h
++++ b/drivers/seekwaveplatform_lite/skwutil/skw_boot.h
+@@ -68,11 +68,11 @@
+ 
+ #ifdef CONFIG_NO_GKI
+ #if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
+-MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);
++MODULE_IMPORT_NS("VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver");
+ #endif
+ #else
+ #if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
+-MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);
++MODULE_IMPORT_NS("VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver");
+ #endif
+ #endif
+ 
+diff --git a/drivers/seekwaveplatform_lite/usb/skw_usb_io.c b/drivers/seekwaveplatform_lite/usb/skw_usb_io.c
+index 39e2e85..c72d8a4 100644
+--- a/drivers/seekwaveplatform_lite/usb/skw_usb_io.c
++++ b/drivers/seekwaveplatform_lite/usb/skw_usb_io.c
+@@ -1884,7 +1884,7 @@ static int usb_loopcheck_entry(void *para)
+ 			assert_info_print = 0;
+ 			modem_status = MODEM_ON;
+ 			memset(firmware_version, 0 , sizeof(firmware_version));
+-			strncpy(firmware_version, buffer, read);
++			memcpy_and_pad(firmware_version, read, buffer, strnlen(buffer, read), 0);
+ 
+ 			modem_notify_event(DEVICE_BSPREADY_EVENT);
+ 			count = 0;
+diff --git a/drivers/swt6621s_wifi/skw_config.c b/drivers/swt6621s_wifi/skw_config.c
+index 64401ad..fd6dd2f 100644
+--- a/drivers/swt6621s_wifi/skw_config.c
++++ b/drivers/swt6621s_wifi/skw_config.c
+@@ -812,14 +812,12 @@ void skw_config_init(struct skw_config *conf)
+ 
+ #ifdef CONFIG_SWT6621S_CHIP_ID
+ 	if (strlen(CONFIG_SWT6621S_CHIP_ID))
+-		strncpy(conf->calib.chip_alias_name, CONFIG_SWT6621S_CHIP_ID,
+-			sizeof(conf->calib.chip_alias_name) - 1);
++		memcpy_and_pad(conf->calib.chip_alias_name, sizeof(conf->calib.chip_alias_name) - 1, CONFIG_SWT6621S_CHIP_ID, strnlen(CONFIG_SWT6621S_CHIP_ID, sizeof(conf->calib.chip_alias_name) - 1), 0);
+ #endif
+ 
+ #ifdef CONFIG_SWT6621S_PROJECT_NAME
+ 	if (strlen(CONFIG_SWT6621S_PROJECT_NAME))
+-		strncpy(conf->calib.project, CONFIG_SWT6621S_PROJECT_NAME,
+-			sizeof(conf->calib.project) - 1);
++		memcpy_and_pad(conf->calib.project, sizeof(conf->calib.project) - 1, CONFIG_SWT6621S_PROJECT_NAME, strnlen(CONFIG_SWT6621S_PROJECT_NAME, sizeof(conf->calib.project) - 1), 0);
+ #endif
+ 
+ 	set_bit(SKW_CFG_WOWLAN_SUPPORT, &conf->wowlan.flags);
+diff --git a/drivers/swt6621s_wifi/skw_iw.c b/drivers/swt6621s_wifi/skw_iw.c
+index dc79b22..730ac87 100644
+--- a/drivers/swt6621s_wifi/skw_iw.c
++++ b/drivers/swt6621s_wifi/skw_iw.c
+@@ -1012,7 +1012,7 @@ int skw_wow_filter_set(struct net_device *dev, u8 *param, int len, char *resp,
+ 
+ 		//Store the temp rule
+ 		memset(t_rule, 0, SKW_MAX_WOW_USER_RULE_LEN);
+-		strncpy(t_rule, param, min_t(int, SKW_MAX_WOW_USER_RULE_LEN, len));
++		memcpy_and_pad(t_rule, min_t(int, SKW_MAX_WOW_USER_RULE_LEN, len), param, strnlen(param, min_t(int, SKW_MAX_WOW_USER_RULE_LEN, len)), 0);
+ 
+ 		//Translate the wow filter to skw rules
+ 		rule = &wow_rules_set.rules[rule_idx];
+@@ -1205,7 +1205,7 @@ int skw_wow_filter_set(struct net_device *dev, u8 *param, int len, char *resp,
+ 		//Store the rule
+ 		wow_user_rules.en_bitmap |=  (1ULL << rule_idx);
+ 		memset(wow_user_rules.rules[rule_idx], 0, SKW_MAX_WOW_USER_RULE_LEN);
+-		strncpy(wow_user_rules.rules[rule_idx], t_rule, SKW_MAX_WOW_USER_RULE_LEN);
++		memcpy_and_pad(wow_user_rules.rules[rule_idx], SKW_MAX_WOW_USER_RULE_LEN, t_rule, strnlen(t_rule, SKW_MAX_WOW_USER_RULE_LEN), 0);
+ 
+ 		ret = 0;
+ 
+diff --git a/drivers/swt6621s_wifi/skw_util.c b/drivers/swt6621s_wifi/skw_util.c
+index 28baab1..a9bbbdc 100644
+--- a/drivers/swt6621s_wifi/skw_util.c
++++ b/drivers/swt6621s_wifi/skw_util.c
+@@ -85,7 +85,7 @@ void skw_file_close(struct file *fp)
+ 	filp_close(fp, NULL);
+ }
+ 
+-MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);
++MODULE_IMPORT_NS("VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver");
+ #endif
+ 
+ int skw_key_idx(unsigned long bitmap)
+diff --git a/drivers/swt6621s_wifi/skw_vendor.c b/drivers/swt6621s_wifi/skw_vendor.c
+index b52877e..e3a1990 100644
+--- a/drivers/swt6621s_wifi/skw_vendor.c
++++ b/drivers/swt6621s_wifi/skw_vendor.c
+@@ -241,7 +241,7 @@ static int skw_vendor_get_version(struct wiphy *wiphy, struct wireless_dev *wdev
+ 
+ 	switch (nla_type(data)) {
+ 	case SKW_ATTR_VERSION_DRIVER:
+-		strncpy(version, SKW_VERSION, sizeof(version));
++		strscpy_pad(version, SKW_VERSION, sizeof(version));
+ 		break;
+ 
+ 	case SKW_ATTR_VERSION_FIRMWARE:
+diff --git a/drivers/swtbt4l/skw_common.h b/drivers/swtbt4l/skw_common.h
+index 067cefe..397df3c 100755
+--- a/drivers/swtbt4l/skw_common.h
++++ b/drivers/swtbt4l/skw_common.h
+@@ -107,7 +107,7 @@
+ #endif
+ 
+ #ifdef CONFIG_NO_GKI
+-MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);
++MODULE_IMPORT_NS("VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver");
+ #endif
+ 
+ typedef struct
+diff --git a/include/linux/skw_firmware_helper.h b/include/linux/skw_firmware_helper.h
+index dcd6b0f..da5ae11 100644
+--- a/include/linux/skw_firmware_helper.h
++++ b/include/linux/skw_firmware_helper.h
+@@ -29,7 +29,7 @@ static inline void skw_firmware_board_id_init(char *board_id, size_t size)
+ 
+ 	compat = of_get_property(root, "compatible", &len);
+ 	if (compat && len > 0) {
+-		strncpy(board_id, compat, size - 1);
++		memcpy_and_pad(board_id, size - 1, compat, strnlen(compat, size - 1), 0);
+ 		board_id[size - 1] = '\0';
+ 		pr_info("skw firmware: board_id from DT compatible: %s\n", board_id);
+ 	}
