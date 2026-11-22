@@ -40,6 +40,11 @@ describes the revision its author had.
 
 ## Pitfalls
 
+- **Nothing is discarded blindly.** A rule that drops a node, a property or a pin state names what
+  it did on the vendor kernel and why mainline needs none of it. V8 checks it on the box.
+- **A drop's reason covers every property its vendor driver reads**, not the one the comment names.
+  The RK3528's `wlan-platdata` was dropped for its host wake, and its Wi-Fi power line went with it;
+  `bluetooth-platdata`'s drop took Bluetooth. The regression's parity finds what the tree lost.
 - **semdiff only reads what it knows.** A reference property not in `references.py` or the base
   compares as numbers: renumbering shows as a change, and a phandle moved to another node can be
   missed (the RK3528's `clk_pin` pointed at `ioc_grf` in its view until the base declared it).
@@ -72,3 +77,5 @@ describes the revision its author had.
 - [ ] **V5** `dt-validate` against the patched bindings reports nothing but the board compatible
 - [ ] **V6** `devices.py` finds no block described twice
 - [ ] **V7** `regression.md` on both kernels, with the touched blocks checked
+- [ ] **V8** A runtime diff on one box, vendor against mainline: every pin's mux and pull, each
+      GPIO, regulator voltage and enabled clock; each difference explained in `dtb.md`

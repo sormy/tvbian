@@ -6,6 +6,8 @@
  * Needs, beyond it, found by name and so best-effort: each
  * patch adding a name the tree uses or a dtsi change it keeps, which may in
  * turn need others before it:
+ *   patches/linux-rockchip/6.12/bluetooth-hci-h4-serdev.patch:
+ *     "aicsemi,aic8800-bt"
  *   patches/linux-rockchip-mainline/dt-bindings-rk3528.patch:
  *     "rockchip,rk3528-vdec", "rockchip,rk3528-tsadc", rockchip,grf, rockchip,hw-tshut-mode,
  *     rockchip,hw-tshut-polarity, rockchip,hw-tshut-temp, "rockchip,rk3528-vop", rockchip,pmu,
@@ -979,6 +981,13 @@
 	pinctrl-names = "default";
 	pinctrl-0 = <&uart2m1_xfer>, <&uart2m1_ctsn>;
 	status = "okay";
+
+	bluetooth {
+		compatible = "aicsemi,aic8800-bt"; /* the AIC8800's Bluetooth half */
+		max-speed = <1500000>;
+		reset-gpios = <&gpio1 RK_PC1 GPIO_ACTIVE_LOW>;
+		device-wakeup-gpios = <&gpio1 RK_PB4 GPIO_ACTIVE_HIGH>;
+	};
 };
 
 &usb2phy {

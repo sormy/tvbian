@@ -150,10 +150,10 @@ vendor's own description: `pwrseq [parent]`, `vbus`, `enable <label>`, `boot-vol
 `hdmi-connector <controller> <port>`, `bluetooth-reset <property>` with `bluetooth-uart`,
 `bank-bias`, `recovery-key <level>`, `cec <controller> <hdmi>`, `rk-sound-card`, `pwm-ir`,
 `init-voltage`, `hdmi-ddc-i2c`, `led-roles <name>:<role>…`, `adc-recovery <key>` and `shared-reset`
-(each an `also`), `console`, `radio-pcm`, `gpu-power`, and for Amlogic `aml-slot <host>`,
-`aml-pwrseq <host>`, `aml-32k`. OPP rows sharing a frequency merge into one row with
-`opp-microvolt-speed<bin>` per speed bin. An OPP table keeps the vendor's rows, and of mainline's
-only an `opp-suspend` row below them all. Pin states without pin groups are not written.
+(each an `also`), `console`, `radio-pcm`, `gpu-power`, `rk-bluetooth`, `rk-wlan`, and for Amlogic
+`aml-slot <host>`, `aml-pwrseq <host>`, `aml-32k`. OPP rows sharing a frequency merge into one row
+with `opp-microvolt-speed<bin>` per speed bin. An OPP table keeps the vendor's rows, and of
+mainline's only an `opp-suspend` row below them all. Pin states without pin groups are not written.
 
 `--report <file>` lists every decision the conf made away from the vendor, one a line: `none` (a
 node, property or pin state dropped from an enabled node), `unresolved` (a question), `dormant` (a

@@ -81,6 +81,8 @@ BUILT = (
     "shared-reset",
     "radio-pcm",
     "gpu-power",
+    "rk-bluetooth",
+    "rk-wlan",
 )
 
 

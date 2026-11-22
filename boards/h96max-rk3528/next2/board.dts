@@ -2935,6 +2935,13 @@
 			status = "okay";
 			pinctrl-names = "default";
 			pinctrl-0 = <&uart2m1_xfer>, <&uart2m1_ctsn>;
+
+			bluetooth {
+				compatible = "aicsemi,aic8800-bt"; /* the AIC8800's Bluetooth half */
+				max-speed = <1500000>;
+				reset-gpios = <&gpio1 RK_PC1 GPIO_ACTIVE_LOW>;
+				device-wakeup-gpios = <&gpio1 RK_PB4 GPIO_ACTIVE_HIGH>;
+			};
 		};
 
 		uart3: serial@ffa08000 {
@@ -3494,15 +3501,6 @@
 			reset-names = "reset";
 			max-frequency = <150000000>;
 			status = "disabled";
-			#address-cells = <1>;
-			#size-cells = <0>;
-
-			/* The radio's MAC tail from the SoC id: its efuse holds none. */
-			wifi@1 {
-				reg = <1>;
-				nvmem-cells = <&otp_id>;
-				nvmem-cell-names = "soc-id";
-			};
 		};
 
 		sdmmc: mmc@ffc30000 {

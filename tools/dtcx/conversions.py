@@ -57,6 +57,18 @@ def gpio(value: str, active: str, pull: bool = False) -> str:
     return f"<{cells[0]} {int(cells[1], 0)} {int(cells[2], 0)} {spelled}>"
 
 
+def compatible_of(node: Node) -> str:
+    """A node's compatible as written, or nothing."""
+    prop = node.prop("compatible")
+    return prop.value if prop else ""
+
+
+def inverted(value: str) -> str:
+    """A <&bank pin flags> line of the other polarity."""
+    swap = {"GPIO_ACTIVE_HIGH": "GPIO_ACTIVE_LOW", "GPIO_ACTIVE_LOW": "GPIO_ACTIVE_HIGH"}
+    return re.sub(r"GPIO_ACTIVE_(HIGH|LOW)", lambda m: swap[m[0]], value)
+
+
 def rk_pins(group: Node) -> dict[tuple[str, str], str]:
     """A Rockchip pin group's entries, each <...> as written, by its bank and pin."""
     pins = group.prop("rockchip,pins")
@@ -139,6 +151,8 @@ class Conversions:
             "shared-reset": self.shared_reset,
             "radio-pcm": self.radio_pcm,
             "gpu-power": self.gpu_power,
+            "rk-bluetooth": self.rk_bluetooth,
+            "rk-wlan": self.rk_wlan,
         }
         conversions[action](fnode, path, args)
 
@@ -559,6 +573,45 @@ class Conversions:
             compatible, state = sequence.prop("compatible"), sequence.prop("pinctrl-0")
             if compatible and '"mmc-pwrseq-simple"' in compatible.value and state is not None:
                 put(sequence, Prop.of("pinctrl-0", f"{state.value}, {self.relabel(pins.value)}"))
+
+    def rk_bluetooth(self, fnode: Node, path: str, args: list[str]) -> None:
+        """The vendor rfkill's Bluetooth, where enabled, as a serdev node on the UART its pins name:
+        BT,reset_gpio, the level that runs the chip, as reset-gpios of the other polarity, and
+        BT,wake_gpio, high to keep it awake, as device-wakeup-gpios; the board's patch names the
+        chip."""
+        if not okay(fnode):
+            return
+        pins, reset = fnode.prop("pinctrl-0"), fnode.prop("BT,reset_gpio")
+        bus = re.search(r"&uart(\d+)m", pins.value) if pins else None
+        uart = self.by_label.get(f"uart{bus[1]}") if bus else None
+        if uart is None or reset is None:
+            self.report(UNRESOLVED, "bluetooth-platdata: no UART or reset line", path)
+            return
+        props = [Prop.of("reset-gpios", self.relabel(inverted(reset.value)))]
+        wake = fnode.prop("BT,wake_gpio")
+        if wake is not None:
+            props.append(Prop.of("device-wakeup-gpios", self.relabel(wake.value)))
+        uart.children.append(Node("bluetooth", [], [], props))
+
+    def rk_wlan(self, fnode: Node, path: str, args: list[str]) -> None:
+        """The vendor rfkill's Wi-Fi power and reset lines, where enabled, which it raised to run the
+        chip: each in the SDIO power sequence's reset-gpios, of the other polarity, once."""
+        lines = [p.value for p in fnode.props if p.name in ("WIFI,poweren_gpio", "WIFI,reset_gpio")]
+        if not okay(fnode) or not lines:
+            return
+        sequences = [n for n in self.nodes if '"mmc-pwrseq-simple"' in compatible_of(n)]
+        if not sequences:
+            self.report(UNRESOLVED, "wlan-platdata: no SDIO power sequence for its lines", path)
+            return
+        sequence = sequences[0]
+        held = sequence.prop("reset-gpios")
+        entries = re.findall(r"<[^>]*>", held.value) if held else []
+        pins = {re.sub(r"\s*GPIO_ACTIVE_\w+", "", e) for e in entries}
+        for line in lines:
+            reset = self.relabel(inverted(line))
+            if re.sub(r"\s*GPIO_ACTIVE_\w+", "", reset) not in pins:
+                entries.append(reset)
+        put(sequence, Prop.of("reset-gpios", ", ".join(entries)))
 
     def gpu_power(self, fnode: Node, path: str, args: list[str]) -> None:
         """The vendor GPU's simple power model as the energy model mainline's power allocator

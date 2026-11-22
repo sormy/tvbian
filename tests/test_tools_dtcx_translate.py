@@ -685,6 +685,58 @@ class BoardTest(unittest.TestCase):
         self.assertTrue([e for e in report.entries if e[1].startswith("bt_hostwake")])
         self.assertFalse([p for p in nodes if p.endswith("-hog")])
 
+    def test_rockchip_wifi_lines_join_the_sdio_power_sequence_once(self) -> None:
+        cases = (
+            ("<&gpio1 RK_PA6 GPIO_ACTIVE_HIGH>", None, "<&gpio1 RK_PA6 GPIO_ACTIVE_LOW>"),
+            (
+                "<&gpio3 RK_PB2 GPIO_ACTIVE_HIGH>",
+                "<&gpio3 RK_PB4 GPIO_ACTIVE_LOW>",
+                "<&gpio3 RK_PB4 GPIO_ACTIVE_LOW>, <&gpio3 RK_PB2 GPIO_ACTIVE_LOW>",
+            ),
+            (
+                "<&gpio3 RK_PB2 GPIO_ACTIVE_HIGH>",
+                "<&gpio3 RK_PB2 GPIO_ACTIVE_LOW>",
+                "<&gpio3 RK_PB2 GPIO_ACTIVE_LOW>",
+            ),
+        )
+        for line, held, expected in cases:
+            with self.subTest(line=line, held=held):
+                props = [Prop.of("compatible", '"mmc-pwrseq-simple"')]
+                if held:
+                    props.append(Prop.of("reset-gpios", held))
+                sequence = Node("sdio-pwrseq", ["sdio_pwrseq"], props=props)
+                vendor = Node(
+                    "wireless-wlan",
+                    props=[Prop.of("WIFI,reset_gpio", line), Prop.of("status", '"okay"')],
+                )
+                RockchipTest.converted(Node("/", children=[sequence]), "rk-wlan", vendor, [])
+                self.assertEqual(values(sequence)["reset-gpios"], expected)
+
+    def test_rockchip_bluetooth_becomes_a_serdev_node_on_its_uart(self) -> None:
+        for status, written in (('"okay"', True), ('"disabled"', False)):
+            with self.subTest(status=status):
+                uart = Node("serial@ff9e0000", ["uart2"])
+                vendor = Node(
+                    "wireless-bluetooth",
+                    props=[
+                        Prop.of("pinctrl-0", "<&uart2m0_rtsn>"),
+                        Prop.of("BT,reset_gpio", "<&gpio3 RK_PC1 GPIO_ACTIVE_HIGH>"),
+                        Prop.of("BT,wake_gpio", "<&gpio3 RK_PB4 GPIO_ACTIVE_HIGH>"),
+                        Prop.of("status", status),
+                    ],
+                )
+                RockchipTest.converted(Node("/", children=[uart]), "rk-bluetooth", vendor, [])
+                nodes = [c for c in uart.children if c.name == "bluetooth"]
+                self.assertEqual(bool(nodes), written)
+                if written:
+                    self.assertEqual(
+                        values(nodes[0]),
+                        {
+                            "reset-gpios": "<&gpio3 RK_PC1 GPIO_ACTIVE_LOW>",
+                            "device-wakeup-gpios": "<&gpio3 RK_PB4 GPIO_ACTIVE_HIGH>",
+                        },
+                    )
+
     def test_no_reset_line_no_bluetooth_node(self) -> None:
         unset = BOARD.replace("bt_rst_n = <&pio 6 19 1 0xffffffff 0xffffffff 0>", "bt_rst_n")
         source, _ = translate(
