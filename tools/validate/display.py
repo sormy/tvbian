@@ -243,6 +243,9 @@ PROP_IMMUTABLE = 0x4
 OPTIONAL_PLANE_PROPS = {"COLOR_ENCODING", "COLOR_RANGE", "EOTF", "zpos"}
 PLANE_TYPES = {0: "overlay", 1: "primary", 2: "cursor"}
 PACING_SECONDS = 60
+# a session's units, in the order they let the display go: the display manager, then the seat
+# daemon, which keeps DRM master on the card with no session
+SESSION_UNITS = ("greetd.service", "seatd.service")
 RUNG_SECONDS = 10
 # Kernel log lines that only a screen absent from the bus raises, not a box falling behind.
 NO_SCREEN_NOISE = re.compile(r"scdc|ddc|i2c|edid|hpd|hot.?plug|phy", re.I)
@@ -747,10 +750,7 @@ def to8(rgb):
     return tuple(round(min(max(c, 0.0), 1.0) * 255) for c in rgb)
 
 
-# ---- a screen that takes HDR, for a box with none: the HDMI connector's EDID through debugfs
-HDR_STATIC_METADATA_DB = bytes([0xE6, 0x06])
-
-
+# ---- a synthetic screen over whatever the box has: the HDMI connector's EDID through debugfs
 def edid_block(data):
     return data + bytes([(-sum(data)) & 0xFF])
 
@@ -844,10 +844,28 @@ def hdr_edid(eotfs=SINKS["HDR10 and HLG"], ladder=False):
 
 
 @contextlib.contextmanager
+def display_free():
+    """The display to ourselves: a running session's compositor holds DRM master, which every
+    modeset here needs; the session is back when the run ends."""
+    running = [
+        unit
+        for unit in SESSION_UNITS
+        if subprocess.run(["systemctl", "is-active", "--quiet", unit]).returncode == 0
+    ]
+    for unit in running:
+        subprocess.run(["systemctl", "stop", unit], check=False)
+    try:
+        yield
+    finally:
+        for unit in reversed(running):
+            subprocess.run(["systemctl", "start", unit], check=False)
+
+
+@contextlib.contextmanager
 def hdr_sink(edid=None):
-    """Gives the HDMI connector a synthetic screen: edid, or without one the HDR EDID wherever the
-    screen lacks HDR or there is none, so the HDR cases run unattended. True while it stands in; the
-    connector's own EDID and force state come back after."""
+    """Gives the HDMI connector a synthetic screen, edid or else the HDR10 and HLG one, over any
+    screen attached: the checks then answer for the screen they expect, unattended. True while it
+    stands in; the connector's own EDID and force state come back after."""
     found = [
         (d, c)
         for d in glob.glob("/sys/kernel/debug/dri/*/HDMI-A-1")
@@ -859,13 +877,7 @@ def hdr_sink(edid=None):
         return
     debugfs, sysfs = found[0]
     if edid is None:
-        with open(f"{sysfs}/status") as status, open(f"{sysfs}/edid", "rb") as own:
-            if status.read().strip() == "connected" and HDR_STATIC_METADATA_DB in own.read():
-                yield False
-                return
-        print(
-            "NOTE the HDMI screen lacks HDR, or there is none: a synthetic HDR10/HLG EDID stands in"
-        )
+        print("NOTE a synthetic HDR10/HLG EDID stands in for the HDMI screen")
         edid = hdr_edid()
     with open(f"{debugfs}/force") as f:
         force = f.read().strip()
@@ -1387,8 +1399,10 @@ class Box:
         """Each LADDER mode the driver offers, at a player's pace with the video at the mode's size:
         sustained when every flip is on time, with no underrun and nothing new in the kernel log. The
         verdicts: the first sustained rung of RESOLUTION_LADDER and of RATE_LADDER."""
-        if not (self.hdmi_connector and self.video_plane and self.ui_plane):
-            print("SKIP rating: no HDMI connector, or no video and interface planes")
+        if not (
+            self.hdmi_connector and self.crtc is not None and self.video_plane and self.ui_plane
+        ):
+            print("SKIP rating: no HDMI connector, CRTC with a mode, or video and interface planes")
             return
         offered = self.connector_modes()
         print(
@@ -2229,10 +2243,11 @@ def composite_only():
 
 
 if __name__ == "__main__":
-    if sys.argv[1:] == ["composite"]:
-        sys.exit(composite_only())
     parser = argparse.ArgumentParser(description="the display, unattended")
     parser.add_argument("--sinks", default=",".join(SINKS), help=f"of {', '.join(SINKS)}")
     parser.add_argument("--no-ladder", action="store_true", help="skip the rating's mode ladder")
-    args = parser.parse_args()
-    sys.exit(main(args.sinks.split(","), not args.no_ladder))
+    with display_free():
+        if sys.argv[1:] == ["composite"]:
+            sys.exit(composite_only())
+        args = parser.parse_args()
+        sys.exit(main(args.sinks.split(","), not args.no_ladder))
