@@ -69,8 +69,9 @@ concurrency:
 
 env:
   TVB_BUILD_CACHE: ${{ inputs.clean && '0' || '1' }}
-  # each of the 7 caches, 6 kernels and the release job's, stays under GitHub's 10 GB per repo
-  TVB_BUILD_CCACHE_SIZE: 1.25G
+  # each of the 8 caches, 7 kernels and the release job's, stays under GitHub's 10 GB per repo; one
+  # cache per kernel, since two families' objects almost never match (their configs differ)
+  TVB_BUILD_CCACHE_SIZE: 1G
   TVB_RELEASE_GUARD: ${{ inputs.unguarded && '0' || '1' }}
   # only these two events publish, so only they sign
   PUBLISH: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
