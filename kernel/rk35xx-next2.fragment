@@ -79,3 +79,5 @@ CONFIG_VIDEO_ROCKCHIP_VDPP=m
 # the dma-buf heaps, built in: no device loads them, and a client allocates its own buffers there
 CONFIG_DMABUF_HEAPS_SYSTEM=y
 CONFIG_DMABUF_HEAPS_CMA=y
+# a TV remote's keys over HDMI CEC as input events, as the vendor kernel gives them
+CONFIG_MEDIA_CEC_RC=y
