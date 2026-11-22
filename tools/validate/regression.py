@@ -76,6 +76,7 @@ DEBS = ROOT / "build" / "out" / "debs"
 CLIPS = ROOT / "build" / "validate" / "video" / "clips"
 KNOWN = HERE / "known.conf"
 RESULTS = ROOT / "build" / "validate" / "regression"
+INVENTORY = "inventory."  # box.py's device-class lines, which parity compares
 # the VA suite, run against the installed driver, and the session's check, with their clips
 VA_SUITE = ROOT / "va-driver" / "tests"
 VA_FILES = ("vaapi_test.py", "headers.py")
@@ -221,6 +222,32 @@ def changed(old: str, new: str) -> list[str]:
         for key in sorted(before.keys() | after.keys())
         if before.get(key) != after.get(key)
     ]
+
+
+def release_order(kernel_dir: Path) -> tuple[int, ...]:
+    """A kernel's results folder by its version, as uname names it: 6.1.172 before 6.12.69."""
+    return tuple(int(n) for n in re.findall(r"\d+", kernel_dir.name.split("-")[0]))
+
+
+def short_of(own: str, other: str) -> list[str]:
+    """The device classes another kernel offers fewer of than the board's own, from box.py's
+    inventory lines: class, both counts, and what only the own kernel names."""
+
+    def counted(text: str) -> dict[str, list[str]]:
+        return {
+            key.removeprefix(INVENTORY): value.split()
+            for key, _, value in (line.partition(" ") for line in text.splitlines())
+            if key.startswith(INVENTORY)
+        }
+
+    theirs = counted(other)
+    out = []
+    for device_class, (count, *names) in counted(own).items():
+        found, *found_names = theirs.get(device_class, ["0"])
+        if int(found) < int(count):
+            gone = " ".join(n for n in names if n not in found_names) or "renamed"
+            out.append(f"{device_class}: {found} of {count}, {gone}")
+    return out
 
 
 def steps(profile: str, family: str, iperf: str, board_family_name: str) -> list[Step]:
@@ -805,7 +832,9 @@ def report(args: argparse.Namespace) -> int:
         end = ending(board_dir) + over_budget(board_dir)
         host = Verdicts.of(board_dir / "host.txt")
         moved_inputs = changed_inputs(board, run)
-        for kernel_dir in sorted(p for p in board_dir.iterdir() if p.is_dir()):
+        kernel_dirs = sorted((p for p in board_dir.iterdir() if p.is_dir()), key=release_order)
+        own = kernel_dirs[0] / "system.txt" if kernel_dirs else None
+        for kernel_dir in kernel_dirs:
             total = Verdicts(host.checks, list(host.fails), list(host.untested))
             for result in sorted(kernel_dir.glob("*.txt")):
                 found = Verdicts.of(result)
@@ -822,6 +851,10 @@ def report(args: argparse.Namespace) -> int:
                 since = last.parents[1].name
                 speeds = slower((last / "va.txt").read_text(), (kernel_dir / "va.txt").read_text())
                 total.fails += [f"va: slower than {since}: {speed}" for speed in speeds]
+            system_txt = kernel_dir / "system.txt"
+            if own is not None and own != system_txt and own.exists() and system_txt.exists():
+                gaps = short_of(own.read_text(), system_txt.read_text())
+                total.fails += [f"parity: short of {own.parent.name}: {gap}" for gap in gaps]
             reasons = {f: known_reason(known, board, kernel, f) for f in total.fails}
             new = [f for f, why in reasons.items() if why is None]
             expected = [f"{f}  ({why})" for f, why in reasons.items() if why is not None]

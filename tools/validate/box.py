@@ -9,7 +9,8 @@ detached, as a sub-suite may reload the Wi-Fi driver the session rides on:
 Every line is "key value"; a missing tool or device is a value, never a gap. The sub-suites, in
 order, each named after the bring-up doc it measures:
 
-    system     identity, boot, log, modules, devices, firmware, packages, kernel baseline, RAM
+    system     identity, boot, log, modules, devices and their inventory, firmware, packages,
+               kernel baseline, RAM
     cpu        the CPU ladder with its voltages, under load: heat, throttling, trips (5 min)
     storage    each MMC bus's mode and errors, the root device, fio as storage.md writes it
     network    Ethernet's PHY and link; each radio driver mode: link, bands, regions, throughput
@@ -46,6 +47,22 @@ NONE = "none"
 # Bluetooth, which rides on the Wi-Fi firmware, exists in it
 MODES: dict[str, list[tuple[str, bool]]] = {
     "atbm6031": [("wifi_bt_comb=0", False), ("wifi_bt_comb=1", True)]
+}
+# the device classes a kernel must offer as many of as the board's own: each a glob, the name its stem
+INVENTORY = {
+    "net": "/sys/class/net/*",
+    "bluetooth": "/sys/class/bluetooth/hci*",
+    "input": "/sys/class/input/input*",
+    "sound": "/proc/asound/card[0-9]*",
+    "leds": "/sys/class/leds/*",
+    "thermal": "/sys/class/thermal/thermal_zone*",
+    "cooling": "/sys/class/thermal/cooling_device*",
+    "devfreq": "/sys/class/devfreq/*",
+    "drm": "/sys/class/drm/card*-*",
+    "rfkill": "/sys/class/rfkill/rfkill*",
+    "rtc": "/sys/class/rtc/rtc*",
+    "watchdog": "/sys/class/watchdog/watchdog*",
+    "hwmon": "/sys/class/hwmon/hwmon*",
 }
 # IR receivers, by compatible: a board whose tree enables one must give it a node
 IR_RECEIVERS = ("sun6i-a31-ir", "meson-ir", "meson-gxbb-ir", "remotectl")
@@ -310,6 +327,8 @@ def system() -> Iterator[Line]:
     yield "firmware.unowned", unowned_firmware()
     yield "packages.added", added_packages()
     yield "addresses.assigned", assigned_addresses()
+    for device_class, pattern in INVENTORY.items():
+        yield f"inventory.{device_class}", inventory(pattern)
     yield "loaders", loaders()
     yield "ram.verify", ram_verify()
     for workers in (1, os.cpu_count() or 1):
@@ -481,6 +500,13 @@ def assigned_addresses() -> str:
     ]
     units = sh("systemctl list-unit-files --no-legend | grep -iE 'hciattach|macaddr|btattach'")
     return " ".join(set_by_user + units.split()[:1]) or NONE
+
+
+def inventory(pattern: str) -> str:
+    """How many devices of a class, then what each calls itself: its name or type, else its node's."""
+    paths = sorted(glob.glob(pattern))
+    names = [read(f"{p}/name") or read(f"{p}/type") or os.path.basename(p) for p in paths]
+    return " ".join([str(len(names)), *(n.replace(" ", "_") for n in names)])
 
 
 def loaders() -> str:

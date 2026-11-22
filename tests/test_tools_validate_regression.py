@@ -27,6 +27,8 @@ from regression import (  # noqa: E402
     inputs,
     changed,
     kernels,
+    release_order,
+    short_of,
     steps,
     upstream_args,
     video_records,
@@ -114,6 +116,25 @@ class ChangedTest(unittest.TestCase):
             changed(old, new),
             ["gpu.glmark2: - -> 120", "mmc.errors: 0 -> 2", "rtc: sun6i -> -"],
         )
+
+
+class ParityTest(unittest.TestCase):
+    def test_a_kernel_short_of_the_own_names_the_class_and_what_went(self) -> None:
+        own = "kernel 6.1\ninventory.bluetooth 1 hci0\ninventory.leds 2 power link\n"
+        cases = (
+            ("inventory.bluetooth 1 hci0\ninventory.leds 2 power lan\n", []),
+            ("inventory.bluetooth 0\ninventory.leds 3 a b c\n", ["bluetooth: 0 of 1, hci0"]),
+            ("inventory.leds 1 power\n", ["bluetooth: 0 of 1, hci0", "leds: 1 of 2, link"]),
+            ("inventory.bluetooth 1 hci0\ninventory.leds 1 lan\n", ["leds: 1 of 2, power link"]),
+        )
+        for other, expected in cases:
+            with self.subTest(other=other):
+                self.assertEqual(short_of(own, other), expected)
+
+    def test_the_own_kernel_is_the_lowest_version(self) -> None:
+        names = ["7.3.5-tvb-rk35xx-next2", "6.12.69-tvb-rk35xx", "6.1.172-tvb-rk35xx"]
+        ordered = sorted((Path(n) for n in names), key=release_order)
+        self.assertEqual(ordered[0].name, "6.1.172-tvb-rk35xx")
 
 
 class ResultsTest(unittest.TestCase):

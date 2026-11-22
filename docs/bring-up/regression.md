@@ -51,7 +51,10 @@ tools: a line that differs from the board's last run is a finding.
 
 3. **Report**: `regression.py report build/validate/regression/<date>` writes `report.md` there, for
    the pull request: each board and kernel with its checks and minutes, new failures apart from the
-   known ones in `tools/validate/known.conf`, every ❓, and what moved since the board's last run. A
+   known ones in `tools/validate/known.conf`, every ❓, and what moved since the board's last run.
+   Parity is a failure too: each device class (network, Bluetooth, input, sound, LEDs, thermal,
+   cooling, devfreq, DRM connectors, rfkill, RTC, watchdog, hwmon) another kernel has fewer of than
+   the board's own, its oldest, with the names it lacks. A
    step that breaks a box, hanging it or worse, is skipped there by a `step:<name>` line in
    `known.conf` with its reason: shown ❓ in every report until the fix lands. Attach it to the PR.
    A new ❌ is a finding; a known one stays known only with its reason, and its line goes when the
@@ -107,3 +110,4 @@ The unattended pass proves a device answers; these need a person, a screen or a 
 - [ ] **R3** `reboots.sh`, 5 on each kernel, every boot back with its radios and no MMC error
 - [ ] **R4** `video.py compare` and the VA suite's speed against the last run: nothing worse
 - [ ] **R5** The hands-on lines the change reaches, handed to the human with what to confirm
+- [ ] **R6** No kernel short of the board's own in parity, or each gap in `known.conf` with its todo
