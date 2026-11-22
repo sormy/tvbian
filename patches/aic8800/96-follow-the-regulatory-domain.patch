@@ -1,0 +1,23 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] aic8800: follow cfg80211's regulatory domain
+
+custregd defaults to true in the code, though its description says
+false: the wiphy registers self-managed at 00 and ignores the global
+domain and iw reg set. Default it to false, so the radio follows the
+domain the system sets.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/src/SDIO/driver_fw/driver/aic8800/aic8800_fdrv/rwnx_mod_params.c b/src/SDIO/driver_fw/driver/aic8800/aic8800_fdrv/rwnx_mod_params.c
+index bc124be..2a2fcd1 100644
+--- a/src/SDIO/driver_fw/driver/aic8800/aic8800_fdrv/rwnx_mod_params.c
++++ b/src/SDIO/driver_fw/driver/aic8800/aic8800_fdrv/rwnx_mod_params.c
+@@ -56,7 +56,7 @@ struct rwnx_mod_params rwnx_mod_params = {
+ 	COMMON_PARAM(mutx_on, true, true)
+ 	COMMON_PARAM(use_80, false, false)
+ /* false: use crda(iw reg set CN); true: drive self-management(wifi_test wlan0 country_set CN) */
+-	COMMON_PARAM(custregd, true, true)
++	COMMON_PARAM(custregd, false, false)
+ 	COMMON_PARAM(custchan, false, false)
+ 	COMMON_PARAM(roc_dur_max, 500, 500)
+ 	COMMON_PARAM(listen_itv, 0, 0)

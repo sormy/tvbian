@@ -1,0 +1,50 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] aicbsp: power-cycle the card through its MMC host where no platform hook does
+
+Without a vendor platform hook, unloading the driver leaves the chip in a
+state it cannot leave: a reload finds the card removed (-ENOMEDIUM) and
+the radio stays down. Re-probe the card's MMC host at power-off instead:
+its mmc-pwrseq resets the chip and the card is enumerated afresh, so the
+next load finds it.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/src/SDIO/driver_fw/driver/aic8800/aic8800_bsp/aicsdio.c b/src/SDIO/driver_fw/driver/aic8800/aic8800_bsp/aicsdio.c
+--- a/src/SDIO/driver_fw/driver/aic8800/aic8800_bsp/aicsdio.c
++++ b/src/SDIO/driver_fw/driver/aic8800/aic8800_bsp/aicsdio.c
+@@ -47,6 +47,8 @@ static int aicbsp_platform_power_on(void);
+ static void aicbsp_platform_power_off(void);
+ 
+ struct aic_sdio_dev *aicbsp_sdiodev = NULL;
++/* the card's MMC host, where no platform hook powers the chip */
++static struct device *aicbsp_mmc_host;
+ static struct semaphore *aicbsp_notify_semaphore;
+ extern struct semaphore aicbsp_probe_semaphore;
+ 
+@@ -363,6 +365,8 @@ static int aicbsp_sdio_probe(struct sdio_func *func,
+ 		return -ENOMEM;
+ 	}
+     aicbsp_sdiodev = sdiodev;
++	if (!aicbsp_mmc_host)
++		aicbsp_mmc_host = get_device(mmc_dev(func->card->host));
+ 
+ 	err = aicwf_sdio_chipmatch(sdiodev, func->vendor, func->device);
+ 
+@@ -637,6 +641,17 @@ static void aicbsp_platform_power_off(void)
+ 	extern_wifi_set_enable(0);
+ #endif
+ 
++#if !defined(CONFIG_PLATFORM_ALLWINNER) && !defined(CONFIG_PLATFORM_ROCKCHIP2) && \
++	!defined(CONFIG_PLATFORM_AMLOGIC)
++	/* Re-probing the host runs its mmc-pwrseq: the next load finds a powered, fresh card */
++	if (aicbsp_mmc_host) {
++		device_release_driver(aicbsp_mmc_host);
++		if (device_attach(aicbsp_mmc_host) < 0)
++			sdio_err("%s: no driver for the MMC host\n", __func__);
++		put_device(aicbsp_mmc_host);
++		aicbsp_mmc_host = NULL;
++	}
++#endif
+ 
+ 	sdio_dbg("%s\n", __func__);
+ }

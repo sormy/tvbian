@@ -9,10 +9,12 @@ boot. The symptom is a wandering DHCP lease and a server slowly filling with
 leases for one box.
 
 Take the address from vendor storage when the platform offers it, via
-rockchip_wifi_mac_addr(), and derive the fallback from the SoC's OTP id instead
-of random bytes, varying only the tail. Keep the vendor's 88:00:33 prefix but
-mark it locally administered: it is no registered OUI. The chip's own efuse
-still wins when it has one.
+rockchip_wifi_mac_addr(), and derive the fallback from the SoC's serial number
+instead of random bytes, varying only the tail. The bootloader writes it to the
+tree's root as serial-number, which the vendor kernel's system_serial also comes
+from, so a board keeps one address on every kernel it boots. Keep the vendor's
+88:00:33 prefix but mark it locally administered: it is no registered OUI. The
+chip's own efuse still wins when it has one.
 
 Without one in efuse, take the address the bootloader put in the SDIO
 function's device-tree node, local-mac-address, before the fallback: a board
@@ -22,70 +24,82 @@ The driver's existing call sites are gated on CONFIG_PLATFORM_ROCKCHIP, a build
 knob no in-tree config defines, so the vendor path never ran; key off
 CONFIG_RFKILL_RK instead, which is what actually provides rfkill-wlan.h.
 
-asm/system_info.h exists only on arm and arm64, so every use of
-system_serial_high/low is gated on the same condition that provides the header.
-
 Record which source the address came from and log it, because a silently
 regenerated MAC is otherwise invisible.
 
 Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
+diff --git a/src/SDIO/driver_fw/driver/aic8800/aic8800_fdrv/rwnx_main.c b/src/SDIO/driver_fw/driver/aic8800/aic8800_fdrv/rwnx_main.c
+index f57638b..6e7f21a 100644
 --- a/src/SDIO/driver_fw/driver/aic8800/aic8800_fdrv/rwnx_main.c
 +++ b/src/SDIO/driver_fw/driver/aic8800/aic8800_fdrv/rwnx_main.c
-@@ -22,6 +22,7 @@
+@@ -22,6 +22,8 @@
  #include <linux/if_arp.h>
  #include <linux/ctype.h>
  #include <linux/random.h>
 +#include <linux/of_net.h>
++#include <linux/of.h>
  #include <linux/vmalloc.h>
  #include "rwnx_defs.h"
  #include "rwnx_dini.h"
-@@ -5840,8 +5841,11 @@
+@@ -5840,7 +5842,7 @@ extern int get_wifi_custom_mac_address(char *addr_str);
  #endif//CONFIG_USE_CUSTOMER_MAC
  #endif//CONFIG_PLATFORM_ALLWINNER
  
 -#ifdef CONFIG_PLATFORM_ROCKCHIP
 +#if defined(CONFIG_PLATFORM_ROCKCHIP) || IS_ENABLED(CONFIG_RFKILL_RK)
  #include <linux/rfkill-wlan.h>
-+#include <asm/system_info.h>
-+/* asm/system_info.h is arm/arm64 only, so gate every use of system_serial_* */
-+#define RWNX_HAVE_SOC_SERIAL 1
  #endif
  #ifdef CONFIG_PLATFORM_ROCKCHIP2
- #include <linux/rfkill-wlan.h>
-@@ -6022,6 +6026,7 @@
+@@ -6009,6 +6011,17 @@ extern int get_adap_test(void);
+ extern void *aicwf_prealloc_txq_alloc(size_t size);
+ extern char default_ccode[];
+ 
++/* The SoC's serial number as the bootloader writes it to the tree's root, which the vendor
++ * kernel's system_serial also comes from: the same address on every kernel
++ */
++static bool rwnx_soc_serial(u64 *serial)
++{
++	const char *text;
++
++	return !of_property_read_string(of_root, "serial-number", &text) &&
++	       !kstrtou64(text, 16, serial) && *serial;
++}
++
+ int rwnx_cfg80211_init(struct rwnx_plat *rwnx_plat, void **platform_data)
+ {
+ 	struct rwnx_hw *rwnx_hw;
+@@ -6022,6 +6035,8 @@ int rwnx_cfg80211_init(struct rwnx_plat *rwnx_plat, void **platform_data)
  	//struct mm_set_rf_calib_cfm cfm;
  	struct mm_get_fw_version_cfm fw_version;
  	u8_l mac_addr_efuse[ETH_ALEN];
 +	const char *mac_src = "vendor storage";
++	u64 serial;
  	struct aicbsp_feature_t feature;
  	struct mm_set_stack_start_cfm set_start_cfm;
  #ifdef CONFIG_TEMP_COMP
-@@ -6035,7 +6040,22 @@
+@@ -6035,7 +6050,19 @@ int rwnx_cfg80211_init(struct rwnx_plat *rwnx_plat, void **platform_data)
  	memset(fw_path, 0, 200);
  	aicbsp_get_feature(&feature, fw_path);
  
 -	get_random_bytes(&dflt_mac[4], 2);
 +	/* This fallback address is what a board with no MAC in efuse ends up using,
-+	 * and a random tail moves it on every boot. Derive it from the SoC's OTP id
-+	 * instead, under the vendor's prefix marked locally administered: no one
-+	 * holds 88:00:33.
++	 * and a random tail moves it on every boot. Derive it from the SoC's serial
++	 * number instead, under the vendor's prefix marked locally administered: no
++	 * one holds 88:00:33.
 +	 */
-+#ifdef RWNX_HAVE_SOC_SERIAL
-+	if (system_serial_high || system_serial_low) {
++	if (rwnx_soc_serial(&serial)) {
 +		dflt_mac[0] |= 0x02;
-+		dflt_mac[3] = system_serial_high >> 8;
-+		dflt_mac[4] = system_serial_high;
-+		dflt_mac[5] = system_serial_low;
-+	} else
-+#endif
-+	{
++		dflt_mac[3] = serial >> 40;
++		dflt_mac[4] = serial >> 32;
++		dflt_mac[5] = serial;
++	} else {
 +		get_random_bytes(&dflt_mac[4], 2);
 +	}
  #ifdef CONFIG_POWER_LIMIT
  	memcpy(country_code, default_ccode, 4);
  #endif
-@@ -6286,9 +6306,28 @@
+@@ -6286,9 +6313,23 @@ int rwnx_cfg80211_init(struct rwnx_plat *rwnx_plat, void **platform_data)
          memcpy(init_conf.mac_addr, dflt_mac, ETH_ALEN);
      }
  #else
@@ -107,17 +121,12 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 +	if (!(mac_addr_efuse[0] | mac_addr_efuse[1] | mac_addr_efuse[2] | mac_addr_efuse[3]) &&
 +	    !of_get_mac_address(rwnx_hw->sdiodev->dev->of_node, mac_addr_efuse))
 +		mac_src = "device tree";
-+	if (!(mac_addr_efuse[0] | mac_addr_efuse[1] | mac_addr_efuse[2] | mac_addr_efuse[3])) {
-+#ifdef RWNX_HAVE_SOC_SERIAL
-+		mac_src = (system_serial_high || system_serial_low) ? "soc otp id" : "random";
-+#else
-+		mac_src = "random";
-+#endif
-+	}
++	if (!(mac_addr_efuse[0] | mac_addr_efuse[1] | mac_addr_efuse[2] | mac_addr_efuse[3]))
++		mac_src = dflt_mac[0] & 0x02 ? "soc serial" : "random";
  #endif
  
  	if (mac_addr_efuse[0] | mac_addr_efuse[1] | mac_addr_efuse[2] | mac_addr_efuse[3]) {
-@@ -6301,6 +6340,7 @@
+@@ -6301,6 +6342,7 @@ int rwnx_cfg80211_init(struct rwnx_plat *rwnx_plat, void **platform_data)
  	AICWFDBG(LOGINFO, "get macaddr: %02x:%02x:%02x:%02x:%02x:%02x\r\n",
  			mac_addr_efuse[0], mac_addr_efuse[1], mac_addr_efuse[2],
  			mac_addr_efuse[3], mac_addr_efuse[4], mac_addr_efuse[5]);
