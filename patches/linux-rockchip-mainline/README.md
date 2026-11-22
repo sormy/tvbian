@@ -45,6 +45,7 @@ Experimental RK3528 patches for `rk35xx-next2`, the mainline kernel tested on th
 | `media-rockchip-vdpp.patch`                               | VDPP scaler, V4L2 mem2mem             |
 | `thermal-rk3528.patch`                                    | TSADC                                 |
 | `cpufreq-rockchip-pvtm.patch`                             | CPU OPPs at the chip's PVTM bin       |
+| `bluetooth-hci-h4-aic8800-bdaddr.patch`                   | The AIC8800's BT at Wi-Fi's + 1       |
 | `drm-lima-devfreq-cooling-energy-model.patch`             | GPU throttled by the power allocator  |
 | `drm-rk3528.patch`                                        | VOP2, HDMI, PHY                       |
 | `drm-dw-hdmi-dblclk.patch`                                | dw-hdmi takes 480i/576i on opt-in     |
