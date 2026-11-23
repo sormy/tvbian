@@ -29,6 +29,7 @@ class OnboxTest(unittest.TestCase):
         onbox.EXTLINUX = self.dir / "extlinux.conf"
         onbox.EXTLINUX.write_text(EXTLINUX)
         onbox.STATE = self.dir / "state.json"
+        onbox.CMA = self.dir / "cma"  # none: the host's debugfs is not the box's
 
     def test_the_entry_not_its_recovery_twin(self) -> None:
         self.assertEqual(onbox.entry_for("7.3.4-tvb-sunxi64"), "l0")
@@ -214,6 +215,9 @@ class EngineSlotTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "7.3.4-tvb-rk35xx-next2"
             step = onbox.Step("video", ["echo", "--engine", onbox.ENGINE_SLOT], 10)
-            with mock.patch.object(onbox, "RESULTS", Path(tmp)):
+            with (
+                mock.patch.object(onbox, "RESULTS", Path(tmp)),
+                mock.patch.object(onbox, "CMA", Path(tmp) / "cma"),
+            ):
                 onbox.run(step, out, "rkvdec")
             self.assertIn("--engine rkvdec", (out / "video.txt").read_text())
