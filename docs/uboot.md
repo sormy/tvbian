@@ -204,7 +204,8 @@ before `mmc_auto`, so a USB disk with a boot entry boots before the eMMC.
 `uboot/sunxi-h616.conf` is one U-Boot for the H616 family: source, patches, defconfig and FEL key
 are shared. Per board are only the DRAM settings, read from its `factory_boot0.bin`, and the control
 tree, its own. The FEL key is PH9, the factory trees' `recovery_key`, held at power-on; a board
-whose `recovery_key` names another pin cannot share the conf.
+whose `recovery_key` names another pin cannot share the conf. Booted from the eMMC, U-Boot looks for
+it as `mmc1`, whatever number the board's tree gives it.
 
 It builds in the container like every other step, from a defconfig made on the spot out of
 `generic-rk3528_defconfig` with the board's tree named in it, and aborts if a `CONFIGS` symbol does

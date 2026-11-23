@@ -1,0 +1,28 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] sunxi: keep the eMMC at mmc1 when the board tree aliases it mmc2
+
+A board's device tree may alias its eMMC controller by its own number,
+mmc2 = &mmc2, as Allwinner's vendor trees do. U-Boot takes the first
+alias that names a node, so that one wins over the mmc1 alias
+sunxi-u-boot.dtsi adds, and the eMMC becomes mmc device 2. The sunxi
+board code and the mmc_auto boot target assume device 1: booted from
+the eMMC, mmc_bootdev is 1, "mmc dev 1" finds nothing, and the board
+does not boot.
+
+Drop the board's mmc2 alias where U-Boot gives the eMMC its own.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/arch/arm/dts/sunxi-u-boot.dtsi b/arch/arm/dts/sunxi-u-boot.dtsi
+index e1a9a7f5..56b16a49 100644
+--- a/arch/arm/dts/sunxi-u-boot.dtsi
++++ b/arch/arm/dts/sunxi-u-boot.dtsi
+@@ -10,6 +10,8 @@
+ 	aliases {
+ 		mmc0 = &mmc0;
+ #if CONFIG_MMC_SUNXI_SLOT_EXTRA == 2
++		/* a board tree's mmc2 alias would come first and renumber it */
++		/delete-property/ mmc2;
+ 		mmc1 = &mmc2;
+ #endif
+ 	};

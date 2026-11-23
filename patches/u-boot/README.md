@@ -1,7 +1,7 @@
 # u-boot — patches on mainline
 
-Seven patches on mainline U-Boot. `uboot/rk3528.conf` applies `0003`, target code, to every RK3528
-board's build; `uboot/sunxi-h616.conf` applies `0004`–`0007` to the H616 boards'. `0001` and `0002`
+Eight patches on mainline U-Boot. `uboot/rk3528.conf` applies `0003`, target code, to every RK3528
+board's build; `uboot/sunxi-h616.conf` applies `0004`–`0008` to the H616 boards'. `0001` and `0002`
 are in `scripts/dtc/pylibfdt`, which `binman` needs and which assumes a Linux host: they built the
 FIT on macOS, and the build now runs in the container, so nothing applies them. They are kept to
 send upstream.
@@ -15,6 +15,7 @@ send upstream.
 | `0005` | sunxi: Ethernet and Wi-Fi on secure storage's `mac` and `wifi_mac`, not the SID |
 | `0006` | sunxi: the Bluetooth address on the tree's `bluetooth0` alias                   |
 | `0007` | sunxi: a GPIO key held at power-on enters FEL                                   |
+| `0008` | sunxi: the eMMC stays `mmc1` when the board tree aliases it `mmc2`              |
 
 `libfdt.i_shipped` guards every other Python 2 call behind `PY_VERSION_HEX`; these two were missed.
 swig ≤ 4.2 emitted compatibility defines that hid them, and 4.3 dropped Python 2 along with the
@@ -45,3 +46,8 @@ our SPL replaces that loader, the key did nothing. `SPL_SUNXI_FEL_KEY_GPIO` name
 pulled up; held at power-on, the SPL returns to the boot ROM's FEL entry, `0x20`, the jump
 sunxi-tools' `fel-sdboot` makes, through the RMR reset `return_to_fel()` already does. An SPL FEL
 started ignores it.
+
+`0008`: a vendor tree aliases its eMMC `mmc2`, and U-Boot takes the first alias naming a node, so
+the board's `mmc2` beat `sunxi-u-boot.dtsi`'s `mmc1`. Booted from the eMMC, `mmc_bootdev` is 1 and
+`bootcmd_mmc1` found no device; `0005`, which looks at devices 0 and 1, fell back to the SID's
+addresses.

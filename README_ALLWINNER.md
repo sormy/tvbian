@@ -88,7 +88,7 @@ display's FIFO and break up, 10-bit worst.
 | Deep suspend                                    |        ❌         |       ❌        |
 | Serial console                                  |        ✅         |       ❓        |
 | eMMC backup over FEL                            |        ✅         |       ✅        |
-| eMMC install over FEL                           |        ✅         |       ✅        |
+| eMMC install over FEL                           |        ✅         |       ❌        |
 
 ## Get an image
 
@@ -105,11 +105,12 @@ The Tanix TX1 V2.0 has no microSD slot, so FEL is its only way in.
 
 | Route                                  | The box needs  | Tanix TX1 V2.0 | H96 Max H313 |
 | -------------------------------------- | -------------- | :------------: | :----------: |
-| 1. SD card, then `tvb-install`         | an SD slot     |    ➖ no SD    |      🟡      |
-| 2. OTG cable: the image written in FEL | the FEL button |       ✅       |      ✅      |
+| 1. SD card, then `tvb-install`         | an SD slot     |    ➖ no SD    |      ✅      |
+| 2. OTG cable: the image written in FEL | the FEL button |       ✅       |      ❌      |
 
 Route 1 runs TVBian from the card before anything is written to the eMMC: the safer one, where the
-box has a slot. Route 2 writes the image straight to the eMMC; the FEL button stays the way back.
+box has a slot. Route 2 writes the image straight to the eMMC; the FEL button stays the way back. On
+the H96 Max H313 it needs a release whose U-Boot keeps the eMMC at `mmc1`; until then take route 1.
 
 ### 1. SD card
 

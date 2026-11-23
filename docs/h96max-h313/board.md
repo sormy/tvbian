@@ -102,7 +102,7 @@ In the bring-up checklist's order, each kernel's mark side by side; numbers read
 | SD hotplug              | ❓  | ❓  | 👤 in and out                                  |
 | FEL button              | ✅  | ✅  | with the factory loader on the eMMC            |
 | PH9 to FEL              | ✅  | ✅  | our SPL on the eMMC, PH9 held; U-Boot `0007`   |
-| eMMC install            | ❓  | ❓  | awaits the owner's go-ahead                    |
+| eMMC install            | ✅  | ✅  | `tvb-install`, SD out: boots; U-Boot `0008`    |
 
 ## Measured
 
