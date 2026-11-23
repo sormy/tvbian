@@ -23,6 +23,10 @@ DEB=/out/debs/ffmpeg9_${PACKAGE_VERSION}_arm64.deb
 
 build_mpp() {
   [ -d "$MPP_SRC/.git" ] || git clone --depth 1 --branch "$MPP_TAG" "$MPP_REPO" "$MPP_SRC"
+  if ! git -C "$MPP_SRC" apply --reverse --check "/repo/$MPP_PATCH" 2>/dev/null; then
+    git -C "$MPP_SRC" restore -- mpp/vproc/mpp_dec_vproc.c
+    git -C "$MPP_SRC" apply "/repo/$MPP_PATCH"
+  fi
   cmake -S "$MPP_SRC" -B "$WORK/mpp-build" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PREFIX"
   cmake --build "$WORK/mpp-build" -j "$TVB_BUILD_CPUS"
   cmake --install "$WORK/mpp-build"
@@ -63,6 +67,7 @@ package() {
   {
     LD_LIBRARY_PATH="$dir/lib" "$dir/ffmpeg" -version
     echo "mpp $(git -C "$MPP_SRC" rev-parse HEAD)"
+    echo "mpp patch $(sha256sum "/repo/$MPP_PATCH" | cut -d' ' -f1)"
     echo "patches $(cat "$FFMPEG_SRC/.tvb-inputs")"
   } >"$dir/build.txt"
   cat >"$ROOT/DEBIAN/control" <<EOF
