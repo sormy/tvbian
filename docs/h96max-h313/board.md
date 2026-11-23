@@ -100,9 +100,8 @@ In the bring-up checklist's order, each kernel's mark side by side; numbers read
 | remote buttons          | ❓  | ❓  | 👤 press every button                          |
 | BLE remote              | ❓  | ❓  | 👤 pair, keep across reboot                    |
 | LED colours             | ✅  | ✅  | blue running; red asleep, off, booting         |
-| SD hotplug              | ❓  | ❓  | 👤 in and out                                  |
-| FEL button              | ✅  | ✅  | with the factory loader on the eMMC            |
-| PH9 to FEL              | ✅  | ✅  | our SPL on the eMMC, PH9 held; U-Boot `0007`   |
+| SD hotplug              | ✅  | ❓  | in and out: `mmc0` adds and removes the card   |
+| recovery button         | ✅  | ✅  | PH9 to FEL, stock's bootloader or ours         |
 | eMMC install            | ✅  | ✅  | `tvb-install`, SD out: boots; U-Boot `0008`    |
 
 ## Measured
@@ -137,7 +136,7 @@ The full eMMC, per-unit data included; six independent readback windows match it
 
 ## Recovery
 
-FEL: the button in the AV jack, PH9, pressed with a toothpick, held while the OTG cable goes in with
-DC unplugged. It is no boot ROM pin: the loader on the eMMC reads it, the factory's or ours with
-U-Boot `0007`, so it works only while that loader does. An SD card boots before the eMMC, whatever
-the eMMC holds. Under Linux it is `KEY_VENDOR` on `/dev/input/recovery-button`.
+FEL: press the button in the AV jack, PH9, with a toothpick, and hold it while the OTG cable goes in
+with DC unplugged. The button is not wired to the chip: the bootloader on the eMMC reads it, stock's
+or ours. If that bootloader is broken, boot from an SD card instead; the chip tries it first. In
+Linux the button is `KEY_VENDOR` on `/dev/input/recovery-button`.

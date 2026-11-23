@@ -1,14 +1,16 @@
 # Allwinner FEL — back up, restore, install
 
-FEL is a USB mode built into the chip: it works whatever is on the eMMC, even on a box that no
-longer boots. Through it the host, macOS or Linux, runs a small loader that opens the box's eMMC as
-a USB disk. Every command here runs on the host.
+FEL is a USB rescue mode built into the chip. Through it the host, macOS or Linux, runs a small
+loader that shows the box's eMMC as a USB disk. Every command here runs on the host.
+
+A FEL button is wired to the chip and works whatever is on the eMMC. A recovery button is read by
+the bootloader on the eMMC instead, so it works only while that bootloader runs.
 
 ## Prerequisites
 
-A USB-A male-to-male cable for the box's OTG port, and the box's FEL button. Keep the box's power
-supply unplugged: the cable powers it, and both at once can damage the box or the host. Build the
-tools once:
+A USB-A male-to-male cable for the box's OTG port, and the box's FEL or recovery button. Keep the
+box's power supply unplugged: the cable powers it, and both at once can damage the box or the host.
+Build the tools once:
 
 ```sh
 ./build.sh tool sunxi-fel                    # -> build/bin/sunxi-fel
@@ -19,8 +21,8 @@ A serial adapter is optional: it shows the loader's log when something fails.
 
 ## Start the loader
 
-Hold the FEL button, plug the cable into the box and the host, and let go after two seconds; the
-screen stays dark. Check the box is in FEL (if not, unplug and try again), then start the loader:
+Hold the button, plug the cable into the box and the host, and let go after two seconds; the screen
+stays dark. Check the box is in FEL (if not, unplug and try again), then start the loader:
 
 ```sh
 build/bin/sunxi-fel version                 # AWUSBFEX soc=…
@@ -42,9 +44,9 @@ plug the power back in.
 
 ## Recovery
 
-The BootROM reads the FEL button before anything on the eMMC, so the routes above work from any
-state the eMMC is in. It also tries an SD card before the eMMC: on a box with a slot, a card holding
-an image boots whatever the eMMC holds.
+With a button wired to the chip, the steps above work whatever state the eMMC is in. With one the
+bootloader reads, they work while the bootloader runs. Either way an SD card holding an image boots
+first: the chip tries it before the eMMC.
 
 ## Back up
 

@@ -88,7 +88,7 @@ display's FIFO and break up, 10-bit worst.
 | Deep suspend                                    |        ❌         |       ❌        |
 | Serial console                                  |        ✅         |       ❓        |
 | eMMC backup over FEL                            |        ✅         |       ✅        |
-| eMMC install over FEL                           |        ✅         |       ❌        |
+| eMMC install over FEL                           |        ✅         |       ✅        |
 
 ## Get an image
 
@@ -103,14 +103,18 @@ The Tanix TX1 V2.0 has no microSD slot, so FEL is its only way in.
 
 ## Install
 
-| Route                                  | The box needs  | Tanix TX1 V2.0 | H96 Max H313 |
-| -------------------------------------- | -------------- | :------------: | :----------: |
-| 1. SD card, then `tvb-install`         | an SD slot     |    ➖ no SD    |      ✅      |
-| 2. OTG cable: the image written in FEL | the FEL button |       ✅       |      ❌      |
+| Route                                  | The box needs | Tanix TX1 V2.0 | H96 Max H313 |
+| -------------------------------------- | ------------- | :------------: | :----------: |
+| 1. SD card, then `tvb-install`         | an SD slot    |    ➖ no SD    |      ✅      |
+| 2. OTG cable: the image written in FEL | a button      |       ✅       |      ✅      |
 
-Route 1 runs TVBian from the card before anything is written to the eMMC: the safer one, where the
-box has a slot. Route 2 writes the image straight to the eMMC; the FEL button stays the way back. On
-the H96 Max H313 it needs a release whose U-Boot keeps the eMMC at `mmc1`; until then take route 1.
+Route 1 runs TVBian from the card before anything touches the eMMC, so it is the safer one. Route 2
+writes the image straight to the eMMC.
+
+A box hides one or two buttons behind a toothpick hole. A FEL button is wired to the chip and
+reaches FEL whatever is on the eMMC. A recovery button is read by the bootloader: TVBian's U-Boot
+sends it to FEL as well, but only while that bootloader runs; if it does not, boot from an SD card.
+Some boxes have one kind, some both. Each board's `board.md` says which.
 
 ### 1. SD card
 
@@ -147,13 +151,14 @@ For debugging. **3.3 V, 115200 baud** — any 3.3 V USB-TTL adapter does it.
 | Board          | Pads, in order |
 | -------------- | -------------- |
 | Tanix TX1 V2.0 | VCC RX TX GND  |
+| H96 Max H313   | RX TX GND      |
 
 GND, TX and RX only, crossed (box TX → adapter RX). **Never connect 3V3/VCC.**
 
 ## Recovery
 
-Over FEL, the backup written back, as `docs/allwinner-fel.md`'s restore describes: Android returns
-as it was. The FEL button stays the way in, whatever is on the eMMC.
+Write the backup back over FEL, as `docs/allwinner-fel.md`'s restore describes, and Android returns
+as it was. If the button no longer works, boot TVBian from an SD card and restore from there.
 
 ## License
 

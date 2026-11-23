@@ -36,6 +36,9 @@ on TWI3, so the tree has no TWI3 and no AC200 node.
 - Pin banks on the rails `PIO_POW_VAL` (`0x0300b348`) measures: PC and PG at 1.8 V on ALDO1, PF, PH
   and PI at 3.3 V on DLDO1. The Wi-Fi host's `vqmmc-supply` is ALDO1, so the bus signals at 1.8 V as
   its bank runs; high speed, no UHS. Wi-Fi associates and Bluetooth comes up on it.
+- The SD runs at high speed, not UHS. Stock switches the card's I/O between two fixed rails,
+  `vqmmc33sw` on DLDO1 and `vqmmc18sw` on ALDO1, and our kernel cannot do that yet. Stock's
+  `sd-uhs-*` come back once it can.
 - CPU OPPs are stock's table, one row a frequency, `opp-microvolt-speed4` for SID `0x5c00`, stock's
   bit 2 and mainline's bin 4; the other bins are open questions and get no rows. DCDC2 is held to
   those OPPs, 900–1120 mV; DCDC1 and DCDC3 keep the vendor's span, so their boot voltages stand.

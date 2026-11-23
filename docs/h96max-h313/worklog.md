@@ -559,8 +559,8 @@ Log paths in this table are under `build/logs/new-board/`.
   `device-wakeup-gpios`, for the serdev driver patch, in place of GPIO hogs. The keymap is
   `rc-h96max-h313`, after the board.
 - `validate.sh` and `reboots.sh` 5 on 6.18.63 and 7.3.4, tree `51c67e84`: 49 lines each. Wi-Fi
-  128/154 and 122/153 Mbit/s at 40 MHz HE; BLE scan 21 and 16; HDMI connected, CEC `1.0.0.0`;
-  both cards play at both rates; no MMC error, failed unit or IOMMU fault; every reboot back.
+  128/154 and 122/153 Mbit/s at 40 MHz HE; BLE scan 21 and 16; HDMI connected, CEC `1.0.0.0`; both
+  cards play at both rates; no MMC error, failed unit or IOMMU fault; every reboot back.
 
 ## 2026-11-14 — s2idle: devices resuming in parallel hang the box
 
@@ -576,3 +576,43 @@ Log paths in this table are under `build/logs/new-board/`.
   Left: display, eMMC, the timers. Unbinding the display engine deadlocks in
   `drm_connector_free_work_fn`, `musb-sunxi` oopses, `sun8i-ce` warns in `crypto_unregister_alg`.
 - `pm_async=off` on the board's command line: 5 of 5 wake on the installed package.
+
+## 2026-11-22 — a user's box does not boot from its eMMC
+
+- A user's box, same PCB, boots from the SD but not from the eMMC, whether installed with
+  `tvb-install` or over FEL: red LED, no picture. Its AV button never entered FEL either.
+- First guess, wrong: U-Boot leaves the eMMC's supplies on the AXP313A off. It does not: the SPL
+  sets only the CPU and DRAM rails, and U-Boot already reads this eMMC when started from the SD.
+- Also ruled out: the eMMC's slot is enabled, its pins match stock's, and U-Boot fits the 1 MiB
+  `tvb-install` writes.
+- The AV button is stock's `recovery_key`, PH9, which the factory loader reads, not the boot ROM.
+  With our loader on the eMMC nothing read it: what the user saw.
+
+## 2026-11-22 — the cause: two names for the eMMC
+
+- Since the dtcx translation (`c748986`, 2026-11-13) the tree names the eMMC `mmc2`, as stock's
+  does. U-Boot adds its own name, `mmc1`, and takes whichever comes first, so the eMMC became
+  U-Boot's device 2. Booting from the eMMC looks for device 1 and finds nothing.
+- It showed from the SD too: a U-Boot built today came up with the SID's MACs instead of stock's,
+  because the MAC lookup (`0005`) checks devices 0 and 1 only.
+- U-Boot `0008` drops the tree's `mmc2` name. Booted from the SD: back in 44 s, stock's MACs.
+- U-Boot `0007`: PH9 held at power-on makes our SPL hand over to the boot ROM's FEL, set for the
+  whole H616 family. Released, the box boots as before.
+
+## 2026-11-22 — the AV button in Linux
+
+- All 85 free pins watched while the owner pressed the button: only PH9 moved, low when pressed.
+- The tree already had the button as `KEY_VENDOR`, disabled. Enabled: on 6.18.64
+  `/dev/input/recovery-button` appears.
+- The owner's first `evtest` after the reboot saw nothing; the next presses showed, with nothing
+  changed in between. Press and release each time, also after a fresh boot.
+
+## 2026-11-23 — the eMMC boots
+
+- `tvb-install` from the SD, with `0007` and `0008`: 9.7 GB in about 8 minutes, limited by the SD's
+  21 MB/s. Secure storage unchanged.
+- SD out: the box boots from the eMMC with stock's MACs.
+- SD hotplug both ways: the card added at 207 s, removed at 244 s, no errors.
+- The button held, SD out, our SPL on the eMMC: `sunxi-fel version` answers. The user's problem is
+  fixed.
+- 7.3.5 from the eMMC: the button sends `KEY_VENDOR` too.

@@ -1788,8 +1788,8 @@ gain, the unit's own DRAM init on the eMMC, is not worth it; the install keeps w
 
 ## 2026-11-12 — regression, both kernels; bank supplies
 
-- Each pin bank's supply as measured: `PIO_POW_VAL` reads `0x18`, the mode the tree now sets; port
-  C had been set to the wrong mode. The eMMC's `vqmmc` is DLDO1. The keymap is `rc-tanix-tx1-v2`.
+- Each pin bank's supply as measured: `PIO_POW_VAL` reads `0x18`, the mode the tree now sets; port C
+  had been set to the wrong mode. The eMMC's `vqmmc` is DLDO1. The keymap is `rc-tanix-tx1-v2`.
 - `validate.sh` and `reboots.sh` 5 on 6.18.63 and 7.3.4, tree `b762ee92`: 45 lines each. No `hci0`,
   as BLE is off by default (board.md, Bluetooth). Wi-Fi 61/77 Mbit/s on 6.18, 43/61 on 7.3.4 with
   the link at 65 Mbit/s for part of the run: the access point's narrowing or the kernel, rerun
@@ -1806,3 +1806,9 @@ gain, the unit's own DRAM init on the eMMC, is not worth it; the install keeps w
   131 s (6.18.63) and 153 s (7.3.4), counted from the last journal entry to the next boot (systemd's
   80 s, the hardware's 16 s, then the boot). The module's own message is not in pstore: the console
   record kept only one line of the next boot.
+
+## 2026-11-22 — U-Boot `0007` and `0008`, from the H313
+
+- The tree names the eMMC `mmc2` since `c748986`, so a U-Boot built from it would not boot from the
+  eMMC; `0008` fixes that. The U-Boot on this eMMC is older and unaffected.
+- `0007`: PH9 held at power-on enters FEL. Not tried here.

@@ -169,8 +169,8 @@ regression pass on each.
 | BLE keymap       | ✅  | ✅  | a BLE remote's keys in `evtest`; on 7.2 by scan and bond              |
 | remote cold boot | ❌  | ❌  | as off, on: no power-on from off but a replug                         |
 | buttons          | ✅  | 🟡  | PH9: `KEY_VENDOR` on `/dev/input/recovery-button`                     |
-| recovery button  | ✅  | ✅  | the FEL button reaches FEL                                            |
-| PH9 to FEL       | 🟡  | 🟡  | our SPL, PH9 held at power-on, as on the H313; U-Boot `0007`          |
+| FEL button       | ✅  | ✅  | the AV jack's, wired to the chip                                      |
+| recovery button  | 🟡  | 🟡  | PH9 to FEL through our bootloader, as on the H313                     |
 | input names      | ✅  | ✅  | `recovery-button`, `cec-remote`, `ir-remote`                          |
 | LED on           | ✅  | ✅  | blue while running                                                    |
 | LED off          | ✅  | ✅  | dark: the AXP313 cuts every rail                                      |
@@ -380,9 +380,9 @@ storage, `sdmmc_arg`, the stock boot package and the unused stretches between th
 The FEL button always works: the boot ROM reads it, whatever is on the eMMC. With the OTG cable in
 and no DC, hold it and plug the cable. The stock eMMC is `backup/tanix-tx1-v2-stock.img.xz`.
 
-The recovery button beside it, PH9, is a second FEL trigger once our U-Boot with `0007` is on the
-eMMC: held at power-on, our SPL hands over to the boot ROM's FEL. Our SPL reads it, so it works only
-while that SPL is there; the AV jack's button works whatever the eMMC holds.
+The recovery button beside it, PH9, also enters FEL once our U-Boot is on the eMMC: hold it at
+power-on. Our bootloader reads it, so it works only while that bootloader runs. The AV jack's button
+always works.
 
 Stock's own recovery gestures, read by stock U-Boot alone (`key_boot_recovery`, `ir_boot_recovery`
 in its tree), each setting `misc` to boot Android's recovery. Stock stores an IR address with its

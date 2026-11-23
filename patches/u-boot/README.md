@@ -41,13 +41,13 @@ end, the probe finds it, and the SPL reports `DRAM: 1536 MiB` with no cap.
 goes on `ethernet0`, `wifi_mac` on `ethernet1`, and `bdaddr` is the Wi-Fi's plus one. A missing item
 keeps the SID's address. `0006` puts `bdaddr` on the node `bluetooth0` names.
 
-`0007` is for boards whose FEL key is a GPIO the vendor's loader reads, not the boot ROM's pin: once
-our SPL replaces that loader, the key did nothing. `SPL_SUNXI_FEL_KEY_GPIO` names it, active-low,
-pulled up; held at power-on, the SPL returns to the boot ROM's FEL entry, `0x20`, the jump
-sunxi-tools' `fel-sdboot` makes, through the RMR reset `return_to_fel()` already does. An SPL FEL
-started ignores it.
+`0007`: on some boards the toothpick button is a recovery button, a GPIO that only the vendor's
+bootloader reads. Once our SPL replaced that bootloader, the button did nothing. Now
+`SPL_SUNXI_FEL_KEY_GPIO` names the pin: held at power-on, the SPL jumps into the boot ROM's FEL, the
+same jump sunxi-tools' `fel-sdboot` makes. The button is active-low, with the pull-up on. A boot
+that FEL started skips the check.
 
-`0008`: a vendor tree aliases its eMMC `mmc2`, and U-Boot takes the first alias naming a node, so
-the board's `mmc2` beat `sunxi-u-boot.dtsi`'s `mmc1`. Booted from the eMMC, `mmc_bootdev` is 1 and
-`bootcmd_mmc1` found no device; `0005`, which looks at devices 0 and 1, fell back to the SID's
-addresses.
+`0008`: a vendor tree names its eMMC `mmc2`, and `sunxi-u-boot.dtsi` names it `mmc1`. U-Boot uses
+the first name it finds, so the eMMC became device 2, while booting from the eMMC looks for device
+
+1. The box did not boot, and `0005` fell back to the SID's MACs. The patch drops the tree's `mmc2`.
