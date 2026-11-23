@@ -442,3 +442,14 @@
 - A first test hashed DRM PRIME frames without `hwdownload`: `-22`, no frames, on the R69-1 too.
 - The 8192×8192 attempt aborted two decoder jobs, each reset; the warm reboot after it, and one
   after refused VP9 attempts, probed the decoder normally, console on the H313's serial adapter.
+
+## 2026-11-23 — `cma=16M`, and HDMI on a real screen
+
+- `BOARD_CMDLINE` takes `cma=16M`, as every RK35xx sibling; the pool read 8192 kB from the tree,
+  16384 kB after.
+- With a 2256×1504 screen on HDMI: next2 reads `connected`, a 256-byte EDID and 23 modes, and the
+  owner sees a picture. 6.1, the same screen, reads `disconnected`.
+- 6.1's tree matches the siblings' for HDMI: pins, `reg` with GPIO0's bank, `hpd-gpios` GPIO0 A2,
+  GRF. GPIO0 A2 reads high; its interrupt never fired. The vendor mirrors that GPIO into the VO GRF
+  sink-detect bit once in `rockchip_hdmi_parse_dt()`, straight after setting the pin's input enable.
+- A `u-boot-update` reset the menu's default to next2 again.

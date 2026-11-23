@@ -170,33 +170,33 @@ HDMI writeback rejects capture after a composite test. HDMI display commits stil
 
 ## Hands-on checks
 
-| Check                | 6.1 | next2 | Evidence                                        |
-| -------------------- | --- | ----- | ----------------------------------------------- |
-| The IR remote        | ✅  | ✅    | All 12 keys canonical in `evtest`               |
-| The BLE remote       | ❓  | ❓    |                                                 |
-| Bluetooth keyboard   | ❓  | ❓    | Scans find devices on both                      |
-| Wi-Fi, owner's       | ✅  | ✅    | Joined on both                                  |
-| Sleep and wake       | ✅  | ❌    | The remote's power key; next2 never wakes       |
-| Power off and on     | ✅  | ❌    | On from the remote after `poweroff.target`      |
-| Reboots by hand      | 🟠  | ✅    | 6.1 froze four times in the decoder's probe     |
-| HDMI on a screen     | ❌  | ❓    | 6.1: no picture, no EDID                        |
-| HDMI sound           | ❌  | ❓    |                                                 |
-| The GPU on a screen  | ❓  | ❓    |                                                 |
-| A player on a screen | ❓  | ❓    |                                                 |
-| HDR on an HDR TV     | ❓  | ❓    |                                                 |
-| The AV jack          | ❓  | ❓    |                                                 |
-| S/PDIF               | ➖  | ➖    | No S/PDIF port                                  |
-| A monitor's DDC/CI   | ❓  | ❓    |                                                 |
-| Ethernet             | ❓  | ❓    | 100 Mb/s, all the port has; 10 Mb/s not tried   |
-| USB 3                | ❓  | ❓    | A USB Ethernet adapter at SuperSpeed, no stick  |
-| USB 2                | ❓  | ❓    |                                                 |
-| The OTG port         | ❓  | ❓    |                                                 |
-| The SD slot          | ❓  | ❓    | Boots from SD; UHS mode and hotplug not checked |
-| The recovery button  | ✅  | ✅    | Factory Loader on OTG                           |
-| The recovery path    | ❓  | ❓    | Loader reads the idbloader back; no restore yet |
-| Buttons and LEDs     | ➖  | ➖    | No LEDs; the panel only                         |
-| The front panel      | ✅  | ✅    | Clock and time zone; brightness not tried       |
-| The serial pads      | ✅  | ✅    | `GND RX TX` as labelled, 1500000 baud           |
+| Check                | 6.1 | next2 | Evidence                                            |
+| -------------------- | --- | ----- | --------------------------------------------------- |
+| The IR remote        | ✅  | ✅    | All 12 keys canonical in `evtest`                   |
+| The BLE remote       | ❓  | ❓    |                                                     |
+| Bluetooth keyboard   | ❓  | ❓    | Scans find devices on both                          |
+| Wi-Fi, owner's       | ✅  | ✅    | Joined on both                                      |
+| Sleep and wake       | ✅  | ❌    | The remote's power key; next2 never wakes           |
+| Power off and on     | ✅  | ❌    | On from the remote after `poweroff.target`          |
+| Reboots by hand      | 🟠  | ✅    | 6.1 froze four times in the decoder's probe         |
+| HDMI on a screen     | ❌  | ✅    | next2: EDID, 23 modes, a picture; 6.1: disconnected |
+| HDMI sound           | ❌  | ❓    |                                                     |
+| The GPU on a screen  | ❓  | ❓    |                                                     |
+| A player on a screen | ❓  | ❓    |                                                     |
+| HDR on an HDR TV     | ❓  | ❓    |                                                     |
+| The AV jack          | ❓  | ❓    |                                                     |
+| S/PDIF               | ➖  | ➖    | No S/PDIF port                                      |
+| A monitor's DDC/CI   | ❓  | ❓    |                                                     |
+| Ethernet             | ❓  | ❓    | 100 Mb/s, all the port has; 10 Mb/s not tried       |
+| USB 3                | ❓  | ❓    | A USB Ethernet adapter at SuperSpeed, no stick      |
+| USB 2                | ❓  | ❓    |                                                     |
+| The OTG port         | ❓  | ❓    |                                                     |
+| The SD slot          | ❓  | ❓    | Boots from SD; UHS mode and hotplug not checked     |
+| The recovery button  | ✅  | ✅    | Factory Loader on OTG                               |
+| The recovery path    | ❓  | ❓    | Loader reads the idbloader back; no restore yet     |
+| Buttons and LEDs     | ➖  | ➖    | No LEDs; the panel only                             |
+| The front panel      | ✅  | ✅    | Clock and time zone; brightness not tried           |
+| The serial pads      | ✅  | ✅    | `GND RX TX` as labelled, 1500000 baud               |
 
 ## Known gaps
 

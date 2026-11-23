@@ -14,7 +14,7 @@
 | ------ | ------------------------------------------ | ----------------------------------------- |
 | all    | `model`: the box's                         | the factory names the EVB                 |
 | vendor | root: `rockchip,rk3528a` last              | MPP's only RK3528 with VP9                |
-| vendor | `chosen`: `bootargs` dropped               | extlinux gives the command line           |
+| vendor | `chosen`: `bootargs` dropped               | the console's in `BOARD_CMDLINE`          |
 | vendor | `gpu`: lima's interrupt names              | mainline's lima                           |
 | vendor | `gpu`: `bus` and `core` on `ACLK_GPU_MALI` | SCMI's 800 MHz is unthrottled here        |
 | both   | `watchdog`: `okay`                         | recovery from a hang                      |
@@ -35,6 +35,9 @@
 | U-Boot | boot phases, clock and reset IDs           | mainline U-Boot's bindings                |
 | U-Boot | `serial@ff9f0000`: added                   | the factory kernel's debug console        |
 | U-Boot | `saradc`: `vdd-microvolts` 1.8 V           | mainline's driver needs a reference       |
+
+The factory's other boot arguments are Android's: `driver_async_probe` for boot time, and
+`drm_kms_helper.fbdev_emulation=0`, which would take away the framebuffer console.
 
 The factory's WLAN node names `rtl8822cs`; the module is an AIC8800D80. The panel takes hour tens to
 minute units at commands `0x68`, `0x6a`, `0x6c` and `0x6e`; bit 7 of the hour units is the colon.
