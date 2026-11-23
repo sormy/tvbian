@@ -79,7 +79,7 @@ display's FIFO and break up, 10-bit worst.
 | **Input and indicators**                        |                   |                 |
 | Bundled remote over IR                          |        ✅         |       ❓        |
 | BLE remote, with BLE on                         |        ✅         |       ❓        |
-| Recovery button (U-Boot)                        |        ✅         |       ➖        |
+| Recovery button: FEL from our U-Boot            |        🟡         |       ✅        |
 | Power and standby LEDs                          |        ✅         |       ✅        |
 | **Power and recovery**                          |                   |                 |
 | CPU frequency scaling                           |        ✅         |       ✅        |

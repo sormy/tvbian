@@ -45,63 +45,64 @@ listing's Wi-Fi 6 and Mali-G31 hold; its Bluetooth 5.0 is 5.4 here (HCI version 
 
 In the bring-up checklist's order, each kernel's mark side by side; numbers read 6.x / 7.x.
 
-| Check                   | 6.x | 7.x | What shows it                                      |
-| ----------------------- | :-: | :-: | -------------------------------------------------- |
-| SoC                     | ✅  | ✅  | FEL `soc=00001823(H616)`; AC300 EPHY by SID        |
-| PCB identity            | ✅  | ✅  | `BA979_627_V1.0`, owner and photos                 |
-| backup                  | ✅  | ✅  | `backup/h96max-h313-stock.img.xz`, xz verified     |
-| factory DRAM init       | ✅  | ✅  | factory-settings SPL; RAM readback                 |
-| SD boot                 | ✅  | ✅  | root media SD; 6.18 the default                    |
-| boot time               | ✅  | ✅  | 16.0 s / 12.7 s                                    |
-| failed units            | ✅  | ✅  | 0 / 0                                              |
-| dmesg accounted         | 🟠  | 🟠  | AIC8800 at warning level; PA/PL supplies           |
-| RAM                     | ✅  | ✅  | 1976 MiB; `stress-ng --vm --verify`, 0 failed      |
-| ten warm reboots        | ✅  | ❓  | every device back each time                        |
-| watchdog reset          | ✅  | ✅  | 30 s set: reset at 30 s, not 16 s                  |
-| forced panic            | ✅  | ✅  | reboots; oops in pstore                            |
-| lockup panic            | ✅  | 🟠  | 6.18 panics with a record; 7.3 by watchdog         |
-| all-CPU lockup          | 🟠  | ❓  | reset at 16 s by watchdog, no record               |
-| OPP table               | ✅  | ❓  | stock's ladder: 480–1344 MHz, 1120 mV top          |
-| 4-core heat             | 🟠  | 🟠  | 70 °C trip: 1200–1320 MHz, 73 °C peak              |
-| Ethernet 10/100         | ✅  | ✅  | both rates link; AC300 EPHY driver                 |
-| Ethernet rate           | ✅  | ✅  | 93.9 / 93.3 idle, 93.8 / 89.4 loaded               |
-| Wi-Fi bands             | ✅  | ✅  | scan: 9 on 2.4 GHz, 20 on 5 GHz                    |
-| Wi-Fi rate              | ✅  | ✅  | Wi-Fi 6 5 GHz: 113 / 93 idle and loaded            |
-| Wi-Fi country           | ❌  | ❌  | self-managed at `00`, `iw reg set` ignored         |
-| Bluetooth               | ✅  | ✅  | `hci0` LE only, errors 0; scan finds 117           |
-| addresses               | ✅  | ✅  | sticker on the PCB; BT Wi-Fi + 1                   |
-| eMMC read               | ✅  | ❓  | HS200: 88.9 MB/s, 3815 IOPS, read-only             |
-| MMC bus modes           | 🟠  | 🟡  | eMMC HS200 100 MHz; SD, SDIO high-speed            |
-| SD card                 | ✅  | ❓  | 20.9 / 22.3 MB/s, 1536 IOPS; no UHS                |
-| USB 1.1                 | ✅  | ✅  | 12M receiver enumerates                            |
-| USB 2.0 480M            | ❓  | ❓  | 👤 a stick in each USB-A port; `fio`               |
-| OTG port host           | ❓  | ❓  | 👤 a stick in the port nearest the SD slot         |
-| input names             | ✅  | 🟡  | `cec-remote`, `ir-remote`                          |
-| IR keymap               | ✅  | ✅  | `rc-h96max-h313`, 22 keys, NEC                     |
-| s2idle 20 s             | ✅  | ❓  | RTC wake, same boot                                |
-| s2idle 100 s            | ❌  | ❓  | resets with no record                              |
-| deep suspend            | ❌  | ❌  | H616: no SCPI; s2idle only                         |
-| RTC                     | ✅  | ✅  | `sun6i-rtc` keeps time                             |
-| HDMI planes and compose | ✅  | ✅  | display.py 35/35 with writeback                    |
-| planes at once          | ✅  | ✅  | 3 planes in one commit                             |
-| HDMI rating             | ✅  | ✅  | 4K60 and 1080p120 sustained                        |
-| HDR signalling          | ✅  | ✅  | PQ, HLG, HDR10+ InfoFrames                         |
-| CEC                     | ❓  | ✅  | 6.18 reads no address                              |
-| sound cards             | ✅  | ✅  | Codec and HDMI, 3 s in 3.0–3.2 s                   |
-| AV picture              | 🟡  | ✅  | PAL bars; 6.18 registers match                     |
-| AV sound                | ✅  | ✅  | line out, heard; board swaps L/R                   |
-| GPU correctness         | ✅  | ✅  | dEQP 1/20: 4980 pass, 0 unexpected                 |
-| GPU speed               | ✅  | ❓  | glmark2 on screen, 2256×1504: 122                  |
-| video decode            | ✅  | ✅  | Tanix's Cedrus profile, nothing worse              |
-| AFBC decode             | ✅  | ✅  | HEVC, VP9 8- and 10-bit                            |
-| deinterlace             | ✅  | ✅  | a frame per field, 27 dB to bwdif                  |
-| encode                  | ✅  | ✅  | H.264 and MJPEG to 4096×4096                       |
-| remote buttons          | ❓  | ❓  | 👤 press every button                              |
-| BLE remote              | ❓  | ❓  | 👤 pair, keep across reboot                        |
-| LED colours             | ✅  | ✅  | blue running; red asleep, off, booting             |
-| SD hotplug              | ❓  | ❓  | 👤 in and out                                      |
-| FEL button              | ✅  | ✅  | the boot ROM's; how FEL was entered for the backup |
-| eMMC install            | ❓  | ❓  | awaits the owner's go-ahead                        |
+| Check                   | 6.x | 7.x | What shows it                                  |
+| ----------------------- | :-: | :-: | ---------------------------------------------- |
+| SoC                     | ✅  | ✅  | FEL `soc=00001823(H616)`; AC300 EPHY by SID    |
+| PCB identity            | ✅  | ✅  | `BA979_627_V1.0`, owner and photos             |
+| backup                  | ✅  | ✅  | `backup/h96max-h313-stock.img.xz`, xz verified |
+| factory DRAM init       | ✅  | ✅  | factory-settings SPL; RAM readback             |
+| SD boot                 | ✅  | ✅  | root media SD; 6.18 the default                |
+| boot time               | ✅  | ✅  | 16.0 s / 12.7 s                                |
+| failed units            | ✅  | ✅  | 0 / 0                                          |
+| dmesg accounted         | 🟠  | 🟠  | AIC8800 at warning level; PA/PL supplies       |
+| RAM                     | ✅  | ✅  | 1976 MiB; `stress-ng --vm --verify`, 0 failed  |
+| ten warm reboots        | ✅  | ❓  | every device back each time                    |
+| watchdog reset          | ✅  | ✅  | 30 s set: reset at 30 s, not 16 s              |
+| forced panic            | ✅  | ✅  | reboots; oops in pstore                        |
+| lockup panic            | ✅  | 🟠  | 6.18 panics with a record; 7.3 by watchdog     |
+| all-CPU lockup          | 🟠  | ❓  | reset at 16 s by watchdog, no record           |
+| OPP table               | ✅  | ❓  | stock's ladder: 480–1344 MHz, 1120 mV top      |
+| 4-core heat             | 🟠  | 🟠  | 70 °C trip: 1200–1320 MHz, 73 °C peak          |
+| Ethernet 10/100         | ✅  | ✅  | both rates link; AC300 EPHY driver             |
+| Ethernet rate           | ✅  | ✅  | 93.9 / 93.3 idle, 93.8 / 89.4 loaded           |
+| Wi-Fi bands             | ✅  | ✅  | scan: 9 on 2.4 GHz, 20 on 5 GHz                |
+| Wi-Fi rate              | ✅  | ✅  | Wi-Fi 6 5 GHz: 113 / 93 idle and loaded        |
+| Wi-Fi country           | ❌  | ❌  | self-managed at `00`, `iw reg set` ignored     |
+| Bluetooth               | ✅  | ✅  | `hci0` LE only, errors 0; scan finds 117       |
+| addresses               | ✅  | ✅  | sticker on the PCB; BT Wi-Fi + 1               |
+| eMMC read               | ✅  | ❓  | HS200: 88.9 MB/s, 3815 IOPS, read-only         |
+| MMC bus modes           | 🟠  | 🟡  | eMMC HS200 100 MHz; SD, SDIO high-speed        |
+| SD card                 | ✅  | ❓  | 20.9 / 22.3 MB/s, 1536 IOPS; no UHS            |
+| USB 1.1                 | ✅  | ✅  | 12M receiver enumerates                        |
+| USB 2.0 480M            | ❓  | ❓  | 👤 a stick in each USB-A port; `fio`           |
+| OTG port host           | ❓  | ❓  | 👤 a stick in the port nearest the SD slot     |
+| input names             | ✅  | 🟡  | `cec-remote`, `ir-remote`                      |
+| IR keymap               | ✅  | ✅  | `rc-h96max-h313`, 22 keys, NEC                 |
+| s2idle 20 s             | ✅  | ❓  | RTC wake, same boot                            |
+| s2idle 100 s            | ❌  | ❓  | resets with no record                          |
+| deep suspend            | ❌  | ❌  | H616: no SCPI; s2idle only                     |
+| RTC                     | ✅  | ✅  | `sun6i-rtc` keeps time                         |
+| HDMI planes and compose | ✅  | ✅  | display.py 35/35 with writeback                |
+| planes at once          | ✅  | ✅  | 3 planes in one commit                         |
+| HDMI rating             | ✅  | ✅  | 4K60 and 1080p120 sustained                    |
+| HDR signalling          | ✅  | ✅  | PQ, HLG, HDR10+ InfoFrames                     |
+| CEC                     | ❓  | ✅  | 6.18 reads no address                          |
+| sound cards             | ✅  | ✅  | Codec and HDMI, 3 s in 3.0–3.2 s               |
+| AV picture              | 🟡  | ✅  | PAL bars; 6.18 registers match                 |
+| AV sound                | ✅  | ✅  | line out, heard; board swaps L/R               |
+| GPU correctness         | ✅  | ✅  | dEQP 1/20: 4980 pass, 0 unexpected             |
+| GPU speed               | ✅  | ❓  | glmark2 on screen, 2256×1504: 122              |
+| video decode            | ✅  | ✅  | Tanix's Cedrus profile, nothing worse          |
+| AFBC decode             | ✅  | ✅  | HEVC, VP9 8- and 10-bit                        |
+| deinterlace             | ✅  | ✅  | a frame per field, 27 dB to bwdif              |
+| encode                  | ✅  | ✅  | H.264 and MJPEG to 4096×4096                   |
+| remote buttons          | ❓  | ❓  | 👤 press every button                          |
+| BLE remote              | ❓  | ❓  | 👤 pair, keep across reboot                    |
+| LED colours             | ✅  | ✅  | blue running; red asleep, off, booting         |
+| SD hotplug              | ❓  | ❓  | 👤 in and out                                  |
+| FEL button              | ✅  | ✅  | with the factory loader on the eMMC            |
+| PH9 to FEL              | ✅  | ✅  | our SPL on the eMMC, PH9 held; U-Boot `0007`   |
+| eMMC install            | ❓  | ❓  | awaits the owner's go-ahead                    |
 
 ## Measured
 

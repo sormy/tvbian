@@ -11,7 +11,7 @@
 | PMIC    | AXP1530, mainline's AXP313                                             |
 | Wi-Fi   | AltoBeam ATBM6031-X on SDIO, `007a:6011`, 2.4 GHz                      |
 | Ports   | HDMI, one USB-A (also FEL), DC 5 V, AV                                 |
-| Buttons | FEL behind the AV jack; U-Boot recovery, PH9                           |
+| Buttons | FEL in the AV jack, the boot ROM's pin; recovery beside it, PH9        |
 | LEDs    | PH6 power (blue), PH7 standby (red)                                    |
 | In box  | the IR-only remote, an HDMI cable, a USB-to-DC power cable, no adapter |
 
@@ -170,6 +170,7 @@ regression pass on each.
 | remote cold boot | ❌  | ❌  | as off, on: no power-on from off but a replug                         |
 | buttons          | ✅  | 🟡  | PH9: `KEY_VENDOR` on `/dev/input/recovery-button`                     |
 | recovery button  | ✅  | ✅  | the FEL button reaches FEL                                            |
+| PH9 to FEL       | 🟡  | 🟡  | our SPL, PH9 held at power-on, as on the H313; U-Boot `0007`          |
 | input names      | ✅  | ✅  | `recovery-button`, `cec-remote`, `ir-remote`                          |
 | LED on           | ✅  | ✅  | blue while running                                                    |
 | LED off          | ✅  | ✅  | dark: the AXP313 cuts every rail                                      |
@@ -378,6 +379,10 @@ storage, `sdmmc_arg`, the stock boot package and the unused stretches between th
 
 The FEL button always works: the boot ROM reads it, whatever is on the eMMC. With the OTG cable in
 and no DC, hold it and plug the cable. The stock eMMC is `backup/tanix-tx1-v2-stock.img.xz`.
+
+The recovery button beside it, PH9, is a second FEL trigger once our U-Boot with `0007` is on the
+eMMC: held at power-on, our SPL hands over to the boot ROM's FEL. Our SPL reads it, so it works only
+while that SPL is there; the AV jack's button works whatever the eMMC holds.
 
 Stock's own recovery gestures, read by stock U-Boot alone (`key_boot_recovery`, `ir_boot_recovery`
 in its tree), each setting `misc` to boot Android's recovery. Stock stores an IR address with its

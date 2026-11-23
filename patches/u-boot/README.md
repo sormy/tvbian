@@ -1,7 +1,7 @@
 # u-boot — patches on mainline
 
-Six patches on mainline U-Boot. `uboot/rk3528.conf` applies `0003`, target code, to every RK3528
-board's build; `uboot/sunxi-h616.conf` applies `0004`–`0006` to the H616 boards'. `0001` and `0002`
+Seven patches on mainline U-Boot. `uboot/rk3528.conf` applies `0003`, target code, to every RK3528
+board's build; `uboot/sunxi-h616.conf` applies `0004`–`0007` to the H616 boards'. `0001` and `0002`
 are in `scripts/dtc/pylibfdt`, which `binman` needs and which assumes a Linux host: they built the
 FIT on macOS, and the build now runs in the container, so nothing applies them. They are kept to
 send upstream.
@@ -14,6 +14,7 @@ send upstream.
 | `0004` | H616: two 3/4-populated ranks mapped contiguous, sized at boot                  |
 | `0005` | sunxi: Ethernet and Wi-Fi on secure storage's `mac` and `wifi_mac`, not the SID |
 | `0006` | sunxi: the Bluetooth address on the tree's `bluetooth0` alias                   |
+| `0007` | sunxi: a GPIO key held at power-on enters FEL                                   |
 
 `libfdt.i_shipped` guards every other Python 2 call behind `PY_VERSION_HEX`; these two were missed.
 swig ≤ 4.2 emitted compatibility defines that hid them, and 4.3 dropped Python 2 along with the
@@ -38,3 +39,9 @@ end, the probe finds it, and the SPL reports `DRAM: 1536 MiB` with no cap.
 `0005` reads Allwinner's secure storage on the eMMC, its index at sector 12288, CRC32-checked: `mac`
 goes on `ethernet0`, `wifi_mac` on `ethernet1`, and `bdaddr` is the Wi-Fi's plus one. A missing item
 keeps the SID's address. `0006` puts `bdaddr` on the node `bluetooth0` names.
+
+`0007` is for boards whose FEL key is a GPIO the vendor's loader reads, not the boot ROM's pin: once
+our SPL replaces that loader, the key did nothing. `SPL_SUNXI_FEL_KEY_GPIO` names it, active-low,
+pulled up; held at power-on, the SPL returns to the boot ROM's FEL entry, `0x20`, the jump
+sunxi-tools' `fel-sdboot` makes, through the RMR reset `return_to_fel()` already does. An SPL FEL
+started ignores it.

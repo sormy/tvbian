@@ -1,0 +1,88 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] sunxi: enter FEL while a GPIO key is held at power-on
+
+Some boards have no button on the BROM's FEL pin: their FEL key is a
+GPIO that the vendor's loader reads, and it stops working once mainline
+U-Boot replaces that loader on the eMMC. The only way back into FEL is
+then to erase the loader.
+
+Let the SPL read such a key, active-low with its pull-up, before it sets
+up the clocks. Held, it returns to the BROM's FEL entry through the RMR
+reset return_to_fel() already uses for FEL boots. An SPL that FEL itself
+started does not look at the key.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/arch/arm/mach-sunxi/Kconfig b/arch/arm/mach-sunxi/Kconfig
+index b0c5d3cd..abd9a18e 100644
+--- a/arch/arm/mach-sunxi/Kconfig
++++ b/arch/arm/mach-sunxi/Kconfig
+@@ -1265,6 +1265,15 @@ config SPL_SUNXI_LED_STATUS_ACTIVE_HIGH
+ 
+ endif # SPL_SUNXI_LED_STATUS
+ 
++config SPL_SUNXI_FEL_KEY_GPIO
++	int "GPIO number of a key that enters FEL at power-on"
++	default -1
++	help
++	  Have the SPL hand the board to the BROM's FEL mode while this
++	  active-low GPIO key is held at power-on, as vendor loaders do on
++	  boards whose FEL key is a GPIO rather than the BROM's own pin.
++	  -1 for none.
++
+ source "board/sunxi/Kconfig"
+ 
+ endif
+diff --git a/arch/arm/mach-sunxi/board.c b/arch/arm/mach-sunxi/board.c
+index 432b1c10..90a3a476 100644
+--- a/arch/arm/mach-sunxi/board.c
++++ b/arch/arm/mach-sunxi/board.c
+@@ -28,6 +28,7 @@
+ #include <asm/arch/mmc.h>
+ 
+ #include <linux/compiler.h>
++#include <linux/delay.h>
+ 
+ struct fel_stash {
+ 	uint32_t sp;
+@@ -469,6 +470,30 @@ u32 spl_mmc_boot_mode(struct mmc *mmc, const u32 boot_device)
+ 	return result;
+ }
+ 
++#define SCTLR_V			BIT(13)	/* AArch32 high exception vectors */
++#define BROM_FEL_ENTRY		0x20
++#define BROM_FEL_ENTRY_HIGH	0xffff0020
++#define FEL_KEY_SETTLE_US	10
++
++/* A held FEL key returns to the BROM's FEL, unless FEL started the SPL */
++static void sunxi_fel_key_check(void)
++{
++	unsigned int gpio = CONFIG_SPL_SUNXI_FEL_KEY_GPIO;
++
++	if (sunxi_get_boot_source() == SUNXI_INVALID_BOOT_SOURCE)
++		return;
++
++	gpio_request(gpio, "fel_key");
++	gpio_direction_input(gpio);
++	sunxi_gpio_set_pull(gpio, SUNXI_GPIO_PULL_UP);
++	udelay(FEL_KEY_SETTLE_US);
++	if (gpio_get_value(gpio))
++		return;
++
++	return_to_fel(fel_stash.sp, fel_stash.sctlr & SCTLR_V ?
++		      BROM_FEL_ENTRY_HIGH : BROM_FEL_ENTRY);
++}
++
+ void board_init_f(ulong dummy)
+ {
+ 	sunxi_sram_init();
+@@ -477,6 +502,9 @@ void board_init_f(ulong dummy)
+ 	tzpc_init();
+ 
+ 	timer_init();
++
++	if (IS_ENABLED(CONFIG_SPL_GPIO) && CONFIG_SPL_SUNXI_FEL_KEY_GPIO >= 0)
++		sunxi_fel_key_check();
+ 	clock_init();
+ 	gpio_init();
+ 
