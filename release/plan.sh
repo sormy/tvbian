@@ -93,8 +93,15 @@ for c in firmware/*/firmware.conf; do
   plan firmware "$d" "tvb-firmware-$(sed -n 's/^FIRMWARE_CHIP=//p' "$c")" "$(bash release/inputs.sh firmware "$d")"
 done
 # an extra after those whose packages it builds against
+# held: a group its conf's HELD keeps out of releases, with the reason
+held() { (. "$1"; echo "${HELD:-}"); }
 for e in $(bash extras/build-with.sh --order); do
   c=extras/$e/extra.conf
+  reason=$(held "$c")
+  if [ -n "$reason" ]; then
+    echo "extra $e held: $reason" >>"$REL/plan"
+    continue
+  fi
   debian=$(bash extras/version.sh "$e")
   if [ "$(bash extras/separator.sh "$e")" = "~tvb" ]; then
     suite=$(bash extras/version.sh --suite "$e")
@@ -111,10 +118,20 @@ for e in $(bash extras/build-with.sh --order); do
   plan extra "$e" "$(. "$c"; echo "$PACKAGE")" "$(bash release/inputs.sh extra "$e" "$debian")" \
     "$debian" "$(bash extras/separator.sh "$e")" "$(. "$c"; echo "${SOURCE:-$PACKAGE}")"
 done
-plan va-driver - tvb-va-driver "$(bash release/inputs.sh va-driver)"
+reason=$(held va-driver/va-driver.conf)
+if [ -n "$reason" ]; then
+  echo "va-driver held: $reason" >>"$REL/plan"
+else
+  plan va-driver - tvb-va-driver "$(bash release/inputs.sh va-driver)"
+fi
 for c in session/*/session.conf; do
   [ -f "$c" ] || continue
   s=$(basename "$(dirname "$c")")
+  reason=$(held "$c")
+  if [ -n "$reason" ]; then
+    echo "session $s held: $reason" >>"$REL/plan"
+    continue
+  fi
   plan session "$s" "tvb-$s" "$(bash release/inputs.sh session "$s")"
 done
 plan base - tvb-base "$(bash release/inputs.sh base)"

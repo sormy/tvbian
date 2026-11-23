@@ -88,6 +88,10 @@ The plan looks up each group's `X-Tvb-Inputs`, from `release/inputs.sh`, in the 
 `assemble` builds what the plan calls new, skipping a kernel whose debs are already in
 `build/out/debs/`, then the guard, the images and the repo.
 
+A group's conf can hold it out of releases: `HELD="<reason>"` in an extra's `extra.conf`, a
+session's `session.conf` or `va-driver/va-driver.conf` keeps it out, the reason in the plan. Local
+builds are unaffected; remove the line to release it.
+
 A path that moves between packages needs `Replaces` and `Breaks` on its new owner, versioned below
 the old owner's first release without it; `release/guard.sh` fails the release otherwise, checking
 the debs a run adds against the published `Contents`. A path renamed within one package needs
