@@ -184,6 +184,8 @@ CreateDumb = S(
     ],
 )
 MapDumb = S("MapDumb", [("handle", u32), ("pad", u32), ("offset", u64)])
+FbId = S("FbId", [("fb_id", u32)])
+DestroyDumb = S("DestroyDumb", [("handle", u32)])
 FbCmd2 = S(
     "FbCmd2",
     [
@@ -232,6 +234,8 @@ IOCTL = {
     "dumb": iowr(0xB2, CreateDumb),
     "map": iowr(0xB3, MapDumb),
     "addfb2": iowr(0xB8, FbCmd2),
+    "rmfb": iowr(0xAF, FbId),
+    "destroy-dumb": iowr(0xB4, DestroyDumb),
     "atomic": iowr(0xBC, Atomic),
 }
 CAP_ATOMIC, CAP_WRITEBACK = 3, 5
@@ -257,6 +261,12 @@ EBUSY = 16
 XRGB8888, ARGB8888, NV12, P010 = 0x34325258, 0x34325241, 0x3231564E, 0x30313050
 LUT_POINTS = 17
 TOLERANCE = 2
+
+
+def display_card():
+    """The DRM card with connectors: a GPU loaded first takes card0."""
+    names = sorted(Path("/sys/class/drm").glob("card*-*"))
+    return f"/dev/dri/{names[0].name.split('-')[0]}" if names else "/dev/dri/card0"
 
 
 class Drm:
@@ -356,17 +366,24 @@ class Drm:
 
 
 class Buffer:
-    def __init__(self, drm, width, height, fourcc):
+    handle = fb = 0  # none yet: an allocation that fails leaves nothing to free
+
+    def __init__(self, drm, width, height, fourcc, unpadded=False):
+        """unpadded: rows width pixels apart, as a writeback engine without a stride writes them,
+        inside the dumb buffer, whose rows are at least as long."""
+        self.drm = drm
         yuv = fourcc in (NV12, P010)
         bpp = 16 if fourcc == P010 else 8 if fourcc == NV12 else 32
         d = drm.call(
             "dumb", CreateDumb(height=height * 3 // 2 if yuv else height, width=width, bpp=bpp)
         )
-        self.width, self.height, self.pitch, self.format = width, height, d.pitch, fourcc
+        self.handle = d.handle
+        pitch = width * bpp // 8 if unpadded else d.pitch
+        self.width, self.height, self.pitch, self.format = width, height, pitch, fourcc
         handles, pitches, offsets = (
             [d.handle, d.handle if yuv else 0],
-            [d.pitch, d.pitch if yuv else 0],
-            [0, d.pitch * height if yuv else 0],
+            [pitch, pitch if yuv else 0],
+            [0, pitch * height if yuv else 0],
         )
         cmd = FbCmd2(width=width, height=height, pixel_format=fourcc)
         for i in range(2):
@@ -376,6 +393,17 @@ class Buffer:
         self.map = mmap.mmap(
             drm.fd, d.size, mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE, offset=offset
         )
+
+    def __del__(self):
+        """Its memory back once the check that made it lets it go: without the display's IOMMU every
+        buffer is contiguous, and a run's buffers outgrow the CMA pool. A closed card freed it."""
+        try:
+            if self.fb:
+                self.drm.call("rmfb", FbId(fb_id=self.fb))
+            if self.handle:
+                self.drm.call("destroy-dumb", DestroyDumb(handle=self.handle))
+        except OSError:
+            pass
 
     def fill_rgb(self, rgb, alpha=255, rows=None):
         row = struct.pack("<I", alpha << 24 | rgb[0] << 16 | rgb[1] << 8 | rgb[2]) * self.width
@@ -750,11 +778,11 @@ def to8(rgb):
     return tuple(round(min(max(c, 0.0), 1.0) * 255) for c in rgb)
 
 
-# ---- a synthetic screen over whatever the box has: the HDMI connector's EDID through debugfs
 def edid_block(data):
     return data + bytes([(-sum(data)) & 0xFF])
 
 
+# ---- a synthetic screen over whatever the box has: the HDMI connector's EDID through debugfs
 EOTF_SDR, EOTF_PQ, EOTF_HLG = 0, 2, 3
 SINKS = {
     "SDR": 1 << EOTF_SDR,
@@ -771,14 +799,36 @@ LADDER = {
     "8K30": (196, 7680, 4320, 30),
     "4K120": (118, 3840, 2160, 120),
     "4K60": (97, 3840, 2160, 60),
+    "4K50": (96, 3840, 2160, 50),
     "4K30": (95, 3840, 2160, 30),
     "4K24": (93, 3840, 2160, 24),
     "1080p120": (63, 1920, 1080, 120),
     "1080p60": (16, 1920, 1080, 60),
+    "1080p50": (31, 1920, 1080, 50),
     "1080p24": (32, 1920, 1080, 24),
+    "1080i60": (5, 1920, 1080, 60),
+    "1080i50": (20, 1920, 1080, 50),
     "720p120": (47, 1280, 720, 120),
     "720p60": (4, 1280, 720, 60),
+    "720p50": (19, 1280, 720, 50),
+    "576p50": (17, 720, 576, 50),
+    "480p60": (3, 720, 480, 60),
+    "576i50": (21, 720, 576, 50),
+    "480i60": (6, 720, 480, 60),
 }
+# broadcast's rungs: the 50 Hz family and the interlaced modes, each offered one held, not only the
+# largest and fastest
+BROADCAST_LADDER = (
+    "4K50",
+    "1080p50",
+    "1080i60",
+    "1080i50",
+    "720p50",
+    "576p50",
+    "480p60",
+    "576i50",
+    "480i60",
+)
 # Two verdicts from the same runs, each its rungs most demanding first: how large, and how fast.
 RESOLUTION_LADDER = ("8K60", "8K30", "4K60", "4K30", "4K24", "1080p60", "1080p24", "720p60")
 RATE_LADDER = ("4K120", "1080p120", "720p120", "4K60", "1080p60", "720p60")
@@ -900,7 +950,7 @@ def hdr_sink(edid=None):
 
 def settled_mode(timeout=10.0, steady=1.0):
     """Waits for the active CRTC's mode to hold still: a new EDID moves it after the probe."""
-    drm = Drm("/dev/dri/card0")
+    drm = Drm(display_card())
     last, since, end = None, time.monotonic(), time.monotonic() + timeout
     while time.monotonic() < end:
         res = drm.call("res", CardRes())
@@ -951,7 +1001,7 @@ def underrun_count():
 # ---- the box
 class Box:
     def __init__(self):
-        self.drm = Drm("/dev/dri/card0")
+        self.drm = Drm(display_card())
         for cap in (CAP_ATOMIC, CAP_WRITEBACK):
             self.drm.call("cap", ClientCap(capability=cap, value=1))
         res = self.drm.call("res", CardRes())
@@ -982,10 +1032,17 @@ class Box:
             shown = self.crtc is not None and any(bytes(m) == bytes(self.mode) for m in modes)
             if not shown:
                 # nothing set a mode, or the screen changed under it (fbcon follows a hotplug on 6.1, not 6.12):
-                # the preferred one, on the first CRTC unless one is active
-                if self.crtc is None:
-                    self.crtc, self.index = crtcs[0], 0
-                if not modes or self.set_mode(modes[0]):
+                # the preferred one, on the active CRTC, else the first the HDMI encoder takes; the
+                # active one may be another output's, composite's on the RK3528
+                active = [] if self.index is None else [self.index]
+                error = None
+                for i in active + [i for i in range(res.count_crtcs) if i not in active]:
+                    self.crtc, self.index = crtcs[i], i
+                    error = self.set_mode(modes[0]) if modes else None
+                    if not error:
+                        break
+                if not modes or error:
+                    print(f"RECORD hdmi: no mode set ({len(modes)} modes, errno {error})")
                     self.crtc = self.index = None
         pr = self.drm.call("planes", PlaneRes())
         ids = self.drm.ids(pr.count_planes)
@@ -1151,7 +1208,7 @@ class Box:
         width, height = self.mode.hdisplay, self.mode.vdisplay
         for scale in (1, 2):
             for fourcc in (XRGB8888, ARGB8888, NV12):
-                capture = Buffer(self.drm, width // scale, height // scale, fourcc)
+                capture = Buffer(self.drm, width // scale, height // scale, fourcc, unpadded=True)
                 if not self.show(
                     self.planes[0], Buffer(self.drm, width, height, XRGB8888), None, capture=capture
                 ):
@@ -1409,14 +1466,22 @@ class Box:
             "RECORD rating: offered "
             + " ".join(sorted({f"{m.hdisplay}x{m.vdisplay}@{m.vrefresh}" for m in offered}))
         )
-        sustained = set()
+        sustained, tried = set(), set()
         for name, (_, ha, va, hz) in LADDER.items():
+            interlaced = name[-3] == "i"  # 1080i60: the scan is the name's, the timing the same
             mode = next(
-                (m for m in offered if (m.hdisplay, m.vdisplay, m.vrefresh) == (ha, va, hz)), None
+                (
+                    m
+                    for m in offered
+                    if (m.hdisplay, m.vdisplay, m.vrefresh) == (ha, va, hz)
+                    and bool(m.flags & MODE_INTERLACE) == interlaced
+                ),
+                None,
             )
             if mode is None:
                 print(f"RECORD rating: {name} not offered: the driver pruned it")
                 continue
+            tried.add(name)
             log, counter = kernel_log(), underrun_count()
             error = self.set_mode(mode)
             time.sleep(0.5)
@@ -1471,6 +1536,13 @@ class Box:
         print(f"RATING display: largest {size or 'none'}, fastest {rate or 'none'}{unmeasured}")
         self.check(
             "rating: the display sustains a ladder mode", bool(sustained), f"({size}, {rate})"
+        )
+        offered_broadcast = [n for n in BROADCAST_LADDER if n in tried]
+        held = [n for n in offered_broadcast if n in sustained]
+        self.check(
+            "rating: the display sustains each broadcast mode it offers",
+            held == offered_broadcast,
+            f"({' '.join(held) or 'none'} of {' '.join(offered_broadcast) or 'none offered'})",
         )
 
     def scope(self):
@@ -1536,7 +1608,7 @@ class Box:
             print("SKIP lut: no plane with SUNXI_CDC_LUT3D, or no writeback connector")
             return
         width, height = self.mode.hdisplay, self.mode.vdisplay
-        capture = Buffer(self.drm, width // 2, height // 2, XRGB8888)
+        capture = Buffer(self.drm, width // 2, height // 2, XRGB8888, unpadded=True)
         for plane in self.lut_planes:
             lut_prop = self.prop(plane, OBJ_PLANE, "SUNXI_CDC_LUT3D")
             good = quantized(lattice(lambda v: v))[1]
@@ -1654,9 +1726,13 @@ class Box:
         self.check("sdr2hdr: a short HDR_EXT_DATA refused", error == 22, f"(errno {error})")
         self.drm.unblob(blob)
         width, height = self.mode.hdisplay, self.mode.vdisplay
-        capture = Buffer(self.drm, width, height, ARGB8888)
+        capture = Buffer(self.drm, width, height, ARGB8888, unpadded=True)
         rgb = Buffer(self.drm, 256, 256, XRGB8888)
         plane = self.planes[0]
+        error = self.show(plane, rgb, None, capture=capture)
+        if error:
+            print(f"SKIP sdr2hdr: baseline RGB writeback refused (errno {error})")
+            return
         for target in RK_TARGETS:
             blob = self.drm.blob(rk_sdr2hdr(target))
             worst, error = 0, 0
@@ -1928,6 +2004,7 @@ class Composite:
 
     def __init__(self, drm):
         self.drm, self.failures, self.passes = drm, 0, 0
+        self.mode_set = False
         for cap in (CAP_ATOMIC, CAP_WRITEBACK):
             drm.call("cap", ClientCap(capability=cap, value=1))
         res = drm.call("res", CardRes())
@@ -2043,10 +2120,12 @@ class Composite:
         interlaced = "interlaced" if mode.flags & MODE_INTERLACE else "progressive"
         self.check(f"composite {name}", True, f"{width}x{height} {interlaced} on CRTC {crtc}")
         capture, error, ready = None, 0, False
+        start = time.monotonic()
+        lines = height // 2 if mode.flags & MODE_INTERLACE else height  # writeback takes a field
         for fourcc, scale in ((XRGB8888, 1), (ARGB8888, 1), (NV12, 1), (XRGB8888, 2), (NV12, 2)):
             if self.writeback is None:
                 break
-            capture = Buffer(self.drm, width // scale, height // scale, fourcc)
+            capture = Buffer(self.drm, width // scale, lines // scale, fourcc, unpadded=True)
             fence = ctypes.c_int32(-1)
             error = self.drm.commit(
                 self.changes(crtc, mode, plane, bars, capture, fence), ALLOW_MODESET
@@ -2062,6 +2141,9 @@ class Composite:
             capture = None
         if error:  # the test commit placed it; the real one must take too
             self.check(f"composite {name} mode set", False, f"the commit failed, error {error}")
+        else:
+            self.mode_set = True
+            print(f"RECORD composite {name} mode set: {(time.monotonic() - start) * 1000:.0f} ms")
         encoder = encoder_registers() if not error else None  # only while the driver powers it
         if self.writeback is None:
             print(f"SKIP composite {name} writeback: no writeback connector")
@@ -2070,7 +2152,7 @@ class Composite:
         else:
             scale = width // capture.width
             seen = [
-                capture.pixel((side * i + side // 2) // scale, height // 2 // scale)
+                capture.pixel((side * i + side // 2) // scale, capture.height // 2)
                 for i in range(len(BARS))
             ]
             kept = all(
@@ -2173,19 +2255,34 @@ def encoder_registers():
     return None
 
 
+def hdmi_writeback_available():
+    with hdr_sink(hdr_edid()) as synthetic:
+        if not synthetic:
+            return False
+        box = Box()
+        try:
+            return bool(box.crtc and box.writeback and box.planes and box.capture_buffer())
+        finally:
+            os.close(box.drm.fd)
+
+
+def run_composite():
+    composite = Composite(Drm(display_card()))
+    try:
+        composite.run()
+    finally:
+        os.close(composite.drm.fd)
+    return composite
+
+
 def main(sinks, ladder):
-    """Every check, then the rating's ladder of modes if ladder, then each sink in sinks as a
-    synthetic screen."""
-    composite = Composite(Drm("/dev/dri/card0"))
-    composite.run()
-    os.close(composite.drm.fd)
+    """HDMI checks and sink variations, then composite and the return to HDMI."""
     with hdr_sink() as synthetic:
         box = run(synthetic)
     if box is None:
+        composite = run_composite()
         print(f"{composite.passes} passed, {composite.failures} failed")
         return 1 if composite.failures else 0 if composite.passes else 77
-    box.passes += composite.passes
-    box.failures += composite.failures
     with hdr_sink(hdr_edid(ladder=True)) as synthetic:
         if synthetic and ladder:
             rating_box = Box()
@@ -2206,6 +2303,14 @@ def main(sinks, ladder):
             os.close(sink_box.drm.fd)
             box.passes += sink_box.passes
             box.failures += sink_box.failures
+    hdmi_before = hdmi_writeback_available()
+    composite = run_composite()
+    box.passes += composite.passes
+    box.failures += composite.failures
+    if hdmi_before and composite.mode_set:
+        box.check("HDMI writeback after composite", hdmi_writeback_available())
+    else:
+        print("SKIP HDMI writeback after composite: baseline capture or composite mode unavailable")
     print(f"{box.passes} passed, {box.failures} failed")
     return 1 if box.failures else 0 if box.passes else 77
 
@@ -2236,9 +2341,7 @@ def run(synthetic_sink):
 
 def composite_only():
     """The composite check alone, for the default profile."""
-    composite = Composite(Drm("/dev/dri/card0"))
-    composite.run()
-    os.close(composite.drm.fd)
+    composite = run_composite()
     return 1 if composite.failures else 0 if composite.passes else 77
 
 

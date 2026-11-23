@@ -59,7 +59,8 @@
 ## Check
 
 - [ ] **H1** 👤 A TV at the largest mode the box claims, 8K60 where the kit's TV shows it, 4K60 on
-      most: picture and sound, replugged, its remote over CEC; a claim past the TV stays ❓
+      most: picture and sound, replugged, plugged in after a headless boot, its remote over CEC; a
+      claim past the TV stays ❓
 - [ ] **H2** 👤 Optional: every refresh rate and 1440p on a TV, and a PC monitor's modes
 - [ ] **H3** Every HDR transition at one mode, the InfoFrame read back, on an HDR screen or the
       synthetic one (`hdmi`)

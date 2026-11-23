@@ -82,6 +82,9 @@ LOAD_TIMEOUT_S = 90
 RESULT_MARGIN_S = 30
 STOP_TIMEOUT_S = 5
 PASS_SHARE = 0.95
+# the video's widths: the window's, and a site's small player
+FULL_WIDTH = "full"
+WIDTHS = (FULL_WIDTH, "160px")
 ENGINE_IRQS = r"cedrus|vdpu|rkvdec|vdec|esparser|video-codec"
 VA_PROFILE = Path("/etc/profile.d/tvb-va-driver.sh")
 # WebKit's own browser on WPE: the same engine and media pipeline as Falkon's, drawn without Qt
@@ -116,6 +119,7 @@ PAGE = """<!doctype html><meta charset=utf-8><title>browser check</title>
 <script>
 const params = new URLSearchParams(location.search);
 const video = document.getElementById("v");
+if (params.get("width")) Object.assign(video.style, {width: params.get("width"), height: "auto"});
 const report = fields => fetch("/report?" + new URLSearchParams({tag: params.get("tag"), ...fields}));
 video.onerror = () => report({error: `code ${video.error.code} ${video.error.message}`});
 // as a player streams: a piece at a time, a few seconds ahead of the playhead, and what has played
@@ -359,6 +363,9 @@ class Server(ThreadingHTTPServer):
         # KEY=VALUE,... given to every browser, to try a setting
         self.extra_env = dict(e.split("=", 1) for e in extra_env.split(",") if "=" in e)
         self.reports: dict[str, dict[str, str]] = {}
+        self.reported_at: dict[str, float] = {}
+        # the logged-in desktop the browsers open in, on its real screen; None: a headless labwc
+        self.screen: dict[str, str] | None = None
         super().__init__(("127.0.0.1", 0), partial(Handler, directory=str(root)))
         threading.Thread(target=self.serve_forever, daemon=True).start()
 
@@ -402,7 +409,9 @@ class Handler(SimpleHTTPRequestHandler):
             return super().do_GET()
         fields = {k: v[0] for k, v in parse_qs(url.query).items()}
         assert isinstance(self.server, Server)
-        self.server.reports[fields.pop("tag", "")] = fields
+        tag = fields.pop("tag", "")
+        self.server.reports[tag] = fields
+        self.server.reported_at[tag] = time.monotonic()
         self.send_response(204)
         self.end_headers()
 
@@ -488,6 +497,48 @@ def irq_count() -> int:
     return sum(int(n) for line in engine for n in line.split()[1:] if n.isdigit())
 
 
+TRACE = Path("/sys/kernel/tracing")
+# each one a new picture sent to the screen
+FLIP_EVENT = TRACE / "events/drm/drm_vblank_event_delivered/enable"
+FLIP = re.compile(r"\s(\d+\.\d+): drm_vblank_event_delivered:")
+
+
+def start_flips() -> None:
+    """The kernel's DRM trace on, on the monotonic clock time.monotonic() reads."""
+    (TRACE / "tracing_on").write_text("0")
+    (TRACE / "trace_clock").write_text("mono")
+    (TRACE / "trace").write_text("")
+    FLIP_EVENT.write_text("1")
+    (TRACE / "tracing_on").write_text("1")
+
+
+def flips_per_second(start: float, end: float) -> float:
+    (TRACE / "tracing_on").write_text("0")
+    FLIP_EVENT.write_text("0")
+    stamps = [float(m.group(1)) for m in FLIP.finditer((TRACE / "trace").read_text())]
+    return sum(start <= t <= end for t in stamps) / (end - start)
+
+
+def desktop_session(user: str) -> dict[str, str] | None:
+    """The user's labwc on a real screen, as its own programs see it; None without one."""
+    listing = subprocess.run(["pgrep", "-x", "-u", user, "labwc"], capture_output=True, text=True)
+    for pid in listing.stdout.split():
+        environ = Path(f"/proc/{pid}/environ").read_bytes().split(b"\0")
+        env = dict(e.decode(errors="replace").split("=", 1) for e in environ if b"=" in e)
+        runtime = env.get("XDG_RUNTIME_DIR")
+        if not runtime or env.get("WLR_BACKENDS") == "headless":
+            continue
+        sockets = sorted(Path(runtime).glob("wayland-[0-9]"))
+        if sockets:
+            bus = env.get("DBUS_SESSION_BUS_ADDRESS", f"unix:path={runtime}/bus")
+            return {
+                "XDG_RUNTIME_DIR": runtime,
+                "WAYLAND_DISPLAY": sockets[0].name,
+                "DBUS_SESSION_BUS_ADDRESS": bus,
+            }
+    return None
+
+
 def wait_for(ready: Callable[[], bool], seconds: float) -> bool:
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
@@ -499,11 +550,13 @@ def wait_for(ready: Callable[[], bool], seconds: float) -> bool:
 
 @dataclass
 class Opened:
-    """A page's report, if it made one, the browser's log, and the decode engine's interrupts."""
+    """A page's report, if it made one, the browser's log, the decode engine's interrupts, and the
+    screen's flips a second over the page's window, where it played on a screen."""
 
     report: dict[str, str] | None
     log: str
     engine_irqs: int
+    flips: float | None
 
 
 def open_page(
@@ -516,13 +569,16 @@ def open_page(
     query: dict[str, str],
     until: Callable[[], bool] | None = None,
 ) -> Opened:
-    """A page in the browser, in a headless labwc, until it reports (or until() holds) or the time
-    runs out."""
+    """A page in the browser, in the user's desktop on its screen or else in a headless labwc,
+    until it reports (or until() holds) or the time runs out."""
     url = f"http://127.0.0.1:{server.port}/{page}?{urlencode({'tag': tag, **query})}"
-    runtime = home / f"runtime-{tag}"
-    runtime.mkdir(mode=0o700)
-    shutil.chown(runtime, user)
-    env = {**HEADLESS, **browser.env, "XDG_RUNTIME_DIR": str(runtime), "HOME": f"/home/{user}"}
+    if server.screen:
+        env = {**browser.env, **server.screen, "HOME": f"/home/{user}"}
+    else:
+        runtime = home / f"runtime-{tag}"
+        runtime.mkdir(mode=0o700)
+        shutil.chown(runtime, user)
+        env = {**HEADLESS, **browser.env, "XDG_RUNTIME_DIR": str(runtime), "HOME": f"/home/{user}"}
     env["TVB_DEMOTE"] = server.demote
     env |= server.extra_env
     if server.gst_debug and "GST_DEBUG" in env:
@@ -532,11 +588,16 @@ def open_page(
     shell += 'export GST_PLUGIN_FEATURE_RANK="$GST_PLUGIN_FEATURE_RANK,$TVB_DEMOTE"; exec "$@"'
     command = ["runuser", "-u", user, "--", "env", "-u", "DBUS_SESSION_BUS_ADDRESS"]
     command += [f"{k}={v}" for k, v in env.items()]
-    command += ["sh", "-c", shell, "sh", "dbus-run-session", "--", "labwc", "-s"]
-    command += [shlex.join(browser.command + [url])]
+    if server.screen:
+        command += ["sh", "-c", shell, "sh", *browser.command, url]
+    else:
+        command += ["sh", "-c", shell, "sh", "dbus-run-session", "--", "labwc", "-s"]
+        command += [shlex.join(browser.command + [url])]
     log_path = home / f"{tag}.log"
     log = log_path.open("w")
     irqs = irq_count()
+    if server.screen:
+        start_flips()
     process = subprocess.Popen(command, stdout=log, stderr=log, start_new_session=True)
     try:
         wait_for(
@@ -550,7 +611,12 @@ def open_page(
     logs = server.root / "logs"
     logs.mkdir(exist_ok=True)
     shutil.copy(log_path, logs / log_path.name)
-    return Opened(server.reports.get(tag), log_path.read_text(errors="replace"), irq_count() - irqs)
+    flips = None
+    if server.screen and tag in server.reported_at:
+        end = server.reported_at[tag]
+        flips = flips_per_second(end - WINDOW_S, end)
+    log_text = log_path.read_text(errors="replace")
+    return Opened(server.reports.get(tag), log_text, irq_count() - irqs, flips)
 
 
 # Falkon's default for the camera on a site it has no setting for; 1 allows
@@ -587,11 +653,16 @@ def warm_falkon(server: Server, user: str, home: Path, falkon_root: Path | None)
     )
 
 
-def play(server: Server, user: str, home: Path, browser: Browser, clip: Path, mse: bool) -> str:
-    """One clip in one browser, as a file or through MSE: its report against the clip's rate, the
-    engine's interrupts and the decoder WebKit made."""
-    tag = f"{browser.name}-{clip.stem}{'-mse' if mse else ''}"
+def play(
+    server: Server, user: str, home: Path, browser: Browser, clip: Path, mse: bool, width: str
+) -> str:
+    """One clip in one browser, as a file or through MSE, at a width: the screen's flips against
+    the clip's rate, with the page's own count, the engine's interrupts and the decoder WebKit made
+    beside them."""
+    tag = f"{browser.name}-{clip.stem}{'-mse' if mse else ''}-{width}"
     query = {"src": f"clips/{clip.name}"}
+    if width != FULL_WIDTH:
+        query["width"] = width
     if mse:
         for part, type in MSE_TYPES[clip.stem.split("-", 1)[0]].items():
             query[part] = f"clips/mse/{mse_part(clip, part).name}"
@@ -612,7 +683,11 @@ def play(server: Server, user: str, home: Path, browser: Browser, clip: Path, ms
         measured += f", {opened.report['waits']} waits for {float(opened.report['waited']):.1f} s"
     if not opened.engine_irqs:
         return f"failed: {measured}, but the video engine's interrupts did not move"
-    if fps < clip_rate(clip) * PASS_SHARE or media < PASS_SHARE:
+    # what WebKit counts is not what reaches the screen: a play is judged by the screen's flips
+    if opened.flips is None:
+        return f"UNTESTED: no screen; {measured}"
+    measured = f"{opened.flips:.1f} on screen, page {measured}"
+    if opened.flips < clip_rate(clip) * PASS_SHARE or media < PASS_SHARE:
         return f"failed: {measured}"
     return f"pass: {measured}"
 
@@ -711,6 +786,7 @@ def play_all(
         yield "browsers", "UNTESTED: no browser installed"
         return
     server = Server(run_dir, demote, gst_debug, extra_env)
+    server.screen = desktop_session(user)
     warm_falkon(server, user, home, falkon_root)
     clips = sorted(
         c for c in (run_dir / "clips").iterdir() if c.is_file() and re.search(only, c.stem)
@@ -727,8 +803,9 @@ def play_all(
                 shutil.copytree(warm_lists, profiles / FALKON_ADBLOCK, dirs_exist_ok=True)
             for browser in browsers(profiles, falkon_root, names):
                 subprocess.run(["chown", "-R", user, str(profiles)], check=False)
-                key = f"{browser.name}.{clip.stem}{'.mse' if mse else ''}"
-                yield key, play(server, user, home, browser, clip, mse)
+                for width in WIDTHS:
+                    key = f"{browser.name}.{clip.stem}{'.mse' if mse else ''}.{width}"
+                    yield key, play(server, user, home, browser, clip, mse, width)
     for camera in (False, True):
         name = f"call{'-camera' if camera else ''}"
         if not re.search(only, name):

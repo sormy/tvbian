@@ -69,6 +69,26 @@ class ClipsTest(unittest.TestCase):
         self.assertEqual(self.calls, ["encode", "decode", "encode", "decode"])
 
 
+class FieldDecodeTest(unittest.TestCase):
+    def test_a_repeated_field_fails_even_with_the_expected_count(self) -> None:
+        first = "0, 0, 0, 1, 10, " + "a" * 32
+        second = "0, 1, 1, 1, 10, " + "b" * 32
+        source = f"{first}\n{second}\n"
+        duplicate = f"{first}\n{first}\n"
+        engine = video.ENGINES["rkmpp"]
+        for output, verdict in ((source, "pass"), (duplicate, "broken")):
+            with (
+                self.subTest(verdict=verdict),
+                mock.patch.object(video, "sh", side_effect=[(0, source, 0), (0, output, 0)]),
+                mock.patch.object(video, "kernel_errors", return_value=[]),
+            ):
+                result = video.field_decode_verdict(
+                    "ffmpeg9", engine, "clip.mp4", engine["decode"]("h264i"), 1, []
+                )
+                self.assertEqual(result["frames_hw"], 2)
+                self.assertEqual(result["verdict"], verdict)
+
+
 class MemoryTest(unittest.TestCase):
     def test_a_decode_s_memory_by_size_and_depth(self) -> None:
         self.assertEqual(video.needed_mb("hevc", "8192x8192"), 768)

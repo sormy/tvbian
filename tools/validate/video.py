@@ -237,7 +237,11 @@ ENGINES = {
     },
     "rkmpp": {
         "decode": lambda c: (
-            ["-c:v", {"h264p10": "h264", "hevc10": "hevc", "vp9p2": "vp9"}.get(c, c) + "_rkmpp"]
+            [
+                "-c:v",
+                {"h264i": "h264", "h264p10": "h264", "hevc10": "hevc", "vp9p2": "vp9"}.get(c, c)
+                + "_rkmpp",
+            ]
             if c not in ("mjpeg", "vc1")
             else None
         ),
@@ -246,6 +250,7 @@ ENGINES = {
         "download": "hwdownload,format=nv12,",
         # NV15 frames cannot be downloaded: 10-bit is checked by frames decoded
         "count_only": {"h264p10", "hevc10", "vp9p2"},
+        "field_decode": {"h264i"},
         "fallback": r"larger than the hardware|unsupported by MPP|for soc \S+ unsupported|Unknown codec",
         "irq": r"vdpu|rkvdec|jpegd|avsd|rkvenc",
         "encoders": {"h264": "h264_rkmpp", "hevc": "hevc_rkmpp"},
@@ -265,6 +270,31 @@ ENGINES = {
         "encoders": {"h264": "h264_v4l2m2m", "hevc": "hevc_v4l2m2m"},
     },
 }
+# mainline Rockchip: stateless V4L2 decode as on sunxi, through rkvdec; stateful encode, rkvenc
+ENGINES["rkvdec"] = {
+    **ENGINES["sunxi"],
+    # MJPEG is jpegd's, stateful; NV15 frames stay as DRM frames, checked by count
+    "decode": lambda c: (
+        ["-c:v", "mjpeg_v4l2m2m"]
+        if c == "mjpeg"
+        else ["-hwaccel", "v4l2request"]
+        + (["-hwaccel_output_format", "drm_prime"] if c in TEN_BIT else [])
+    ),
+    "count_only": TEN_BIT,
+    # rkvdec writes AFBC non-split, Cedrus split
+    "afbc_formats": r"\b(AN68|AN6a)\b",
+    "irq": r"video-codec",
+    "encoders": {"h264": "h264_v4l2m2m", "hevc": "hevc_v4l2m2m", "mjpeg": "mjpeg_v4l2m2m"},
+    "device": "rkvdec",
+    "formats": {
+        "h264": "S264",
+        "h264i": "S264",
+        "h264p10": "S264",
+        "hevc": "S265",
+        "hevc10": "S265",
+    },
+}
+
 # VA-API through tvb-va-driver, installed: libva finds it by the render node's DRM driver
 RENDER_NODE = "/dev/dri/renderD128"
 VAAPI_DEVICE = ["-hwaccel", "vaapi", "-hwaccel_device", RENDER_NODE]
@@ -298,6 +328,8 @@ CPU_ENCODERS = {
     "hevc": ["-c:v", "libx265", "-preset", "ultrafast"],
     "mjpeg": ["-c:v", "mjpeg", "-q:v", "3"],
 }
+# a V4L2 encoder refuses a size it cannot encode, at its format or its buffers
+ENCODE_REFUSED = r"larger than|REQBUFS failed: Invalid argument"
 ENCODE_SIZES = [
     "1280x720",
     "1920x1080",
@@ -371,7 +403,12 @@ def cmd_clips(args):
     for codec, (ext, enc, sizes, _) in CODECS.items():
         for size in sizes:
             path = CORPUS / f"{codec}-{size}.{ext}"
+            source = f"testsrc2=size={size}:rate=30"
+            if codec == "h264i":
+                source = f"testsrc2=size={size}:rate=60,tinterlace=interleave_top"
             recipe = " ".join([size, str(FRAMES), *enc])
+            if codec == "h264i":
+                recipe += f" {source}"
             known = before.get(path.name, {})
             if known.get("recipe") != recipe or not path.exists():
                 rc, out, _ = sh(
@@ -383,7 +420,7 @@ def cmd_clips(args):
                         "-f",
                         "lavfi",
                         "-i",
-                        f"testsrc2=size={size}:rate=30",
+                        source,
                         "-frames:v",
                         str(FRAMES),
                     ]
@@ -514,15 +551,18 @@ def repeated(ff, clip, times):
     return out
 
 
-def decode_rate(ff, eng, opts, clip):
+def decode_rate(ff, eng, opts, clip, outputs_per_picture=1):
     keep = eng.get("keep", []) if "-hwaccel" in opts else []
+    sync = ["-fps_mode", "passthrough"] if outputs_per_picture > 1 else []
     return frame_rate(
         lambda n: timed(
             [ff, "-hide_banner", "-nostdin", "-stats"]
             + opts
             + keep
-            + ["-i", repeated(ff, clip, n // FRAMES), "-f", "null", "-"],
-            n,
+            + ["-i", repeated(ff, clip, n // FRAMES)]
+            + sync
+            + ["-f", "null", "-"],
+            n * outputs_per_picture,
         )
     )
 
@@ -561,11 +601,39 @@ def decode_case(ff, engine, codec, size, clip, ref):
     if r["verdict"] == "pass" and irq_count(eng["irq"]) == irqs:
         r["verdict"] = "software"
     if r["verdict"] == "pass":
-        r["fps"] = decode_rate(ff, eng, opts, clip)
+        r["fps"] = decode_rate(ff, eng, opts, clip, 2 if codec in eng.get("field_decode", ()) else 1)
     return r
 
 
+def field_decode_verdict(ff, eng, clip, opts, source_pictures, before):
+    """Compare preserved luma fields in the top-first interlaced corpus."""
+    prefix = [ff, "-hide_banner", "-nostdin", "-v", "error"]
+    output = ["-enc_time_base", "filter", "-fps_mode", "passthrough", "-f", "framemd5", "-"]
+    source_filter = "extractplanes=y,setfield=tff,separatefields"
+    # Each progressive output contains two fields. Alternate the preserved field.
+    preserved = "select='not(mod(n,4))+eq(mod(n,4),3)'"
+    sw_rc, sw_log, _ = sh(prefix + ["-i", clip, "-vf", source_filter] + output)
+    hw_rc, hw_log, _ = sh(
+        prefix + opts + ["-i", clip, "-vf", f"{eng['download']}{source_filter},{preserved}"] + output
+    )
+    sw, hw = md5_lines(sw_log), md5_lines(hw_log)
+    fell_back = bool(re.search(eng["fallback"], hw_log))
+    errs = kernel_errors(before)
+    ok = not (sw_rc or hw_rc or errs) and len(sw) == 2 * source_pictures > 0 and hw == sw
+    return {
+        "frames_hw": len(hw),
+        "frames_sw": len(sw),
+        "checked": "luma fields",
+        "identical": ok,
+        "fallback": fell_back,
+        "kernel": errs[:3],
+        "verdict": "refused" if fell_back else "pass" if ok else "broken",
+    }
+
+
 def decode_verdict(ff, eng, codec, clip, opts, exact, ref, before):
+    if codec in eng.get("field_decode", ()):
+        return field_decode_verdict(ff, eng, clip, opts, len(ref), before)
     sw = ref
     if codec in eng.get("count_only", ()):
         rc, log, _ = sh(
@@ -728,7 +796,9 @@ def encode_case(ff, engine, codec, encoder, size, time_cpu):
         verdict = (
             "unoffered"
             if "Unknown encoder" in log
-            else "refused" if re.search(eng.get("encode_refused", "larger than"), log) else "broken"
+            else (
+                "refused" if re.search(eng.get("encode_refused", ENCODE_REFUSED), log) else "broken"
+            )
         )
         return {
             "verdict": verdict,
@@ -738,11 +808,14 @@ def encode_case(ff, engine, codec, encoder, size, time_cpu):
     got = frames_of(sh([ff, "-hide_banner", "-nostdin", "-i", out, "-f", "null", "-"])[1])
     _, info, _ = sh([ff, "-hide_banner", "-i", out])
     m = re.search(r"Video: .*?(\d{3,5}x\d{3,5})", info)
-    # raw frames on both sides: compared by index, as timestamps may pair them wrong
+    # raw frames on both sides, each written as decoded: compared by index, as timestamps may
+    # pair them wrong and a constant rate would repeat or drop one
     raw = lambda inp, name: sh(
         [ff, "-v", "error", "-y"]
         + inp
         + [
+            "-fps_mode",
+            "passthrough",
             "-frames:v",
             str(FRAMES),
             "-vf",

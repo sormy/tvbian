@@ -19,12 +19,12 @@ tools: a line that differs from the board's last run is a finding.
    each kernel the profile names, the family's and its `-next`, with a guard that brings the default
    back if the kernel brings no network up (`boot.md`). On each it runs every check unattended, none
    left out for what the change touched: the `box.py` phases, a soak, `display.py`, `screen.py`,
-   `video.py`'s decode suite, the VA driver's suite through FFmpeg and GStreamer, the desktop
-   session where one is installed, dEQP against Mesa CI's lists, a panic, an unpinged watchdog and
-   warm reboots. `short` samples them; `default` runs them all; `extended` soaks longer. The decode
-   suite's clips are made by the host's FFmpeg; `video.py`'s conformance streams, pinned from
-   FFmpeg's FATE suite, add what its encoders never make: VC-1, slices, odd widths. Each decodes
-   exact, twice alike, in a `conformance` step of its own that `short` skips.
+   `video.py`'s decode suite, the VA driver's suite through FFmpeg and GStreamer, dEQP against Mesa
+   CI's lists, a panic, an unpinged watchdog and warm reboots. `short` samples them; `default` runs
+   them all; `extended` soaks longer. The decode suite's clips are made by the host's FFmpeg;
+   `video.py`'s conformance streams, pinned from FFmpeg's FATE suite, add what its encoders never
+   make: VC-1, slices, odd widths. Each decodes exact, twice alike, in a `conformance` step of its
+   own that `short` skips.
 
    | Scope       | `short`               | `default`              | `extended`               |
    | ----------- | --------------------- | ---------------------- | ------------------------ |
@@ -35,7 +35,8 @@ tools: a line that differs from the board's last run is a finding.
    | Video sizes | 4K                    | the whole ladder       | the whole ladder         |
    | dEQP        | 1/2000                | 1/500                  | 1/500                    |
 
-   `--kernels own|next|both` picks the kernels apart from the profile; `both` unless named.
+   `--kernels own|next|next2|both|all` picks the kernels apart from the profile: `next2` the
+   mainline series beside the vendor kernels, `all` the three; `both`, own and next, unless named.
 
    `--released` tests a box as its owner has it: what it lacks comes from its own apt, nothing is
    built on the host, and the checks against this tree are left out.
@@ -50,15 +51,14 @@ tools: a line that differs from the board's last run is a finding.
    each box's results whenever it answers; the box restores its default and stops when done.
 
 3. **Report**: `regression.py report build/validate/regression/<date>` writes `report.md` there, for
-   the pull request: each board and kernel with its checks and minutes, new failures apart from the
-   known ones in `tools/validate/known.conf`, every ❓, and what moved since the board's last run.
-   Parity is a failure too: each device class (network, Bluetooth, input, sound, LEDs, thermal,
-   cooling, devfreq, DRM connectors, rfkill, RTC, watchdog, hwmon) another kernel has fewer of than
-   the board's own, its oldest, with the names it lacks. A
-   step that breaks a box, hanging it or worse, is skipped there by a `step:<name>` line in
-   `known.conf` with its reason: shown ❓ in every report until the fix lands. Attach it to the PR.
-   A new ❌ is a finding; a known one stays known only with its reason, and its line goes when the
-   fix lands.
+   the pull request: each board and kernel with its checks and minutes, every ❌ and ❓, and what
+   moved since the board's last run. Parity is a failure too: each device class (network, Bluetooth,
+   input, sound, LEDs, thermal, cooling, devfreq, DRM connectors, rfkill, RTC, watchdog, hwmon)
+   another kernel has fewer of than the board's own, its oldest, with the names it lacks. A step
+   that breaks a box, hanging it or worse, is skipped there by a `step:<name>` line in
+   `tools/validate/known.conf` with its reason: shown ❓ in every report until the fix lands. No
+   failure stops the run: every step runs, and each ❌ is judged in the report against its todo.
+   Attach it to the PR.
 4. **Record** each kernel's lines in the board's Test report and a worklog entry: the lines that
    moved, and why.
 5. **Hand the human** the lines below that the change reaches, each with what to look for.
@@ -67,17 +67,36 @@ tools: a line that differs from the board's last run is a finding.
 
 The unattended pass proves a device answers; these need a person, a screen or a plug.
 
-| Item                      | What the human confirms                                     | Phase        |
-| ------------------------- | ----------------------------------------------------------- | ------------ |
-| The remote, every button  | each key as its printed label (`docs/remote-keymap.md`)     | `input.md`   |
-| HDMI on a real screen     | picture at the TV's modes, EDID read, CEC to the TV         | `display.md` |
-| Sound from a speaker      | audible, both rates; the pass proves only the rate          | `display.md` |
-| The AV jack               | composite picture, analog sound                             | `display.md` |
-| USB ports and the SD slot | a device on each port, a card in and out                    | `storage.md` |
-| Buttons and LEDs          | power and recovery buttons, each LED's colour and state     | `input.md`   |
-| Sleep and wake            | wake by the remote and the power key; the pass wakes by RTC | `power.md`   |
-| A BLE remote              | pairs, keys, survives a power cycle                         | `network.md` |
-| An Ethernet cable         | link at its speed, where the pass found no cable            | `network.md` |
+| Item                 | What the human confirms                                        | Phase        |
+| -------------------- | -------------------------------------------------------------- | ------------ |
+| The IR remote        | every key as labelled, the canonical layout, in `evtest`       | `input.md`   |
+| The BLE remote       | pairs; every key canonical in `evtest`; survives a power cycle | `network.md` |
+| Bluetooth            | a scan finds devices; a keyboard pairs and types               | `network.md` |
+| Wi-Fi                | joins the owner's network, its password given                  | `network.md` |
+| Sleep and wake       | the remote and the power key wake it; the pass wakes by RTC    | `power.md`   |
+| Power off and on     | off from the power key; on from the remote's                   | `power.md`   |
+| Reboots by hand      | a cold boot and a soft reboot each come back, not dark         | `system.md`  |
+| HDMI on a screen     | modes, EDID, CEC; plugged in after a headless boot             | `display.md` |
+| HDMI sound           | audible at both rates; multichannel                            | `display.md` |
+| The GPU on a screen  | glmark2 at the screen's own mode                               | `display.md` |
+| A player on a screen | 4K60 H.264, HEVC and HEVC 10-bit, smooth, with sound           | `video.md`   |
+| HDR on an HDR TV     | the TV switches to HDR for a 10-bit HDR film                   | `video.md`   |
+| The AV jack          | composite picture and analog sound                             | `display.md` |
+| S/PDIF               | sound on a receiver                                            | `display.md` |
+| A monitor's DDC/CI   | its brightness read and set                                    | `display.md` |
+| Ethernet             | links at 10, 100 and 1000 Mb/s where fitted; out and back      | `network.md` |
+| USB 3                | a fast stick at SuperSpeed, its read rate                      | `storage.md` |
+| USB 2                | the same stick at high speed; a keyboard at low speed          | `storage.md` |
+| The OTG port         | a keyboard works on it as a host                               | `storage.md` |
+| The SD slot          | a UHS card at its UHS mode; out and in                         | `storage.md` |
+| The recovery button  | held at power-on, U-Boot or the boot ROM answers on OTG        | `input.md`   |
+| The recovery path    | the factory image restored over OTG                            | `storage.md` |
+| Buttons and LEDs     | the power button; each LED's colour and state                  | `input.md`   |
+| The front panel      | the clock shown, the time zone and brightness set              | `input.md`   |
+| The serial pads      | their labels match the signals; the console at its baud        | `system.md`  |
+
+Once the recovery path is proven on a board, its unattended pass may install to the eMMC with
+`tvb-install`: a failed install is then a restore away.
 
 ## Bites
 
@@ -110,4 +129,4 @@ The unattended pass proves a device answers; these need a person, a screen or a 
 - [ ] **R3** `reboots.sh`, 5 on each kernel, every boot back with its radios and no MMC error
 - [ ] **R4** `video.py compare` and the VA suite's speed against the last run: nothing worse
 - [ ] **R5** The hands-on lines the change reaches, handed to the human with what to confirm
-- [ ] **R6** No kernel short of the board's own in parity, or each gap in `known.conf` with its todo
+- [ ] **R6** No kernel short of the board's own in parity, or each gap a row in its todo page

@@ -16,10 +16,10 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools/validate"))
 import regression  # noqa: E402
 import results  # noqa: E402
+from results import Known  # noqa: E402
 from regression import (  # noqa: E402
     PROFILES,
     Box,
-    Known,
     Verdicts,
     board_family,
     duration,
@@ -48,11 +48,38 @@ class KernelsTest(unittest.TestCase):
         ]
         self.assertEqual(kernels("sunxi64", debs), ["6.18.63-tvb-sunxi64", "7.3.10-tvb-sunxi64"])
 
-    def test_the_kernels_option_picks_own_next_or_both(self) -> None:
-        both = ["6.18.63-tvb-sunxi64", "7.3.4-tvb-sunxi64"]
-        picked = {which: both[regression.KERNELS[which]] for which in ("own", "next", "both")}
-        self.assertEqual(picked, {"own": both[:1], "next": both[1:], "both": both})
-        self.assertEqual(["6.1.172-tvb-rk35xx"][regression.KERNELS["next"]], [])  # none: refused
+    def test_the_kernels_option_picks_its_series(self) -> None:
+        debs = [
+            "linux-image-tvb-rk35xx_6.1.172-0~local_arm64.deb",
+            "linux-image-tvb-rk35xx-next_6.12.69-0~local_arm64.deb",
+            "linux-image-tvb-rk35xx-next2_7.3.4-0~local_arm64.deb",
+        ]
+        own, nxt, next2 = "6.1.172-tvb-rk35xx", "6.12.69-tvb-rk35xx", "7.3.4-tvb-rk35xx-next2"
+        expected = {
+            "own": [own],
+            "next": [nxt],
+            "next2": [next2],
+            "both": [own, nxt],
+            "all": [own, nxt, next2],
+        }
+        for which, releases in expected.items():
+            with self.subTest(which=which):
+                self.assertEqual(kernels("rk35xx", debs, which), releases)
+        self.assertEqual(kernels("rk35xx", debs[:1], "next"), [])  # none: refused
+
+    def test_a_kernel_s_video_engine_is_its_series_else_its_family_s(self) -> None:
+        cases = [
+            ("6.1.172-tvb-rk35xx", "rkmpp"),
+            ("6.12.69-tvb-rk35xx", "rkmpp"),
+            ("7.3.4-tvb-rk35xx-next2", "rkvdec"),
+        ]
+        for release, expected in cases:
+            with self.subTest(release=release):
+                self.assertEqual(regression.engine("rk35xx", release), expected)
+        video = [
+            s for s in regression.steps("short", "rk35xx", "plex", "rk35xx") if s.name == "video"
+        ]
+        self.assertIn("{engine}", video[0].command)
 
     def test_a_family_without_next_runs_one(self) -> None:
         debs = ["linux-image-tvb-rk35xx_6.1.172-0~local_arm64.deb"]
@@ -79,7 +106,7 @@ class StepsTest(unittest.TestCase):
         self.assertEqual(names["short"], [n for n in names["default"] if n != "conformance"])
         self.assertEqual(names["default"], names["extended"])
         self.assertIn("conformance", names["default"])
-        for check in ("throughput", "soak", "display-full", "screen", "video", "va", "desktop"):
+        for check in ("throughput", "soak", "display-full", "screen", "video", "va"):
             self.assertIn(check, names["short"])
         for check in ("deqp", "reboots"):
             self.assertIn(check, names["short"])
@@ -102,9 +129,11 @@ class StepsTest(unittest.TestCase):
             p: next(s for s in steps(p, "rk35xx", "plex", "rk35xx") if s.name == "soak")
             for p in PROFILES
         }
+        # box.py soaks for its profile's time; the step allows that and its margin
+        self.assertEqual([soak[p].seconds for p in PROFILES], [630, 720, 2400])
         self.assertEqual(
-            [soak[p].command[soak[p].command.index("--soak") + 1] for p in PROFILES],
-            ["30", "120", "1800"],
+            [soak[p].command[soak[p].command.index("--profile") + 1] for p in PROFILES],
+            list(PROFILES),
         )
 
 
@@ -188,25 +217,6 @@ class ResultsTest(unittest.TestCase):
         self.assertEqual(duration(log, "6.12.69-tvb-rk35xx"), "1 min")
         self.assertEqual(duration(log, "7.3.4-tvb-sunxi64"), "?")
 
-    def test_a_known_failure_matches_its_boards_kernels_and_check_alone(self) -> None:
-        path = self.dir / "known.conf"
-        path.write_text(
-            "# a comment\n" "h96max-3518*,r69-1 * ^network: bt\\.find: 0$  # needs an advertiser\n"
-        )
-        [known] = Known.load(path)
-        self.assertEqual(known.reason, "needs an advertiser")
-        line = "network: bt.find: 0"
-        self.assertTrue(known.matches("h96max-3518d", "6.1.172-tvb-rk35xx", line))
-        self.assertTrue(known.matches("r69-1", "6.12.69-tvb-rk35xx", line))
-        self.assertFalse(known.matches("h96max-h313", "6.18.63-tvb-sunxi64", line))
-        self.assertFalse(known.matches("r69-1", "6.1.172-tvb-rk35xx", "network: bt.find: 01"))
-
-    def test_the_repo_s_composite_failure_is_known_in_either_step(self) -> None:
-        known = Known.load(Path(regression.__file__).parent / "known.conf")
-        for step in ("composite", "display-full"):
-            line = f"{step}: composite PAL writeback colour bars LOST, 720x576"
-            self.assertTrue(any(k.matches("r69-1", "6.1.172-tvb-rk35xx", line) for k in known))
-
     def test_a_crashed_script_is_its_own_failure(self) -> None:
         found = self.verdicts(
             'cpu.ladder 480\nTraceback (most recent call last):\n  File "box.py", line 3\n'
@@ -224,7 +234,7 @@ class ResultsTest(unittest.TestCase):
             (found.checks, found.untested), (0, ["video decode av1 7680x4320: skipped"])
         )
 
-    def test_a_step_entry_skips_the_step_and_matches_no_check(self) -> None:
+    def test_a_step_entry_skips_the_step_where_it_names(self) -> None:
         path = self.dir / "known.conf"
         path.write_text("h96max-h313 6.18* step:recovery  # the watchdog test hangs it\n")
         known = Known.load(path)
@@ -234,7 +244,15 @@ class ResultsTest(unittest.TestCase):
         )
         self.assertIsNone(results.skipped(known, "h96max-h313", "7.3.4-tvb-sunxi64", "recovery"))
         self.assertIsNone(results.skipped(known, "tanix-tx1-v2", "6.18.63-tvb-sunxi64", "recovery"))
-        self.assertFalse(known[0].matches("h96max-h313", "6.18.63-tvb-sunxi64", "recovery: x"))
+
+    def test_a_line_that_is_not_a_step_is_refused(self) -> None:
+        path = self.dir / "known.conf"
+        path.write_text("r69-1 * ^network: bt\\.find: 0$  # a failure, not a step\n")
+        with self.assertRaises(ValueError):
+            Known.load(path)
+
+    def test_the_repo_s_known_conf_loads(self) -> None:
+        Known.load(Path(regression.__file__).parent / "known.conf")
 
     def test_a_run_past_its_profile_s_usual_time_is_flagged(self) -> None:
         (self.dir / "host.txt").write_text("profile short\n")
@@ -368,11 +386,13 @@ class InstallReleasedTest(unittest.TestCase):
         depends = {
             "linux-image-tvb-rk35xx": "linux-image-6.1.172-tvb-rk35xx (= 6.1.172-7), tvb-aic8800-modules",
             "linux-image-tvb-rk35xx-next": "linux-image-6.12.69-tvb-rk35xx (= 6.12.69-7)",
+            "linux-image-tvb-rk35xx-next2": "linux-image-7.3.4-tvb-rk35xx-next2 (= 7.3.4-1)",
         }
         for which, metas in (
             ("own", ["linux-image-tvb-rk35xx"]),
             ("next", ["linux-image-tvb-rk35xx-next"]),
-            ("both", list(depends)),
+            ("both", list(depends)[:2]),
+            ("next2", ["linux-image-tvb-rk35xx-next2"]),
         ):
             with self.subTest(which=which):
                 box = mock.MagicMock()
@@ -391,7 +411,6 @@ class PrepareTest(unittest.TestCase):
         with (
             mock.patch.object(regression, "ROOT", Path(tempfile.mkdtemp())),
             mock.patch.object(regression.subprocess, "run") as run,
-            mock.patch.object(regression.desktop, "make_clips"),
         ):
             regression.prepare("h96max-rk3528", released=True)
         self.assertNotIn("build.sh", " ".join(str(c.args[0][0]) for c in run.call_args_list))

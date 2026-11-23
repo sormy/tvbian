@@ -4,9 +4,9 @@
 From the host, in the repo checkout:
 
     python3 tools/validate/regression.py run [--profile short|default|extended] \\
-        [--kernels own|next|both] [--iperf HOST] [--released] BOARD=USER@HOST
+        [--kernels own|next|next2|both|all] [--iperf HOST] [--released] BOARD=USER@HOST
     python3 tools/validate/regression.py deploy [--profile short|default|extended] \\
-        [--kernels own|next|both] [--iperf HOST] [--released] BOARD=USER@HOST
+        [--kernels own|next|next2|both|all] [--iperf HOST] [--released] BOARD=USER@HOST
     python3 tools/validate/regression.py collect BOARD=USER@HOST ...
     python3 tools/validate/regression.py report build/validate/regression/<date>
 
@@ -28,8 +28,8 @@ back if a kernel brings no network up, and runs the profile's steps:
     video sizes     4K             the whole ladder
     dEQP            1/2000         1/500
 
-    --kernels picks the kernels apart from the profile: the family's own, its -next, or both (the
-    default).
+    --kernels picks the kernels apart from the profile: the family's own, its -next, its -next2
+    (mainline beside the vendor kernels), own and next (both, the default), or all three.
 
 --released tests a box as its owner has it: what it lacks of the release's kernels, board package
 and tools comes from its own apt, nothing is built, and the checks against this tree are left out.
@@ -62,29 +62,26 @@ import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from box import TEST_TOOLS
+from box import PROFILES as SCOPES, TEST_TOOLS
 from onbox import Step
 from gpu import GLES2, SUITE, expectations, suite_toml
-from results import Known, Verdicts, known_reason
+from results import Verdicts
 from va_driver import slower
 from video import worse
-import desktop
 
 ROOT = Path(__file__).resolve().parents[2]
 HERE = ROOT / "tools" / "validate"
 DEBS = ROOT / "build" / "out" / "debs"
 CLIPS = ROOT / "build" / "validate" / "video" / "clips"
-KNOWN = HERE / "known.conf"
 RESULTS = ROOT / "build" / "validate" / "regression"
 INVENTORY = "inventory."  # box.py's device-class lines, which parity compares
 # the VA suite, run against the installed driver, and the session's check, with their clips
 VA_SUITE = ROOT / "va-driver" / "tests"
 VA_FILES = ("vaapi_test.py", "headers.py")
 VA_CLIPS = ROOT / "build" / "out" / "va-driver" / "clips"
-SESSION_CHECK = ROOT / "tests" / "session_check.py"
 DRI_DIR = "/usr/lib/aarch64-linux-gnu/dri"
 # the box's clip folders a new run keeps: only changed clips are sent again
-CLIP_DIRS = {"video": CLIPS, "va-clips": VA_CLIPS, "desktop-clips": desktop.CLIPS}
+CLIP_DIRS = {"video": CLIPS, "va-clips": VA_CLIPS}
 BOX_DIR = "/var/lib/tvb-regress"
 IPERF_PORT = 5201
 COMMAND_S = 600
@@ -94,6 +91,8 @@ POLL_S = 15  # how often run looks at the boxes: a crash is said within this
 ON_BOX = ("onbox.py", "box.py", "display.py", "screen.py", "video.py", "results.py", "known.conf")
 # per kernel family: video.py's engine and the Mesa CI GPU nearest the box's
 ENGINE = {"sunxi64": "sunxi", "rk35xx": "rkmpp", "meson64": "meson"}
+# a series whose kernel reaches the video engines another way than its family's: mainline's V4L2
+SERIES_ENGINE = {"-next2": "rkvdec"}
 GPU = {"sunxi64": "g52", "rk35xx": "lima", "meson64": "lima"}
 PHASES = ("system", "cpu", "storage", "network", "throughput", "display", "audio", "gpu", "input")
 PHASES += ("power",)
@@ -101,11 +100,17 @@ PHASES += ("power",)
 PHASE_SECONDS = {"short": 120, "default": 300, "extended": 1200}
 PROFILES = ("short", "default", "extended")
 # each profile's scope within a test: how long, how many, how much of a sample
-SLEEP_SECONDS = {"short": 10, "default": 20, "extended": 120}  # extended's outlasts the watchdog
-SOAK_SECONDS = {"short": 30, "default": 120, "extended": 1800}
 REBOOTS = {"short": 1, "default": 2, "extended": 5}
-# which of the family's kernels a run boots, a choice apart from the profile: its own, its -next
-KERNELS = {"own": slice(0, 1), "next": slice(1, 2), "both": slice(0, 2)}
+# a family's kernel series: its metapackage's suffix, and its kernel release's
+SERIES = {"own": ("", ""), "next": ("-next", ""), "next2": ("-next2", "-next2")}
+# which series a run boots, a choice apart from the profile
+KERNELS = {
+    "own": ("own",),
+    "next": ("next",),
+    "next2": ("next2",),
+    "both": ("own", "next"),
+    "all": ("own", "next", "next2"),
+}
 # display.py's synthetic screens: short, an SDR and an HDR10 one at their first mode; the rest,
 # every sink and the rating's ladder of modes
 DISPLAY_ARGS = {"short": ["--sinks", "SDR,HDR10", "--no-ladder"], "default": [], "extended": []}
@@ -145,6 +150,11 @@ systemctl daemon-reload
 systemctl enable tvb-regress.service tvb-regress-guard.service
 systemctl start tvb-regress.service
 """
+# the release the box's default entry boots: the entry itself is a position, which installs shift
+DEFAULT_RELEASE = (
+    "awk '/^default/{d=$2} /^label/{l=$2} /^[[:space:]]*linux/ && l==d"
+    ' {sub(/.*vmlinuz-/, "", $2); print $2; exit}\' /boot/extlinux/extlinux.conf'
+)
 INSTALL = """set -e
 export DEBIAN_FRONTEND=noninteractive
 # $1: the suite's tools, a list; the rest: package files. apt's index only for a tool missing
@@ -160,7 +170,7 @@ apt-get install -y -qq --reinstall $missing "$@"
 """
 PACKAGES = "/var/tmp/regress"  # the box's copy of what it was given, kept to skip what is unchanged
 # --released: what the box's apt gives the suite beside its tools and the family's kernels
-RELEASED = ("deqp", "gstreamer1.0-plugins-bad", "libgstreamer-plugins-bad1.0-0")
+RELEASED = ("deqp",)
 RELEASED_HELP = "the release's packages from the box's apt; nothing built"
 DEQP_RUN = """cd deqp
 EGL_PLATFORM=surfaceless LD_LIBRARY_PATH=/usr/lib/deqp/lib /usr/lib/deqp/deqp-runner suite \
@@ -192,16 +202,19 @@ def board_family(board: str) -> str:
     return found.group(1)
 
 
-def kernels(family: str, debs: list[str]) -> list[str]:
-    """The family's kernel and its -next, the newest each metapackage built, as uname names them."""
+def kernels(family: str, debs: list[str], which: str = "all") -> list[str]:
+    """The family's kernels of the series which names, the newest each metapackage built, as uname
+    names them."""
     out = []
-    for name in (f"linux-image-tvb-{family}", f"linux-image-tvb-{family}-next"):
+    for series in KERNELS[which]:
+        meta, release = SERIES[series]
+        name = f"linux-image-tvb-{family}{meta}"
         versions = [
             m.group(1) for d in debs if (m := re.fullmatch(rf"{name}_([\d.]+)-[^_]+_arm64\.deb", d))
         ]
         if versions:
             newest = max(versions, key=lambda v: [int(p) for p in v.split(".")])
-            out.append(f"{newest}-tvb-{family}")
+            out.append(f"{newest}-tvb-{family}{release}")
     return out
 
 
@@ -250,19 +263,23 @@ def short_of(own: str, other: str) -> list[str]:
     return out
 
 
+def engine(family: str, release: str) -> str:
+    """video.py's engine for a kernel: its series', else its family's."""
+    return next((e for s, e in SERIES_ENGINE.items() if release.endswith(s)), ENGINE[family])
+
+
 def steps(profile: str, family: str, iperf: str, board_family_name: str) -> list[Step]:
     """The plan's steps for each kernel, in order: a name, a command run in BOX_DIR, its time.
     Every profile runs every step but short, which skips conformance; it sets how much of each."""
-    soak = SOAK_SECONDS[profile]
-    phase = ["python3", "box.py", "--profile", profile, "--iperf", iperf]
-    phase += ["--sleep", str(SLEEP_SECONDS[profile]), "--soak", str(soak), "--suite"]
+    soak = SCOPES[profile].soak_s
+    phase = ["python3", "box.py", "--profile", profile, "--iperf", iperf, "--suite"]
     out = [Step(name, [*phase, name], PHASE_SECONDS[profile]) for name in PHASES]
     video_box = [
         "python3",
         "video.py",
         "box",
         "--engine",
-        ENGINE[family],
+        "{engine}",
         "--dir",
         f"{BOX_DIR}/video",
     ]
@@ -270,19 +287,18 @@ def steps(profile: str, family: str, iperf: str, board_family_name: str) -> list
     if profile in VIDEO_SIZES:  # joined with =: a regex starting with - would read as an option
         video += ["--suite", "decode", f"--only=-({'|'.join(VIDEO_SIZES[profile])})$"]
     long = STEP_SECONDS[profile]
-    out.append(Step("soak", [*phase, "soak"], soak + 600, ["system"]))
+    out.append(Step("soak", [*phase, "soak"], soak + 600))
     display = ["python3", "display.py", *DISPLAY_ARGS[profile]]
-    out.append(Step("display-full", display, long, ["system"]))
-    out.append(Step("screen", ["python3", "screen.py"], long, ["system"]))
-    out.append(Step("video", video, long, ["system"]))
+    # Composite can leave HDMI writeback unavailable on the vendor kernel.
+    out.append(Step("screen", ["python3", "screen.py"], long))
+    out.append(Step("display-full", display, long))
+    out.append(Step("video", video, long))
     if profile != "short":
-        out.append(Step("conformance", [*video_box, "--suite", "conformance"], long, ["system"]))
+        out.append(Step("conformance", [*video_box, "--suite", "conformance"], long))
     va = ["python3", "vaapi_test.py", "box", "--driver-dir", DRI_DIR]
     va += ["--clips", f"{BOX_DIR}/va-clips", "--family", board_family_name]
-    out.append(Step("va", va, long, ["system"]))
-    session = ["python3", "session_check.py", "desktop", "--box"]
-    out.append(Step("desktop", [*session, "--clips", f"{BOX_DIR}/desktop-clips"], long, ["system"]))
-    out.append(Step("deqp", ["sh", "deqp/run.sh"], long, ["system", "gpu"]))
+    out.append(Step("va", va, long))
+    out.append(Step("deqp", ["sh", "deqp/run.sh"], long))
     out.append(Step("recovery", [], 0))
     out.append(Step("reboots", [], 0))
     return out
@@ -393,10 +409,11 @@ class Deployment:
         ]:
             raise NotStarted(f"no linux-image package for {', '.join(missing)} in {DEBS}")
         wanted += [board.name, *[d.name for d in sorted(DEBS.glob("ffmpeg9_*_arm64.deb"))[-1:]]]
+        # what every box gets, from this tree as the board's package is
+        wanted += [d.name for d in sorted(DEBS.glob("tvb-base_*.deb"))[-1:]]
         wanted += [d.name for d in sorted(DEBS.glob("deqp_*_arm64.deb"))[-1:]]
-        # the VA driver and the GStreamer it is tested through, ours where built
-        for built in ("tvb-va-driver", "gstreamer1.0-plugins-bad", "libgstreamer-plugins-bad1.0-0"):
-            wanted += [d.name for d in sorted(DEBS.glob(f"{built}_*_arm64.deb"))[-1:]]
+        # the VA driver, ours where built
+        wanted += [d.name for d in sorted(DEBS.glob("tvb-va-driver_*_arm64.deb"))[-1:]]
         tree = ROOT / "boards" / self.board / "board.dtb"
         self.inputs = [f"{n.split('_')[0]} {sha(DEBS / n)}" for n in wanted]
         self.inputs.append(f"board.dtb {sha(tree)}")
@@ -421,14 +438,15 @@ class Deployment:
         """The family's kernels, the board's package and the suite's tools from the box's own apt,
         where it lacks them; the kernels as uname names them, from their metapackages."""
         family = board_family(self.board)
-        metas = [f"linux-image-tvb-{family}", f"linux-image-tvb-{family}-next"][KERNELS[which]]
+        metas = [f"linux-image-tvb-{family}{SERIES[s][0]}" for s in KERNELS[which]]
         self.box.root(INSTALL, " ".join([*metas, f"tvb-{self.board}", *TEST_TOOLS, *RELEASED]))
         depends = self.box.run(f"dpkg-query -W -f '${{Depends}}\\n' {shlex.join(metas)}")
         return re.findall(r"^linux-image-(\S+)", depends, re.MULTILINE)
 
-    def bundle(self, releases: list[str], host_lines: list[str]) -> None:
+    def bundle(self, releases: list[str], host_lines: list[str], default: str) -> None:
         """The suite, its plan, its units and the host's checks, into BOX_DIR, replacing any
-        earlier run's; its clips kept, and only those that changed sent."""
+        earlier run's; its clips kept, and only those that changed sent. default: the release to
+        boot by default after the run."""
         family = board_family(self.board)
         kept = " ".join(f"! -name {d}" for d in CLIP_DIRS)
         keep = f"sudo -n find {BOX_DIR} -mindepth 1 -maxdepth 1 {kept} -exec rm -rf {{}} +"
@@ -437,9 +455,7 @@ class Deployment:
             self.box.put(f"{BOX_DIR}/{name}", (HERE / name).read_bytes())
         for name in VA_FILES:
             self.box.put(f"{BOX_DIR}/{name}", (VA_SUITE / name).read_bytes())
-        self.box.put(f"{BOX_DIR}/{SESSION_CHECK.name}", SESSION_CHECK.read_bytes())
-        for folder in ("va-clips", "desktop-clips"):
-            self.sync_clips(folder)
+        self.sync_clips("va-clips")
         plan = {
             "board": self.board,
             "kernels": releases,
@@ -448,6 +464,8 @@ class Deployment:
                 for s in steps(self.profile, family, self.iperf, board_family_name(self.board))
             ],
             "reboots": REBOOTS[self.profile],
+            "engines": {release: engine(family, release) for release in releases},
+            "default": default,
         }
         self.box.put(f"{BOX_DIR}/plan.json", json.dumps(plan, indent=1).encode())
         self.box.put(f"{BOX_DIR}/tvb-regress.service", UNIT.encode())
@@ -515,18 +533,19 @@ def start(profile: str, spec: str, iperf: str | None, which: str, released: bool
     box = Box(target)
     iperf = iperf or address_towards(target.rpartition("@")[2])
     deployment = Deployment(board, box, profile, iperf)
+    default = box.run(DEFAULT_RELEASE).strip()
     if released:
         releases = deployment.install_released(which)
         host_lines = [f"profile {profile}"]
     else:
         debs = [d.name for d in DEBS.glob("*.deb")]
-        releases = kernels(board_family(board), debs)[KERNELS[which]]
+        releases = kernels(board_family(board), debs, which)
         if not releases:
             raise NotStarted(f"no {which} {board_family(board)} kernel package in {DEBS}")
         print(f"{board}: install {deployment.install(releases)}")
         host_lines = [f"profile {profile}", *deployment.host_checks()]
     host_lines += [f"# input {i}" for i in deployment.inputs]
-    deployment.bundle(releases, host_lines)
+    deployment.bundle(releases, host_lines, default)
     failed = [line for line in host_lines if line.startswith("FAIL")]
     print(f"{board}: host checks {'; '.join(failed) or 'pass'}")
     Box(target).root(START)
@@ -551,7 +570,6 @@ def prepare(board: str, released: bool) -> None:
             cwd=ROOT,
             check=True,
         )
-        desktop.make_clips()
 
 
 def board_inputs(board: str) -> str:
@@ -589,13 +607,8 @@ def collect(args: argparse.Namespace) -> int:
 
 
 def ending(folder: Path) -> str:
-    """How a box's collected run ended: done, crashed and why, or not yet."""
-    if (folder / "done").exists():
-        return "done"
-    crashed = folder / "crashed"
-    if crashed.exists():
-        return f"**crashed**: {crashed.read_text().strip().split(' ', 2)[-1]}"
-    return "**not finished**"
+    """How a box's collected run ended: done, or not yet."""
+    return "done" if (folder / "done").exists() else "**not finished**"
 
 
 def fetch(boxes: list[str]) -> Path:
@@ -641,9 +654,9 @@ def fresh(folder: Path) -> Path:
 
 
 def state(box: Box) -> str:
-    """A box's run: done, crashed (its suite's own bug), failed (onbox.py's unit died), or
-    running; a box rebooting between kernels is running."""
-    probe = f"cd {BOX_DIR}/results && for m in done crashed; do test -f $m && echo $m; done; "
+    """A box's run: done, failed (onbox.py's unit died), or running; a box rebooting between
+    kernels is running."""
+    probe = f"cd {BOX_DIR}/results && test -f done && echo done; "
     probe += "systemctl is-failed -q tvb-regress.service && echo failed"
     return (box.run(probe).split() or ["running"])[0]
 
@@ -826,7 +839,6 @@ def report(args: argparse.Namespace) -> int:
         ["git", "-C", str(ROOT), "describe", "--always", "--dirty"], capture_output=True, text=True
     ).stdout.strip()
     rows, details = [], []
-    known = Known.load(KNOWN)
     for board_dir in sorted(p for p in run.iterdir() if p.is_dir()):
         board = board_dir.name
         end = ending(board_dir) + over_budget(board_dir)
@@ -855,19 +867,12 @@ def report(args: argparse.Namespace) -> int:
             if own is not None and own != system_txt and own.exists() and system_txt.exists():
                 gaps = short_of(own.read_text(), system_txt.read_text())
                 total.fails += [f"parity: short of {own.parent.name}: {gap}" for gap in gaps]
-            reasons = {f: known_reason(known, board, kernel, f) for f in total.fails}
-            new = [f for f, why in reasons.items() if why is None]
-            expected = [f"{f}  ({why})" for f, why in reasons.items() if why is not None]
-            counts = f"{total.checks} | {len(new)} | {len(expected)} | {len(total.untested)}"
+            counts = f"{total.checks} | {len(total.fails)} | {len(total.untested)}"
             minutes = duration(board_dir / "run.log", kernel)
             rows.append(f"| {board} | {kernel} | {end}, {minutes} | {counts} |")
             details += [f"### {board}, {kernel}\n", moved_inputs]
-            details += [f"- ❌ {x}" for x in new]
+            details += [f"- ❌ {x}" for x in total.fails]
             details += [f"- ❓ {x}" for x in total.untested]
-            if expected:
-                lines = "\n".join(f"- {x}" for x in expected)
-                summary = f"{len(expected)} known failures, known.conf"
-                details.append(f"\n<details><summary>{summary}</summary>\n\n{lines}\n</details>")
             details.append(step_table(board_dir / "run.log", kernel))
             details.append(video_table(kernel_dir))
             if last is not None:
@@ -884,10 +889,10 @@ def report(args: argparse.Namespace) -> int:
         f"## Regression {run.name}",
         "",
         f"Commit `{commit}`; profile {profiles(run)}; results in `{run.relative_to(ROOT)}`.",
-        "❌ failed and ❓ untested are both not a pass; known failures are listed in known.conf.",
+        "❌ failed and ❓ untested are both not a pass.",
         "",
-        "| Board | Kernel | Run | Checks | ❌ new | ❌ known | ❓ |",
-        "| --- | --- | --- | ---: | ---: | ---: | ---: |",
+        "| Board | Kernel | Run | Checks | ❌ | ❓ |",
+        "| --- | --- | --- | ---: | ---: | ---: |",
     ]
     (run / "report.md").write_text("\n".join([*header, *rows, "", *details]) + "\n")
     print(run / "report.md")
@@ -902,7 +907,9 @@ def main() -> int:
     begin = sub.add_parser("deploy")
     begin.add_argument("--profile", choices=PROFILES, default="default")
     begin.add_argument("--iperf", metavar="HOST", help="the iperf3 server; default: this machine")
-    begin.add_argument("--kernels", choices=KERNELS, default="both", help="the family's own, -next")
+    begin.add_argument(
+        "--kernels", choices=KERNELS, default="both", help="the family's own, -next, -next2"
+    )
     begin.add_argument("--released", action="store_true", help=RELEASED_HELP)
     begin.add_argument("box", metavar="BOARD=USER@HOST")
     gather = sub.add_parser("collect")
@@ -912,7 +919,9 @@ def main() -> int:
     whole = sub.add_parser("run", help="deploy, wait, collect, report")
     whole.add_argument("--profile", choices=PROFILES, default="default")
     whole.add_argument("--iperf", metavar="HOST", help="the iperf3 server; default: this machine")
-    whole.add_argument("--kernels", choices=KERNELS, default="both", help="the family's own, -next")
+    whole.add_argument(
+        "--kernels", choices=KERNELS, default="both", help="the family's own, -next, -next2"
+    )
     whole.add_argument("--released", action="store_true", help=RELEASED_HELP)
     whole.add_argument("box", metavar="BOARD=USER@HOST")
     args = parser.parse_args()

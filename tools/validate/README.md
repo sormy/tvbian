@@ -1,7 +1,8 @@
 # validate — a running box against the bring-up criteria
 
 One script a component, each run from the host or on the box as its header says;
-`docs/bring-up/regression.md` runs them after a change.
+`docs/bring-up/regression.md` runs them after a change. What a script cannot check, a hand, a
+screen, a speaker or a cable, is the list in the same doc.
 
 | Script          | Checks                                                                    |
 | --------------- | ------------------------------------------------------------------------- |
@@ -29,6 +30,9 @@ compared with FFmpeg's software decoder; the decoder's own downscaling; AFBC fra
 and 4K, decoded clean in the decoder's AFBC format; the deinterlacer's frame per field against
 `bwdif`'s; each hardware encoder, decoded back. The same run is the hardware video tables, a board's
 measured matrix, and the regression check after a kernel or FFmpeg change.
+
+The MPP H.264 interlaced decode check compares each output’s preserved luma field against the
+software decoder’s fields in playback order.
 
 ### Run
 
@@ -71,6 +75,8 @@ kernel and date; `compare` lists every case that got worse and exits 1 if any di
 - **LUT:** malformed blobs refused; tables applied while active and held over 60 flips; HDR10 to
   SDR, HLG to SDR, SDR to PQ and HLG to PQ on 64 YUV patches, within two 8-bit codes of the same
   table on the host. It checks that the hardware applies a table, not how good the table is.
+- **HDMI after composite:** a writeback mode that captured before the composite check still accepts
+  capture after the switch back to HDMI.
 - **SDR to HDR:** a short `HDR_EXT_DATA` refused; seven colours to PQ and HLG within two codes of
   BT.2408 (gamma 2.2, BT.709 to BT.2020, white at 203 nits).
 - **Scope:** which planes each stage maps: the interface left alone, or the whole output, recorded.

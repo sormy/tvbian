@@ -23,10 +23,21 @@ CHECK = REPO / "tests/session_check.py"
 CLIPS = REPO / "build/validate/desktop/clips"
 CHECK_TIMEOUT = 1800
 CLIP_SECONDS = 10
-# what a session plays without a dropped frame on every family: 1080p at 60, 4K at 30
+ENCODERS = {
+    "h264": ["-c:v", "libx264", "-preset", "veryfast"],
+    "hevc": ["-c:v", "libx265", "-preset", "ultrafast", "-x265-params", "log-level=error"],
+    "vp9": ["-c:v", "libvpx-vp9", "-deadline", "realtime", "-cpu-used", "8", "-row-mt", "1"],
+}
+SIZES = {
+    "1080p60": ("1920x1080", "60"),
+    "2160p30": ("3840x2160", "30"),
+    "2160p60": ("3840x2160", "60"),
+}
+# what a session plays without a dropped frame: each codec at 1080p60, 4K30 and 4K60
 CLIP_RECIPES = {
-    "h264-1080p60": ["-s", "1920x1080", "-r", "60", "-c:v", "libx264", "-preset", "veryfast"],
-    "hevc-2160p30": ["-s", "3840x2160", "-r", "30", "-c:v", "libx265", "-preset", "ultrafast"],
+    f"{codec}-{tag}": ["-s", size, "-r", rate, *encoder]
+    for codec, encoder in ENCODERS.items()
+    for tag, (size, rate) in SIZES.items()
 }
 
 

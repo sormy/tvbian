@@ -186,6 +186,8 @@ cannot be backed, say so rather than rounding up.
   they update.
 - **Checklist IDs live in `docs/bring-up/` alone**: a board's Test report, its worklog, commits and
   messages name what a line checks, since IDs drift.
+- **A check is never a todo, unless it waits on a person.** Checks live in `docs/bring-up/`, a hand
+  check marked 👤; one a board still waits on is a 👤 item on its todo page until done.
 - **A todo goes where its scope is.** `docs/todo/README.md` holds what spans families, and indexes
   the folder: `<family>.md` for what spans a family's boards (`rk35xx`), `<chip>.md` for a Wi-Fi/BT
   chip whatever board carries it (`aic8800`), `<board>.md` for one box, and `<topic>.md` for a
@@ -346,12 +348,20 @@ guess, a test or another board's tree.
   as `ssh root@<BOARD_HOSTNAME>.local`.
 - **Test everything unattended, and fast.** Synthetic EDIDs, emulators and writeback stand in for
   screens and people; a suite fails fast and runs in minutes.
+- **A test waits on events, each wait bounded by a timeout, not on sleeps**: a socket appearing, a
+  page's beacon, a frame shown, a process exiting. A fixed sleep is too long on a quiet box and too
+  short on a busy one; the timeout only ends a hang, and says which wait hung.
 - **Bring-up and fixes run unattended.** Exhaust the box's readback, the repo and `backup/` before
   asking a person to look, listen or plug in. Make the ask one step, and add the test it shows is
   missing. When the ask is timed, a person watching or acting soon after the agent starts something
   (a button held through a reboot), start only on their word that they are ready.
 - **`/dev/mem`: only the offsets the driver uses, while its power domain is on**; anything else
   hangs or resets the box.
+- **A box without a screen gets one in software for a display test**: a panel's EDID
+  (`tools/validate/edid-boe-2256x1504.bin`, the M2 Plus's) into
+  `/sys/kernel/debug/dri/0/<connector>/edid_override` and `on` into its `force`, written with
+  `printf`: the kernel refuses `echo`'s newline. `reset` and `unspecified` undo both. A result on a
+  connector whose `status` reads `disconnected` proves nothing: check it first.
 - **A box's `/tmp` is RAM**: big files go to `/var/tmp`; remove what you wrote.
 - **A `cma=` in `BOARD_CMDLINE`, where the tree's pool is wrong, covers the worst case**, the
   largest uncompressed picture, a seek, a resolution change and the interface up, plus a margin,

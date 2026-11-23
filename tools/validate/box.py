@@ -41,6 +41,9 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from display import SINKS, hdr_edid, hdr_sink  # noqa: E402
+
 Line = tuple[str, str]
 NONE = "none"
 # Wi-Fi drivers with more than one mode: the module parameters to load each with, and whether
@@ -48,6 +51,10 @@ NONE = "none"
 MODES: dict[str, list[tuple[str, bool]]] = {
     "atbm6031": [("wifi_bt_comb=0", False), ("wifi_bt_comb=1", True)]
 }
+# the modules this box's devices ask for, by modalias
+MODALIAS_MODULES = (
+    "cat /sys/bus/*/devices/*/modalias 2>/dev/null | sort -u | xargs -r -n1 modprobe -qR"
+)
 # the device classes a kernel must offer as many of as the board's own: each a glob, the name its stem
 INVENTORY = {
     "net": "/sys/class/net/*",
@@ -181,6 +188,8 @@ class Profile:
     iperf_runs: int
     loaded_s: int
     reloads: int
+    sleep_s: int  # s2idle: extended's outlasts the watchdog's 80 s
+    soak_s: int
     glmark2: str  # glmark2's scene options; empty for its whole default suite
     driver_modes: bool = True  # each mode a radio's driver offers, reloaded; else the one loaded
 
@@ -197,6 +206,8 @@ PROFILES = {
         iperf_runs=1,
         loaded_s=10,
         reloads=1,
+        sleep_s=10,
+        soak_s=30,
         glmark2="-b build",
         driver_modes=False,
     ),
@@ -211,6 +222,8 @@ PROFILES = {
         iperf_runs=1,
         loaded_s=20,
         reloads=1,
+        sleep_s=20,
+        soak_s=120,
         glmark2="-b build -b texture -b shading -b effect2d -b desktop",
     ),
     "extended": Profile(
@@ -224,6 +237,8 @@ PROFILES = {
         iperf_runs=3,
         loaded_s=60,
         reloads=3,
+        sleep_s=120,
+        soak_s=1800,
         glmark2="",
     ),
 }
@@ -428,11 +443,22 @@ def hwrng() -> str:
     return f"{current}: unreadable"
 
 
+def iommu_lines(interrupts: str) -> list[str]:
+    """The /proc/interrupts lines an IOMMU alone serves: one it shares with its master (VOP2's)
+    counts the master's own interrupts, and that IOMMU's faults show in iommu.faults instead."""
+    out = []
+    for line in interrupts.splitlines():
+        actions = re.split(r"\s(?:Level|Edge)\s", line, maxsplit=1)[-1].split(",")
+        if all("mmu" in a.lower() for a in actions):
+            out.append(line)
+    return out
+
+
 def iommu_irqs() -> str:
     """The IOMMU's interrupt count over 10 s at idle: one still firing is a fault storm."""
 
     def count() -> int:
-        lines = [l for l in read("/proc/interrupts").splitlines() if "iommu" in l.lower()]
+        lines = iommu_lines(read("/proc/interrupts"))
         return sum(int(x) for l in lines for x in l.split()[1:] if x.isdigit())
 
     before = count()
@@ -441,11 +467,14 @@ def iommu_irqs() -> str:
 
 
 def missing_modules() -> str:
+    """Our packages' modules a device on this box asks for, by its modalias, yet not loaded: a
+    module for a chip the box does not carry is not missing."""
     packages = sh("dpkg-query -W -f '${Package}\\n' 'tvb-*-modules-*'").split()
     files = sh(f"dpkg -L {' '.join(packages)}").splitlines() if packages else []
-    wanted = {Path(f).name.removesuffix(".ko") for f in files if f.endswith(".ko")}
+    ours = {Path(f).name.removesuffix(".ko") for f in files if f.endswith(".ko")}
+    asked = set(sh(MODALIAS_MODULES).split())
     loaded = {line.split()[0] for line in read("/proc/modules").splitlines()}
-    return " ".join(sorted(wanted - loaded)) or NONE
+    return " ".join(sorted({m.replace("-", "_") for m in ours} & asked - loaded)) or NONE
 
 
 def watchdog() -> str:
@@ -929,16 +958,22 @@ def max_channels(card: str) -> int:
 
 @contextlib.contextmanager
 def screen() -> Iterator[None]:
-    """A connected HDMI connector for the time: glmark2 asks for one even off-screen. Forced on
-    where nothing is plugged in, and back to detecting after."""
-    forced = [] if hdmi_connected() else glob.glob("/sys/class/drm/card*-HDMI-A-*/status")
-    for status in forced:
-        Path(status).write_text("on")
-    try:
+    """A connected HDMI connector for the time: glmark2 asks for one even off-screen, and scans out
+    whatever mode the connector has, which costs the GPU memory bandwidth. Where nothing is plugged
+    in, a synthetic 1080p60 screen, so every box renders at one size; forced on where the kernel
+    takes no EDID override, and back to detecting after."""
+    if hdmi_connected():
         yield
-    finally:
+        return
+    with hdr_sink(hdr_edid(SINKS["SDR"])) as synthetic:
+        forced = [] if synthetic else glob.glob("/sys/class/drm/card*-HDMI-A-*/status")
         for status in forced:
-            Path(status).write_text("detect")
+            Path(status).write_text("on")
+        try:
+            yield
+        finally:
+            for status in forced:
+                Path(status).write_text("detect")
 
 
 def hdmi_connected() -> bool:
@@ -1291,13 +1326,13 @@ def main() -> int:
     parser.add_argument("--suite", default=",".join(SUITES), help="comma-separated")
     parser.add_argument("--profile", choices=PROFILES, default="default")
     parser.add_argument("--iperf", default="", help="an iperf3 server the box resolves")
-    parser.add_argument(
-        "--sleep", type=int, default=120, help="s2idle seconds: past the watchdog's 80 s (W6)"
-    )
-    parser.add_argument("--soak", type=int, default=1800, help="soak seconds")
+    parser.add_argument("--sleep", type=int, help="s2idle seconds; the profile's by default")
+    parser.add_argument("--soak", type=int, help="soak seconds; the profile's by default")
     args = parser.parse_args()
     global PROFILE
     PROFILE = PROFILES[args.profile]
+    sleep_s = args.sleep or PROFILE.sleep_s
+    soak_s = args.soak or PROFILE.soak_s
     suites: dict[str, Callable[[], Iterator[Line]]] = {
         "system": system,
         "cpu": cpu,
@@ -1308,8 +1343,8 @@ def main() -> int:
         "audio": audio,
         "gpu": gpu,
         "input": input_,
-        "power": lambda: power(args.sleep),
-        "soak": lambda: soak(args.soak, args.iperf),
+        "power": lambda: power(sleep_s),
+        "soak": lambda: soak(soak_s, args.iperf),
     }
     failed = False
     for name in args.suite.split(","):

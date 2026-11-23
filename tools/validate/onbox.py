@@ -19,11 +19,12 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from results import Known, crash, new_failures, skipped
+from results import Known, crash, skipped
 
 HERE = Path(__file__).resolve().parent
 RESULTS = HERE / "results"
@@ -38,6 +39,13 @@ BOOT_S = 120  # a reset's boot, past which the box waited on a power cycle
 WDIOC_GETTIMEOUT = 0x80045707
 WDIOC_SETTIMEOUT = 0xC0045706
 WATCHDOG_TEST_S = 10  # the unpinged watchdog's timeout: systemd's 80 s proves nothing more
+CMA = Path("/sys/kernel/debug/cma")
+CMA_SAMPLE_S = 0.05  # a decoder holds a frame's buffers longer than this
+CMA_HEADROOM = 0.9  # a step's peak share of the pool: a seek or a resolution change needs the rest
+
+
+# a step command's word replaced by the engine of the kernel it runs on
+ENGINE_SLOT = "{engine}"
 
 
 @dataclass
@@ -45,7 +53,6 @@ class Step:
     name: str
     command: list[str]
     seconds: int
-    needs: list[str] = field(default_factory=list)  # steps whose new failures make this one moot
 
 
 @dataclass
@@ -54,12 +61,21 @@ class Plan:
     kernels: list[str]
     steps: list[Step]
     reboots: int
+    engines: dict[str, str] = field(default_factory=dict)  # kernel -> video.py's engine for it
+    default: str = ""  # the release the box booted by default before the run's installs
 
     @staticmethod
     def load() -> Plan:
         raw = json.loads((HERE / "plan.json").read_text())
         steps = [Step(**s) for s in raw["steps"]]
-        return Plan(raw["board"], raw["kernels"], steps, raw["reboots"])
+        return Plan(
+            raw["board"],
+            raw["kernels"],
+            steps,
+            raw["reboots"],
+            raw.get("engines", {}),
+            raw.get("default", ""),
+        )
 
 
 @dataclass
@@ -149,13 +165,54 @@ def record(out: Path, name: str, lines: list[str]) -> None:
         f.write("\n".join(lines) + "\n")
 
 
-def run(step: Step, out: Path) -> None:
-    """One step's output to out/<name>.txt, killed with its children past its time."""
+class CmaPeak:
+    """The CMA pools' peak allocation while a step runs, sampled. debugfs counts what cma_alloc
+    handed out, unlike CmaFree, which movable pages borrowing the pool also lower."""
+
+    def __init__(self) -> None:
+        self.pools = [pool for pool in CMA.glob("*") if (pool / "used").exists()]
+        self.peak = 0
+        self.stop = threading.Event()
+        self.thread = threading.Thread(target=self.sample, daemon=True)
+
+    def pages(self, name: str) -> int:
+        return sum(int((pool / name).read_text()) for pool in self.pools)
+
+    def sample(self) -> None:
+        while not self.stop.wait(CMA_SAMPLE_S):
+            self.peak = max(self.peak, self.pages("used"))
+
+    def __enter__(self) -> CmaPeak:
+        if self.pools:
+            self.thread.start()
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.stop.set()
+        if self.pools:
+            self.thread.join()
+
+    def lines(self, step: str) -> list[str]:
+        """The peak against the pool, failed past the headroom; nothing without debugfs."""
+        if not self.pools:
+            return []
+        total = self.pages("count")
+        mib = os.sysconf("SC_PAGE_SIZE") / 2**20
+        lines = [f"cma.peak.mib {self.peak * mib:.1f} of {total * mib:.0f}"]
+        if self.peak > total * CMA_HEADROOM:
+            lines.append(f"FAIL cma.peak.mib: {step} took {self.peak / total:.0%} of the pool")
+        return lines
+
+
+def run(step: Step, out: Path, engine: str = "") -> None:
+    """One step's output to out/<name>.txt, killed with its children past its time; its command's
+    ENGINE_SLOT the running kernel's video engine."""
     out.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
-    with (out / f"{step.name}.txt").open("w") as f:
+    with (out / f"{step.name}.txt").open("w") as f, CmaPeak() as cma:
+        command = [engine if word == ENGINE_SLOT else word for word in step.command]
         process = subprocess.Popen(
-            step.command, cwd=HERE, stdout=f, stderr=subprocess.STDOUT, start_new_session=True
+            command, cwd=HERE, stdout=f, stderr=subprocess.STDOUT, start_new_session=True
         )
         try:
             status = str(process.wait(timeout=step.seconds))
@@ -164,6 +221,7 @@ def run(step: Step, out: Path) -> None:
             process.wait()
             status = f"KILLED past {step.seconds} s"
             f.write(f"FAIL {step.name}: {status}\n")
+        f.write("".join(f"{line}\n" for line in cma.lines(step.name)))
         f.write(f"exit {status}\n")
     log(f"{out.name}: {step.name} exit {status}, {time.monotonic() - started:.0f} s")
 
@@ -206,11 +264,8 @@ def ended(state: State, out: Path) -> None:
 def step() -> int:
     plan, state = Plan.load(), State.load()
     if not state.default:
-        state.default = default_entry()
-    try:
-        return run_kernels(plan, state)
-    except Crashed as error:  # fail fast: stop the run, say why
-        return finish(state, "crashed", str(error))
+        state.default = (entry_for(plan.default) if plan.default else None) or default_entry()
+    return run_kernels(plan, state)
 
 
 def run_kernels(plan: Plan, state: State) -> int:
@@ -250,11 +305,6 @@ def run_kernels(plan: Plan, state: State) -> int:
     return finish(state, "done", "the default back")
 
 
-class Crashed(Exception):
-    """A step's script died of its own bug: every result after it would be the suite's, not the
-    box's."""
-
-
 def finish(state: State, marker: str, why: str) -> int:
     """The run over, done or crashed: the default boot back, the units off, the marker the host
     waits for."""
@@ -286,18 +336,12 @@ def carry_on(plan: Plan, state: State, out: Path) -> bool:
                 state.begin("reboot")
                 reboot()
                 return False
-        elif blocked := new_failures(out, item.needs, known, plan.board):
-            # an expensive step on a box already failing in new ways measures nothing worth its time
-            reason = f"not run, new failures before it: {'; '.join(blocked[:3])}"
-            record(out, item.name, [f"{item.name} {reason}", f"UNTESTED {item.name}"])
-            log(f"{out.name}: {item.name} {reason}")
         else:
             state.begin("step", item.name)
-            run(item, out)
+            run(item, out, plan.engines.get(out.name, ""))
             state.pending = None
-            if why := crash(out / f"{item.name}.txt"):
-                state.save()
-                raise Crashed(f"{out.name}: {item.name}: {why}")
+            if why := crash(out / f"{item.name}.txt"):  # the suite's bug: failed, the run goes on
+                log(f"{out.name}: {item.name} crashed: {why}")
         state.steps_done.append(item.name)
         state.save()
     return True

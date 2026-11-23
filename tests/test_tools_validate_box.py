@@ -83,3 +83,15 @@ class VerdictTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class IommuLinesTest(unittest.TestCase):
+    def test_an_iommu_shared_with_its_master_is_left_out(self) -> None:
+        interrupts = """           CPU0       CPU1
+ 24:          0          0     GICv2 127 Level     ff740800.iommu
+ 37:     153921          0     GICv2 141 Level     ff847e00.iommu, ff840000.vop
+ 62:          5          0     GICv2 121 Level     gpmmu
+ 70:        900          0     GICv2 150 Edge      ff8d0000.hdmi
+"""
+        lines = box.iommu_lines(interrupts)
+        self.assertEqual([l.split(":")[0].strip() for l in lines], ["24", "62"])

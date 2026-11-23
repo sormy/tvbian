@@ -55,3 +55,4 @@
 - [ ] **N20** `iw list`'s interface modes match stock's; once a chip
 - [ ] **N21** Each address comes from the best source the box has
 - [ ] **N22** 👤 The printed address is in use on its interface
+- [ ] **N23** 👤 Ethernet unplugged and plugged back: the link returns at its speed

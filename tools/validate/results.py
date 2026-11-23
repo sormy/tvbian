@@ -1,11 +1,10 @@
-"""A step's results on the box, judged: its checks, its failures and untested lines, and which of
-the failures are known (known.conf) rather than new. Read by regression.py's report on the host and
-by onbox.py's gate on the box, so both judge alike."""
+"""A step's results on the box, judged: its checks, its failures and untested lines; and the steps
+known.conf keeps from running where they break a box. Read by regression.py's report on the host
+and by onbox.py on the box."""
 
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass
 from fnmatch import fnmatch
 from pathlib import Path
@@ -15,7 +14,6 @@ from video import FAILING
 SKIPPED = "77"  # a step's exit status for nothing to test on this box
 TRACEBACK = "Traceback (most recent call last):"
 SKIP = "step:"  # known.conf's form for a step not run: step:<name>
-NOTHING = "(?!)"  # a pattern no line matches
 
 
 def crash(path: Path) -> str | None:
@@ -47,7 +45,9 @@ class Verdicts:
             if line.startswith("{") and '"verdict"' in line:  # video.py's records
                 record = json.loads(line)
                 case = f"{record.get('suite')} {record.get('codec')} {record.get('size')}"
-                if record["verdict"] == "skipped":  # a --skip hazard, or past the box: recorded, never run
+                if (
+                    record["verdict"] == "skipped"
+                ):  # a --skip hazard, or past the box: recorded, never run
                     why = f", {record['why']}" if "why" in record else ""
                     found.untested.append(f"video {case}: skipped{why}")
                     continue
@@ -77,14 +77,13 @@ class Verdicts:
 
 @dataclass(frozen=True)
 class Known:
-    """A failure known and not yet fixed, from known.conf: which boards and kernels, which check;
-    or, as step:<name>, a step not run there at all until the fix lands."""
+    """A step known to break a box, from known.conf: the boards and kernels it is not run on, and
+    why, until the fix lands."""
 
     boards: tuple[str, ...]
     kernels: str
-    check: re.Pattern[str]
+    step: str
     reason: str
-    step: str = ""
 
     @staticmethod
     def load(path: Path) -> list[Known]:
@@ -93,31 +92,18 @@ class Known:
             entry, _, reason = line.partition("  # ")
             if not entry.strip() or entry.startswith("#"):
                 continue
-            boards, kernels, check = entry.split(None, 2)
-            step = check.removeprefix(SKIP) if check.startswith(SKIP) else ""
-            pattern = re.compile(NOTHING if step else check)
-            out.append(Known(tuple(boards.split(",")), kernels, pattern, reason.strip(), step))
+            boards, kernels, step = entry.split()
+            if not step.startswith(SKIP):
+                raise ValueError(f"known.conf: not a step:<name> line: {line}")
+            out.append(
+                Known(tuple(boards.split(",")), kernels, step.removeprefix(SKIP), reason.strip())
+            )
         return out
 
     def on(self, board: str, kernel: str) -> bool:
         return any(fnmatch(board, b) for b in self.boards) and fnmatch(kernel, self.kernels)
 
-    def matches(self, board: str, kernel: str, line: str) -> bool:
-        return self.on(board, kernel) and bool(self.check.search(line))
-
 
 def skipped(known: list[Known], board: str, kernel: str, step: str) -> str | None:
     """Why known.conf keeps a step from running on this board and kernel, if it does."""
     return next((k.reason for k in known if k.step == step and k.on(board, kernel)), None)
-
-
-def known_reason(known: list[Known], board: str, kernel: str, line: str) -> str | None:
-    return next((k.reason for k in known if k.matches(board, kernel, line)), None)
-
-
-def new_failures(folder: Path, names: list[str], known: list[Known], board: str) -> list[str]:
-    """The failures in the steps named, of the kernel whose results folder this is, that
-    known.conf does not name."""
-    kernel = folder.name
-    found = [f"{n}: {f}" for n in names for f in Verdicts.of(folder / f"{n}.txt").fails]
-    return [f for f in found if known_reason(known, board, kernel, f) is None]

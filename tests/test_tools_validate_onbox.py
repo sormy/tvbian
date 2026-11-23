@@ -53,6 +53,18 @@ class OnboxTest(unittest.TestCase):
         sync.assert_called_once()  # the panic comes next: an unsynced save loops the box
         self.assertEqual(onbox.State.load(), state)
 
+    def test_the_run_ends_on_the_kernel_the_box_booted_before_its_installs(self) -> None:
+        """An install regenerates the menu and moves the default: the plan names the release."""
+        onbox.HERE, onbox.RESULTS = self.dir, self.dir / "results"
+        onbox.RESULTS.mkdir()
+        onbox.set_default("l0")  # the install's doing
+        plan = {"board": "tanix-tx1-v2", "kernels": [], "steps": [], "reboots": 0}
+        plan["default"] = "6.18.63-tvb-sunxi64"
+        (self.dir / "plan.json").write_text(json.dumps(plan))
+        with mock.patch.object(onbox, "reboot"), mock.patch.object(onbox.subprocess, "run"):
+            onbox.step()
+        self.assertEqual(onbox.default_entry(), "l1")
+
     def test_a_run_boots_the_kernel_it_already_runs(self) -> None:
         """What the run installed is live only after a boot: the first kernel's included."""
         onbox.HERE, onbox.RESULTS = self.dir, self.dir / "results"
@@ -75,26 +87,21 @@ class OnboxTest(unittest.TestCase):
         self.assertEqual(pending.kind if pending else None, "switch")
         self.assertEqual(onbox.default_entry(), "l1")
 
-    def gated(self, known: str) -> Path:
-        """A plan whose system step fails a check, then a video step that needs it: its folder."""
+    def planned(self, known: str) -> Path:
+        """A plan whose system step fails a check, then a video step: its folder."""
         onbox.HERE, onbox.RESULTS = self.dir, self.dir / "results"
         (self.dir / "known.conf").write_text(known)
         failing = onbox.Step(
             "system", ["sh", "-c", "echo 'dmesg.errors 3'; echo 'FAIL dmesg.errors'"], 30
         )
-        video = onbox.Step("video", ["sh", "-c", "touch ran"], 30, ["system"])
+        video = onbox.Step("video", ["sh", "-c", "touch ran"], 30)
         plan = onbox.Plan("tanix-tx1-v2", ["6.18.63-tvb-sunxi64"], [failing, video], 0)
         out = self.dir / "results" / "6.18.63-tvb-sunxi64"
         onbox.carry_on(plan, onbox.State(), out)
         return out
 
-    def test_a_new_failure_gates_the_steps_that_need_it(self) -> None:
-        out = self.gated("")
-        self.assertFalse((self.dir / "ran").exists())
-        self.assertIn("UNTESTED video", (out / "video.txt").read_text())
-
-    def test_a_known_failure_does_not(self) -> None:
-        self.gated("tanix-* * ^system: dmesg\\.errors: 3$  # known\n")
+    def test_a_failure_does_not_stop_the_steps_after_it(self) -> None:
+        self.planned("")
         self.assertTrue((self.dir / "ran").exists())
 
     def test_a_step_that_reset_the_box_is_failed_not_rerun(self) -> None:
@@ -131,7 +138,7 @@ class OnboxTest(unittest.TestCase):
                 self.assertEqual(state.recovery, recovery)
                 self.assertEqual((out / "recovery.txt").read_text().splitlines()[1:], tail)
 
-    def test_a_crashed_step_ends_the_run_and_nothing_after_it_runs(self) -> None:
+    def test_a_crashed_step_is_its_failure_and_the_run_goes_on(self) -> None:
         onbox.HERE, onbox.RESULTS = self.dir, self.dir / "results"
         dying = onbox.Step("soak", ["python3", "-c", "raise TimeoutError('glmark2')"], 30)
         after = onbox.Step("video", ["sh", "-c", "touch ran"], 30)
@@ -146,12 +153,13 @@ class OnboxTest(unittest.TestCase):
             mock.patch.object(onbox.subprocess, "run"),
         ):
             onbox.step()
-        self.assertFalse((self.dir / "ran").exists())
-        self.assertIn("soak: TimeoutError: glmark2", (self.dir / "results" / "crashed").read_text())
-        self.assertFalse((self.dir / "results" / "done").exists())
+        self.assertTrue((self.dir / "ran").exists())
+        self.assertTrue((self.dir / "results" / "done").exists())
+        soak = self.dir / "results" / "6.18.63-tvb-sunxi64" / "soak.txt"
+        self.assertIn("TimeoutError: glmark2", soak.read_text())
 
     def test_a_step_known_conf_skips_is_untested_not_run(self) -> None:
-        out = self.gated("tanix-* * step:video  # hangs the box until the fix lands\n")
+        out = self.planned("tanix-* * step:video  # hangs the box until the fix lands\n")
         self.assertFalse((self.dir / "ran").exists())
         self.assertIn(
             "video skipped, known.conf: hangs the box until the fix lands",
@@ -161,3 +169,51 @@ class OnboxTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CmaPeakTest(unittest.TestCase):
+    def pool(self, root: Path, used: int, count: int) -> None:
+        (root / "reserved").mkdir()
+        (root / "reserved" / "used").write_text(f"{used}\n")
+        (root / "reserved" / "count").write_text(f"{count}\n")
+
+    def lines(self, peak: int, count: int = 4096) -> list[str]:
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.object(onbox, "CMA", Path(tmp)),
+            mock.patch.object(onbox.os, "sysconf", return_value=4096),  # the boxes' page
+        ):
+            self.pool(Path(tmp), 0, count)
+            cma = onbox.CmaPeak()
+            cma.peak = peak
+            return cma.lines("video")
+
+    def test_a_peak_within_the_headroom_is_reported(self) -> None:
+        self.assertEqual(self.lines(1024), ["cma.peak.mib 4.0 of 16"])
+
+    def test_a_peak_past_the_headroom_fails(self) -> None:
+        self.assertEqual(self.lines(4000)[1], "FAIL cma.peak.mib: video took 98% of the pool")
+
+    def test_no_debugfs_reports_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(onbox, "CMA", Path(tmp)):
+            self.assertEqual(onbox.CmaPeak().lines("video"), [])
+
+    def test_the_sampler_catches_a_peak_between_reads(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(onbox, "CMA", Path(tmp)):
+            self.pool(Path(tmp), 512, 4096)
+            with onbox.CmaPeak() as cma:
+                (Path(tmp) / "reserved" / "used").write_text("2048\n")
+                cma.stop.wait(onbox.CMA_SAMPLE_S * 4)
+                (Path(tmp) / "reserved" / "used").write_text("0\n")
+                cma.stop.wait(onbox.CMA_SAMPLE_S * 4)
+            self.assertEqual(cma.peak, 2048)
+
+
+class EngineSlotTest(unittest.TestCase):
+    def test_a_step_s_engine_word_is_the_running_kernel_s(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "7.3.4-tvb-rk35xx-next2"
+            step = onbox.Step("video", ["echo", "--engine", onbox.ENGINE_SLOT], 10)
+            with mock.patch.object(onbox, "RESULTS", Path(tmp)):
+                onbox.run(step, out, "rkvdec")
+            self.assertIn("--engine rkvdec", (out / "video.txt").read_text())

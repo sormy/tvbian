@@ -36,3 +36,4 @@ goes on in `research/`.
 - [ ] **X3** Any regulatory country can be set
 - [ ] **X4** The module loads and unloads cleanly, repeatedly
 - [ ] **X5** The firmware's origin is in its package's `README.md`
+- [ ] **X7** 👤 Bluetooth audio: headphones or a speaker pair and play, a stream lasting minutes

@@ -5,7 +5,9 @@ from __future__ import annotations
 import subprocess
 import sys
 import unittest
+from contextlib import nullcontext
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools/validate"))
@@ -45,6 +47,29 @@ class DisplayFreeTest(unittest.TestCase):
             with self.assertRaises(RuntimeError), display.display_free():
                 raise RuntimeError("a check crashed")
         self.assertEqual(calls[-1], ["systemctl", "start", display.SESSION_UNITS[0]])
+
+
+class DisplayOrderTest(unittest.TestCase):
+    def test_hdmi_capture_failure_after_composite_has_its_own_result(self) -> None:
+        box = SimpleNamespace(passes=1, failures=0, check=mock.Mock())
+        composite = SimpleNamespace(passes=1, failures=0, mode_set=True)
+        checks = mock.Mock()
+        checks.hdmi.return_value = box
+        checks.composite.return_value = composite
+        checks.capture.side_effect = [True, False]
+        with (
+            mock.patch.object(display, "hdr_sink", side_effect=lambda *_: nullcontext(True)),
+            mock.patch.object(display, "run", checks.hdmi),
+            mock.patch.object(display, "run_composite", checks.composite),
+            mock.patch.object(display, "hdmi_writeback_available", checks.capture),
+            mock.patch("builtins.print"),
+        ):
+            display.main([], False)
+        self.assertEqual(
+            checks.mock_calls,
+            [mock.call.hdmi(True), mock.call.capture(), mock.call.composite(), mock.call.capture()],
+        )
+        box.check.assert_called_once_with("HDMI writeback after composite", False)
 
 
 if __name__ == "__main__":
