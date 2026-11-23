@@ -1,0 +1,54 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Thu, 19 Nov 2026 01:41:07 -0500
+Subject: [PATCH] avutil/hwcontext_v4l2request: map non-split AFBC 16x16 formats
+
+Rockchip's rkvdec writes AFBC in 16x16 blocks, sparse but not split, as
+V4L2_PIX_FMT_AFBC_YUV420_16x16 and its 10-bit sibling. Export them with
+the matching modifier, so the "afbc" option asks a decoder for them as it
+does for Cedrus's split formats. The formats are defined where the
+kernel's headers predate them.
+---
+ libavutil/hwcontext_v4l2request.c | 22 ++++++++++++++++++++++
+ 1 file changed, 22 insertions(+)
+
+diff --git a/libavutil/hwcontext_v4l2request.c b/libavutil/hwcontext_v4l2request.c
+index 817e387..d51391c 100644
+--- a/libavutil/hwcontext_v4l2request.c
++++ b/libavutil/hwcontext_v4l2request.c
+@@ -52,6 +52,12 @@
+ #ifndef V4L2_PIX_FMT_YUV420_10_AFBC_16X16_SPLIT
+ #define V4L2_PIX_FMT_YUV420_10_AFBC_16X16_SPLIT v4l2_fourcc('A', 'S', '0', '1')
+ #endif
++#ifndef V4L2_PIX_FMT_AFBC_YUV420_16x16
++#define V4L2_PIX_FMT_AFBC_YUV420_16x16 v4l2_fourcc('A', 'N', '6', '8')
++#endif
++#ifndef V4L2_PIX_FMT_AFBC_YUV420_16x16_10
++#define V4L2_PIX_FMT_AFBC_YUV420_16x16_10 v4l2_fourcc('A', 'N', '6', 'a')
++#endif
+ 
+ typedef struct V4L2RequestVideoDecoder {
+     dev_t media_dev;
+@@ -139,6 +145,22 @@ static const struct {
+         .bit_depth = 10,
+     },
+ #endif
++    {
++        .pixelformat = V4L2_PIX_FMT_AFBC_YUV420_16x16,
++        .sw_format = AV_PIX_FMT_YUV420P,
++        .drm_format = DRM_FORMAT_YUV420_8BIT,
++        .format_modifier = DRM_FORMAT_MOD_ARM_AFBC(AFBC_FORMAT_MOD_BLOCK_SIZE_16x16 |
++                                                   AFBC_FORMAT_MOD_SPARSE),
++        .bit_depth = 8,
++    },
++    {
++        .pixelformat = V4L2_PIX_FMT_AFBC_YUV420_16x16_10,
++        .sw_format = AV_PIX_FMT_YUV420P10,
++        .drm_format = DRM_FORMAT_YUV420_10BIT,
++        .format_modifier = DRM_FORMAT_MOD_ARM_AFBC(AFBC_FORMAT_MOD_BLOCK_SIZE_16x16 |
++                                                   AFBC_FORMAT_MOD_SPARSE),
++        .bit_depth = 10,
++    },
+ #if defined(V4L2_PIX_FMT_NV12_COL128) && defined(V4L2_PIX_FMT_NV12_10_COL128)
+     { V4L2_PIX_FMT_NV12_COL128, AV_PIX_FMT_YUV420P, DRM_FORMAT_NV12, DRM_FORMAT_MOD_BROADCOM_SAND128, 8 },
+ #if defined(DRM_FORMAT_P030)

@@ -1,0 +1,34 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Wed, 18 Nov 2026 01:03:06 -0500
+Subject: [PATCH] avutil/hwcontext_v4l2request: read the OUTPUT capabilities of
+ the codec format
+
+A driver may hold a CAPTURE buffer for one codec and not another, as
+Hantro does for H.264 alone: the capabilities read before the codec's
+format is set are the default format's. Read them again once it is set,
+so a decoder that takes a picture whole is handed one.
+---
+ libavutil/hwcontext_v4l2request.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/libavutil/hwcontext_v4l2request.c b/libavutil/hwcontext_v4l2request.c
+index c885c68..817e387 100644
+--- a/libavutil/hwcontext_v4l2request.c
++++ b/libavutil/hwcontext_v4l2request.c
+@@ -594,6 +594,15 @@ static int v4l2request_probe_video_device(AVHWFramesContext *hwfc,
+         goto fail;
+     }
+ 
++    // The capabilities again, now of the codec format: holding a CAPTURE buffer may depend on it
++    buffers = (struct v4l2_create_buffers) {
++        .count = 0,
++        .memory = V4L2_MEMORY_MMAP,
++        .format.type = fctxi->output.format.type,
++    };
++    if (ioctl(fctxi->video_fd, VIDIOC_CREATE_BUFS, &buffers) >= 0)
++        fctxi->output.capabilities = buffers.capabilities;
++
+     /*
+      * Set any codec specific controls that can help assist the driver
+      * make a decision on what CAPTURE buffer format can be used.

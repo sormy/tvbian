@@ -1,0 +1,111 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Wed, 18 Nov 2026 00:27:05 -0500
+Subject: [PATCH] avcodec/v4l2_request_mpeg4: a VOP whole to a decoder that
+ parses its packets
+
+A decoder that cannot hold a CAPTURE buffer across requests decodes a
+picture from one request, parsing the video packet and GOB headers
+itself, as Rockchip's VDPU2 does: hand it the VOP whole, with the VOL's
+vop_time_increment_resolution the packet headers need and the coding
+type of the most recent reference VOP, which B-VOP direct mode reads.
+---
+ libavcodec/mpeg4-ctrls.h        |  4 +++-
+ libavcodec/v4l2_request.c       |  7 +++++++
+ libavcodec/v4l2_request.h       |  6 ++++++
+ libavcodec/v4l2_request_mpeg4.c | 25 +++++++++++++++++++++++++
+ 4 files changed, 41 insertions(+), 1 deletion(-)
+
+diff --git a/libavcodec/mpeg4-ctrls.h b/libavcodec/mpeg4-ctrls.h
+index ed9ab31..1cde20b 100644
+--- a/libavcodec/mpeg4-ctrls.h
++++ b/libavcodec/mpeg4-ctrls.h
+@@ -87,7 +87,9 @@ struct v4l2_ctrl_mpeg4_vop {
+ 	__u8	intra_dc_vlc_thr;
+ 	__u8	vop_fcode_forward;
+ 	__u8	vop_fcode_backward;
+-	__u8	reserved[4];
++	__u16	vop_time_increment_resolution;
++	__u8	last_ref_coding_type;
++	__u8	reserved;
+ };
+ 
+ /* Zigzag order; read only with V4L2_MPEG4_VOL_FLAG_QUANT_TYPE */
+diff --git a/libavcodec/v4l2_request.c b/libavcodec/v4l2_request.c
+index 76d3f55..f4e72b3 100644
+--- a/libavcodec/v4l2_request.c
++++ b/libavcodec/v4l2_request.c
+@@ -493,6 +493,13 @@ int ff_v4l2_request_decode_slice(AVCodecContext *avctx,
+                                      first_slice, last_slice);
+ }
+ 
++int ff_v4l2_request_holds_capture(AVCodecContext *avctx)
++{
++    V4L2RequestContext *ctx = v4l2_request_context(avctx);
++
++    return !!(ctx->fctxi->output.capabilities & V4L2_BUF_CAP_SUPPORTS_M2M_HOLD_CAPTURE_BUF);
++}
++
+ int ff_v4l2_request_decode_frame(AVCodecContext *avctx,
+                                  V4L2RequestPictureContext *pic,
+                                  struct v4l2_ext_control *control, int count)
+diff --git a/libavcodec/v4l2_request.h b/libavcodec/v4l2_request.h
+index 6ffaac2..64cc588 100644
+--- a/libavcodec/v4l2_request.h
++++ b/libavcodec/v4l2_request.h
+@@ -81,6 +81,12 @@ int ff_v4l2_request_decode_slice(AVCodecContext *avctx,
+                                  struct v4l2_ext_control *control, int count,
+                                  bool first_slice, bool last_slice);
+ 
++/**
++ * Whether the decoder holds a CAPTURE buffer across a picture's slices; one
++ * that does not decodes a picture from one request.
++ */
++int ff_v4l2_request_holds_capture(AVCodecContext *avctx);
++
+ int ff_v4l2_request_decode_frame(AVCodecContext *avctx,
+                                  V4L2RequestPictureContext *pic,
+                                  struct v4l2_ext_control *control, int count);
+diff --git a/libavcodec/v4l2_request_mpeg4.c b/libavcodec/v4l2_request_mpeg4.c
+index 412f0db..902e142 100644
+--- a/libavcodec/v4l2_request_mpeg4.c
++++ b/libavcodec/v4l2_request_mpeg4.c
+@@ -171,6 +171,13 @@ static int v4l2_request_mpeg4_start_frame(AVCodecContext *avctx,
+         return 0;
+ 
+     vop->intra_dc_vlc_thr = mpeg4_intra_dc_vlc_thr(ctx);
++    vop->vop_time_increment_resolution = avctx->framerate.num;
++    {
++        const MPVPicture *ref = s->pict_type == AV_PICTURE_TYPE_B ? s->next_pic.ptr
++                                                                  : s->last_pic.ptr;
++        if (ref)
++            vop->last_ref_coding_type = ref->f->pict_type - AV_PICTURE_TYPE_I;
++    }
+     vop->vop_fcode_forward = ctx->f_code;
+     vop->vop_fcode_backward = ctx->b_code;
+     vop->trb = s->pb_time;
+@@ -372,6 +379,24 @@ static int v4l2_request_mpeg4_decode_slice(AVCodecContext *avctx,
+         .qscale = s->qscale,
+     };
+ 
++    /*
++     * A decoder that cannot hold the picture across requests takes it whole,
++     * from the 64-bit word its first macroblock starts in, as Rockchip's MPP
++     * hands VDPU2 a picture
++     */
++    if (!ff_v4l2_request_holds_capture(avctx)) {
++        int bits = get_bits_count(&h->gb);
++        int back = (bits / 8) % 8;
++
++        controls->slice = (struct v4l2_ctrl_mpeg4_slice) {
++            .bit_size = (size + back) * 8,
++            .data_bit_offset = back * 8 + bits % 8,
++            .num_macroblocks = s->mb_num,
++            .quant_scale = s->qscale,
++        };
++        return ff_v4l2_request_append_output(avctx, &controls->pic, buffer - back, size + back);
++    }
++
+     while (packets) {
+         MPEG4Run next = run;
+         int end, ret;

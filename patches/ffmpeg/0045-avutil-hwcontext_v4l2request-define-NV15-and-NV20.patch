@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Tue, 17 Nov 2026 03:00:00 -0500
+Subject: [PATCH] avutil/hwcontext_v4l2request: define NV15 and NV20 where the
+ headers lack them
+
+Debian's kernel headers predate V4L2_PIX_FMT_NV15, so the capture format
+table compiled without it, and a 10-bit stream on rkvdec, which offers
+only NV15, found no format it knew and fell back to software.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/libavutil/hwcontext_v4l2request.c b/libavutil/hwcontext_v4l2request.c
+--- a/libavutil/hwcontext_v4l2request.c
++++ b/libavutil/hwcontext_v4l2request.c
+@@ -37,6 +37,14 @@
+ #include "mathematics.h"
+ #include "mem.h"
+ 
++// rkvdec's 10-bit formats, where the kernel's headers predate them.
++#ifndef V4L2_PIX_FMT_NV15
++#define V4L2_PIX_FMT_NV15 v4l2_fourcc('N', 'V', '1', '5')
++#endif
++#ifndef V4L2_PIX_FMT_NV20
++#define V4L2_PIX_FMT_NV20 v4l2_fourcc('N', 'V', '2', '0')
++#endif
++
+ // Cedrus's AFBC formats, where the kernel's headers predate them.
+ #ifndef V4L2_PIX_FMT_YUV420_8_AFBC_16X16_SPLIT
+ #define V4L2_PIX_FMT_YUV420_8_AFBC_16X16_SPLIT v4l2_fourcc('A', 'S', '1', '2')

@@ -1,0 +1,89 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Tue, 17 Nov 2026 23:44:19 -0500
+Subject: [PATCH] avcodec/v4l2_context: take any V4L2 format of the codec as
+ its coded format
+
+A stateful JPEG decoder offers V4L2_PIX_FMT_JPEG, which the format map
+gives MJPEG as its second V4L2 format; only the first, MJPG, was looked
+for, so mjpeg_v4l2m2m found no device. Take the driver's first format
+that maps to the codec.
+---
+ libavcodec/v4l2_context.c | 12 +++---------
+ libavcodec/v4l2_fmt.c     |  8 ++++----
+ libavcodec/v4l2_fmt.h     |  2 +-
+ 3 files changed, 8 insertions(+), 14 deletions(-)
+
+diff --git a/libavcodec/v4l2_context.c b/libavcodec/v4l2_context.c
+index 82354ec..e00133e 100644
+--- a/libavcodec/v4l2_context.c
++++ b/libavcodec/v4l2_context.c
+@@ -568,15 +568,9 @@ static int v4l2_get_raw_format(V4L2Context* ctx, enum AVPixelFormat *p)
+ static int v4l2_get_coded_format(V4L2Context* ctx, uint32_t *p)
+ {
+     struct v4l2_fmtdesc fdesc;
+-    uint32_t v4l2_fmt;
+     int ret;
+ 
+-    /* translate to a valid v4l2 format */
+-    v4l2_fmt = ff_v4l2_format_avcodec_to_v4l2(ctx->av_codec_id);
+-    if (!v4l2_fmt)
+-        return AVERROR(EINVAL);
+-
+-    /* check if the driver supports this format */
++    /* the driver's first format for this codec: MJPEG is MJPG or JPEG */
+     memset(&fdesc, 0, sizeof(fdesc));
+     fdesc.type = ctx->type;
+ 
+@@ -585,13 +579,13 @@ static int v4l2_get_coded_format(V4L2Context* ctx, uint32_t *p)
+         if (ret)
+             return AVERROR(EINVAL);
+ 
+-        if (fdesc.pixelformat == v4l2_fmt)
++        if (ff_v4l2_format_v4l2_to_avcodec(fdesc.pixelformat) == ctx->av_codec_id)
+             break;
+ 
+         fdesc.index++;
+     }
+ 
+-    *p = v4l2_fmt;
++    *p = fdesc.pixelformat;
+ 
+     return 0;
+ }
+diff --git a/libavcodec/v4l2_fmt.c b/libavcodec/v4l2_fmt.c
+index 6df47e3..9658463 100644
+--- a/libavcodec/v4l2_fmt.c
++++ b/libavcodec/v4l2_fmt.c
+@@ -109,14 +109,14 @@ static const struct fmt_conversion {
+ #endif
+ };
+ 
+-uint32_t ff_v4l2_format_avcodec_to_v4l2(enum AVCodecID avcodec)
++enum AVCodecID ff_v4l2_format_v4l2_to_avcodec(uint32_t v4l2_fmt)
+ {
+     int i;
+     for (i = 0; i < FF_ARRAY_ELEMS(fmt_map); i++) {
+-        if (fmt_map[i].avcodec == avcodec)
+-            return fmt_map[i].v4l2_fmt;
++        if (fmt_map[i].v4l2_fmt == v4l2_fmt)
++            return fmt_map[i].avcodec;
+     }
+-    return 0;
++    return AV_CODEC_ID_NONE;
+ }
+ 
+ uint32_t ff_v4l2_format_avfmt_to_v4l2(enum AVPixelFormat avfmt)
+diff --git a/libavcodec/v4l2_fmt.h b/libavcodec/v4l2_fmt.h
+index 577e03a..37a9ae1 100644
+--- a/libavcodec/v4l2_fmt.h
++++ b/libavcodec/v4l2_fmt.h
+@@ -29,7 +29,7 @@
+ #include "codec_id.h"
+ 
+ enum AVPixelFormat ff_v4l2_format_v4l2_to_avfmt(uint32_t v4l2_fmt, enum AVCodecID avcodec);
+-uint32_t ff_v4l2_format_avcodec_to_v4l2(enum AVCodecID avcodec);
++enum AVCodecID ff_v4l2_format_v4l2_to_avcodec(uint32_t v4l2_fmt);
+ uint32_t ff_v4l2_format_avfmt_to_v4l2(enum AVPixelFormat avfmt);
+ 
+ #endif /* AVCODEC_V4L2_FMT_H*/

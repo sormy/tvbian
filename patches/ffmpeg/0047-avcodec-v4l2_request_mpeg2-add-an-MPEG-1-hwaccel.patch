@@ -1,0 +1,138 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Tue, 17 Nov 2026 23:52:55 -0500
+Subject: [PATCH] avcodec/v4l2_request_mpeg2: add an MPEG-1 hwaccel
+
+The MPEG-2 controls describe an MPEG-1 picture as they stand, but for
+two things the hardware must be told: that the stream is MPEG-1, whose
+decoding mode differs, and whether a picture's vectors are of whole
+pixels. TVBian's kernel takes a sequence flag and two picture flags for
+them; defined here where its headers lack them.
+---
+ configure                       |  2 ++
+ libavcodec/Makefile             |  1 +
+ libavcodec/hwaccels.h           |  1 +
+ libavcodec/mpeg12dec.c          |  6 ++++++
+ libavcodec/v4l2_request_mpeg2.c | 30 ++++++++++++++++++++++++++++++
+ 5 files changed, 40 insertions(+)
+
+diff --git a/configure b/configure
+index 257f9ce..874bef6 100755
+--- a/configure
++++ b/configure
+@@ -3502,6 +3502,8 @@ mpeg2_dxva2_hwaccel_deps="dxva2"
+ mpeg2_dxva2_hwaccel_select="mpeg2video_decoder"
+ mpeg2_nvdec_hwaccel_deps="nvdec"
+ mpeg2_nvdec_hwaccel_select="mpeg2video_decoder"
++mpeg1_v4l2request_hwaccel_deps="v4l2_request mpeg2_v4l2_request"
++mpeg1_v4l2request_hwaccel_select="mpeg1video_decoder"
+ mpeg2_v4l2request_hwaccel_deps="v4l2_request mpeg2_v4l2_request"
+ mpeg2_v4l2request_hwaccel_select="mpeg2video_decoder"
+ mpeg2_vaapi_hwaccel_deps="vaapi"
+diff --git a/libavcodec/Makefile b/libavcodec/Makefile
+index 98e66aa..507a40d 100644
+--- a/libavcodec/Makefile
++++ b/libavcodec/Makefile
+@@ -1090,6 +1090,7 @@ OBJS-$(CONFIG_MPEG2_DXVA2_HWACCEL)        += dxva2_mpeg2.o
+ OBJS-$(CONFIG_MPEG2_D3D12VA_HWACCEL)      += dxva2_mpeg2.o d3d12va_mpeg2.o
+ OBJS-$(CONFIG_MPEG2_NVDEC_HWACCEL)        += nvdec_mpeg12.o
+ OBJS-$(CONFIG_MPEG2_QSV_HWACCEL)          += qsvdec.o
++OBJS-$(CONFIG_MPEG1_V4L2REQUEST_HWACCEL)  += v4l2_request_mpeg2.o
+ OBJS-$(CONFIG_MPEG2_V4L2REQUEST_HWACCEL)  += v4l2_request_mpeg2.o
+ OBJS-$(CONFIG_MPEG2_VAAPI_HWACCEL)        += vaapi_mpeg2.o
+ OBJS-$(CONFIG_MPEG2_VDPAU_HWACCEL)        += vdpau_mpeg12.o
+diff --git a/libavcodec/hwaccels.h b/libavcodec/hwaccels.h
+index 1673cf6..7a232b6 100644
+--- a/libavcodec/hwaccels.h
++++ b/libavcodec/hwaccels.h
+@@ -59,6 +59,7 @@ extern const struct FFHWAccel ff_mjpeg_nvdec_hwaccel;
+ extern const struct FFHWAccel ff_mjpeg_vaapi_hwaccel;
+ extern const struct FFHWAccel ff_mpeg1_nvdec_hwaccel;
+ extern const struct FFHWAccel ff_mpeg1_vdpau_hwaccel;
++extern const struct FFHWAccel ff_mpeg1_v4l2request_hwaccel;
+ extern const struct FFHWAccel ff_mpeg1_videotoolbox_hwaccel;
+ extern const struct FFHWAccel ff_mpeg2_d3d11va_hwaccel;
+ extern const struct FFHWAccel ff_mpeg2_d3d11va2_hwaccel;
+diff --git a/libavcodec/mpeg12dec.c b/libavcodec/mpeg12dec.c
+index ac9eb64..10e8839 100644
+--- a/libavcodec/mpeg12dec.c
++++ b/libavcodec/mpeg12dec.c
+@@ -793,6 +793,9 @@ static const enum AVPixelFormat mpeg1_hwaccel_pixfmt_list_420[] = {
+ #endif
+ #if CONFIG_MPEG1_VDPAU_HWACCEL
+     AV_PIX_FMT_VDPAU,
++#endif
++#if CONFIG_MPEG1_V4L2REQUEST_HWACCEL
++    AV_PIX_FMT_DRM_PRIME,
+ #endif
+     AV_PIX_FMT_YUV420P,
+     AV_PIX_FMT_NONE
+@@ -2656,6 +2659,9 @@ const FFCodec ff_mpeg1video_decoder = {
+ #endif
+ #if CONFIG_MPEG1_VIDEOTOOLBOX_HWACCEL
+                                HWACCEL_VIDEOTOOLBOX(mpeg1),
++#endif
++#if CONFIG_MPEG1_V4L2REQUEST_HWACCEL
++                               HWACCEL_V4L2REQUEST(mpeg1),
+ #endif
+                                NULL
+                            },
+diff --git a/libavcodec/v4l2_request_mpeg2.c b/libavcodec/v4l2_request_mpeg2.c
+index 5d89b71..104b4c0 100644
+--- a/libavcodec/v4l2_request_mpeg2.c
++++ b/libavcodec/v4l2_request_mpeg2.c
+@@ -24,6 +24,13 @@
+ #include "mpegvideo.h"
+ #include "v4l2_request.h"
+ 
++// TVBian's MPEG-1 on the MPEG-2 controls, where the kernel's headers predate them
++#ifndef V4L2_MPEG2_SEQ_FLAG_MPEG1
++#define V4L2_MPEG2_SEQ_FLAG_MPEG1             0x02
++#define V4L2_MPEG2_PIC_FLAG_FULL_PEL_FORWARD  0x0100
++#define V4L2_MPEG2_PIC_FLAG_FULL_PEL_BACKWARD 0x0200
++#endif
++
+ typedef struct V4L2RequestControlsMPEG2 {
+     V4L2RequestPictureContext pic;
+     struct v4l2_ctrl_mpeg2_sequence sequence;
+@@ -57,6 +64,8 @@ static int v4l2_request_mpeg2_start_frame(AVCodecContext *avctx,
+ 
+     if (s->progressive_sequence)
+         controls->sequence.flags |= V4L2_MPEG2_SEQ_FLAG_PROGRESSIVE;
++    if (avctx->codec_id == AV_CODEC_ID_MPEG1VIDEO)
++        controls->sequence.flags |= V4L2_MPEG2_SEQ_FLAG_MPEG1;
+ 
+     controls->picture = (struct v4l2_ctrl_mpeg2_picture) {
+         /* ISO/IEC 13818-2, ITU-T Rec. H.262: Picture header */
+@@ -94,6 +103,10 @@ static int v4l2_request_mpeg2_start_frame(AVCodecContext *avctx,
+ 
+     if (s->progressive_frame)
+         controls->picture.flags |= V4L2_MPEG2_PIC_FLAG_PROGRESSIVE;
++    if (s->full_pel[0])
++        controls->picture.flags |= V4L2_MPEG2_PIC_FLAG_FULL_PEL_FORWARD;
++    if (s->full_pel[1])
++        controls->picture.flags |= V4L2_MPEG2_PIC_FLAG_FULL_PEL_BACKWARD;
+ 
+     switch (s->pict_type) {
+     case AV_PICTURE_TYPE_B:
+@@ -182,3 +195,20 @@ const FFHWAccel ff_mpeg2_v4l2request_hwaccel = {
+     .frame_params       = v4l2_request_mpeg2_frame_params,
+     .caps_internal      = HWACCEL_CAP_ASYNC_SAFE,
+ };
++
++const FFHWAccel ff_mpeg1_v4l2request_hwaccel = {
++    .p.name             = "mpeg1_v4l2request",
++    .p.type             = AVMEDIA_TYPE_VIDEO,
++    .p.id               = AV_CODEC_ID_MPEG1VIDEO,
++    .p.pix_fmt          = AV_PIX_FMT_DRM_PRIME,
++    .start_frame        = v4l2_request_mpeg2_start_frame,
++    .decode_slice       = v4l2_request_mpeg2_decode_slice,
++    .end_frame          = v4l2_request_mpeg2_end_frame,
++    .flush              = ff_v4l2_request_flush,
++    .frame_priv_data_size = sizeof(V4L2RequestControlsMPEG2),
++    .init               = v4l2_request_mpeg2_init,
++    .uninit             = ff_v4l2_request_uninit,
++    .priv_data_size     = sizeof(V4L2RequestContext),
++    .frame_params       = v4l2_request_mpeg2_frame_params,
++    .caps_internal      = HWACCEL_CAP_ASYNC_SAFE,
++};

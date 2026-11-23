@@ -1,0 +1,84 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Thu, 19 Nov 2026 02:55:04 -0500
+Subject: [PATCH] avcodec/v4l2_request: crop the lines a decoder starts a picture
+ below
+
+Rockchip's rkvdec starts an AFBC picture 4 lines into its CAPTURE
+buffer and reports where through the CAPTURE queue's compose selection.
+Read its top once the format is set, and take those lines into each
+frame as cropped, as rkmppdec does with MPP's offset, so a player shows
+the picture from its first line. A driver without the selection starts
+its pictures at the top, as before.
+---
+ libavcodec/v4l2_request.c                  |  9 +++++++++
+ libavutil/hwcontext_v4l2request.c          | 11 +++++++++++
+ libavutil/hwcontext_v4l2request_internal.h |  6 ++++++
+ 3 files changed, 26 insertions(+)
+
+diff --git a/libavcodec/v4l2_request.c b/libavcodec/v4l2_request.c
+index f4e72b3..0e00de3 100644
+--- a/libavcodec/v4l2_request.c
++++ b/libavcodec/v4l2_request.c
+@@ -525,6 +525,14 @@ static void v4l2_request_scale_frame(AVCodecContext *avctx, AVFrame *frame)
+     frame->crop_bottom = frame->height - frame->crop_top  - avctx->height / ratio;
+ }
+ 
++// A picture the decoder starts below its buffer's top, as Rockchip's AFBC,
++// takes those lines into the frame and crops them
++static void v4l2_request_offset_frame(V4L2RequestContext *ctx, AVFrame *frame)
++{
++    frame->height   += ctx->fctxi->capture_top;
++    frame->crop_top += ctx->fctxi->capture_top;
++}
++
+ static int v4l2_request_post_process(void *logctx, AVFrame *frame)
+ {
+     uint32_t index = v4l2_request_frameindex(frame);
+@@ -532,6 +540,7 @@ static int v4l2_request_post_process(void *logctx, AVFrame *frame)
+     V4L2RequestContext *ctx = fdd->hwaccel_priv;
+ 
+     v4l2_request_scale_frame(logctx, frame);
++    v4l2_request_offset_frame(ctx, frame);
+ 
+     // Wait on CAPTURE buffer before returning the frame to application
+     return v4l2_request_wait_on_capture(ctx, index);
+diff --git a/libavutil/hwcontext_v4l2request.c b/libavutil/hwcontext_v4l2request.c
+index d51391c..43bd2ff 100644
+--- a/libavutil/hwcontext_v4l2request.c
++++ b/libavutil/hwcontext_v4l2request.c
+@@ -1059,6 +1059,17 @@ static int v4l2request_frames_init(AVHWFramesContext *hwfc)
+         pixelformat = fctxi->capture.format.fmt.pix.pixelformat;
+     }
+ 
++    // A driver without the selection starts its pictures at the top
++    {
++        struct v4l2_selection sel = {
++            .type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
++            .target = V4L2_SEL_TGT_COMPOSE,
++        };
++
++        if (!ioctl(fctxi->video_fd, VIDIOC_G_SELECTION, &sel))
++            fctxi->capture_top = sel.r.top;
++    }
++
+     hwfc->sw_format = AV_PIX_FMT_NONE;
+     for (int i = 0; i < FF_ARRAY_ELEMS(v4l2request_capture_pixelformats); i++) {
+         if (pixelformat == v4l2request_capture_pixelformats[i].pixelformat) {
+diff --git a/libavutil/hwcontext_v4l2request_internal.h b/libavutil/hwcontext_v4l2request_internal.h
+index e92b45f..ccc2938 100644
+--- a/libavutil/hwcontext_v4l2request_internal.h
++++ b/libavutil/hwcontext_v4l2request_internal.h
+@@ -47,6 +47,12 @@ struct AVV4L2RequestFramesContextInternal {
+      */
+     int import_capture;
+ 
++    /**
++     * Lines a picture starts below its CAPTURE buffer's top, from the CAPTURE
++     * queue's compose selection.
++     */
++    int capture_top;
++
+     /**
+      * Details of the initialized CAPTURE and OUTPUT queues.
+      */
