@@ -188,10 +188,11 @@ diff --git a/drivers/clk/clk.h b/drivers/clk/clk.h
 index 2d801900cad5..367a0f036b13 100644
 --- a/drivers/clk/clk.h
 +++ b/drivers/clk/clk.h
-@@ -24,6 +24,7 @@ struct clk_hw *clk_find_hw(const char *dev_id, const char *con_id);
+@@ -24,7 +24,8 @@ struct clk_hw *clk_find_hw(const char *dev_id, const char *con_id);
  #ifdef CONFIG_COMMON_CLK
  struct clk *clk_hw_create_clk(struct device *dev, struct clk_hw *hw,
- 			      const char *dev_id, const char *con_id);
+ 			      const char *dev_id, const char *con_id,
+ 			      struct module *owner);
 +int __clk_protect(struct clk *clk);
  void __clk_put(struct clk *clk);
  #else
