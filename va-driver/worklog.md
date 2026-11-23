@@ -563,3 +563,6 @@ real time on Cedrus whatever the driver: about 25 fps flat out, 180 of 288 frame
   NV12 by `VideoProc` without the row copy, 300 pictures identical to the build with it, 2.5 s of
   user time against 3.2; the suite 89 pass, none failing, 10-bit 30 of 30 identical, `vpp.*` 53.7
   and 58.8 dB, GStreamer 10-bit 63 dB.
+- `extras/gst-plugins-bad` and its `0001` dropped: `0001` let GStreamer narrow where a driver listed
+  no 10-bit format, and every 10-bit config lists P010 since MPP's narrowing went. Debian's own
+  `gst-plugins-bad`, unpatched, decodes 10-bit through the driver at 63 dB on the R69-1.

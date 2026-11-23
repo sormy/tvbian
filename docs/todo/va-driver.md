@@ -57,9 +57,6 @@ settings.
       container lacks; a Linux host or CI could pass `vgem`'s node in.
 - [ ] **HEVC 1080p60 in WebKit on `rk35xx-next2` now and then decodes nothing**: one Falkon file run
       of several, the others at full rate.
-- [ ] **`extras/gst-plugins-bad` dropped**: its `0001` lets GStreamer narrow where a driver lists no
-      10-bit format, and every 10-bit config lists P010 now; GStreamer 10-bit on Debian's own plugin
-      is measured on the R69-1 alone.
 - [ ] **Held pictures detected**: `backend_v4l2m2m.c` assumes them by codec; a decoder seen holding
       one should switch the workaround on.
 - [ ] **Standalone build**: `build.sh` reads repo paths, and the host engine needs
