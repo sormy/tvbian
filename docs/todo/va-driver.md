@@ -21,6 +21,10 @@ settings.
       about one run in three, on either driver build.
 - [ ] **`meson-gxl` VC-1 with slices refuses every wrong picture after a drain**: `vc1-ap-slices`
       lets one through at 17 dB.
+- [ ] **Smooth from the first picture**: decoders stutter for the first seconds of a play, seen by
+      eye, not measured; a warm-up before the first picture shows, a short delay in place of drops.
+      Kernel or driver is not known: the first pictures' times, through VA and `ffmpeg9`'s own path,
+      on each family, tell which; on `meson-gxl` the kernel's first HEVC sessions are one cause.
 - [ ] **Every family at `ffmpeg9`'s native rate through VA-API**, decoding only, frames left on the
       GPU: `rk35xx` HEVC Main 10 at 88 to 89% when narrowed by the CPU; as P010 not measured.
 - [ ] **`meson-gxl` VP9 4K without a copy**: the decoder grants only the 16 CAPTURE buffers it holds
@@ -47,8 +51,7 @@ settings.
 - [ ] **A sync on one VP9 picture on `meson-gxl`**: reading a picture back drains, and the drain
       ends the stream with an internal decoding error.
 - [ ] **The suite leaves no process behind**: that FFmpeg outlived its run and its directory.
-- [ ] **`mpv --hwdec=vaapi` on `rk35xx` and `meson-gxl`**: through Wayland, as on `sunxi-h616`;
-      mpv's DRM output finds no primary node where the display and the GPU are two devices. On
+- [ ] **`mpv --hwdec=vaapi` on `rk35xx` and `meson-gxl`**: through Wayland, as on `sunxi-h616`. On
       `meson-gxl`, with the system heap, VP9 and HEVC play with no copy; H.264 stops after about 11
       pictures, mpv waiting on one meson holds, and the drain losing its references.
 - [ ] **`va_probe` in `tvb-va-driver`**: the suite's initialize check is UNTESTED on a box without
@@ -65,7 +68,8 @@ settings.
       closes; today each opens at its first context.
 - [ ] **AFBC on `rk35xx-next2`**: `rkvdec` writes `AN68` and `AN6a`, 16x16 sparse, not split, for
       H.264, HEVC and VP9; the driver offers Cedrus's split AFBC alone. The modifier by the formats
-      CAPTURE lists, for a client that lists it; VOP2 scans it on Cluster0.
+      CAPTURE lists, for a client that lists it; VOP2 scans it on Cluster0. No client lists it yet:
+      GStreamer's `va` offers the modifier a plain surface exports, FFmpeg and mpv list none.
 - [ ] **MPP's FBC**: AFBC from MPP on the vendor kernel, for a client that lists the modifier.
 - [ ] **`VideoProc` scaling**: for Jellyfin's `scale_vaapi`, and NV12 to ARGB where Chromium's GL
       cannot import NV12; it converts 8-bit and 10-bit at one size today.
@@ -85,5 +89,6 @@ settings.
 - [ ] **GStreamer on `rk35xx`**: an MPP plugin package; AirPlay mirroring (`uxplay`) needs it.
 - [ ] **Encode** for WebRTC and screen capture, through `tvb-va-driver`'s H.264, HEVC and JPEG
       encoders in a browser.
-- [ ] **Zero copy to the screen**: a VA-API frame imported by Lima and Panfrost without a CPU copy.
+- [ ] **Zero copy to the screen on Lima**: a VA-API frame imported without a CPU copy, as Panfrost
+      does.
 - [ ] **A matrix**: program by codec by family, in `tools/validate/`.
