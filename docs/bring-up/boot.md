@@ -47,8 +47,8 @@ From loaders to an installed system, and how a running box is changed without lo
    Without SD, use a supported USB stick or a RAM boot through the service mode.
 5. **Network first**: a boot that comes up on Ethernet or Wi-Fi and takes `ssh`; the USB Ethernet
    adapter stands in until the board's own works (`r8152` is in every family's kernel).
-6. **Install** with `tvb-install` from external media, which keeps the eMMC's bootloader; a box that
-   boots none is written over the service mode.
+6. **Install** with `tvb-install` from external media, which keeps what the family's preserve list
+   names; a box that boots none is written over the service mode.
 7. **Changing a running box**, every tree or kernel change:
    1. a second way in plugged: USB Ethernet or serial;
    2. a driver patch is built and loaded on the box, no reboot; only a kernel change needs one;
