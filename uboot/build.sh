@@ -103,5 +103,8 @@ else
   make -s "$jobs" u-boot.bin
   cp u-boot.bin "$OUT/$NAME"
 fi
+# two aliases naming one node: U-Boot numbers it by the first, and booting looks for the other
+twice=$(for a in $(fdtget -p u-boot.dtb /aliases); do fdtget u-boot.dtb /aliases "$a"; done | sort | uniq -d)
+[ -z "$twice" ] || { echo "✗ $BOARD: the control tree aliases one node twice: $twice" >&2; exit 1; }
 echo "✓ $BOARD: $NAME, U-Boot $TAG${TFA_TAG:+ + TF-A $TFA_TAG}${type:+, $type at $(($(dram 0))) MHz}," \
   "$(stat -c %s "$OUT/$NAME") bytes"

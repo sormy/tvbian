@@ -209,7 +209,9 @@ it as `mmc1`, whatever number the board's tree gives it.
 
 It builds in the container like every other step, from a defconfig made on the spot out of
 `generic-rk3528_defconfig` with the board's tree named in it, and aborts if a `CONFIGS` symbol does
-not survive Kconfig. `boards/<board>/uboot.patch` is the only device-tree source we edit.
+not survive Kconfig, or if the control tree aliases one node twice: U-Boot numbers a device by the
+first alias, so a second one moves it. `boards/<board>/uboot.patch` is the only device-tree source
+we edit.
 
 Smoke-test before trusting it: the factory idbloader at sector 64 stays put, and the box must come
 back; `/proc/device-tree/chosen/u-boot,version` names the U-Boot that booted it.
