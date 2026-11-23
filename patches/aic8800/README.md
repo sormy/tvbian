@@ -8,6 +8,7 @@ Selected kernels: `rk35xx`, `rk35xx-next`, `rk35xx-next2`, `sunxi64`, `sunxi64-n
 | Patch     | Source                                                                            |
 | --------- | --------------------------------------------------------------------------------- |
 | `01`–`17` | radxa-pkg/aic8800's `debian/patches`, in its series order, cut to the SDIO driver |
+| `95`      | ours: the SDIO drivers name their module, as 6.12's register call does            |
 | `96`      | ours: `custregd` off, so the wiphy follows cfg80211's domain and `iw reg set`     |
 | `97`      | ours: power-off re-probes the MMC host where no platform hook does                |
 | `98`      | ours: two bare `printk()`s, one per management frame, deleted                     |

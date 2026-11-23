@@ -1,0 +1,38 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] aic8800: the SDIO drivers name their module
+
+6.1's sdio_register_driver() records no owner, where 6.12's sets it from
+THIS_MODULE, so on 6.1 the bound SDIO driver has no module link in sysfs
+and nothing can tell which module drives the card. Set the owner in every
+SDIO driver, the Wi-Fi's and the platform's, as 6.12 does.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+--- a/src/SDIO/driver_fw/driver/aic8800/aic8800_bsp/aicsdio.c
++++ b/src/SDIO/driver_fw/driver/aic8800/aic8800_bsp/aicsdio.c
+@@ -135,6 +135,7 @@
+ 	.remove		= aicbsp_dummy_remove,
+ 	.name		= "aicbsp_dummy_sdmmc",
+ 	.id_table	= aicbsp_sdmmc_ids,
++	.drv		= { .owner = THIS_MODULE },
+ };
+ 
+ static int aicbsp_reg_sdio_notify(void *semaphore)
+@@ -541,6 +542,7 @@
+ 	.name = AICBSP_SDIO_NAME,
+ 	.id_table = aicbsp_sdmmc_ids,
+ 	.drv = {
++		.owner = THIS_MODULE,
+ 		.pm = &aicbsp_sdio_pm_ops,
+ 	},
+ };
+--- a/src/SDIO/driver_fw/driver/aic8800/aic8800_fdrv/aicwf_sdio.c
++++ b/src/SDIO/driver_fw/driver/aic8800/aic8800_fdrv/aicwf_sdio.c
+@@ -1201,6 +1201,7 @@
+ 	.name = AICWF_SDIO_NAME,
+ 	.id_table = aicwf_sdmmc_ids,
+ 	.drv = {
++		.owner = THIS_MODULE,
+ 		.pm = &aicwf_sdio_pm_ops,
+ #if defined(CONFIG_PLATFORM_ROCKCHIP) || defined(CONFIG_PLATFORM_ROCKCHIP2)
+ #ifdef CONFIG_SHUTDOWN_CALLBACK

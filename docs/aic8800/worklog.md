@@ -19,3 +19,13 @@
 - On the R69-1: `96` on 6.1.172, the phy following `iw reg set`; `97` on 6.12.69, two reloads where
   6.12 failed before. Each release logs `aicwf_sdio_release: reg:0 write failed!`; the next load is
   unaffected.
+
+## 2026-11-22 — `wifi.reloads` on 6.1: the suite reloaded nothing
+
+- The regression's 6.1 runs failed `wifi.reloads` (0 of 1) on the R69-1 and the HK1, 6.12 and next2
+  passing. By hand, two reloads on 6.1 each had an address after 4 s.
+- The suite reads the module from `/sys/class/net/wlan0/device/driver/module`. 6.1's
+  `sdio_register_driver()` records no owner, 6.12's sets it, so on 6.1 `aicwf_sdio` had no module
+  link and the suite ran `modprobe -r module`.
+- `95` sets `.drv.owner` in `aic8800_fdrv`'s `aicwf_sdio` and `aic8800_bsp`'s two SDIO drivers. On
+  the R69-1, 6.1: the link names `aic8800_fdrv`; the suite's own reload code, two of two back.
