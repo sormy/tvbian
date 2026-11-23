@@ -1,8 +1,7 @@
 # HK1 RBOX K8S
 
-- [ ] **HDMI picture and sound on vendor 6.1**: a screen attached at boot reads disconnected while
-      next2 finds it. The GPIO reads high; the vendor mirrors it into the controller once at probe,
-      right after enabling the pin's input, and no edge comes later to correct it.
+- [ ] **HDMI picture and sound on vendor 6.1**: a screen attached at boot reads disconnected; the
+      hot-plug patch shown working on the box, with picture and sound.
 - [ ] **The GPU's clocks on 6.1 with their measured reason**: both `ACLK_GPU_MALI`, where next2's
       core runs on SCMI.
 - [ ] **UART2 the same on both trees**: 6.1 drops its DMA, next2 keeps it.
@@ -16,7 +15,6 @@
 
 ## 👤 By hand
 
-- [ ] HDMI on 6.1: unplug and replug the cable with a screen on; does it find the screen.
 - [ ] The serial pads' voltage.
 - [ ] Pair a BLE remote and a Bluetooth keyboard; each survives a power cycle.
 - [ ] On a screen: HDMI sound, glmark2, a 4K60 player, HDR, DDC/CI.

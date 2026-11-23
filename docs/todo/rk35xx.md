@@ -106,3 +106,7 @@
 - [ ] **8K in real time on the DDR3 boxes**: decode and display together at 8K, fps and dropped
       frames, against an LPDDR3 box. The 8K line today is the engine alone; bandwidth is what DDR3
       lacks.
+
+## 👤 By hand
+
+- [ ] A sibling booted on 6.1 with a screen attached: does HDMI find it.

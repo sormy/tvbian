@@ -453,3 +453,11 @@
   GRF. GPIO0 A2 reads high; its interrupt never fired. The vendor mirrors that GPIO into the VO GRF
   sink-detect bit once in `rockchip_hdmi_parse_dt()`, straight after setting the pin's input enable.
 - A `u-boot-update` reset the menu's default to next2 again.
+- Reproduced on four 6.1 boots, the screen attached each time: the connector `disconnected`, GPIO0
+  A2 high, its interrupt 0, and `VO_GRF_HDMI_MASK` (`0xff360014`) `0x4b`: `SNKDET_SEL` 1,
+  `SNKDET` 0. The controller holds the probe's "no sink" while the pin reads one.
+- Writing `SNKDET` 1 by hand, as the vendor's GPIO interrupt would (`0x00200020` to `0xff360014`):
+  `connected`, the 256-byte EDID, 23 modes, 2256×1504 at 60 Hz set and the console on the screen.
+  The probe's mirrored level alone was wrong.
+- `drm-rockchip-dw-hdmi-rk3528-hpd-at-detect.patch` mirrors the GPIO again at each hot-plug read;
+  one patch for 6.1 and 6.12, whose functions are identical.

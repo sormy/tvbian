@@ -4,19 +4,20 @@ Board-independent fixes for Rockchip's vendor kernel. TVBian's `kernel/rk35xx.co
 `rockchip-linux/kernel` `develop-6.1`. At the branch tip Rockchip has fixed part of two, so those
 carry only the rest.
 
-| Patch                                    | Fixes                                                                       |
-| ---------------------------------------- | --------------------------------------------------------------------------- |
-| `input-remotectl-share-pwm-irq`          | the IR power key as a wake source; Rockchip fixed the IRQ choice            |
-| `net-stmmac-skip-absent-mdio-reset-gpio` | a WARN + ~416 lines of trace at every boot; Rockchip fixed one call site    |
-| `bluetooth-hci-h4-serdev`                | serdev `hci_h4`: BT with no `hciattach`, once it answers steadily           |
-| `bluetooth-hci-h4-aic8800-bdaddr`        | the AIC8800's BT on a made-up address: Wi-Fi's + 1 instead                  |
-| `drm-rockchip-tve-unknown-connector`     | the AV jack seen as connected, the console sized to 720x576 on HDMI         |
-| `drm-rockchip-tve-composite-connector`   | the AV jack as `TV-1`, not `Composite-1` as on every other SoC              |
-| `drm-rockchip-vop2-esmart-lb-mode-param` | the Esmart line buffers' split from the command line, over the tree's       |
-| `drm-rockchip-no-render-node`            | the display on `renderD128`: Mesa's scanout buffers refused, WebKit dies    |
-| `drm-rockchip-vop2-hdr-ext-data-size`    | a short `HDR_EXT_DATA` blob read past its end; Rockchip's 3108-byte refused |
-| `6.12/devfreq-event-rockchip-dfi-rk3528` | 6.12 only: no RK3528 DFI, so the DDR never scales                           |
-| `mmc-dw-mmc-rockchip-per-host-inherit`   | `static bool inherit` in `dw_mci_v2_execute_tuning()` — **not needed here** |
+| Patch                                       | Fixes                                                                       |
+| ------------------------------------------- | --------------------------------------------------------------------------- |
+| `input-remotectl-share-pwm-irq`             | the IR power key as a wake source; Rockchip fixed the IRQ choice            |
+| `net-stmmac-skip-absent-mdio-reset-gpio`    | a WARN + ~416 lines of trace at every boot; Rockchip fixed one call site    |
+| `bluetooth-hci-h4-serdev`                   | serdev `hci_h4`: BT with no `hciattach`, once it answers steadily           |
+| `bluetooth-hci-h4-aic8800-bdaddr`           | the AIC8800's BT on a made-up address: Wi-Fi's + 1 instead                  |
+| `drm-rockchip-tve-unknown-connector`        | the AV jack seen as connected, the console sized to 720x576 on HDMI         |
+| `drm-rockchip-tve-composite-connector`      | the AV jack as `TV-1`, not `Composite-1` as on every other SoC              |
+| `drm-rockchip-vop2-esmart-lb-mode-param`    | the Esmart line buffers' split from the command line, over the tree's       |
+| `drm-rockchip-dw-hdmi-rk3528-hpd-at-detect` | the RK3528's hot-plug read again at each detect, not only at probe          |
+| `drm-rockchip-no-render-node`               | the display on `renderD128`: Mesa's scanout buffers refused, WebKit dies    |
+| `drm-rockchip-vop2-hdr-ext-data-size`       | a short `HDR_EXT_DATA` blob read past its end; Rockchip's 3108-byte refused |
+| `6.12/devfreq-event-rockchip-dfi-rk3528`    | 6.12 only: no RK3528 DFI, so the DDR never scales                           |
+| `mmc-dw-mmc-rockchip-per-host-inherit`      | `static bool inherit` in `dw_mci_v2_execute_tuning()` — **not needed here** |
 
 The sunxi kernels apply `6.12/bluetooth-hci-h4-serdev` too, against mainline's `hci_h4`.
 

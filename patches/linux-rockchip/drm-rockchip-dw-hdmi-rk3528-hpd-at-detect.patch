@@ -1,0 +1,30 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] drm/rockchip: dw-hdmi: RK3528 hot-plug mirrored again at detect
+
+The RK3528 mirrors its HPD GPIO into the VO GRF sink-detect bit at probe,
+right after enabling the pad's input, and again only on a GPIO edge. A
+screen attached at boot was read as absent on a box and never corrected:
+no edge followed. Mirror the level again each time hot-plug is read.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/drivers/gpu/drm/rockchip/dw_hdmi-rockchip.c b/drivers/gpu/drm/rockchip/dw_hdmi-rockchip.c
+--- a/drivers/gpu/drm/rockchip/dw_hdmi-rockchip.c
++++ b/drivers/gpu/drm/rockchip/dw_hdmi-rockchip.c
+@@ -2141,6 +2141,16 @@
+ static enum drm_connector_status
+ dw_hdmi_rk3528_read_hpd(struct dw_hdmi *dw_hdmi, void *data)
+ {
++	struct rockchip_hdmi *hdmi = (struct rockchip_hdmi *)data;
++	u32 val;
++
++	/* the level mirrored at probe can predate the pad's input path */
++	if (hdmi->hpd_gpiod) {
++		val = gpiod_get_value(hdmi->hpd_gpiod) ? RK3528_HDMI_SNKDET : 0;
++		regmap_write(hdmi->regmap, RK3528_VO_GRF_HDMI_MASK,
++			     HIWORD_UPDATE(val, RK3528_HDMI_SNKDET));
++	}
++
+ 	return dw_hdmi_phy_read_hpd(dw_hdmi, data);
+ }
+ 
