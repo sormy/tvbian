@@ -30,8 +30,18 @@ screen in a player, before any one stage is judged.
 - **At 4K60 memory is the limit**: the handover to the display must keep up, not only the decoder.
   On LPDDR3 or a 32-bit bus a 4K60 claim stands on AFBC.
 - **A fault must leave the engine usable**: every clip past each limit is followed by a supported
-  clip checked against the software decode. A size is tested on a freshly booted engine before it is
-  called a limit.
+  clip checked against the software decode. A job that hangs, a corrupt stream or one the engine
+  times out on, resets the engine and its IOMMU, and the next clip decodes with no reboot. A size is
+  tested on a freshly booted engine before it is called a limit.
+- **A cap is the hardware's, measured**: a size or rate limit holds only where the engine fails past
+  it; the limit passes and one step past fails, both run, and the patch names the test. A cap copied
+  from another driver or a datasheet is a question.
+- **Interlaced streams are their own codecs**: field-coded and MBAFF H.264, interlaced MPEG-2 and
+  VC-1 take paths progressive clips never touch; an MBAFF regression here passed every progressive
+  test. MPEG-2, MPEG-4 Part 2, H.263 and VC-1 are compared by PSNR: their IDCT is not bit-exact, and
+  FFmpeg's own IDCTs disagree on one clip.
+- **A picture read back on the CPU runs at memory speed**: a converter, a scaler or a thumbnailer
+  maps decoded pictures, and an uncached buffer took 99 ms a 4K picture here against 24 ms cached.
 - **Test as a normal user**: the nodes ship `0600`, and root hides a missing udev rule.
 - **Ancient and regional codecs** (RealVideo, AVS) are worth little effort. ffmpeg patches that
   validate or fix a codec live in `patches/ffmpeg/`.
@@ -46,3 +56,9 @@ screen in a player, before any one stage is judged.
 - [ ] **C6** The decoder's scaled picture, decoder to plane
 - [ ] **C7** A clip past each limit, then a supported one, decodes right
 - [ ] **C8** The board's matrix is in `board.md`, its chip's column in `docs/video-support.md`
+- [ ] **C9** A job forced to time out, on each engine, is followed by a clip that decodes right, no
+      reboot
+- [ ] **C10** Each size or rate cap: the limit decodes, one step past is refused, both recorded
+- [ ] **C11** Interlaced clips, field and MBAFF H.264 and interlaced MPEG-2 and VC-1, against the
+      software decode, by PSNR where the IDCT is not bit-exact
+- [ ] **C12** A decoded 4K picture read back on the CPU at memory speed, cached and uncached timed

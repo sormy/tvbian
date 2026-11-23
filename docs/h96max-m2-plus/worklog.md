@@ -713,3 +713,11 @@ MPP 1.1.0's `osal/mpp_soc.c`, the `rk3528` entry, against `patches/ffmpeg/`; not
 ## 2026-11-21 — next2 on the boards' own `cma=16M`
 
 - The full regression on next2, the VOP behind its IOMMU: CMA peak 2.8 MiB.
+
+## 2026-11-20 — next2: a panic's restart stayed dark (recorded 2026-11-23)
+
+- The regression's panic step on 7.3.4-tvb-rk35xx-next2 (`build/validate/regression/2026-11-20/`)
+  crashed the box by `sysrq`; it did not come back on its own and stayed dark until the owner pulled
+  the power.
+- Back at 20:03 box time, its pstore held `dmesg-ramoops-0` (71,266 B, ending in the panic) and
+  `console-ramoops-0`; the run then finished, the default kernel restored.

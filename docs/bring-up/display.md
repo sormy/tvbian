@@ -50,6 +50,9 @@
   CDC maps only its own plane.
 - **Match vendor tables byte for byte**: replace a vendor library's register data only with a
   generator that reproduces it exactly.
+- **A drop count is the harness's until shown otherwise**: a test tool's watcher that mapped each 4K
+  buffer to hash a row cost 14 ms a picture and read as 4K60 drops. Time the harness's own steps
+  between decision and commit before blaming the kernel.
 - **An early flip event refuses the next commit**: on the Tanix it cost a dropped picture each time.
 - **4K60 is a rating, not a mode list**: an offered mode can still underrun or fall behind with
   full-size planes.

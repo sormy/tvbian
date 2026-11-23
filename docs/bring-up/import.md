@@ -1,7 +1,11 @@
 # Import bring-up
 
-A board of a family we boot, built from its stock firmware image with no box in hand. Every line
-that needs the box stays ❓ until one boots.
+A board built from its stock firmware image with no box in hand, beside a similar board already
+here. The riskiest route: no box boots its image before an owner does, so a wrong tree, loader or
+DRAM init reaches a box unseen. It has no validation of its own: an owner's report is all that
+comes, and it is coarse, the box boots or not, Wi-Fi works or not. Each report fills only the lines
+it names; the rest stay ❓. Reserve `BOARD_SUPPORT=not_tested` for an import with no hardware test
+run.
 
 ## Do
 
@@ -22,7 +26,10 @@ that needs the box stays ❓ until one boots.
    its source. A sibling's value is a question, not a row: ask, never guess. Search the tree before
    calling a part absent.
 7. **Build**: `./build.sh loader <board>`, `uboot <board>`, `board <board>`, `image <board>`.
-8. **Document**: `board.md` with the Test report and the image's source, `dtb.md`, `worklog.md`; the
+8. **Review before it ships**, a second pass over everything the image writes: every hunk of the
+   patches read against this factory tree, every per-board row against its named source, the loader
+   and DRAM init the image's own. The owner approves the import before a release carries it.
+9. **Document**: `board.md` with the Test report and the image's source, `dtb.md`, `worklog.md`; the
    board's rows in `README.md` and its family's README, marked ❓.
 
 ## Where each family's image keeps it

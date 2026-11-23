@@ -1,10 +1,7 @@
 # HK1 RBOX K8S
 
-- [ ] **HDMI picture and sound on vendor 6.1**: a screen attached at boot reads disconnected; the
-      hot-plug patch shown working on the box, with picture and sound.
 - [ ] **The GPU's clocks on 6.1 with their measured reason**: both `ACLK_GPU_MALI`, where next2's
       core runs on SCMI.
-- [ ] **UART2 the same on both trees**: 6.1 drops its DMA, next2 keeps it.
 - [ ] **The analog codec's timing on 6.1**: 3.02 s against 6.12's 2.03 s for a 2 s clip.
 - [ ] **USB Ethernet on the SuperSpeed hub** through every warm boot and under load.
 - [ ] **Wi-Fi download at 2.4 GHz on next2, every run**: nothing in two of four runs.

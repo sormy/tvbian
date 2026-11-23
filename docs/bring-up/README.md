@@ -3,13 +3,14 @@
 An agent brings a TV box up to TVBian with the human's hands only where a step needs them. This
 folder is the whole procedure: this file, read whole first, then one phase at a time.
 
-| Kind   | When                                    | Files, in order                                       |
-| ------ | --------------------------------------- | ----------------------------------------------------- |
-| board  | family and chips in the repo            | contact to input in the table below, then `finish.md` |
-| chip   | a Wi-Fi, BT or other chip has no driver | as a board, with `chip.md` before `finish.md`         |
-| family | the SoC family is new                   | `contact.md`, `family.md`, then as a board            |
-| alias  | a listed board's hardware, another name | `alias.md` alone                                      |
-| import | no box: a known family, its stock image | `import.md` alone                                     |
+| Kind   | When                                             | Files, in order                                       |
+| ------ | ------------------------------------------------ | ----------------------------------------------------- |
+| board  | family and chips in the repo                     | contact to input in the table below, then `finish.md` |
+| chip   | a Wi-Fi, BT or other chip has no driver          | as a board, with `chip.md` before `finish.md`         |
+| family | the SoC family is new                            | `contact.md`, `family.md`, then as a board            |
+| alias  | a listed board's hardware, another name          | `alias.md` alone                                      |
+| import | no box, a similar board here, its stock image    | `import.md` alone                                     |
+| otg    | the box in hand, no serial, a similar board here | `otg.md`, then as a board from `trees.md`             |
 
 **A board of a known family with known chips is mostly authoring**: its trees (`trees.md`) and its
 board data (`boot.md`), with no stock runtime capture, the image and its factory trees carrying it.
@@ -27,7 +28,7 @@ sibling.
 | `trees.md`      | the board's kernel and U-Boot trees                            |
 | `conversion.md` | a vendor tree translated to mainline, and its validation       |
 | `boot.md`       | board data, RAM first, a first boot, install, changes          |
-| `system.md`     | boot, reboots, RAM, the watchdog, crash records, heat          |
+| `system.md`     | boot, reboots, RAM, the watchdog, crash records, clocks, heat  |
 | `video.md`      | decode, encode, the picture path from decoder to screen        |
 | `display.md`    | HDMI, audio, CEC, DDC, the AV jack, the GPU                    |
 | `power.md`      | sleep, wake, off, draw                                         |
@@ -38,6 +39,7 @@ sibling.
 | `family.md`     | what every board of a new family inherits                      |
 | `alias.md`      | another box on a listed board's image                          |
 | `import.md`     | a board from its stock image, no box in hand                   |
+| `otg.md`        | no serial: the service mode, the dump, a first boot            |
 | `regression.md` | a change re-run against the board's last results, both kernels |
 | `finish.md`     | the full pass, `-next`'s kernel lines, the pull request        |
 
@@ -153,6 +155,11 @@ driver warning in it traced to its source and to any handling the vendor comment
 that forces it in minutes; a fix at the first event of the chain, a workaround only after. A
 measuring tool is proven on one known event before it is trusted. Soaking until it happens again is
 the last resort.
+
+**Kernel code recovers without a reboot.** Every driver or patch we write resets what it hangs: a
+job that times out or faults resets its block and IOMMU and the next job runs; a firmware that stops
+answering is restarted by its driver. A case it cannot recover from is refused before it starts. A
+block left wedged until a reboot is a bug in the patch, never a known limitation.
 
 **Bring-up integrates; research digs.** A driver from scratch, or a fault that needs a study, goes
 to `research/<experiment>/`; the board ships with the gap marked and scoped.

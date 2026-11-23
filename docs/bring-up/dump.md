@@ -28,6 +28,7 @@ shell on stock is at hand.
    | `lsmod.txt`                                              | the vendor's drivers                  |
    | `gpio.txt`, `pinmux.txt`, `regulators.txt`, `clocks.txt` | the wiring state                      |
    | `cpufreq.txt`, `thermal.txt`                             | the factory OPPs and trip points      |
+   | `devfreq.txt`                                            | the GPU's and DDR's ladders           |
    | `input-devices.txt`, `leds.txt`                          | buttons, remote, LEDs                 |
    | `iw-list.txt`                                            | the Wi-Fi's modes, bands and rates    |
 

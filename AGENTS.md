@@ -54,6 +54,10 @@ in `base/`, mechanism some boards share in `boards/common/`** — a board never 
 a family script. What it may keep is mechanism no other board can use: a unit for hardware only it
 has.
 
+**A board's tree for a kernel not yet its own lives in a subdirectory**, `boards/<board>/next2/`: a
+`board.conf` naming only its DTB bases, links to the factory DTB and its source, and its patch and
+output. It replaces the board's own tree once that kernel does.
+
 **A board's version lives in `BOARD_ID` alone**, beside `BOARD_PCB`'s silkscreen, which says it
 anyway. `BOARD_NAME` and `BOARD_HOSTNAME` name the model: `tanix-tx1-v2` is `Tanix TX1` at
 `tanix-tx1.local`.
@@ -101,7 +105,7 @@ another, so nothing rots when one is rewritten.
 | `docs/rockchip-maskrom.md`               | Rockchip's USB service modes: entry, the 32 MiB Loader trap, restore  |
 | `docs/amlogic-burning-mode.md`           | the Amlogic burning gadget: entry, backup, restore, the mask ROM      |
 | `docs/allwinner-fel.md`                  | Allwinner's FEL: back up, restore, install over USB                   |
-| `docs/watchdog.md`                       | why it cannot be stopped, and why a soft reboot can strand the box    |
+| `docs/watchdog.md`                       | the watchdog: checking it, rebooting with it armed, crash records     |
 | `docs/hdmi-edid-override.md`             | banning a display mode the panel advertises but nothing should pick   |
 | `docs/remote-keymap.md`                  | validating IR and BLE keymaps separately; the `hwdb` override         |
 | `docs/front-panel.md`                    | a front-panel display's clock: its settings on the box                |
@@ -194,7 +198,7 @@ cannot be backed, say so rather than rounding up.
   its row in the index. An item says what we want in the end, in a line or two, not how. A finished
   item is removed: the worklog and the commit record it.
 - **A todo changed is a todo cross-checked**: the board's `board.md` and `dtb.md`, the READMEs that
-  name it, and `tools/validate/known.conf`, whose lines point at todos and go when the fix lands.
+  name it, and `tools/validate/known.conf`, whose step skips point at todos and go when they land.
 - **An ask made in the middle of other work is a todo first**, to do or to consider, on its page.
   Then back to the work.
 - **Worklogs are written as work happens** — dated entries, wrong turns included. They are the raw
@@ -278,6 +282,10 @@ work. A push starts a release.
 **Nothing is committed untested**, unless the owner approves it untested. A kernel, tree or driver
 change is tested on the box it targets, on every kernel it ships on.
 
+**Release-ready means `docs/bring-up/regression.md` passed**: its unattended run, the extended
+profile for a kernel series, and its list of what needs hands, done by the owner. No one suite's
+pass stands in for it.
+
 **A title. A paragraph only where it earns its place** — something a reader cannot get from the
 diff. The diff is the record; reasoning belongs in the comment, the doc, or the todo it came from.
 
@@ -285,6 +293,10 @@ diff. The diff is the record; reasoning belongs in the comment, the doc, or the 
 name, path or claim it touches is left stale elsewhere in the repo.
 
 ## Code
+
+**Follow a trusted upstream's releases; pin only what is unmaintained or risky.** Mainline Linux on
+kernel.org and a vendor's kernel on the vendor's own GitHub account are trusted and float; work from
+any other tree is a carried patch. `docs/sources.md` lists each source and why.
 
 **A `kernel/*.conf` lists every patch and fragment it applies, one path a line**: no loops, globs,
 `$(…)` or `${…}`. A `-next` conf sources its base for the rest. Where a patch comes from is its
@@ -304,11 +316,34 @@ and OPPs onto hardware that does not have them.
 translation rule in `tools/dtcx/bases/`, never a hand edit in each board's patch; the patch holds
 only what no vendor node carries, such as a panel's digit map.
 
+**Nothing from a vendor tree is discarded blindly.** A dropped node, property or pin state names
+what it did on the vendor kernel and the evidence mainline needs no counterpart: the driver that
+reads it, or a runtime diff, vendor against mainline on one box, of pin mux, GPIOs, regulators and
+clocks. Each difference is a question until explained. A translation rule that ignores a node is
+presumed a bug, not the norm: a vendor node that did something on the vendor kernel needs its
+mainline counterpart.
+
+**A tree keeps what its vendor tree enables, and fixes no size the hardware varies.** A vendor ships
+one tree across a board's revisions (a 100M and a 1000M Ethernet, more RAM, a bigger eMMC), so a
+block enabled with nothing attached stays enabled, and RAM and storage sizes come from U-Boot and
+the card, never the tree. The exception is a vendor node that does harm, a pin taken from another
+block or a hang: the board's patch disables it, with that reason.
+
 **U-Boot handles the SoC and vendor storage only**: it may set the SoC's Ethernet address and pass
 vendor-storage entries on; a radio's address belongs to that radio's driver.
 
 **A driver refuses what it cannot show** rather than show garbage: an atomic check that fails is a
 player's cue to take another route; a picture that breaks is not.
+
+**A driver's limit is the hardware's, measured**: a size or rate cap is set only where the hardware
+fails past it, and its patch names the test that shows it, at the limit and one step past.
+
+**Kernel code never needs a reboot to recover**: no implementation may leave a block, a bus or the
+box wedged. A job that times out or faults resets its block and that block's IOMMU, and the next job
+runs; a case whose recovery is not written is refused instead. A block that stays wedged until a
+reboot is a bug, and a reload or reboot is the test of a recovery, never the recovery. A busy
+block's CRU reset is pulsed only inside the PMU's idle request, as the vendor does: pulsed under a
+core on the bus, it hangs the SoC past its watchdog.
 
 Less code is better. Communicate through names, not comments: comment a non-obvious _why_ only,
 never what the code already says, and keep it shorter than the code it explains. One responsibility
@@ -354,8 +389,8 @@ guess, a test or another board's tree.
   asking a person to look, listen or plug in. Make the ask one step, and add the test it shows is
   missing. When the ask is timed, a person watching or acting soon after the agent starts something
   (a button held through a reboot), start only on their word that they are ready.
-- **`/dev/mem`: only the offsets the driver uses, while its power domain is on**; anything else
-  hangs or resets the box.
+- **`/dev/mem`: only the offsets the driver uses, while its device is runtime-active**; a domain
+  reported on can still have the block's clock gated, and anything else hangs or resets the box.
 - **A box without a screen gets one in software for a display test**: a panel's EDID
   (`tools/validate/edid-boe-2256x1504.bin`, the M2 Plus's) into
   `/sys/kernel/debug/dri/0/<connector>/edid_override` and `on` into its `force`, written with

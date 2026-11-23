@@ -147,8 +147,9 @@ with `unguarded` skips `release/guard.sh`, for a release no box upgrades into.
 - **Disk:** a runner has 14 GB, the binding limit. The fragment's `CONFIG_DEBUG_INFO_NONE=y` drops
   debug info and BTF, and each job deletes the runner image's preinstalled toolchains.
 - **ccache** alone carries over: each kernel job keeps its own through `actions/cache`
-  (`TVB_BUILD_CCACHE_DIR`), about 1 GB a kernel against the repo's 10 GB. A pull request reads
-  `main`'s and saves only its own; one unused for 7 days is evicted.
+  (`TVB_BUILD_CCACHE_DIR`), capped at 1 GB so every family's cache and the release job's fit the
+  repo's 10 GB. Families do not share one: their configs differ. A pull request reads `main`'s and
+  saves only its own; one unused for 7 days is evicted.
 - **Unchanged pins** still give a new image: `mmdebstrap` pulls the week's Debian updates.
 
 `docs/sources.md` holds what floats and what is pinned.

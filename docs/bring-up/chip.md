@@ -26,6 +26,9 @@ goes on in `research/`.
   reloads, so a dropped link cannot strand the box.
 - **A hardware trade-off is a switch**, a module parameter, never one side left out: the ATBM6031's
   BLE costs Wi-Fi throughput, and the owner decides.
+- **A driver recovers without a reboot**: a firmware that hangs is restarted by the driver, through
+  its reset line or power sequence, and a command that times out leaves the interface usable.
+  Reloading the module is how the recovery is tested, never how it is done.
 - **A driver's own error paths are read** before a fault is soaked: the vendor's handling of a
   firmware reboot sat commented out beside its log line.
 
@@ -36,4 +39,5 @@ goes on in `research/`.
 - [ ] **X3** Any regulatory country can be set
 - [ ] **X4** The module loads and unloads cleanly, repeatedly
 - [ ] **X5** The firmware's origin is in its package's `README.md`
+- [ ] **X6** A firmware hang or a command timeout, forced, recovers on its own: no reload, no reboot
 - [ ] **X7** 👤 Bluetooth audio: headphones or a speaker pair and play, a stream lasting minutes

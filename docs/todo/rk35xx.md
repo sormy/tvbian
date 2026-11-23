@@ -39,6 +39,9 @@
       right third of a 4K frame; ✅ on the 3518D only. Check `3840x2160p60` full-screen with no
       fringe on the right, then that a 1080p display still comes up clean.
 
+- [ ] **A warm reboot never strands a box.** The watchdog's count carries over a reboot, and a boot
+      that outlasts what is left of it is reset partway, sometimes into a box dark until its power
+      is pulled. The count restarts, or stops, before the next boot, on every kernel.
 - [ ] **The R69's Wi-Fi comes back after every warm reboot.**
 - [ ] **6.12: a `_regulator_put` WARNING in the USB2 PHY's deferred probe**, now and then on the
       3518D and the R69. The probe fails `IRQ index 0 not found`, after

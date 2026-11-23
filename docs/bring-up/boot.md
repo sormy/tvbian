@@ -46,7 +46,11 @@ From loaders to an installed system, and how a running box is changed without lo
    identification, backup and recovery; do not upload a kernel through FEL when SD is available.
    Without SD, use a supported USB stick or a RAM boot through the service mode.
 5. **Network first**: a boot that comes up on Ethernet or Wi-Fi and takes `ssh`; the USB Ethernet
-   adapter stands in until the board's own works (`r8152` is in every family's kernel).
+   adapter stands in until the board's own works (`r8152` is in every family's kernel). On the first
+   login, use the expired root password `1234` and set a new one when prompted. From the host, run
+   `ssh-copy-id root@<hostname>.local` to install the SSH public key for unattended bring-up. If
+   using the console, add the public key to `/root/.ssh/authorized_keys` on the box. Verify from the
+   host with `ssh -o BatchMode=yes root@<hostname>.local true`.
 6. **Install** with `tvb-install` from external media, which keeps what the family's preserve list
    names; a box that boots none is written over the service mode.
 7. **Changing a running box**, every tree or kernel change:

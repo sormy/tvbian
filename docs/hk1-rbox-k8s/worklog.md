@@ -461,3 +461,10 @@
   The probe's mirrored level alone was wrong.
 - `drm-rockchip-dw-hdmi-rk3528-hpd-at-detect.patch` mirrors the GPIO again at each hot-plug read;
   one patch for 6.1 and 6.12, whose functions are identical.
+- UART2's DMA: both kernels run it in interrupt mode. The factory `dmas` have no `dma-names`; the
+  vendor driver logs `failed to request DMA, use interrupt mode` (the R69-1's 6.1), mainline
+  requests `rx` and `tx` by name and warns the same (`8250_port.c`). The trees differ only in that
+  warning.
+- 6.1 with the patch, four boots with the screen attached: each `connected`, the 256-byte EDID,
+  `SNKDET` 1, and 2256×1504 at 60 Hz set at 12.8 s with the console on HDMI. Before it, four of four
+  `disconnected`.

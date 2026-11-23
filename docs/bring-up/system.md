@@ -13,11 +13,17 @@ Test report marking each side by side; a number that differs between them is a f
 4. RAM under load and its bandwidth, `stress-ng --stream 1`, then `4`, read and write against a
    sibling family's; then the watchdog's two traps, a forced panic, and a real hang: the box resets
    itself each time. It is what every later phase relies on to run unattended.
-5. **Heat**: the CPU's ladder first, each frequency at its voltage the same as stock runs it on this
-   chip, then CPU stress against the trip points. A stick, or a box with a small heat sink, also
-   gets a combined soak, CPU, GPU, a 4K decode, Wi-Fi and eMMC traffic at once for 30 minutes, every
-   thermal zone logged. Where it throttles or errs, its trip points, OPPs and the eMMC, DRAM and
-   Wi-Fi settings are tuned for it, each change measured.
+5. **Clocks and rails, against stock's**: the CPU's and the GPU's ladders, each rate at the voltage
+   stock runs it at on this chip, the chip's bin or speed grade as the stock log names it; the GPU's
+   bus clock; DDR's ladder; the logic and GPU rails. Then scaling seen, not read: under load each
+   reaches its top rate and voltage, idle each falls back, and a block that suspends parks at its
+   lowest rate first. A clock or rail short of stock's is a gap in the todo, not a choice.
+6. **Heat**: CPU stress, then CPU and GPU together, against the trip points: the GPU shares the
+   CPU's rail and heat sink on some SoCs, and a box ran 81 °C on CPU stress and 93 °C with the GPU
+   beside it. A stick, or a box with a small heat sink, also gets a combined soak, CPU, GPU, a 4K
+   decode, Wi-Fi and eMMC traffic at once for 30 minutes, every thermal zone logged. Where it
+   throttles or errs, its trip points, OPPs and the eMMC, DRAM and Wi-Fi settings are tuned for it,
+   each change measured.
 
 ## Bites
 
@@ -25,6 +31,14 @@ Test report marking each side by side; a number that differs between them is a f
   the H616, SID `0x5c00` is stock's bit 2 and mainline's bin 4; the factory's masks passed through
   ran another grade's rows, 50–70 mV under stock and a step above it. Compare the booted ladder with
   stock's, never the table with the factory's.
+- **The reference is the stock firmware, not a vendor kernel**: our vendor 6.12 applies no PVTM bin
+  and runs every RK3528 chip at the table's default, below stock's voltage for the low bins. The
+  stock log names the bin (`pvtm-volt-sel`) and its clock dump the rates.
+- **A clock changed with its power domain off can reset the box**: lima's devfreq left the RK3528's
+  GPU at 800 MHz as its domain powered down, and the box reset within 30 s. The OPP table's
+  `opp-suspend` row parks it first, and devfreq leaves a suspended device's rate to its resume: a
+  `min_freq` written to an idle GPU did the same. A box that resets only once a driver idles, or on
+  a rate pinned from sysfs, is checked for both.
 - **A boot that grew** is the cheapest signal: a unit waiting on absent hardware, a getty on a
   missing tty, DHCP on an unplugged port.
 - **A watchdog has two known traps**: counting through system sleep (`power.md`), and a timeout set
@@ -75,8 +89,16 @@ Test report marking each side by side; a number that differs between them is a f
 - [ ] **S19** The ladder is stock's: `scaling_available_frequencies` as the dump's `cpufreq.txt`,
       and `vdd-cpu`'s voltage at each step as the factory row stock selects
 - [ ] **S20** 5 minutes of 4-core `stress-ng` stays under the trip points, not throttled
+- [ ] **S28** 5 minutes of 4-core `stress-ng` beside the GPU at its top rate stays under the trip
+      points, `--verify` clean
 - [ ] **S21** A stick or small heat sink: the 30-minute combined soak, no throttling, no eMMC, DRAM
       or Wi-Fi error
 - [ ] **S22** A CPU stuck on a hung bus read: a lockup panic, the box back by itself
 - [ ] **S23** RAM type, clock and bandwidth on one core and four are in `board.md` and the family
       README's Memory table
+- [ ] **S24** The chip's PVTM bin or speed grade is the one the stock log names
+- [ ] **S25** The GPU's ladder is stock's, each rate at the voltage stock's bin selects, and its bus
+      clock at stock's rate
+- [ ] **S26** DDR's ladder, and the logic and GPU rails' voltage at each step, are stock's
+- [ ] **S27** Scaling, seen: under load the CPU and GPU reach their top rate and voltage, idle they
+      return, and the GPU suspends at its lowest rate (`trans_stat`), no driver error
