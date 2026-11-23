@@ -67,9 +67,10 @@ settings.
 - [ ] **Chromium's sandbox**: every engine's device opened in `vaInitialize`, before the sandbox
       closes; today each opens at its first context.
 - [ ] **AFBC on `rk35xx-next2`**: `rkvdec` writes `AN68` and `AN6a`, 16x16 sparse, not split, for
-      H.264, HEVC and VP9; the driver offers Cedrus's split AFBC alone. The modifier by the formats
-      CAPTURE lists, for a client that lists it; VOP2 scans it on Cluster0. No client lists it yet:
-      GStreamer's `va` offers the modifier a plain surface exports, FFmpeg and mpv list none.
+      H.264, HEVC and VP9; the driver offers Cedrus's split AFBC alone. The driver half is
+      `research/va-driver/afbc-detect.patch`. GStreamer's `va` offers downstream the modifier a
+      plain surface exports, linear: it needs a probe with the AFBC modifiers listed. Then Falkon's
+      video-plane sink takes AFBC onto VOP2's Cluster0, where 4K60 runs at 48 to 55 fps linear.
 - [ ] **MPP's FBC**: AFBC from MPP on the vendor kernel, for a client that lists the modifier.
 - [ ] **`VideoProc` scaling**: for Jellyfin's `scale_vaapi`, and NV12 to ARGB where Chromium's GL
       cannot import NV12; it converts 8-bit and 10-bit at one size today.
