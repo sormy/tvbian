@@ -41,3 +41,4 @@ link ../tvb-journal-spill.timer /usr/lib/systemd/system/timers.target.wants/tvb-
 0644 front-panel.service       /usr/lib/systemd/system/tvb-front-panel.service
 0644 front-panel.timer         /usr/lib/systemd/system/tvb-front-panel.timer
 0755 front-panel               /usr/lib/tvb/front-panel
+0755 front-panel-sleep         /usr/lib/systemd/system-sleep/tvb-front-panel

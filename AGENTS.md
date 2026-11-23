@@ -104,6 +104,7 @@ another, so nothing rots when one is rewritten.
 | `docs/watchdog.md`                       | why it cannot be stopped, and why a soft reboot can strand the box   |
 | `docs/hdmi-edid-override.md`             | banning a display mode the panel advertises but nothing should pick  |
 | `docs/remote-keymap.md`                  | validating IR and BLE keymaps separately; the `hwdb` override        |
+| `docs/front-panel.md`                    | a front-panel display's clock: its settings on the box               |
 | `research/<experiment>/`                 | dead ends and partial results, kept so nobody re-walks them          |
 | `docs/todo/README.md`                    | project-wide items, and the index of every page in `docs/todo/`      |
 | `docs/todo/`                             | a page a scope: family, Wi-Fi/BT chip, box, or project-wide topic    |

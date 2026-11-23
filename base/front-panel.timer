@@ -5,3 +5,5 @@ Description=Schedule front-panel display updates
 OnActiveSec=1s
 OnCalendar=minutely
 AccuracySec=1s
+OnClockChange=yes
+OnTimezoneChange=yes

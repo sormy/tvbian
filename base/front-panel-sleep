@@ -1,0 +1,12 @@
+#!/bin/sh
+# the front panel follows the box at once: blank asleep, the clock back on waking
+display=/sys/class/leds/display
+[ -e "$display/message" ] || exit 0
+case "$1" in
+    pre)
+        printf 'none\n' > "$display::colon/trigger"
+        printf '0\n' > "$display::colon/brightness"
+        printf '    \n' > "$display/message"
+        ;;
+    post) systemctl --no-block start tvb-front-panel.service ;;
+esac
