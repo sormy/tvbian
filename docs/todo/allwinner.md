@@ -1,5 +1,7 @@
 # Allwinner: what is left, every board
 
+- [ ] **A hardware cursor plane on the H616**: a spare UI channel typed cursor, if the mixer has one
+      beyond the desktop's and the video's; mainline types every channel primary or overlay.
 - [ ] **H616: deep suspend, parked.** The H616 has no SCPI core, so TF-A needs its own
       `SYSTEM_SUSPEND`: DRAM self-refresh and a wake path from EL3. Large; s2idle meanwhile.
 

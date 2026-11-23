@@ -2765,6 +2765,7 @@
 			resets = <&cru SRST_A_VOP>, <&cru SRST_H_VOP>,
 			 <&cru SRST_D_VOP0>, <&cru SRST_D_VOP1>;
 			status = "okay";
+			esmart_lb_mode = [02]; /* Esmart0 a 4K line buffer for HDMI */
 
 			vop_out: ports {
 				#address-cells = <1>;

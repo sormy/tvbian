@@ -2,6 +2,8 @@
 
 What spans the family's boards.
 
+- [ ] **A hardware cursor plane**: the second graphics layer, OSD2, as a cursor plane, if the S905L3
+      has one usable; mainline `meson` drives OSD1 only.
 - [ ] **Keep an Amlogic board's Ethernet address, as `LAN_MAC` is kept on Rockchip.** It is the
       unifykey `mac` slot, encrypted, so only the vendor U-Boot reads it (`keyman read mac`); the
       stock env hands it to Android as `mac=`. Our `aml_autoscript` runs in that U-Boot: read it,

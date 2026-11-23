@@ -81,67 +81,68 @@ a Mac, which cannot mount ext4; the stock one corrupts an image on delete.
 **This table is the only index.** Docs are independent — each stands alone and none links to
 another, so nothing rots when one is rewritten.
 
-| Doc                                      | Holds                                                                |
-| ---------------------------------------- | -------------------------------------------------------------------- |
-| `docs/bring-up/`                         | bring-up in phases, each do, bites and checks; the run's rules       |
-| `docs/first-login.md`                    | a new box's user, timezone, locale and Wi-Fi, by hand                |
-| `docs/mpp.md`                            | reaching the video engines; the codec test commands                  |
-| `docs/video-support.md`                  | each SoC's hardware decode, encode and display formats, by codec     |
-| `docs/va-driver.md`                      | Debian's programs in hardware; what the VA driver adds               |
-| `va-driver/README.md`                    | the VA-API driver: what each engine offers, how VA maps onto it      |
-| `va-driver/worklog.md`                   | the VA-API driver's dated history, wrong turns included              |
-| `session/<name>/worklog.md`              | a session's dated history                                            |
-| `docs/emmc-layout.md`                    | the measured eMMC map: every replicated structure and its sectors    |
-| `docs/build.md`                          | `./build.sh`: hosts, steps, outputs, and making a release            |
-| `docs/release-checklist.md`              | what a new package needs to build and publish: extras, new steps     |
-| `site/README.md`                         | the public page: one HTML file from the repo, deployed on a release  |
-| `docs/sources.md`                        | every upstream we build from: what floats, what is pinned, and why   |
-| `docs/migrate.md`                        | moving a box off the overlay: in place on Rockchip, or a reinstall   |
-| `docs/uboot.md`                          | the bootloader pair: what we build, what stays factory, why          |
-| `docs/rockchip-maskrom.md`               | Rockchip's USB service modes: entry, the 32 MiB Loader trap, restore |
-| `docs/amlogic-burning-mode.md`           | the Amlogic burning gadget: entry, backup, restore, the mask ROM     |
-| `docs/allwinner-fel.md`                  | Allwinner's FEL: back up, restore, install over USB                  |
-| `docs/watchdog.md`                       | why it cannot be stopped, and why a soft reboot can strand the box   |
-| `docs/hdmi-edid-override.md`             | banning a display mode the panel advertises but nothing should pick  |
-| `docs/remote-keymap.md`                  | validating IR and BLE keymaps separately; the `hwdb` override        |
-| `docs/front-panel.md`                    | a front-panel display's clock: its settings on the box               |
-| `research/<experiment>/`                 | dead ends and partial results, kept so nobody re-walks them          |
-| `docs/todo/README.md`                    | project-wide items, and the index of every page in `docs/todo/`      |
-| `docs/todo/`                             | a page a scope: family, Wi-Fi/BT chip, box, or project-wide topic    |
-| `docs/<board>/board.md`                  | that board's identity, measured numbers, known gaps                  |
-| `docs/<board>/dtb.md`                    | that board's device-tree changes, tried and reverted ones too        |
-| `docs/<board>/worklog*.md`               | dated history, wrong turns included; split by topic once it grows    |
-| `docs/<family>/worklog.md`               | a kernel, translator rules, SoC blocks: no single box's work         |
-| `docs/<chip>/worklog.md`                 | a Wi-Fi/BT chip's driver, on every board that carries it             |
-| `tools/dtcx/README.md`                   | a blob decompiled as its vendor wrote it: named constants, decimal   |
-| `tools/amlcmd/README.md`                 | the Amlogic burning-mode client we wrote, and its worklog            |
-| `tools/validate/README.md`               | a running box against the bring-up criteria, one script a component  |
-| `patches/dtc/README.md`                  | the patched `dtc` that round-trips a vendor blob with `&label`s      |
-| `patches/u-boot/README.md`               | U-Boot's pylibfdt build off Linux; the MAC from vendor storage       |
-| `patches/arm-trusted-firmware/README.md` | TF-A's BL31 for Allwinner boards: the watchdog reset fix             |
-| `patches/rkdeveloptool/README.md`        | the patched `pack`; why the stock one cannot build a usable loader   |
-| `patches/e2tools/README.md`              | the patched `e2tools`; why the stock one corrupts an image on delete |
-| `patches/linux-rockchip/README.md`       | the vendor kernel's patches, their PRs, what Rockchip fixed since    |
-| `patches/linux-meson/README.md`          | mainline kernel patches for Amlogic boards, on their way upstream    |
-| `patches/linux-sunxi/README.md`          | mainline kernel patches for Allwinner boards: the H616 display       |
-| `patches/aic8800/README.md`              | the AIC8800 SDIO driver: Radxa's patches, then ours                  |
-| `patches/atbm6031/README.md`             | the ATBM6031 SDIO driver: a community 6.18 port, then ours           |
-| `patches/tm16xx/README.md`               | the TM16xx front-panel display driver on our kernels                 |
-| `patches/seekwave-swt6621s/README.md`    | the H96 Max Wi-Fi driver patches and their PRs                       |
-| `patches/mt76-mt7668/README.md`          | mainline mt76 for the MT7668S: what it does, its gaps, its firmware  |
-| `patches/btmtksdio-mt7668/README.md`     | mainline Bluetooth for the MT7668S, in-tree                          |
-| `patches/mt76x8-mt7668/README.md`        | the vendor MT7668 driver on 6.18: the fallback, not shipped          |
-| `patches/meson-dw-hdmi/README.md`        | mainline HDMI for the GXLX2 (S905L3), in-tree                        |
-| `patches/meson-codecs/README.md`         | the video decoder in-tree and the encoders beside it on the GXLX2    |
-| `patches/gst-plugins-good/README.md`     | VC-1 through V4L2 on GStreamer 1.26.2: the patched plugin, by hand   |
-| `patches/gst-plugins-bad/README.md`      | the va decoders on a driver that narrows 10-bit streams              |
-| `patches/mpp/README.md`                  | Rockchip's MPP: its platform probe a call, not run at load           |
-| `patches/ffmpeg/README.md`               | FFmpeg 9.0.2: V4L2 request, mem2mem and Rockchip MPP codecs          |
-| `patches/kodi/README.md`                 | Kodi 22 on GBM: handing the screen to another program                |
-| `patches/mesa/README.md`                 | Panfrost fixes on Debian's Mesa, backported from upstream            |
-| `patches/gxlimg/README.md`               | the Amlogic boot-image tool, built on macOS                          |
-| `keyring/README.md`                      | the archive signing key: fingerprint, secret, rotation               |
-| `kernel/regdb-certs/README.md`           | the regulatory database's signing keys our kernels trust             |
+| Doc                                      | Holds                                                                 |
+| ---------------------------------------- | --------------------------------------------------------------------- |
+| `docs/bring-up/`                         | bring-up in phases, each do, bites and checks; the run's rules        |
+| `docs/first-login.md`                    | a new box's user, timezone, locale and Wi-Fi, by hand                 |
+| `docs/mpp.md`                            | reaching the video engines; the codec test commands                   |
+| `docs/video-support.md`                  | each SoC's hardware decode, encode and display formats, by codec      |
+| `docs/va-driver.md`                      | Debian's programs in hardware; what the VA driver adds                |
+| `va-driver/README.md`                    | the VA-API driver: what each engine offers, how VA maps onto it       |
+| `va-driver/worklog.md`                   | the VA-API driver's dated history, wrong turns included               |
+| `session/<name>/worklog.md`              | a session's dated history                                             |
+| `docs/emmc-layout.md`                    | the measured eMMC map: every replicated structure and its sectors     |
+| `docs/build.md`                          | `./build.sh`: hosts, steps, outputs, and making a release             |
+| `docs/release-checklist.md`              | what a new package needs to build and publish: extras, new steps      |
+| `site/README.md`                         | the public page: one HTML file from the repo, deployed on a release   |
+| `docs/sources.md`                        | every upstream we build from: what floats, what is pinned, and why    |
+| `docs/migrate.md`                        | moving a box off the overlay: in place on Rockchip, or a reinstall    |
+| `docs/uboot.md`                          | the bootloader pair: what we build, what stays factory, why           |
+| `docs/rockchip-maskrom.md`               | Rockchip's USB service modes: entry, the 32 MiB Loader trap, restore  |
+| `docs/amlogic-burning-mode.md`           | the Amlogic burning gadget: entry, backup, restore, the mask ROM      |
+| `docs/allwinner-fel.md`                  | Allwinner's FEL: back up, restore, install over USB                   |
+| `docs/watchdog.md`                       | why it cannot be stopped, and why a soft reboot can strand the box    |
+| `docs/hdmi-edid-override.md`             | banning a display mode the panel advertises but nothing should pick   |
+| `docs/remote-keymap.md`                  | validating IR and BLE keymaps separately; the `hwdb` override         |
+| `docs/front-panel.md`                    | a front-panel display's clock: its settings on the box                |
+| `docs/rk3528-line-buffers.md`            | the RK3528's display line buffers: planes per split, the boot setting |
+| `research/<experiment>/`                 | dead ends and partial results, kept so nobody re-walks them           |
+| `docs/todo/README.md`                    | project-wide items, and the index of every page in `docs/todo/`       |
+| `docs/todo/`                             | a page a scope: family, Wi-Fi/BT chip, box, or project-wide topic     |
+| `docs/<board>/board.md`                  | that board's identity, measured numbers, known gaps                   |
+| `docs/<board>/dtb.md`                    | that board's device-tree changes, tried and reverted ones too         |
+| `docs/<board>/worklog*.md`               | dated history, wrong turns included; split by topic once it grows     |
+| `docs/<family>/worklog.md`               | a kernel, translator rules, SoC blocks: no single box's work          |
+| `docs/<chip>/worklog.md`                 | a Wi-Fi/BT chip's driver, on every board that carries it              |
+| `tools/dtcx/README.md`                   | a blob decompiled as its vendor wrote it: named constants, decimal    |
+| `tools/amlcmd/README.md`                 | the Amlogic burning-mode client we wrote, and its worklog             |
+| `tools/validate/README.md`               | a running box against the bring-up criteria, one script a component   |
+| `patches/dtc/README.md`                  | the patched `dtc` that round-trips a vendor blob with `&label`s       |
+| `patches/u-boot/README.md`               | U-Boot's pylibfdt build off Linux; the MAC from vendor storage        |
+| `patches/arm-trusted-firmware/README.md` | TF-A's BL31 for Allwinner boards: the watchdog reset fix              |
+| `patches/rkdeveloptool/README.md`        | the patched `pack`; why the stock one cannot build a usable loader    |
+| `patches/e2tools/README.md`              | the patched `e2tools`; why the stock one corrupts an image on delete  |
+| `patches/linux-rockchip/README.md`       | the vendor kernel's patches, their PRs, what Rockchip fixed since     |
+| `patches/linux-meson/README.md`          | mainline kernel patches for Amlogic boards, on their way upstream     |
+| `patches/linux-sunxi/README.md`          | mainline kernel patches for Allwinner boards: the H616 display        |
+| `patches/aic8800/README.md`              | the AIC8800 SDIO driver: Radxa's patches, then ours                   |
+| `patches/atbm6031/README.md`             | the ATBM6031 SDIO driver: a community 6.18 port, then ours            |
+| `patches/tm16xx/README.md`               | the TM16xx front-panel display driver on our kernels                  |
+| `patches/seekwave-swt6621s/README.md`    | the H96 Max Wi-Fi driver patches and their PRs                        |
+| `patches/mt76-mt7668/README.md`          | mainline mt76 for the MT7668S: what it does, its gaps, its firmware   |
+| `patches/btmtksdio-mt7668/README.md`     | mainline Bluetooth for the MT7668S, in-tree                           |
+| `patches/mt76x8-mt7668/README.md`        | the vendor MT7668 driver on 6.18: the fallback, not shipped           |
+| `patches/meson-dw-hdmi/README.md`        | mainline HDMI for the GXLX2 (S905L3), in-tree                         |
+| `patches/meson-codecs/README.md`         | the video decoder in-tree and the encoders beside it on the GXLX2     |
+| `patches/gst-plugins-good/README.md`     | VC-1 through V4L2 on GStreamer 1.26.2: the patched plugin, by hand    |
+| `patches/gst-plugins-bad/README.md`      | the va decoders on a driver that narrows 10-bit streams               |
+| `patches/mpp/README.md`                  | Rockchip's MPP: its platform probe a call, not run at load            |
+| `patches/ffmpeg/README.md`               | FFmpeg 9.0.2: V4L2 request, mem2mem and Rockchip MPP codecs           |
+| `patches/kodi/README.md`                 | Kodi 22 on GBM: handing the screen to another program                 |
+| `patches/mesa/README.md`                 | Panfrost fixes on Debian's Mesa, backported from upstream             |
+| `patches/gxlimg/README.md`               | the Amlogic boot-image tool, built on macOS                           |
+| `keyring/README.md`                      | the archive signing key: fingerprint, secret, rotation                |
+| `kernel/regdb-certs/README.md`           | the regulatory database's signing keys our kernels trust              |
 
 # Standing rules
 

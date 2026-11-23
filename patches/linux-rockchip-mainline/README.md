@@ -60,6 +60,8 @@ Experimental RK3528 patches for `rk35xx-next2`, the mainline kernel tested on th
 | `drm-rockchip-vop2-rk3528-aclk-gating.patch`              | aclk pre auto gating off              |
 | `drm-rockchip-vop2-scanout.patch`                         | Lit output for DDR rate changes       |
 | `drm-rk3528-vop2-afbc.patch`                              | AFBC scanout on Cluster0              |
+| `drm-rk3528-vop2-esmart-lb-mode.patch`                    | Esmart line buffers: tree, cmdline    |
+| `drm-rk3528-vop2-cursor-plane.patch`                      | Esmart2 as HDMI's cursor plane        |
 | `iommu-rockchip-attach-only.patch`                        | An IOMMU only its master enables      |
 | `media-rc-keymaps-h96max-m2-plus.patch`                   | The M2 Plus's IR remote keymap        |
 | `media-rc-keymaps-r69-1.patch`                            | The R69-1's IR remote keymap          |

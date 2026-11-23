@@ -1,0 +1,104 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] drm/rockchip: vop2: rk3528 Esmart2 as the cursor plane
+
+Userspace takes a hardware cursor only from a cursor plane, and VOP2
+registers none. On the RK3528 make Esmart2 the cursor plane, as the
+vendor driver does: shared between both video ports, the first's cursor,
+Esmart3 VP1's primary in its place. The driver keeps a window the table
+types cursor as one, and hands it to the first video port it serves.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+--- a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.h
++++ b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.h
+@@ -257,6 +257,7 @@
+ 	u32 win_mask;
+ 
+ 	struct vop2_win *primary_plane;
++	struct vop2_win *cursor_plane;
+ 	struct drm_pending_vblank_event *event;
+ 
+ 	unsigned int nlayers;
+--- a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
++++ b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
+@@ -2933,12 +2933,12 @@
+ 	const struct vop2_data *vop2_data = vop2->data;
+ 	struct drm_device *drm = vop2->drm;
+ 	struct device *dev = vop2->dev;
+-	struct drm_plane *plane;
++	struct drm_plane *plane, *cursor;
+ 	struct device_node *port;
+ 	struct vop2_video_port *vp;
+ 	struct vop2_win *win;
+ 	u32 possible_crtcs;
+-	int i, j, nvp, nvps = 0;
++	int i, j, nvp, nvps = 0, possible_cursor;
+ 	int ret;
+ 
+ 	for (i = 0; i < vop2_data->nr_vps; i++) {
+@@ -3024,9 +3024,11 @@
+ 		if (vop2_is_mirror_win(win) || vop2_win_unbuffered(win))
+ 			continue;
+ 
+-		win->type = DRM_PLANE_TYPE_OVERLAY;
++		if (win->type != DRM_PLANE_TYPE_CURSOR)
++			win->type = DRM_PLANE_TYPE_OVERLAY;
+ 
+ 		possible_crtcs = 0;
++		possible_cursor = 0;
+ 		nvp = 0;
+ 		for (j = 0; j < vop2_data->nr_vps; j++) {
+ 			vp = &vop2->vps[j];
+@@ -3034,8 +3036,12 @@
+ 			if (!vp->crtc.port)
+ 				continue;
+ 
+-			if (win->data->possible_vp_mask & BIT(vp->id))
++			if (win->data->possible_vp_mask & BIT(vp->id)) {
+ 				possible_crtcs |= BIT(nvp);
++				/* a cursor window is the first of its ports' cursor plane */
++				if (win->type == DRM_PLANE_TYPE_CURSOR && !possible_cursor++)
++					vp->cursor_plane = win;
++			}
+ 			nvp++;
+ 		}
+ 
+@@ -3052,8 +3058,9 @@
+ 			continue;
+ 
+ 		plane = &vp->primary_plane->base;
++		cursor = vp->cursor_plane ? &vp->cursor_plane->base : NULL;
+ 
+-		ret = drm_crtc_init_with_planes(drm, &vp->crtc, plane, NULL,
++		ret = drm_crtc_init_with_planes(drm, &vp->crtc, plane, cursor,
+ 						&vop2_crtc_funcs,
+ 						"video_port%d", vp->id);
+ 		if (ret)
+--- a/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c
++++ b/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c
+@@ -2705,13 +2705,13 @@
+ 		.name = "Esmart2-win0",
+ 		.phys_id = ROCKCHIP_VOP2_ESMART2,
+ 		.base = 0x1c00,
+-		.possible_vp_mask = BIT(1),
++		.possible_vp_mask = BIT(0) | BIT(1),
+ 		.formats = formats_rk356x_esmart,
+ 		.nformats = ARRAY_SIZE(formats_rk356x_esmart),
+ 		.format_modifiers = format_modifiers,
+-		.layer_sel_id = { 0xf, 0, 0xf, 0xf },
++		.layer_sel_id = { 3, 0, 0xf, 0xf },
+ 		.supported_rotations = DRM_MODE_REFLECT_Y,
+-		.type = DRM_PLANE_TYPE_PRIMARY,
++		.type = DRM_PLANE_TYPE_CURSOR,
+ 		.axi_yrgb_r_id = 10,
+ 		.axi_uv_r_id = 11,
+ 		.max_upscale_factor = 8,
+@@ -2726,7 +2726,7 @@
+ 		.format_modifiers = format_modifiers,
+ 		.layer_sel_id = { 0xf, 1, 0xf, 0xf },
+ 		.supported_rotations = DRM_MODE_REFLECT_Y,
+-		.type = DRM_PLANE_TYPE_OVERLAY,
++		.type = DRM_PLANE_TYPE_PRIMARY,
+ 		.axi_yrgb_r_id = 12,
+ 		.axi_uv_r_id = 13,
+ 		.max_upscale_factor = 8,

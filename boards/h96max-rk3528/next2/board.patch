@@ -24,7 +24,16 @@
  	};
  
  	reserved-memory {
-@@ -2937,6 +2937,8 @@
+@@ -2796,7 +2796,7 @@
+ 			resets = <&cru SRST_A_VOP>, <&cru SRST_H_VOP>,
+ 			 <&cru SRST_D_VOP0>, <&cru SRST_D_VOP1>;
+ 			status = "okay";
+-			esmart_lb_mode = [03];
++			esmart_lb_mode = [02]; /* Esmart0 a 4K line buffer for HDMI */
+ 
+ 			vop_out: ports {
+ 				#address-cells = <1>;
+@@ -2938,6 +2938,8 @@
  			pinctrl-0 = <&uart2m1_xfer>, <&uart2m1_ctsn>;
  
  			bluetooth {
@@ -33,7 +42,7 @@
  				reset-gpios = <&gpio1 RK_PC1 GPIO_ACTIVE_LOW>;
  				device-wakeup-gpios = <&gpio1 RK_PB4 GPIO_ACTIVE_HIGH>;
  			};
-@@ -3208,7 +3210,7 @@
+@@ -3209,7 +3211,7 @@
  			clocks = <&cru TCLK_WDT_NS>, <&cru PCLK_WDT_NS>;
  			clock-names = "tclk", "pclk";
  			interrupts = <GIC_SPI 28 IRQ_TYPE_LEVEL_HIGH>;
@@ -42,7 +51,7 @@
  		};
  
  		tsadc: tsadc@ffad0000 {
-@@ -3758,6 +3760,77 @@
+@@ -3759,6 +3761,77 @@
  		i2c-gpio,delay-us = <5>;
  		#address-cells = <1>;
  		#size-cells = <0>;

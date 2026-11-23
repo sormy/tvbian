@@ -1,0 +1,35 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] drm/rockchip: vop2: Esmart line buffers from the command line
+
+The Esmart line-buffer split comes from the tree's esmart_lb_mode alone.
+Let the esmart_lb_mode parameter override it, so a box that wants
+another split, at the cost of planes, sets it at boot without a tree
+edit. An out-of-range value falls back to the SoC's default, as one in
+the tree does.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+--- a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
++++ b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
+@@ -63,6 +63,10 @@
+ #include "rockchip_vop_reg.h"
+ #include "rockchip_post_csc.h"
+ 
++static int esmart_lb_mode = -1;
++module_param(esmart_lb_mode, int, 0444);
++MODULE_PARM_DESC(esmart_lb_mode, "RK3528 Esmart line buffers, over the tree's esmart_lb_mode");
++
+ #define _REG_SET(vop2, name, off, reg, mask, v, relaxed) \
+ 		vop2_mask_write(vop2, off + reg.offset, mask, reg.shift, v, reg.write_mask, relaxed)
+ 
+@@ -19722,6 +19726,10 @@
+ 	 * };
+ 	 */
+ 	ret = of_property_read_u8(dev->of_node, "esmart_lb_mode", &vop2->esmart_lb_mode);
++	if (esmart_lb_mode >= 0) {
++		vop2->esmart_lb_mode = esmart_lb_mode;
++		ret = 0;
++	}
+ 	if (ret < 0 || vop2->esmart_lb_mode >= VOP3_ESMART_LB_MODE_MAX)
+ 		vop2->esmart_lb_mode = vop2->data->esmart_lb_mode;
+ 

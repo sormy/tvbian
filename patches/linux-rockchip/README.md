@@ -12,6 +12,7 @@ carry only the rest.
 | `bluetooth-hci-h4-aic8800-bdaddr`        | the AIC8800's BT on a made-up address: Wi-Fi's + 1 instead                  |
 | `drm-rockchip-tve-unknown-connector`     | the AV jack seen as connected, the console sized to 720x576 on HDMI         |
 | `drm-rockchip-tve-composite-connector`   | the AV jack as `TV-1`, not `Composite-1` as on every other SoC              |
+| `drm-rockchip-vop2-esmart-lb-mode-param` | the Esmart line buffers' split from the command line, over the tree's       |
 | `drm-rockchip-no-render-node`            | the display on `renderD128`: Mesa's scanout buffers refused, WebKit dies    |
 | `drm-rockchip-vop2-hdr-ext-data-size`    | a short `HDR_EXT_DATA` blob read past its end; Rockchip's 3108-byte refused |
 | `6.12/devfreq-event-rockchip-dfi-rk3528` | 6.12 only: no RK3528 DFI, so the DDR never scales                           |

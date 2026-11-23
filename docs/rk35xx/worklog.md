@@ -413,3 +413,21 @@ Read: "RK3528 Datasheet", Rev 1.4, © 2025 Rockchip, pages 6-15 (features), from
   digit map stay in each board's patch: no vendor node carries them.
 - The HK1's next2 tree came out identical to its hand-written bus; its patch and the H96 Max
   RK3528's now add only `display@24`.
+
+## 2026-11-22 — the same planes on both kernels
+
+- The vendor driver types RK3528 VOP2 as VOP3 and ignores `rockchip,plane-mask`: each plane's ports
+  are its window table's `possible_vp_mask`. Esmart0, Esmart1, Cluster0 VP0; Esmart2 VP0 and VP1,
+  `DRM_PLANE_TYPE_CURSOR`; Esmart3 VP1, primary. `esmart_lb_mode` `02` feeds Esmart0 (4K), Esmart2
+  and Esmart3 (2K); the vendor registers no plane for Esmart1.
+- Next2 hard-coded `02`, offered Esmart1 unbuffered, kept Esmart2 VP1-only, and registered no cursor
+  plane: mainline VOP2 types none on any SoC.
+- `drm-rk3528-vop2-esmart-lb-mode.patch`: the split from the tree's `esmart_lb_mode` or
+  `rockchipdrm.esmart_lb_mode`, `02` without either; Esmart windows it leaves unbuffered not
+  registered. A `u8` mask dropped Esmart2 and Esmart3, whose IDs pass bit 7: `W=1` caught it.
+- `drm-rk3528-vop2-cursor-plane.patch`: the vendor's table, Esmart2 a cursor plane on VP0 and VP1,
+  Esmart3 VP1's primary. Composite's desktop moves to Esmart3, which showed black on next2.
+- The vendor kernels take `rockchipdrm.esmart_lb_mode` over the tree's value. The translator keeps
+  `esmart_lb_mode`; every next2 board patch sets `02`, each DTB's only change.
+- Built: 6.1, 6.12, next2; checkpatch clean. The 20:42 regression, the 3518, 3518D and R69-1 on all
+  three kernels: HDMI's planes alike everywhere, primary, overlay and cursor.

@@ -14,7 +14,7 @@
  
  	aliases {
  		ethernet0 = &gmac0;
-@@ -1792,17 +1792,18 @@
+@@ -1783,17 +1783,18 @@
  	sdio_pwrseq: sdio-pwrseq {
  		compatible = "mmc-pwrseq-simple";
  		pinctrl-names = "default";
@@ -35,14 +35,25 @@
  			default-state = "on";
  			retain-state-suspended;
  			retain-state-shutdown;
-@@ -2680,4 +2681,6 @@
+@@ -2537,7 +2538,7 @@
+ 			resets = <&cru SRST_A_VOP>, <&cru SRST_H_VOP>,
+ 			 <&cru SRST_D_VOP0>, <&cru SRST_D_VOP1>;
+ 			status = "okay";
+-			esmart_lb_mode = [03];
++			esmart_lb_mode = [02]; /* Esmart0 a 4K line buffer for HDMI */
+ 
+ 			vop_out: ports {
+ 				#address-cells = <1>;
+@@ -2679,6 +2680,8 @@
+ 			pinctrl-0 = <&uart2m0_xfer>, <&uart2m0_ctsn>;
+ 
  			bluetooth {
 +				compatible = "aicsemi,aic8800-bt"; /* the AIC8800's Bluetooth half */
 +				max-speed = <1500000>;
  				reset-gpios = <&gpio3 RK_PC1 GPIO_ACTIVE_LOW>;
  				device-wakeup-gpios = <&gpio3 RK_PB4 GPIO_ACTIVE_HIGH>;
  			};
-@@ -2948,7 +2949,7 @@
+@@ -2946,7 +2949,7 @@
  			clocks = <&cru TCLK_WDT_NS>, <&cru PCLK_WDT_NS>;
  			clock-names = "tclk", "pclk";
  			interrupts = <GIC_SPI 28 IRQ_TYPE_LEVEL_HIGH>;
@@ -51,7 +62,7 @@
  		};
  
  		tsadc: tsadc@ffad0000 {
-@@ -3504,6 +3514,7 @@
+@@ -3502,6 +3505,7 @@
  	ir-receiver {
  		compatible = "gpio-ir-receiver";
  		gpios = <&gpio4 RK_PC6 GPIO_ACTIVE_LOW>;

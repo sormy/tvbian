@@ -105,10 +105,8 @@ Grafted to `[02]` = `VOP3_ESMART_4K_2K_2K_MODE`, which gives **Esmart0** a 4K li
 2026-09-07 on a 4K LG TV: boots natively at `3840x2160p60`, console `480x135` (= 3840 px), full
 screen correct.
 
-The value is read straight from the DT — `of_property_read_u8(dev->of_node, "esmart_lb_mode", …)` in
-`rockchip_drm_vop2.c` — so there is no kernel command line or module parameter for it, and no safe
-runtime override (the VOP cannot be unbound while it drives the console). It needs a DTB and a
-reboot.
+The value is read from the tree on both kernels; `rockchipdrm.esmart_lb_mode` on the kernel command
+line overrides it. Either takes a reboot: the VOP cannot be unbound while it drives the console.
 
 **What `[02]` costs.** `vop3_ignore_plane()` drops a window outright under some modes and
 `vop3_esmart_linebuffer_size()` halves it under others. Per-window width on this SoC

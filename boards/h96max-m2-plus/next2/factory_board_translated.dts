@@ -2763,6 +2763,7 @@
 			resets = <&cru SRST_A_VOP>, <&cru SRST_H_VOP>,
 			 <&cru SRST_D_VOP0>, <&cru SRST_D_VOP1>;
 			status = "okay";
+			esmart_lb_mode = [03];
 
 			vop_out: ports {
 				#address-cells = <1>;

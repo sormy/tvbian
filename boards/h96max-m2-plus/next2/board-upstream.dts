@@ -1111,6 +1111,7 @@
 };
 
 &vop {
+	esmart_lb_mode = [02]; /* Esmart0 a 4K line buffer for HDMI */
 	status = "okay";
 };
 

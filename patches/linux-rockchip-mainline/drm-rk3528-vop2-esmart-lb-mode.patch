@@ -1,0 +1,127 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] drm/rockchip: vop2: rk3528 Esmart line buffers from the tree
+
+The RK3528 splits one line buffer between its Esmart windows, four ways:
+8K for Esmart0 alone, 4K and 4K, 4K and 2K and 2K, or 2K for each. The
+driver wrote 4K/2K/2K at every enable and still registered Esmart1, which
+that split leaves without a buffer, so a plane offered to userspace could
+not scan out.
+
+Take the split from the tree's esmart_lb_mode, as the vendor driver does,
+overridable by the esmart_lb_mode parameter, 4K/2K/2K without either; and
+register only the Esmart windows the split feeds.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+--- a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.h
++++ b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.h
+@@ -321,6 +321,8 @@
+ 	 * total number of hardware windows.
+ 	 */
+ 	u32 registered_num_wins;
++	/* RK3528: which Esmart windows the line buffer is split between */
++	u8 esmart_lb_mode;
+ 
+ 	struct resource *res;
+ 	void __iomem *regs;
+@@ -484,6 +486,7 @@
+ #define RK3528_OVL_SYS_ESMART3_CTRL		0x52c
+ #define RK3528_LUT_PORT_SEL__ESMART_LB_MODE	GENMASK(27, 26)
+ #define RK3528_ESMART_LB_MODE_4K_2K_2K		2
++#define RK3528_ESMART_LB_MODES			4
+ #define RK3576_CLUSTER0_MIX_SRC_COLOR_CTRL	0x530
+ #define RK3576_CLUSTER0_MIX_DST_COLOR_CTRL	0x534
+ #define RK3576_CLUSTER0_MIX_SRC_ALPHA_CTRL	0x538
+--- a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
++++ b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
+@@ -41,6 +41,10 @@
+ 
+ #include "rockchip_drm_gem.h"
+ #include "rockchip_drm_vop2.h"
++
++static int esmart_lb_mode = -1;
++module_param(esmart_lb_mode, int, 0444);
++MODULE_PARM_DESC(esmart_lb_mode, "RK3528 Esmart line buffers: 0 8K, 1 4K 4K, 2 4K 2K 2K, 3 2K x4");
+ #include "rockchip_rgb.h"
+ 
+ #include <soc/rockchip/rockchip_scanout.h>
+@@ -923,12 +927,12 @@
+ 	if (vop2->version == VOP_VERSION_RK3588)
+ 		rk3588_vop2_power_domain_enable_all(vop2);
+ 
+-	/* Esmart0 must retain a 4K line buffer regardless of the bootloader. */
++	/* the split the tree or the command line chose, regardless of the bootloader */
+ 	if (vop2->version == VOP_VERSION_RK3528) {
+ 		ret = regmap_update_bits(vop2->map, RK3568_LUT_PORT_SEL,
+ 					 RK3528_LUT_PORT_SEL__ESMART_LB_MODE,
+ 					 FIELD_PREP(RK3528_LUT_PORT_SEL__ESMART_LB_MODE,
+-						    RK3528_ESMART_LB_MODE_4K_2K_2K));
++						    vop2->esmart_lb_mode));
+ 		if (ret)
+ 			goto err_dma;
+ 	}
+@@ -2888,6 +2892,24 @@
+  * And RK3566 share the same vop version with Rk3568, so we
+  * need to use soc_id for identification here.
+  */
++/* The Esmart windows each RK3528 line buffer split feeds, as the vendor's scale engine table */
++static const u32 rk3528_esmart_lb_wins[RK3528_ESMART_LB_MODES] = {
++	BIT(ROCKCHIP_VOP2_ESMART0),
++	BIT(ROCKCHIP_VOP2_ESMART0) | BIT(ROCKCHIP_VOP2_ESMART2),
++	BIT(ROCKCHIP_VOP2_ESMART0) | BIT(ROCKCHIP_VOP2_ESMART2) | BIT(ROCKCHIP_VOP2_ESMART3),
++	BIT(ROCKCHIP_VOP2_ESMART0) | BIT(ROCKCHIP_VOP2_ESMART1) | BIT(ROCKCHIP_VOP2_ESMART2) |
++	BIT(ROCKCHIP_VOP2_ESMART3),
++};
++
++/* An Esmart window the line buffer split leaves without one cannot scan out: not a plane */
++static bool vop2_win_unbuffered(struct vop2_win *win)
++{
++	struct vop2 *vop2 = win->vop2;
++
++	return vop2->version == VOP_VERSION_RK3528 && !vop2_cluster_window(win) &&
++	       !(rk3528_esmart_lb_wins[vop2->esmart_lb_mode] & BIT(win->data->phys_id));
++}
++
+ static bool vop2_is_mirror_win(struct vop2_win *win)
+ {
+ 	struct vop2 *vop2 = win->vop2;
+@@ -2970,7 +2992,7 @@
+ 			if (!(win->data->possible_vp_mask & BIT(vp->id)))
+ 				continue;
+ 
+-			if (vop2_is_mirror_win(win))
++			if (vop2_is_mirror_win(win) || vop2_win_unbuffered(win))
+ 				continue;
+ 
+ 			if (win->type == DRM_PLANE_TYPE_PRIMARY) {
+@@ -2999,7 +3021,7 @@
+ 		if (win->base.type == DRM_PLANE_TYPE_PRIMARY)
+ 			continue;
+ 
+-		if (vop2_is_mirror_win(win))
++		if (vop2_is_mirror_win(win) || vop2_win_unbuffered(win))
+ 			continue;
+ 
+ 		win->type = DRM_PLANE_TYPE_OVERLAY;
+@@ -3227,6 +3249,7 @@
+ 	struct vop2 *vop2;
+ 	struct resource *res;
+ 	size_t alloc_size;
++	u8 mode;
+ 	int ret;
+ 
+ 	vop2_data = of_device_get_match_data(dev);
+@@ -3268,6 +3291,13 @@
+ 	drm->mode_config.max_width = vop2_data->max_input.width;
+ 	drm->mode_config.max_height = vop2_data->max_input.height;
+ 
++	vop2->esmart_lb_mode = RK3528_ESMART_LB_MODE_4K_2K_2K;
++	if (esmart_lb_mode >= 0 && esmart_lb_mode < RK3528_ESMART_LB_MODES)
++		vop2->esmart_lb_mode = esmart_lb_mode;
++	else if (of_property_read_u8(dev->of_node, "esmart_lb_mode", &mode) == 0 &&
++		 mode < RK3528_ESMART_LB_MODES)
++		vop2->esmart_lb_mode = mode;
++
+ 	ret = vop2_win_init(vop2);
+ 	if (ret)
+ 		return ret;
