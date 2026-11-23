@@ -82,8 +82,9 @@ The reader brackets its reads with `DMA_BUF_IOCTL_SYNC`; the decoder and the dis
 frames through their IOMMUs either way.
 
 `0037`'s `cacheable` does the same for `v4l2request`'s CAPTURE buffers, where the queue offers cache
-hints (Cedrus with `linux-sunxi/0813`): the driver syncs them at QBUF and DQBUF, so a picture read
-between dequeue and requeue is coherent; `DMA_BUF_IOCTL_SYNC` does nothing on them.
+hints (Cedrus with `linux-sunxi/0813`, rkvdec and Hantro on `rk35xx-next2`): the driver syncs them
+at QBUF and DQBUF, so a picture read between dequeue and requeue is coherent; `DMA_BUF_IOCTL_SYNC`
+syncs them only on `rk35xx-next2`, whose videobuf2 carries the fix.
 
 `0027`–`0030` serve the Amlogic decoder through the `*_v4l2m2m` wrappers. `0028`'s `afbc` takes the
 bit depths as `0018`'s and `0025`'s do, and asks DRM PRIME frames in the decoder's own compressed
