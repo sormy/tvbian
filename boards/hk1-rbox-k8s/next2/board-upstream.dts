@@ -1,0 +1,1118 @@
+/dts-v1/;
+
+/*
+ * Written by tools/dtcx/upstream.py from board.dts: a view, not edited.
+ * Over gregkh/linux at v7.3.4.
+ * Needs, beyond it, found by name and so best-effort: each
+ * patch adding a name the tree uses or a dtsi change it keeps, which may in
+ * turn need others before it:
+ *   patches/linux-rockchip/6.12/bluetooth-hci-h4-serdev.patch:
+ *     "aicsemi,aic8800-bt"
+ *   patches/linux-rockchip-mainline/dt-bindings-rk3528.patch:
+ *     "rockchip,rk3528-vdec", "rockchip,rk3528-tsadc", rockchip,grf, rockchip,hw-tshut-mode,
+ *     rockchip,hw-tshut-polarity, rockchip,hw-tshut-temp, "rockchip,rk3528-vop", rockchip,pmu,
+ *     "rockchip,rk3528-dw-hdmi", "rockchip,rk3528-hdmi-phy", "rockchip,rk3528-codec"
+ *   patches/linux-rockchip-mainline/dt-bindings-rk3528-audio.patch:
+ *     "rockchip,rk3528-sai", "rockchip,rk3576-sai"
+ *   patches/linux-rockchip-mainline/dt-bindings-rk3528-core-grf.patch:
+ *     "rockchip,rk3528-core-grf"
+ *   patches/linux-rockchip-mainline/dt-bindings-rk3528-rga.patch:
+ *     "rockchip,rk3528-rga"
+ *   patches/linux-rockchip-mainline/dt-bindings-rockchip-iep2.patch:
+ *     "rockchip,rk3528-iep"
+ *   patches/linux-rockchip-mainline/dt-bindings-rockchip-vdpp.patch:
+ *     "rockchip,rk3528-vdpp"
+ *   patches/linux-rockchip-mainline/dt-bindings-rockchip-iommu-dlr.patch:
+ *     rockchip,disable-device-link-resume
+ *   patches/linux-rockchip-mainline/dt-bindings-rockchip-grf-rk3528-pmu.patch:
+ *     "rockchip,rk3528-pmu-grf"
+ *   patches/linux-rockchip-mainline/dt-bindings-rk3528-gpu-grf.patch:
+ *     "rockchip,rk3528-gpu-grf"
+ *   patches/linux-rockchip-mainline/dt-bindings-devfreq-rockchip-dfi-rk3528.patch:
+ *     "rockchip,rk3528-dfi"
+ *   patches/linux-rockchip-mainline/dt-bindings-rockchip-rk3528-dmc.patch:
+ *     "rockchip,rk3528-dmc"
+ *   patches/linux-rockchip-mainline/media-rkvdec-rk3528.patch:
+ *     "rockchip,rk3528-vdec"
+ *   patches/linux-rockchip-mainline/media-hantro-rk3528-bindings.patch:
+ *     "rockchip,rk3528-vpu"
+ *   patches/linux-rockchip-mainline/media-hantro-rk3528.patch:
+ *     "rockchip,rk3528-vpu"
+ *   patches/linux-rockchip-mainline/media-rga-rk3528.patch:
+ *     "rockchip,rk3528-rga"
+ *   patches/linux-rockchip-mainline/media-rockchip-iep2.patch:
+ *     "rockchip,rk3528-iep"
+ *   patches/linux-rockchip-mainline/devfreq-rockchip-dfi-rk3528.patch:
+ *     "rockchip,rk3528-dfi"
+ *   patches/linux-rockchip-mainline/devfreq-rk3528-dmc.patch:
+ *     "rockchip,rk3528-dmc"
+ *   patches/linux-rockchip-mainline/thermal-rk3528.patch:
+ *     "rockchip,rk3528-tsadc", rockchip,hw-tshut-mode
+ *   patches/linux-rockchip-mainline/cpufreq-rockchip-pvtm.patch:
+ *     "rockchip,rk3528", "rockchip,rk3528-mali", rockchip,grf, rockchip,pvtm-freq,
+ *     rockchip,pvtm-offset, rockchip,pvtm-sample-time, rockchip,pvtm-volt,
+ *     rockchip,pvtm-voltage-sel
+ *   patches/linux-rockchip-mainline/drm-rk3528.patch:
+ *     "rockchip,rk3528-dw-hdmi", "rockchip,rk3528-vop", "rockchip,rk3528-hdmi-phy"
+ *   patches/linux-rockchip-mainline/drm-rk3528-tve.patch:
+ *     "rockchip,rk3528-tve", rockchip,grf
+ *   patches/linux-rockchip-mainline/iommu-rockchip-attach-only.patch:
+ *     rockchip,disable-device-link-resume
+ *   patches/linux-rockchip-mainline/arm64-dts-rk3528-media-display.patch:
+ *     &core_grf, &rmii0_phy nvmem-cells, &rmii0_phy nvmem-cell-names, &test_version,
+ *     &macphy_txlevel, &vdac_out_current, &rng, &rga, &rga_mmu, &iep, &iep_mmu, &vdpp, &jpegd,
+ *     &jpegd_mmu, &vpu, &vdpu_mmu, &vdec_mmu, &vdec, &sram, &sai2, &acodec, &vop, &vop_mmu, &tve,
+ *     &rkvenc, &rkvenc_mmu, &hdmi, &hdmiphy, &sai3, &tsadc, &display_subsystem
+ *   patches/linux-rockchip-mainline/arm64-dts-rk3528-dfi.patch:
+ *     &pmu_grf, &dfi
+ *   patches/linux-rockchip-mainline/arm64-dts-rk3528-gpu-grf.patch:
+ *     &gpu_grf
+ *   patches/linux-rockchip-mainline/arm64-dts-rk3528-gpu-bus-clock.patch:
+ *     &gpu assigned-clock-rates
+ *   patches/linux-rockchip-mainline/arm64-dts-rk3528-dmc.patch:
+ *     &dmc, &dmc_opp_table
+ *   patches/linux-rockchip-mainline/media-rc-keymaps-hk1-rbox-k8s.patch:
+ *     "rc-hk1-rbox-k8s"
+ *   patches/linux-rockchip-mainline/asoc-rk3528-codec.patch:
+ *     "rockchip,rk3528-codec"
+ *   patches/linux-rockchip-mainline/media-rkjpegd-v7-bindings.patch:
+ *     "rockchip,rk3588-jpegd"
+ *   patches/linux-rockchip-mainline/media-rkjpegd-v7-driver.patch:
+ *     "rockchip,rk3588-jpegd"
+ *   patches/linux-rockchip-mainline/media-rkvenc-rk3528-bindings.patch:
+ *     "rockchip,rk3528-rkvenc"
+ *   patches/linux-rockchip-mainline/media-rkvenc-rk3528-vepu540c.patch:
+ *     "rockchip,rk3528-rkvenc"
+ *   patches/linux-rockchip-mainline/media-rockchip-vdpp.patch:
+ *     "rockchip,rk3528-vdpp"
+ * Left out, the distribution's, not the board's:
+ *   /reserved-memory/ramoops@110000
+ */
+
+#include "rk3528.dtsi"
+#include <dt-bindings/power/rockchip,rk3528-power.h>
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/interrupt-controller/arm-gic.h>
+#include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/pinctrl/rockchip.h>
+#include <dt-bindings/input/linux-event-codes.h>
+#include <dt-bindings/thermal/thermal.h>
+
+/ {
+	model = "HK1 RBOX K8S (FX-RX3528-D4)";
+
+	aliases {
+		ethernet0 = &gmac0;
+		ethernet1 = &gmac1;
+		i2c0 = &i2c0;
+		i2c1 = &i2c1;
+		i2c2 = &i2c2;
+		i2c3 = &i2c3;
+		i2c4 = &i2c4;
+		i2c5 = &i2c5;
+		i2c6 = &i2c6;
+		i2c7 = &i2c7;
+		serial0 = &uart0;
+		serial1 = &uart1;
+		serial2 = &uart2;
+		serial3 = &uart3;
+		serial4 = &uart4;
+		serial5 = &uart5;
+		serial6 = &uart6;
+		serial7 = &uart7;
+		spi0 = &spi0;
+		spi1 = &spi1;
+	};
+
+	cpus {
+		idle-states {
+			entry-method = "psci";
+
+			CPU_SLEEP0: cpu-sleep0 {
+				compatible = "arm,idle-state";
+				local-timer-stop;
+				arm,psci-suspend-param = <0x10000>;
+				entry-latency-us = <120>;
+				exit-latency-us = <250>;
+				min-residency-us = <900>;
+				status = "disabled";
+			};
+
+			CPU_SLEEP1: cpu-sleep {
+				compatible = "arm,idle-state";
+				local-timer-stop;
+				arm,psci-suspend-param = <0x10000>;
+				entry-latency-us = <120>;
+				exit-latency-us = <250>;
+				min-residency-us = <900>;
+				status = "okay";
+			};
+		};
+	};
+
+	firmware {
+		optee {
+			compatible = "linaro,optee-tz";
+			method = "smc";
+		};
+	};
+
+	reserved-memory {
+		cma {
+			compatible = "shared-dma-pool";
+			reusable;
+			size = <0x00 0x800000>;
+			linux,cma-default;
+		};
+	};
+
+	arm-pmu {
+		compatible = "arm,cortex-a53-pmu";
+		interrupts = <GIC_SPI 171 IRQ_TYPE_LEVEL_HIGH>,
+		             <GIC_SPI 172 IRQ_TYPE_LEVEL_HIGH>,
+		             <GIC_SPI 173 IRQ_TYPE_LEVEL_HIGH>,
+		             <GIC_SPI 174 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-affinity = <&cpu0>, <&cpu1>, <&cpu2>, <&cpu3>;
+	};
+
+	thermal_zones: thermal-zones {
+		soc_thermal: soc-thermal {
+			polling-delay-passive = <500>;
+			polling-delay = <1000>;
+			sustainable-power = <927>;
+			thermal-sensors = <&tsadc 0>;
+
+			trips {
+				threshold: trip-point-0 {
+					temperature = <75000>;
+					hysteresis = <2000>;
+					type = "passive";
+				};
+
+				target: trip-point-1 {
+					temperature = <85000>;
+					hysteresis = <2000>;
+					type = "passive";
+				};
+
+				soc_crit: soc-crit {
+					temperature = <115000>;
+					hysteresis = <2000>;
+					type = "critical";
+				};
+			};
+
+			cooling-maps {
+				map0 {
+					trip = <&target>;
+					cooling-device = <&cpu0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+					contribution = <1024>;
+				};
+
+				map1 {
+					trip = <&target>;
+					cooling-device = <&gpu THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+					contribution = <1024>;
+				};
+			};
+		};
+	};
+
+	acodec_sound: acodec-sound {
+		compatible = "simple-audio-card";
+		simple-audio-card,name = "rk3528-acodec";
+		simple-audio-card,format = "i2s";
+		simple-audio-card,mclk-fs = <256>;
+		status = "okay";
+
+		simple-audio-card,cpu {
+			sound-dai = <&sai2>;
+		};
+
+		simple-audio-card,codec {
+			sound-dai = <&acodec>;
+		};
+	};
+
+	adc_keys: adc-keys {
+		compatible = "adc-keys";
+		io-channels = <&saradc 1>;
+		io-channel-names = "buttons";
+		keyup-threshold-microvolt = <1800000>;
+		poll-interval = <100>;
+		status = "okay";
+
+		button-recovery {
+			press-threshold-microvolt = <1750>;
+			linux,code = <KEY_VENDOR>;
+			label = "recovery";
+		};
+	};
+
+	dc_12v: dc-12v {
+		compatible = "regulator-fixed";
+		regulator-name = "dc_12v";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <12000000>;
+		regulator-max-microvolt = <12000000>;
+	};
+
+	leds: gpio-leds {
+		compatible = "gpio-leds";
+
+		pwr-red {
+			gpios = <&gpio4 RK_PB3 GPIO_ACTIVE_HIGH>;
+			linux,default-trigger = "none";
+			default-state = "off";
+			retain-state-suspended;
+			retain-state-shutdown;
+		};
+
+		pwr-green {
+			gpios = <&gpio4 RK_PB5 GPIO_ACTIVE_HIGH>;
+			linux,default-trigger = "none";
+			default-state = "on";
+			retain-state-suspended;
+			retain-state-shutdown;
+		};
+	};
+
+	vcc5v0_sys: vcc5v0-sys {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc5v0_sys";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		vin-supply = <&dc_12v>;
+	};
+
+	vcc5v0_host: vcc5v0-host-regulator {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc5v0_host";
+		regulator-boot-on;
+		regulator-always-on;
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		enable-active-high;
+		gpio = <&gpio4 RK_PB4 GPIO_ACTIVE_HIGH>;
+		vin-supply = <&vcc5v0_sys>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&vcc5v0_host_en>;
+	};
+
+	vdd_logic: vdd-logic {
+		compatible = "pwm-regulator";
+		pwms = <&pwm2 0 5000 1>;
+		regulator-name = "vdd_logic";
+		regulator-min-microvolt = <703000>;
+		regulator-max-microvolt = <1006000>;
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-settling-time-up-us = <250>;
+		pwm-supply = <&vcc5v0_sys>;
+		status = "okay";
+	};
+
+	vdd_cpu: vdd-cpu {
+		compatible = "pwm-regulator";
+		pwms = <&pwm1 0 5000 1>;
+		regulator-name = "vdd_cpu";
+		regulator-min-microvolt = <746000>;
+		regulator-max-microvolt = <1201000>;
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-settling-time-up-us = <250>;
+		pwm-supply = <&vcc5v0_sys>;
+		status = "okay";
+	};
+
+	vdd_0v9_s3: vdd-0v9-s3 {
+		compatible = "regulator-fixed";
+		regulator-name = "vdd_0v9_s3";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <900000>;
+		regulator-max-microvolt = <900000>;
+		vin-supply = <&vcc5v0_sys>;
+	};
+
+	vdd_1v8_s3: vdd-1v8-s3 {
+		compatible = "regulator-fixed";
+		regulator-name = "vdd_1v8_s3";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		vin-supply = <&vcc5v0_sys>;
+	};
+
+	vcc_3v3_s3: vcc-3v3-s3 {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_3v3_s3";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		vin-supply = <&vcc5v0_sys>;
+	};
+
+	vcc_ddr_s3: vcc-ddr-s3 {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_ddr_s3";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <1200000>;
+		regulator-max-microvolt = <1200000>;
+		vin-supply = <&vcc5v0_sys>;
+	};
+
+	vcc_sd: vcc-sd {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_sd";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		vin-supply = <&vcc_3v3_s3>;
+		regulator-always-on;
+	};
+
+	vccio_sd: vccio-sd {
+		compatible = "regulator-fixed";
+		regulator-name = "vccio_sd";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		vin-supply = <&vcc5v0_sys>;
+		regulator-always-on;
+	};
+
+	sdio_pwrseq: sdio-pwrseq {
+		compatible = "mmc-pwrseq-simple";
+		pinctrl-names = "default";
+		pinctrl-0 = <&wifi_reset>, <&clkm0_32k_out>;
+		reset-gpios = <&gpio3 RK_PB4 GPIO_ACTIVE_LOW>, <&gpio3 RK_PB2 GPIO_ACTIVE_LOW>;
+		power-off-delay-us = <2000000>; /* B2, the module enable, low 2 s: a stalled card returns */
+	};
+
+	ir-receiver {
+		compatible = "gpio-ir-receiver";
+		gpios = <&gpio4 RK_PC6 GPIO_ACTIVE_LOW>;
+		linux,rc-map-name = "rc-hk1-rbox-k8s";
+		pinctrl-names = "default";
+		pinctrl-0 = <&ir_rx_gpio>;
+	};
+
+	hdmi-sound {
+		compatible = "simple-audio-card";
+		simple-audio-card,name = "rockchip,hdmi";
+		simple-audio-card,format = "i2s";
+		simple-audio-card,mclk-fs = <128>;
+
+		simple-audio-card,cpu {
+			sound-dai = <&sai3>;
+			dai-tdm-slot-num = <2>;
+			dai-tdm-slot-width = <32>;
+		};
+
+		simple-audio-card,codec {
+			sound-dai = <&hdmi>;
+		};
+	};
+
+	i2c-display {
+		compatible = "i2c-gpio";
+		sda-gpios = <&gpio4 RK_PA2 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		scl-gpios = <&gpio4 RK_PA3 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		i2c-gpio,delay-us = <5>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		display@24 {
+			compatible = "fdhisi,fd650", "titanmec,tm1650";
+			reg = <0x24>;
+			default-brightness = <3>;
+
+			digits {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				digit@0 {
+					reg = <0>;
+					segments = <0 0>, <0 1>, <0 2>, <0 3>, <0 4>, <0 5>, <0 6>;
+				};
+
+				digit@1 {
+					reg = <1>;
+					segments = <1 0>, <1 1>, <1 2>, <1 3>, <1 4>, <1 5>, <1 6>;
+				};
+
+				digit@2 {
+					reg = <2>;
+					segments = <2 0>, <2 1>, <2 2>, <2 3>, <2 4>, <2 5>, <2 6>;
+				};
+
+				digit@3 {
+					reg = <3>;
+					segments = <3 0>, <3 1>, <3 2>, <3 3>, <3 4>, <3 5>, <3 6>;
+				};
+			};
+
+			leds {
+				#address-cells = <2>;
+				#size-cells = <0>;
+
+				led@1,7 {
+					reg = <1 7>;
+					function = "colon";
+				};
+			};
+		};
+	};
+};
+
+&acodec {
+	pa-ctl-gpios = <&gpio0 RK_PA0 GPIO_ACTIVE_HIGH>;
+	status = "okay";
+};
+
+&combphy {
+	status = "okay";
+};
+
+&cpu0 {
+	#cooling-cells = <2>;
+	dynamic-power-coefficient = <147>;
+	cpu-idle-states = <&CPU_SLEEP0>;
+	cpu-supply = <&vdd_cpu>;
+};
+
+&cpu1 {
+	cpu-idle-states = <&CPU_SLEEP0>;
+};
+
+&cpu2 {
+	cpu-idle-states = <&CPU_SLEEP1>;
+};
+
+&cpu3 {
+	cpu-idle-states = <&CPU_SLEEP1>;
+};
+
+&cpu_opp_table {
+	rockchip,pvtm-voltage-sel = <0 1320 0>, <1321 1350 1>, <1351 1375 2>, <1376 1405 3>,
+	                            <1406 1435 4>, <1436 1470 5>, <1471 1505 6>,
+	                            <1506 1540 7>, <1541 1575 8>, <1576 1610 9>,
+	                            <1611 1640 10>, <1641 9999 11>;
+	rockchip,pvtm-offset = <0x18>;
+	rockchip,pvtm-sample-time = <1100>;
+	rockchip,pvtm-freq = <1608000>;
+	rockchip,pvtm-volt = <900000>;
+	rockchip,grf = <&core_grf>;
+
+	opp-1200000000 {
+		opp-microvolt = <900000 900000 1100000>;
+		opp-microvolt-L0 = <900000 900000 1100000>;
+		opp-microvolt-L1 = <887500 887500 1100000>;
+		opp-microvolt-L2 = <875000 875000 1100000>;
+		opp-microvolt-L3 = <875000 875000 1100000>;
+		opp-microvolt-L4 = <875000 875000 1100000>;
+		opp-microvolt-L5 = <862500 862500 1100000>;
+		opp-microvolt-L6 = <850000 850000 1100000>;
+		opp-microvolt-L7 = <825000 825000 1100000>;
+		opp-microvolt-L8 = <825000 825000 1100000>;
+		opp-microvolt-L9 = <825000 825000 1100000>;
+		opp-microvolt-L10 = <825000 825000 1100000>;
+		opp-microvolt-L11 = <825000 825000 1100000>;
+	};
+
+	opp-1416000000 {
+		opp-microvolt = <962500 962500 1100000>;
+		opp-microvolt-L1 = <950000 950000 1100000>;
+		opp-microvolt-L2 = <950000 950000 1100000>;
+		opp-microvolt-L3 = <937500 937500 1100000>;
+		opp-microvolt-L4 = <925000 925000 1100000>;
+		opp-microvolt-L5 = <912500 912500 1100000>;
+		opp-microvolt-L6 = <900000 900000 1100000>;
+		opp-microvolt-L7 = <887500 887000 1100000>;
+		opp-microvolt-L8 = <875000 875000 1100000>;
+		opp-microvolt-L9 = <862500 862500 1100000>;
+		opp-microvolt-L10 = <850000 850000 1100000>;
+		opp-microvolt-L11 = <850000 850000 1100000>;
+		opp-microvolt-L0 = <962500 962500 1100000>;
+	};
+
+	opp-1608000000 {
+		opp-microvolt = <1012500 1012500 1100000>;
+		opp-microvolt-L2 = <1000000 1000000 1100000>;
+		opp-microvolt-L3 = <987500 987500 1100000>;
+		opp-microvolt-L4 = <975000 975000 1100000>;
+		opp-microvolt-L5 = <962500 962500 1100000>;
+		opp-microvolt-L6 = <950000 950000 1100000>;
+		opp-microvolt-L7 = <937500 937500 1100000>;
+		opp-microvolt-L8 = <925000 925000 1100000>;
+		opp-microvolt-L9 = <912500 912500 1100000>;
+		opp-microvolt-L10 = <900000 900000 1100000>;
+		opp-microvolt-L11 = <887500 887500 1100000>;
+		opp-microvolt-L0 = <1012500 1012500 1100000>;
+		opp-microvolt-L1 = <1012500 1012500 1100000>;
+	};
+
+	opp-1800000000 {
+		opp-microvolt = <1062500 1062500 1100000>;
+		opp-microvolt-L1 = <1050000 1050000 1100000>;
+		opp-microvolt-L2 = <1037500 1037500 1100000>;
+		opp-microvolt-L3 = <1025000 1025000 1100000>;
+		opp-microvolt-L4 = <1012500 1012500 1100000>;
+		opp-microvolt-L5 = <1000000 1000000 1100000>;
+		opp-microvolt-L6 = <987500 987500 1100000>;
+		opp-microvolt-L7 = <975000 975000 1100000>;
+		opp-microvolt-L8 = <962500 962500 1100000>;
+		opp-microvolt-L9 = <950000 950000 1100000>;
+		opp-microvolt-L10 = <937500 937500 1100000>;
+		opp-microvolt-L11 = <925000 925000 1100000>;
+		opp-microvolt-L0 = <1062500 1062500 1100000>;
+	};
+
+	opp-2016000000 {
+		opp-microvolt-L1 = <1087500 1087500 1100000>;
+		opp-microvolt-L2 = <1075000 1075000 1100000>;
+		opp-microvolt-L3 = <1062500 1062500 1100000>;
+		opp-microvolt-L4 = <1050000 1050000 1100000>;
+		opp-microvolt-L5 = <1037500 1037500 1100000>;
+		opp-microvolt-L6 = <1025000 1025000 1100000>;
+		opp-microvolt-L7 = <1012500 1012500 1100000>;
+		opp-microvolt-L8 = <1000000 1000000 1100000>;
+		opp-microvolt-L9 = <987500 987500 1100000>;
+		opp-microvolt-L10 = <975000 975000 1100000>;
+		opp-microvolt-L11 = <962500 962500 1100000>;
+		opp-microvolt-L0 = <1100000 1100000 1100000>;
+	};
+
+	opp-408000000 {
+		opp-hz = /bits/ 64 <408000000>;
+		opp-microvolt = <875000 875000 1100000>;
+		opp-microvolt-L0 = <875000 875000 1100000>;
+		opp-microvolt-L1 = <875000 875000 1100000>;
+		opp-microvolt-L2 = <875000 875000 1100000>;
+		opp-microvolt-L3 = <875000 875000 1100000>;
+		opp-microvolt-L4 = <875000 875000 1100000>;
+		opp-microvolt-L5 = <850000 850000 1100000>;
+		clock-latency-ns = <40000>;
+		opp-suspend;
+		opp-microvolt-L6 = <825000 825000 1100000>;
+		opp-microvolt-L7 = <825000 825000 1100000>;
+		opp-microvolt-L8 = <825000 825000 1100000>;
+		opp-microvolt-L9 = <825000 825000 1100000>;
+		opp-microvolt-L10 = <825000 825000 1100000>;
+		opp-microvolt-L11 = <825000 825000 1100000>;
+	};
+
+	opp-600000000 {
+		opp-hz = /bits/ 64 <600000000>;
+		opp-microvolt = <875000 875000 1100000>;
+		opp-microvolt-L0 = <875000 875000 1100000>;
+		opp-microvolt-L1 = <875000 875000 1100000>;
+		opp-microvolt-L2 = <875000 875000 1100000>;
+		opp-microvolt-L3 = <875000 875000 1100000>;
+		opp-microvolt-L4 = <875000 875000 1100000>;
+		opp-microvolt-L5 = <850000 850000 1100000>;
+		clock-latency-ns = <40000>;
+		opp-microvolt-L6 = <825000 825000 1100000>;
+		opp-microvolt-L7 = <825000 825000 1100000>;
+		opp-microvolt-L8 = <825000 825000 1100000>;
+		opp-microvolt-L9 = <825000 825000 1100000>;
+		opp-microvolt-L10 = <825000 825000 1100000>;
+		opp-microvolt-L11 = <825000 825000 1100000>;
+	};
+
+	opp-816000000 {
+		opp-hz = /bits/ 64 <816000000>;
+		opp-microvolt = <875000 875000 1100000>;
+		opp-microvolt-L0 = <875000 875000 1100000>;
+		opp-microvolt-L1 = <875000 875000 1100000>;
+		opp-microvolt-L2 = <875000 875000 1100000>;
+		opp-microvolt-L3 = <875000 875000 1100000>;
+		opp-microvolt-L4 = <875000 875000 1100000>;
+		opp-microvolt-L5 = <850000 850000 1100000>;
+		clock-latency-ns = <40000>;
+		opp-microvolt-L6 = <825000 825000 1100000>;
+		opp-microvolt-L7 = <825000 825000 1100000>;
+		opp-microvolt-L8 = <825000 825000 1100000>;
+		opp-microvolt-L9 = <825000 825000 1100000>;
+		opp-microvolt-L10 = <825000 825000 1100000>;
+		opp-microvolt-L11 = <825000 825000 1100000>;
+	};
+
+	opp-1008000000 {
+		opp-hz = /bits/ 64 <1008000000>;
+		opp-microvolt = <875000 875000 1100000>;
+		opp-microvolt-L0 = <875000 875000 1100000>;
+		opp-microvolt-L1 = <875000 875000 1100000>;
+		opp-microvolt-L2 = <875000 875000 1100000>;
+		opp-microvolt-L3 = <875000 875000 1100000>;
+		opp-microvolt-L4 = <875000 875000 1100000>;
+		opp-microvolt-L5 = <850000 850000 1100000>;
+		clock-latency-ns = <40000>;
+		opp-microvolt-L6 = <825000 825000 1100000>;
+		opp-microvolt-L7 = <825000 825000 1100000>;
+		opp-microvolt-L8 = <825000 825000 1100000>;
+		opp-microvolt-L9 = <825000 825000 1100000>;
+		opp-microvolt-L10 = <825000 825000 1100000>;
+		opp-microvolt-L11 = <825000 825000 1100000>;
+	};
+};
+
+&dmc {
+	center-supply = <&vdd_logic>;
+	status = "okay";
+};
+
+&dmc_opp_table {
+	opp-920000000 {
+		opp-hz = /bits/ 64 <920000000>;
+		opp-microvolt = <850000 850000 1000000>;
+	};
+
+	opp-1056000000 {
+		opp-hz = /bits/ 64 <1056000000>;
+		opp-microvolt = <875000 875000 1000000>;
+		opp-microvolt-L0 = <875000 875000 1000000>;
+		opp-microvolt-L1 = <850000 850000 1000000>;
+		opp-microvolt-L2 = <850000 850000 1000000>;
+		opp-microvolt-L3 = <850000 850000 1000000>;
+		opp-microvolt-L4 = <850000 850000 1000000>;
+	};
+};
+
+&gmac0 {
+	clock_in_out = "input";
+	status = "okay";
+};
+
+&gpu {
+	#cooling-cells = <2>;
+	mali-supply = <&vdd_logic>;
+	dynamic-power-coefficient = <724>;
+	status = "okay";
+};
+
+&gpu_opp_table {
+	rockchip,pvtm-voltage-sel = <0 750 0>, <751 770 1>, <771 790 2>, <791 810 3>,
+	                            <811 830 4>, <831 850 5>, <851 870 6>, <871 890 7>,
+	                            <891 9999 8>;
+	rockchip,pvtm-offset = <24>;
+	rockchip,pvtm-sample-time = <1100>;
+	rockchip,pvtm-freq = <800000>;
+	rockchip,pvtm-volt = <900000>;
+	rockchip,grf = <&gpu_grf>;
+
+	opp-300000000 {
+		opp-microvolt-L5 = <850000 850000 1000000>;
+		opp-microvolt-L6 = <837500 837500 1000000>;
+		opp-microvolt-L7 = <825000 825000 1000000>;
+		opp-microvolt-L8 = <825000 825000 1000000>;
+		opp-microvolt-L0 = <875000 875000 1000000>;
+		opp-microvolt-L1 = <875000 875000 1000000>;
+		opp-microvolt-L2 = <875000 875000 1000000>;
+		opp-microvolt-L3 = <875000 875000 1000000>;
+		opp-microvolt-L4 = <875000 875000 1000000>;
+	};
+
+	opp-500000000 {
+		opp-microvolt-L5 = <850000 850000 1000000>;
+		opp-microvolt-L6 = <837500 837500 1000000>;
+		opp-microvolt-L7 = <825000 825000 1000000>;
+		opp-microvolt-L8 = <825000 825000 1000000>;
+		opp-microvolt-L0 = <875000 875000 1000000>;
+		opp-microvolt-L1 = <875000 875000 1000000>;
+		opp-microvolt-L2 = <875000 875000 1000000>;
+		opp-microvolt-L3 = <875000 875000 1000000>;
+		opp-microvolt-L4 = <875000 875000 1000000>;
+	};
+
+	opp-600000000 {
+		opp-microvolt-L5 = <850000 850000 1000000>;
+		opp-microvolt-L6 = <837500 837500 1000000>;
+		opp-microvolt-L7 = <825000 825000 1000000>;
+		opp-microvolt-L8 = <825000 825000 1000000>;
+		opp-microvolt-L0 = <875000 875000 1000000>;
+		opp-microvolt-L1 = <875000 875000 1000000>;
+		opp-microvolt-L2 = <875000 875000 1000000>;
+		opp-microvolt-L3 = <875000 875000 1000000>;
+		opp-microvolt-L4 = <875000 875000 1000000>;
+	};
+
+	opp-700000000 {
+		opp-microvolt-L1 = <887500 887500 1000000>;
+		opp-microvolt-L2 = <875000 875000 1000000>;
+		opp-microvolt-L3 = <875000 875000 1000000>;
+		opp-microvolt-L4 = <875000 875000 1000000>;
+		opp-microvolt-L5 = <850000 850000 1000000>;
+		opp-microvolt-L6 = <837500 837500 1000000>;
+		opp-microvolt-L7 = <825000 825000 1000000>;
+		opp-microvolt-L8 = <825000 825000 1000000>;
+		clock-latency-ns = <40000>;
+		opp-microvolt-L0 = <900000 900000 1000000>;
+	};
+
+	opp-800000000 {
+		opp-microvolt-L1 = <937500 937500 1000000>;
+		opp-microvolt-L2 = <925000 925000 1000000>;
+		opp-microvolt-L3 = <912500 912500 1000000>;
+		opp-microvolt-L4 = <900000 900000 1000000>;
+		opp-microvolt-L5 = <887500 887500 1000000>;
+		opp-microvolt-L6 = <875000 875000 1000000>;
+		opp-microvolt-L7 = <862500 862500 1000000>;
+		opp-microvolt-L8 = <850000 850000 1000000>;
+		clock-latency-ns = <40000>;
+		opp-microvolt-L0 = <950000 950000 1000000>;
+	};
+};
+
+&hdmi {
+	pinctrl-names = "default";
+	pinctrl-0 = <&hdmi_pins>;
+	hpd-gpios = <&gpio0 RK_PA2 GPIO_ACTIVE_HIGH>;
+	ddc-i2c-bus = <&i2c2>;
+	status = "okay";
+};
+
+&hdmi_pins {
+	rockchip,pins = <0 RK_PA3 1 &pcfg_pull_none>;
+};
+
+&hdmiphy {
+	status = "okay";
+};
+
+&i2c2 {
+	pinctrl-0 = <&i2c2m0_xfer>;
+	status = "okay";
+};
+
+&iep {
+	status = "okay";
+};
+
+&iep_mmu {
+	status = "okay";
+};
+
+&jpegd {
+	status = "okay";
+};
+
+&jpegd_mmu {
+	status = "okay";
+};
+
+&otp {
+	cpu_mbist_vmin: cpu-mbist-vmin@9 {
+		reg = <0x09 0x01>;
+		bits = <0 3>;
+	};
+
+	gpu_mbist_vmin: gpu-mbist-vmin@9 {
+		reg = <0x09 0x01>;
+		bits = <3 2>;
+	};
+
+	logic_mbist_vmin: logic-mbist-vmin@9 {
+		reg = <0x09 0x01>;
+		bits = <5 2>;
+	};
+
+	log_leakage: log-leakage@1b {
+		reg = <0x1b 0x01>;
+	};
+
+	macphy_bgs: macphy-bgs@2d {
+		reg = <0x2d 0x01>;
+	};
+
+	cpu_opp_info: cpu-opp-info@32 {
+		reg = <0x32 0x06>;
+	};
+
+	gpu_opp_info: gpu-opp-info@38 {
+		reg = <0x38 0x06>;
+	};
+
+	dmc_opp_info: dmc-opp-info@3e {
+		reg = <0x3e 0x06>;
+	};
+
+	cpu_tsadc_trim_l: cpu-tsadc-trim-l@44 {
+		reg = <0x44 0x01>;
+	};
+
+	cpu_tsadc_trim_h: cpu-tsadc-trim-h@45 {
+		reg = <0x45 0x01>;
+	};
+};
+
+&pinctrl {
+	pwm3 {
+		ir_rx_gpio: ir-rx-gpio {
+			rockchip,pins = <4 RK_PC6 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+
+	pcfg_output_high_pull_up: pcfg-output-high-pull-up {
+		output-high;
+		bias-pull-up;
+	};
+
+	pcfg_output_high_pull_down: pcfg-output-high-pull-down {
+		output-high;
+		bias-pull-down;
+	};
+
+	pcfg_output_high_pull_none: pcfg-output-high-pull-none {
+		output-high;
+		bias-disable;
+	};
+
+	pcfg_output_low_pull_up: pcfg-output-low-pull-up {
+		output-low;
+		bias-pull-up;
+	};
+
+	pcfg_output_low_pull_down: pcfg-output-low-pull-down {
+		output-low;
+		bias-pull-down;
+	};
+
+	pcfg_output_low_pull_none: pcfg-output-low-pull-none {
+		output-low;
+		bias-disable;
+	};
+
+	usb {
+		vcc5v0_host_en: vcc5v0-host-en-pins {
+			rockchip,pins = <4 RK_PB4 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+
+	sdio-pwrseq {
+		wifi_reset: wifi-reset-pins {
+			rockchip,pins = <3 RK_PB4 RK_FUNC_GPIO &pcfg_output_high>;
+		};
+	};
+};
+
+&power {
+	power-domain@5 {
+		status = "okay";
+	};
+};
+
+&pwm1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pwm1m0_pins>;
+	status = "okay";
+};
+
+&pwm2 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pwm2m0_pins>;
+	status = "okay";
+};
+
+&rga {
+	status = "okay";
+};
+
+&rga_mmu {
+	status = "okay";
+};
+
+&rkvenc {
+	status = "okay";
+};
+
+&rkvenc_mmu {
+	status = "okay";
+};
+
+&rmii0_phy {
+	/delete-property/ pinctrl-names;
+	/delete-property/ pinctrl-0;
+};
+
+&sai2 {
+	status = "okay";
+};
+
+&sai3 {
+	status = "okay";
+};
+
+&saradc {
+	vref-supply = <&vdd_1v8_s3>;
+	status = "okay";
+};
+
+&sdhci {
+	max-frequency = <150000000>;
+	bus-width = <8>;
+	non-removable;
+	mmc-hs200-1_8v;
+	mmc-hs400-1_8v;
+	mmc-hs400-enhanced-strobe;
+	disable-wp;
+	cap-mmc-highspeed;
+	fixed-emmc-driver-type = <0x04>;
+	status = "okay";
+};
+
+&sdio1 {
+	max-frequency = <150000000>;
+	pinctrl-0 = <&sdio1_bus4>, <&sdio1_cmd>, <&sdio1_clk>;
+	no-sd;
+	no-mmc;
+	bus-width = <4>;
+	disable-wp;
+	cap-sd-highspeed;
+	cap-sdio-irq;
+	keep-power-in-suspend;
+	non-removable;
+	mmc-pwrseq = <&sdio_pwrseq>;
+	post-power-on-delay-ms = <100>;
+	sd-uhs-sdr12;
+	sd-uhs-sdr25;
+	sd-uhs-sdr50;
+	sd-uhs-ddr50;
+	sd-uhs-sdr104;
+	status = "okay";
+};
+
+&sdio1_bus4 {
+	rockchip,pins = <3 RK_PA6 1 &pcfg_pull_up>,
+	                <3 RK_PA7 1 &pcfg_pull_up>,
+	                <3 RK_PB0 1 &pcfg_pull_up>,
+	                <3 RK_PB1 1 &pcfg_pull_up>;
+};
+
+&sdio1_clk {
+	rockchip,pins = <3 RK_PA4 1 &pcfg_pull_up>;
+};
+
+&sdio1_cmd {
+	rockchip,pins = <3 RK_PA5 1 &pcfg_pull_up>;
+};
+
+&sdmmc {
+	pinctrl-0 = <&sdmmc_clk>, <&sdmmc_cmd>, <&sdmmc_det>, <&sdmmc_bus4>;
+	bus-width = <4>;
+	cap-mmc-highspeed;
+	cap-sd-highspeed;
+	disable-wp;
+	card-detect-delay = <0x1f4>;
+	vmmc-supply = <&vcc_sd>;
+	status = "okay";
+};
+
+&tsadc {
+	status = "okay";
+};
+
+&tve {
+	status = "okay";
+};
+
+&uart0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart0m0_xfer>;
+	status = "okay";
+};
+
+&uart2 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart2m0_xfer>, <&uart2m0_ctsn>;
+	status = "okay";
+
+	bluetooth {
+		compatible = "aicsemi,aic8800-bt"; /* SDIO c8a1:0082, an AIC8800D80, not rtl8822cs */
+		max-speed = <1500000>;
+		reset-gpios = <&gpio3 RK_PC2 GPIO_ACTIVE_LOW>;
+	};
+};
+
+&uart3 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart3m1_xfer>;
+	status = "okay";
+};
+
+&usb2phy {
+	status = "okay";
+};
+
+&usb2phy_host {
+	phy-supply = <&vcc5v0_host>;
+	status = "okay";
+};
+
+&usb2phy_otg {
+	phy-supply = <&vcc5v0_host>;
+	status = "okay";
+};
+
+&usb_host0_ehci {
+	status = "okay";
+};
+
+&usb_host0_ohci {
+	status = "okay";
+};
+
+&usb_host0_xhci {
+	dr_mode = "host";
+	status = "okay";
+};
+
+/*
+ * No power-domains on purpose.  rk3528.dtsi leaves
+ * power-domain@RK3528_PD_RKVDEC disabled, so referencing it makes both
+ * devices fail with deferred probe timeouts.  The vendor DTB does not
+ * use a power domain here either: the RK3528 vdec domain is defined with
+ * a zero power mask, i.e. bus idle handshake only, permanently powered.
+ */
+&vdec {
+	status = "okay";
+};
+
+/*
+ * The vendor DTB uses the BSP-only "rockchip,iommu-v2"; mainline reaches
+ * the same v2 ops through "rockchip,rk3568-iommu".
+ */
+&vdec_mmu {
+	status = "okay";
+};
+
+&vdpp {
+	status = "okay";
+};
+
+&vdpu_mmu {
+	status = "okay";
+};
+
+&vop {
+	esmart_lb_mode = [02]; /* Esmart0 a 4K line buffer for HDMI */
+	status = "okay";
+};
+
+&vop_mmu {
+	status = "okay";
+};
+
+/* VDPU2, as on RK3568: MPEG-2, VP8 and H.264 behind the decoder at +0x400. */
+&vpu {
+	status = "okay";
+};
+
+&wdt {
+	status = "okay"; /* Recover from kernel hangs. */
+};

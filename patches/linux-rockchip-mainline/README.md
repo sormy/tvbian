@@ -65,6 +65,7 @@ Experimental RK3528 patches for `rk35xx-next2`, the mainline kernel tested on th
 | `iommu-rockchip-attach-only.patch`                        | An IOMMU only its master enables      |
 | `media-rc-keymaps-h96max-m2-plus.patch`                   | The M2 Plus's IR remote keymap        |
 | `media-rc-keymaps-r69-1.patch`                            | The R69-1's IR remote keymap          |
+| `media-rc-keymaps-hk1-rbox-k8s.patch`                     | The HK1's IR remote keymap            |
 | `asoc-rk3528-codec.patch`                                 | Internal audio codec driver           |
 | `net-phy-rockchip-rk3528-fephy.patch`                     | Integrated Ethernet PHY tuning        |
 | `media-rkjpegd-v7-bindings.patch`                         | JPEG decoder binding, posted v7       |

@@ -21,10 +21,16 @@
 - [ ] **VOP2: AFBC through a size change.** Cluster0 alone takes AFBC; whether it refuses an AFBC
       frame mid-play when the stream changes size.
 
+- [ ] **Vendor 6.12: HDMI writeback after composite**: commits still succeed; a capture is refused.
 - [ ] **Vendor kernels: an off-table HDMI mode at its own pixel clock**: 2256x1504 (235.7 MHz) runs
       the PHY at 1080p60's 148.5 MHz. Computed, as on next2, or refused.
+- [ ] **The vendor kernels' decoder reset at probe**: warm boots of the HK1's 6.1 froze in its
+      probe, a power cut alone clearing it; next2's own driver never froze. The vendor resets it on
+      errors and at shutdown only; `rkvdec2_reset`, CRU lines in the PMU idle request, is the
+      candidate at probe, not the IOMMU reset, which froze every boot.
 - [ ] **Vendor kernels: the GPU on stock's SCMI clock**, 800 MHz, not the CRU's 498 MHz cap: after
-      lima's throttling, as on next2, and its OPPs at the chip's PVTM bin.
+      lima's throttling, as on next2, and its OPPs at the chip's PVTM bin; and `gpu-bus` scaling
+      `vdd_logic` with it, once `rockchip_bus.c` asks for its `bus` regulator, not `pvtm`.
 - [ ] **Check the `ttyFIQ0` login on a serial header.** Every Rockchip board's console is `ttyFIQ0`,
       seen in `/proc/consoles` with its getty running; never on a cable.
 
@@ -73,7 +79,7 @@
       | Small  | PVTM's 10 °C floor (`rockchip,low-temp-min-volt`) not applied                             |
       | Small  | PVTM's per-chip floor (`mbist-vmin`) not applied: index 1 on each chip here, a no-op      |
       | Small  | OTP's OPP voltage offset (`opp-info`) not applied: zero on the M2 Plus, others unread     |
-      | Small  | deep suspend: BL31 gets none of the vendor's sleep or PWM-regulator config; untested      |
+      | Medium | the remote wakes the box from sleep or off: neither on the HK1; BL31 has no sleep config |
       | Medium | a panic's restart strands the M2 Plus on next2: the watchdog's count carries over boot    |
       | Small  | idle CPU at 1008-2016 MHz under schedutil on next2, never its 408 floor: cause unknown    |
       | Small  | RK3528 PHY: the vendor's RX signal-detect switch above a temperature is not in next2      |

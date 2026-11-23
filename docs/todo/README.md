@@ -83,6 +83,9 @@ below.
 - [ ] **Every script reads as `AGENTS.md` asks**: settings named at the top, one step a line, Python
       where it parses. `extras/` already does.
 
+- [ ] **A package's install keeps the boot menu's default**: installing a board package regenerates
+      `extlinux.conf` and its default goes back to the first entry, next2's.
+
 - [ ] **`ffmpeg9` quiet off Rockchip**: Rockchip's MPP library prints `can not found match soc name`
       at every start on an Allwinner or Amlogic box.
 
@@ -196,8 +199,8 @@ below.
 - [ ] **`regression.py deploy` gives every box the deqp runner**: with no `deqp` deb in
       `build/out/debs/` it ships none, and the step fails as a GPU fault (`exit 127`).
 - [ ] **What every box gets, in `tvb-base`**: `tvb-install`, `led-sleep`, `led-shutdown`, and
-      `powerkey.conf` if it is generic, out of `boards/common/`, with `Replaces` and `Breaks` against
-      each board package that ships them now.
+      `powerkey.conf` if it is generic, out of `boards/common/`, with `Replaces` and `Breaks`
+      against each board package that ships them now.
 - [ ] **A composite grabber**: a USB composite capture stick on a host, so composite's picture is
       checked unattended, not only its writeback and encoder registers.
 
@@ -226,6 +229,7 @@ below.
 | `docs/todo/h96max-h313.md`      | the H96 Max H313: what is left              |
 | `docs/todo/h96max-m20.md`       | the H96 Max M20: what is left               |
 | `docs/todo/h96max-m2-plus.md`   | the H96 Max M2 Plus: what is left           |
+| `docs/todo/hk1-rbox-k8s.md`     | HK1 RBOX K8S                                |
 | `docs/todo/swt6621s.md`         | the SWT6621S Wi-Fi/BT: what is left         |
 | `docs/todo/aic8800.md`          | the AIC8800 Wi-Fi/BT: what is left          |
 | `docs/todo/website.md`          | tvbian.com: what the page still lacks       |

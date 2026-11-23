@@ -1,0 +1,602 @@
+/dts-v1/;
+
+/*
+ * Written by tools/dtcx/upstream.py from board.dts: a view, not edited.
+ * Over rockchip-linux/kernel at 77168c8d5ab8.
+ * Needs, beyond it, found by name and so best-effort: each
+ * patch adding a name the tree uses or a dtsi change it keeps, which may in
+ * turn need others before it:
+ *   patches/linux-rockchip/bluetooth-hci-h4-serdev.patch:
+ *     "aicsemi,aic8800-bt"
+ */
+
+#include "rk3528-evb1-ddr4-v10.dts"
+#include <dt-bindings/clock/rk3528-cru.h>
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/pinctrl/rockchip.h>
+#include <dt-bindings/input/linux-event-codes.h>
+#include <dt-bindings/suspend/rockchip-rk3528.h>
+
+/ {
+	/* rk3528a, last, is MPP's only RK3528 with VP9, which this decodes on mainline */
+	compatible = "rockchip,rk3528-box", "rockchip,rk3528", "rockchip,rk3528a";
+	model = "HK1 RBOX K8S (FX-RX3528-D4)";
+
+	spdif-sound {
+		status = "disabled";
+	};
+
+	leds: gpio-leds {
+		compatible = "gpio-leds";
+
+		pwr-red {
+			gpios = <&gpio4 RK_PB3 GPIO_ACTIVE_HIGH>;
+			linux,default-trigger = "none";
+			default-state = "off";
+			retain-state-suspended;
+			retain-state-shutdown;
+		};
+
+		pwr-green {
+			gpios = <&gpio4 RK_PB5 GPIO_ACTIVE_HIGH>;
+			linux,default-trigger = "none";
+			default-state = "on";
+			retain-state-suspended;
+			retain-state-shutdown;
+		};
+	};
+
+	i2c-display {
+		compatible = "i2c-gpio";
+		sda-gpios = <&gpio4 RK_PA2 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		scl-gpios = <&gpio4 RK_PA3 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		i2c-gpio,delay-us = <5>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		display@24 {
+			compatible = "fdhisi,fd650", "titanmec,tm1650";
+			reg = <0x24>;
+			default-brightness = <3>;
+
+			digits {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				digit@0 {
+					reg = <0>;
+					segments = <0 0>, <0 1>, <0 2>, <0 3>, <0 4>, <0 5>, <0 6>;
+				};
+
+				digit@1 {
+					reg = <1>;
+					segments = <1 0>, <1 1>, <1 2>, <1 3>, <1 4>, <1 5>, <1 6>;
+				};
+
+				digit@2 {
+					reg = <2>;
+					segments = <2 0>, <2 1>, <2 2>, <2 3>, <2 4>, <2 5>, <2 6>;
+				};
+
+				digit@3 {
+					reg = <3>;
+					segments = <3 0>, <3 1>, <3 2>, <3 3>, <3 4>, <3 5>, <3 6>;
+				};
+			};
+
+			leds {
+				#address-cells = <2>;
+				#size-cells = <0>;
+
+				led@1,7 {
+					reg = <1 7>;
+					function = "colon";
+				};
+			};
+		};
+	};
+
+	amlogic_battery: dummy-battery {
+		compatible = "amlogic, dummy-battery";
+		status = "okay";
+	};
+
+	amlogic_charger: dummy-charger {
+		compatible = "amlogic, dummy-charger";
+		status = "okay";
+	};
+};
+
+&adc_keys {
+	vol-up-key {
+		label = "recovery";
+		linux,code = <KEY_VENDOR>; /* AV-jack recovery button */
+	};
+};
+
+&chosen {
+	/delete-property/ bootargs;
+};
+
+&cpu0_opp_table {
+	/delete-property/ rockchip,temp-hysteresis;
+	/delete-property/ rockchip,low-temp;
+	/delete-property/ rockchip,low-temp-min-volt;
+	rockchip,pvtm-voltage-sel = <0 1320 0>, <1321 1350 1>, <1351 1375 2>, <1376 1405 3>,
+	                            <1406 1435 4>, <1436 1470 5>, <1471 1505 6>,
+	                            <1506 1540 7>, <1541 1575 8>, <1576 1610 9>,
+	                            <1611 1640 10>, <1641 9999 11>;
+};
+
+&dmc {
+	system-status-level = <1 8>;
+};
+
+&dmc_opp_table {
+	rockchip,leakage-voltage-sel = <1 10 0>, <11 14 1>, <15 22 2>, <23 28 3>,
+	                               <29 254 4>;
+	/delete-node/ opp-324000000;
+	/delete-node/ opp-666000000;
+};
+
+&gmac1 {
+	status = "disabled";
+};
+
+&gpu {
+	interrupt-names = "gp", "gpmmu", "pp", "pp0", "ppmmu0", "pp1", "ppmmu1"; /* Lima bindings */
+	clocks = <&cru ACLK_GPU_MALI>, <&cru ACLK_GPU_MALI>; /* SCMI's 800 MHz, unthrottled here */
+	clock-names = "bus", "core";
+	mali-supply = <&vdd_logic>;
+};
+
+&gpu_bus {
+	status = "disabled"; /* it sets vdd_logic for SCMI's GPU clock, which no longer drives the GPU */
+};
+
+&gpu_bus_opp_table {
+	rockchip,leakage-voltage-sel = <1 22 0>, <23 254 1>;
+};
+
+&gpu_opp_table {
+	/delete-property/ rockchip,temp-hysteresis;
+	/delete-property/ rockchip,low-temp;
+	/delete-property/ rockchip,low-temp-min-volt;
+	rockchip,pvtm-voltage-sel = <0 750 0>, <751 770 1>, <771 790 2>, <791 810 3>,
+	                            <811 830 4>, <831 850 5>, <851 870 6>, <871 890 7>,
+	                            <891 9999 8>;
+};
+
+&gpu_power_model {
+	ls = <0xffffc2d6 0x1071a 0x00>;
+	ts = <0x302a42 0x1d55a 0xfffff636 0x27>;
+};
+
+&hdmi {
+	/delete-property/ rockchip,cts-manual;
+	pinctrl-names = "default", "sleep";
+	pinctrl-1 = <&hdmi_pins>;
+	cec-enable;
+};
+
+&i2c6 {
+	status = "disabled";
+};
+
+&mpp_srv {
+	/delete-property/ rockchip,iommu-shared-mask;
+};
+
+&pinctrl {
+	sdio-pwrseq {
+		/delete-node/ wifi-enable-h;
+
+		wifi_reset: wifi-reset {
+			rockchip,pins = <3 RK_PB4 RK_FUNC_GPIO &pcfg_output_high>;
+		};
+	};
+
+	wireless-bluetooth {
+		uart2m0_gpios: uart2m0-gpios {
+			rockchip,pins = <3 RK_PA2 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+
+	wireless-wlan {
+		wifi_enable_h: wifi-enable-h {
+			rockchip,pins = <3 RK_PB2 RK_FUNC_GPIO &pcfg_output_high>;
+		};
+	};
+};
+
+&pwm0 {
+	status = "disabled";
+};
+
+&pwm1 {
+	/delete-property/ interrupts;
+};
+
+&pwm2 {
+	/delete-property/ interrupts;
+};
+
+&pwm3 {
+	remote_support_psci = <0x01>; /* the remote wakes the box from off */
+
+	ir_key1 {
+		rockchip,usercode = <0xff00>;
+		rockchip,key_table = <0xf9 KEY_HOME>, <0xbf KEY_BACK>, <0xfb KEY_MENU>,
+		                     <0xaa KEY_REPLY>, <0xb9 KEY_UP>, <0xe9 KEY_DOWN>,
+		                     <0xb8 KEY_LEFT>, <0xea KEY_RIGHT>,
+		                     <0xeb KEY_VOLUMEDOWN>, <0xef KEY_VOLUMEUP>,
+		                     <0xf7 KEY_MUTE>, <0xe7 KEY_POWER>, <0xfc KEY_POWER>,
+		                     <0xa9 KEY_VOLUMEDOWN>, <0xa8 KEY_PLAYPAUSE>,
+		                     <0xe0 KEY_VOLUMEDOWN>, <0xa5 KEY_VOLUMEDOWN>,
+		                     <0xab KEY_F13>, <0xb7 KEY_TEXT>, <0xe8 KEY_TEXT>,
+		                     <0xf8 KEY_F14>, <0xaf KEY_F15>, <0xed KEY_VOLUMEDOWN>,
+		                     <0xee KEY_F16>, <0xb3 KEY_VOLUMEDOWN>,
+		                     <0xf1 KEY_VOLUMEDOWN>, <0xf2 KEY_VOLUMEDOWN>,
+		                     <0xf3 KEY_SEARCH>, <0xb4 KEY_VOLUMEDOWN>,
+		                     <0xa4 KEY_SETUP>, <0xbe KEY_SEARCH>;
+	};
+
+	ir_key2 {
+		rockchip,usercode = <0x7f80>;
+		rockchip,key_table = <0xec KEY_REPLY>, <0xd8 KEY_BACK>, <0xc7 KEY_UP>,
+		                     <0xbf KEY_DOWN>, <0xc8 KEY_LEFT>, <0xc6 KEY_RIGHT>,
+		                     <0x8c KEY_HOME>, <0x78 KEY_VOLUMEUP>,
+		                     <0x76 KEY_VOLUMEDOWN>, <0x7e KEY_POWER>,
+		                     <0x7c KEY_MENU>, <0xb7 KEY_TEXT>;
+	};
+
+	ir_key4 {
+		rockchip,key_table = <0x31 KEY_REPLY>, <0x3a KEY_BACK>, <0x35 KEY_UP>,
+		                     <0x2d KEY_DOWN>, <0x66 KEY_LEFT>, <0x3e KEY_RIGHT>,
+		                     <0x7f KEY_VOLUMEUP>, <0xfe KEY_VOLUMEDOWN>,
+		                     <0x23 KEY_POWER>, <0x63 KEY_MUTE>, <0x6d KEY_1>,
+		                     <0x6c KEY_2>, <0x33 KEY_3>, <0x71 KEY_4>, <0x70 KEY_5>,
+		                     <0x37 KEY_6>, <0x75 KEY_7>, <0x74 KEY_8>, <0x3b KEY_9>,
+		                     <0x78 KEY_0>, <0x73 KEY_PAGEDOWN>, <0x22 KEY_PAGEUP>,
+		                     <0x72 KEY_SETUP>, <0x7a 0xf9>, <0x79 0xfa>,
+		                     <0x77 0xfb>, <0x29 0xfc>, <0x32 0xfd>, <0x6e 0xfe>,
+		                     <0x7c 0xff>, <0x3c BTN_0>, <0x67 BTN_1>, <0x25 BTN_2>,
+		                     <0x2f BTN_3>, <0x7d BTN_4>, <0x6a KEY_PLAYPAUSE>,
+		                     <0x0b KEY_EQUAL>;
+	};
+
+	ir_key5 {
+		rockchip,key_table = <0x4c KEY_REPLY>, <0x4d KEY_BACK>, <0x4b KEY_UP>,
+		                     <0x4a KEY_DOWN>, <0x49 KEY_LEFT>, <0x48 KEY_RIGHT>,
+		                     <0x4e KEY_HOME>, <0x0b KEY_VOLUMEUP>,
+		                     <0x0c KEY_VOLUMEDOWN>, <0x23 KEY_POWER>,
+		                     <0x45 KEY_MUTE>, <0x44 KEY_MENU>, <0x78 KEY_1>,
+		                     <0x77 KEY_2>, <0x76 KEY_3>, <0x75 KEY_4>, <0x74 KEY_5>,
+		                     <0x73 KEY_6>, <0x72 KEY_7>, <0x71 KEY_8>, <0x70 KEY_9>,
+		                     <0x79 KEY_0>, <0x43 KEY_EQUAL>, <0x72 BTN_2>,
+		                     <0x5f KEY_SETUP>, <0x25 0xfd>, <0x24 0xfe>,
+		                     <0x21 0xff>, <0x20 BTN_0>;
+	};
+
+	ir_key6 {
+		rockchip,key_table = <0xec KEY_OK>, <0xe6 KEY_BACK>, <0xe9 KEY_UP>,
+		                     <0xe5 KEY_DOWN>, <0xae KEY_LEFT>, <0xaf KEY_RIGHT>,
+		                     <0xee KEY_HOMEPAGE>, <0xe7 KEY_VOLUMEUP>,
+		                     <0xef KEY_VOLUMEDOWN>, <0xbf KEY_POWER>,
+		                     <0xbe KEY_MUTE>, <0xb3 KEY_MENU>, <0xff KEY_TOUCHPAD_TOGGLE>,
+		                     <0xb1 KEY_1>, <0xf2 KEY_2>, <0xf3 KEY_3>, <0xb5 KEY_4>,
+		                     <0xf6 KEY_5>, <0xf7 KEY_6>, <0xb9 KEY_7>, <0xfa KEY_8>,
+		                     <0xfb KEY_9>, <0xfe KEY_0>, <0xbd KEY_BACKSPACE>,
+		                     <0xbc KEY_SETUP>, <0xf0 KEY_F13>, <0xb4 KEY_PREVIOUS>,
+		                     <0xb0 KEY_NEXT>, <0x6d KEY_KATAKANA>,
+		                     <0x6c KEY_HIRAGANA>, <0x33 KEY_HENKAN>,
+		                     <0x71 KEY_KATAKANAHIRAGANA>, <0x70 KEY_MUHENKAN>,
+		                     <0x37 KEY_KPJPCOMMA>;
+	};
+
+	ir_key7 {
+		rockchip,key_table = <0x31 KEY_REPLY>, <0x3a KEY_BACK>, <0x35 KEY_UP>,
+		                     <0x2d KEY_DOWN>, <0x66 KEY_LEFT>, <0x3e KEY_RIGHT>,
+		                     <0x7f KEY_VOLUMEUP>, <0x7e KEY_VOLUMEDOWN>,
+		                     <0x23 KEY_POWER>, <0x63 KEY_MUTE>, <0x6d KEY_1>,
+		                     <0x6c KEY_2>, <0x33 KEY_3>, <0x71 KEY_4>, <0x70 KEY_5>,
+		                     <0x37 KEY_6>, <0x75 KEY_7>, <0x74 KEY_8>, <0x3b KEY_9>,
+		                     <0x78 KEY_0>, <0x73 KEY_PAGEDOWN>, <0x22 KEY_PAGEUP>,
+		                     <0x72 KEY_SETUP>, <0x7a 0xf9>, <0x79 0xfa>,
+		                     <0x77 0xfb>, <0x29 0xfc>, <0x32 0xfd>, <0x6e 0xfe>,
+		                     <0x7c 0xff>, <0x3c BTN_0>, <0x67 BTN_1>, <0x25 BTN_2>,
+		                     <0x2f BTN_3>, <0x7d BTN_4>, <0x6a KEY_PLAYPAUSE>,
+		                     <0x0b KEY_EQUAL>;
+	};
+
+	ir_key8 {
+		rockchip,key_table = <0x31 KEY_REPLY>, <0x6a KEY_BACK>, <0x35 KEY_UP>,
+		                     <0x2d KEY_DOWN>, <0x66 KEY_LEFT>, <0x3e KEY_RIGHT>,
+		                     <0x7f KEY_VOLUMEUP>, <0x7e KEY_VOLUMEDOWN>,
+		                     <0x23 KEY_POWER>, <0x63 KEY_MUTE>, <0x6d KEY_1>,
+		                     <0x6c KEY_2>, <0x33 KEY_3>, <0x71 KEY_4>, <0x70 KEY_5>,
+		                     <0x37 KEY_6>, <0x75 KEY_7>, <0x74 KEY_8>, <0x3b KEY_9>,
+		                     <0x78 KEY_0>, <0x73 KEY_PAGEDOWN>, <0x22 KEY_PAGEUP>,
+		                     <0x72 KEY_SETUP>, <0x7a 0xf9>, <0x79 0xfa>,
+		                     <0x77 0xfb>, <0x2f 0xfc>, <0x32 0xfd>, <0x6e 0xfe>,
+		                     <0x7c 0xff>, <0x3c BTN_0>, <0x3a KEY_HELP>,
+		                     <0x67 BTN_1>, <0x25 BTN_3>, <0x7d KEY_MENU>,
+		                     <0x3f KEY_EQUAL>, <0x29 KEY_TEXT>,
+		                     <0x26 KEY_PLAYPAUSE>, <0x76 KEY_BLUE>,
+		                     <0x7b KEY_YELLOW>, <0x69 KEY_F8>;
+	};
+
+	ir_key9 {
+		rockchip,usercode = <0x7788>;
+		rockchip,key_table = <0xe6 KEY_REPLY>, <0xb7 KEY_BACK>, <0xea KEY_UP>,
+		                     <0xe9 KEY_DOWN>, <0xe8 KEY_LEFT>, <0xe7 KEY_RIGHT>,
+		                     <0xb8 KEY_HOME>, <0xdc KEY_VOLUMEUP>,
+		                     <0xdb KEY_VOLUMEDOWN>, <0xde KEY_POWER>,
+		                     <0xda KEY_MUTE>, <0x9f KEY_MENU>, <0xcd KEY_TEXT>,
+		                     <0xf0 KEY_SETUP>, <0x8b KEY_F13>, <0xcc KEY_PREVIOUS>,
+		                     <0xcb KEY_NEXT>, <0xb9 KEY_F11>, <0x9b KEY_F6>,
+		                     <0x9c KEY_F8>, <0x98 KEY_F4>, <0x97 KEY_F5>;
+	};
+
+	ir_key10 {
+		rockchip,usercode = <0xf709>;
+		rockchip,key_table = <0xe0 KEY_REPLY>, <0xe3 KEY_BACK>, <0xff KEY_UP>,
+		                     <0xfe KEY_DOWN>, <0xfc KEY_LEFT>, <0xfd KEY_RIGHT>,
+		                     <0xf3 KEY_HOME>, <0xa7 KEY_VOLUMEUP>,
+		                     <0xa2 KEY_VOLUMEDOWN>, <0xf5 KEY_POWER>,
+		                     <0xf2 KEY_MUTE>, <0xe5 KEY_MENU>, <0xb5 KEY_TEXT>,
+		                     <0x7f KEY_SETUP>, <0xe4 KEY_F13>, <0xae KEY_PREVIOUS>,
+		                     <0xad KEY_NEXT>, <0xdd KEY_F11>, <0x8d KEY_F6>,
+		                     <0x8e KEY_F8>, <0x8c KEY_F4>, <0x79 KEY_F7>;
+	};
+
+	ir_key11 {
+		rockchip,usercode = <0xbf00>;
+		rockchip,key_table = <0xff KEY_POWER>, <0xef KEY_REPLY>, <0xea KEY_BACK>,
+		                     <0xec KEY_UP>, <0xeb KEY_DOWN>, <0xee KEY_LEFT>,
+		                     <0xed KEY_RIGHT>, <0x9e KEY_HOME>, <0xb7 KEY_VOLUMEUP>,
+		                     <0xb6 KEY_VOLUMEDOWN>, <0xe9 KEY_MENU>,
+		                     <0xb0 KEY_TEXT>;
+	};
+};
+
+&reboot_mode {
+	mode-bootloader = <0x5242c301>;
+	mode-charge = <0x5242c30b>;
+	mode-fastboot = <0x5242c309>;
+	mode-loader = <0x5242c301>;
+	mode-normal = <0x5242c300>;
+	mode-recovery = <0x5242c303>;
+	mode-ums = <0x5242c30c>;
+	mode-panic = <0x5242c307>;
+	mode-watchdog = <0x5242c308>;
+};
+
+&rmii0_phy {
+	/delete-property/ pinctrl-names;
+	/delete-property/ pinctrl-0;
+	/delete-property/ rockchip,thermal-zone;
+};
+
+&rockchip_suspend {
+	rockchip,sleep-mode-config = <RKPM_SLP_ARMPD>;
+	rockchip,wakeup-config = <(RKPM_CPU0_WKUP_EN | RKPM_GPIO_WKUP_EN)>;
+	rockchip,pwm-regulator-config = <RKPM_PWM1_M0_REGULATOR_EN>;
+};
+
+&route_hdmi {
+	logo,kernel = "logo.bmp";
+	logo,mode = "fullscreen";
+	charge_logo,mode = "fullscreen";
+};
+
+&route_tve {
+	logo,kernel = "logo.bmp";
+	logo,mode = "fullscreen";
+	charge_logo,mode = "fullscreen";
+};
+
+&sai1 {
+	status = "disabled";
+};
+
+&sai3 {
+	/delete-property/ assigned-clocks;
+	/delete-property/ assigned-clock-rates;
+	/delete-property/ rockchip,always-on;
+};
+
+&sdhci {
+	/delete-property/ no-sd;
+	/delete-property/ no-sdio;
+	max-frequency = <150000000>;
+	fifo-depth = <256>;
+	supports-emmc;
+	mmc-hs200-1_8v;
+	disable-wp;
+	cap-mmc-highspeed;
+	fixed-emmc-driver-type = <0x04>;
+};
+
+&sdio0 {
+	status = "disabled";
+};
+
+&sdio1 {
+	fifo-depth = <4096>;
+	no-sd;
+	no-mmc;
+	supports-sdio;
+	bus-width = <4>;
+	disable-wp;
+	cap-sd-highspeed;
+	cap-sdio-irq;
+	keep-power-in-suspend;
+	non-removable;
+	mmc-pwrseq = <&sdio_pwrseq>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&sdio1_bus4>, <&sdio1_cmd>, <&sdio1_clk>;
+	post-power-on-delay-ms = <100>;
+	sd-uhs-sdr12;
+	sd-uhs-sdr25;
+	sd-uhs-sdr50;
+	sd-uhs-ddr50;
+	sd-uhs-sdr104;
+	status = "okay";
+};
+
+&sdio1_bus4 {
+	rockchip,pins = <3 RK_PA6 1 &pcfg_pull_up>,
+	                <3 RK_PA7 1 &pcfg_pull_up>,
+	                <3 RK_PB0 1 &pcfg_pull_up>,
+	                <3 RK_PB1 1 &pcfg_pull_up>;
+};
+
+&sdio1_clk {
+	rockchip,pins = <3 RK_PA4 1 &pcfg_pull_up>;
+};
+
+&sdio1_cmd {
+	rockchip,pins = <3 RK_PA5 1 &pcfg_pull_up>;
+};
+
+&sdio_pwrseq {
+	/delete-property/ post-power-on-delay-ms;
+	pinctrl-0 = <&wifi_reset>, <&clkm0_32k_out>;
+	reset-gpios = <&gpio3 RK_PB4 GPIO_ACTIVE_LOW>,
+		      <&gpio3 RK_PB2 GPIO_ACTIVE_LOW>;
+	power-off-delay-us = <2000000>; /* B2, the module enable, low 2 s: a stalled card returns */
+	status = "okay";
+};
+
+&sdmmc {
+	/delete-property/ rockchip,default-sample-phase;
+	/delete-property/ sd-uhs-sdr12;
+	/delete-property/ sd-uhs-sdr25;
+	/delete-property/ sd-uhs-sdr50;
+	/delete-property/ sd-uhs-sdr104;
+	/delete-property/ vqmmc-supply;
+	num-slots = <0x01>;
+	card-detect-delay = <0x1f4>;
+};
+
+&sfc {
+	status = "disabled";
+};
+
+&soc_crit {
+	temperature = <115000>;
+};
+
+&soc_thermal {
+	polling-delay-passive = <500>;
+	sustainable-power = <927>;
+};
+
+&spdif_8ch {
+	status = "disabled";
+};
+
+&spdif_out {
+	status = "disabled";
+};
+
+&target {
+	temperature = <85000>;
+};
+
+&threshold {
+	temperature = <75000>;
+};
+
+&tve {
+	rockchip,tve-upsample = <0x02>;
+};
+
+&u2phy_otg {
+	/delete-property/ vbus-supply;
+	phy-supply = <&vcc5v0_host>;
+};
+
+&uart2 {
+	/delete-property/ dmas;
+	pinctrl-0 = <&uart2m0_xfer>, <&uart2m0_ctsn>;
+
+	bluetooth {
+		compatible = "aicsemi,aic8800-bt"; /* SDIO c8a1:0082, an AIC8800D80, not rtl8822cs */
+		max-speed = <1500000>;
+	};
+};
+
+&uart3 {
+	pinctrl-names = "default";
+	dma-names = "!tx", "!rx";
+	pinctrl-0 = <&uart3m1_xfer>;
+	status = "okay";
+};
+
+&usbdrd_dwc3 {
+	dr_mode = "host";
+	snps,xhci-trb-ent-quirk;
+};
+
+&vcc5v0_host {
+	gpio = <&gpio4 RK_PB4 GPIO_ACTIVE_HIGH>;
+};
+
+&vcc5v0_host_en {
+	rockchip,pins = <4 RK_PB4 RK_FUNC_GPIO &pcfg_pull_none>;
+};
+
+&vcc5v0_otg {
+	status = "disabled";
+};
+
+&vcc_sd {
+	/delete-property/ gpio;
+	regulator-always-on;
+};
+
+&vccio_sd {
+	/delete-property/ gpios;
+	/delete-property/ states;
+	compatible = "regulator-fixed";
+	regulator-max-microvolt = <1800000>;
+	regulator-always-on;
+};
+
+&vdd_gpu {
+	status = "disabled";
+};
+
+&vdd_logic {
+	regulator-min-microvolt = <703000>;
+};
+
+&vop {
+	/delete-property/ support-multi-area;
+	esmart_lb_mode = [02]; /* Esmart0 a 4K line buffer; sub-windows never reach HDMI */
+};
+
+&wdt {
+	status = "okay"; /* Recover from kernel hangs. */
+};
+
+&wifi_host_wake_irq {
+	rockchip,pins = <3 RK_PB3 RK_FUNC_GPIO &pcfg_pull_down>;
+};
+
+&wireless_bluetooth {
+	/delete-property/ bt_port;
+	/delete-property/ BT,wake_gpio;
+	uart_rts_gpios = <&gpio3 RK_PA2 GPIO_ACTIVE_LOW>;
+	pinctrl-0 = <&uart2m0_rtsn>;
+	pinctrl-1 = <&uart2m0_gpios>;
+	BT,reset_gpio = <&gpio3 RK_PC2 GPIO_ACTIVE_HIGH>;
+	BT,wake_host_irq = <&gpio3 RK_PC1 GPIO_ACTIVE_HIGH>;
+};
+
+&wireless_wlan {
+	wifi_chip_type = "rtl8822cs";
+	WIFI,host_wake_irq = <&gpio3 RK_PB3 GPIO_ACTIVE_HIGH>;
+};

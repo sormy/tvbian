@@ -1,0 +1,86 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] media: rc: keymaps: Add the HK1 RBOX K8S remote
+
+The HK1 RBOX K8S's stock remote, NEC, address 0x01, twelve buttons.
+Map each as its label reads, and the mouse button, which toggles a
+pointer in the vendor's software, as KEY_TOUCHPAD_TOGGLE for a pointer
+mode to follow.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/drivers/media/rc/keymaps/Makefile b/drivers/media/rc/keymaps/Makefile
+--- a/drivers/media/rc/keymaps/Makefile
++++ b/drivers/media/rc/keymaps/Makefile
+@@ -60,6 +60,7 @@
+ 			rc-hauppauge.o \
+ 			rc-hisi-poplar.o \
+ 			rc-hisi-tv-demo.o \
++			rc-hk1-rbox-k8s.o \
+ 			rc-imon-mce.o \
+ 			rc-imon-pad.o \
+ 			rc-imon-rsc.o \
+diff --git a/drivers/media/rc/keymaps/rc-hk1-rbox-k8s.c b/drivers/media/rc/keymaps/rc-hk1-rbox-k8s.c
+new file mode 100644
+--- /dev/null
++++ b/drivers/media/rc/keymaps/rc-hk1-rbox-k8s.c
+@@ -0,0 +1,49 @@
++// SPDX-License-Identifier: GPL-2.0+
++
++#include <media/rc-map.h>
++#include <linux/module.h>
++
++/*
++ * Keymap for the HK1 RBOX K8S's stock remote. The mouse button toggles a
++ * pointer mode, as the vendor's software does with it.
++ */
++
++static struct rc_map_table hk1_rbox_k8s[] = {
++	{ 0x0140, KEY_POWER },
++	{ 0x014c, KEY_MENU },
++	{ 0x0111, KEY_HOMEPAGE },
++	{ 0x0116, KEY_UP },
++	{ 0x011a, KEY_DOWN },
++	{ 0x0151, KEY_LEFT },
++	{ 0x0150, KEY_RIGHT },
++	{ 0x0113, KEY_OK },
++	{ 0x0119, KEY_BACK },
++	{ 0x0110, KEY_VOLUMEDOWN },
++	{ 0x0118, KEY_VOLUMEUP },
++	{ 0x0100, KEY_TOUCHPAD_TOGGLE },
++};
++
++static struct rc_map_list hk1_rbox_k8s_map = {
++	.map = {
++		.scan     = hk1_rbox_k8s,
++		.size     = ARRAY_SIZE(hk1_rbox_k8s),
++		.rc_proto = RC_PROTO_NEC,
++		.name     = RC_MAP_HK1_RBOX_K8S,
++	}
++};
++
++static int __init init_rc_map_hk1_rbox_k8s(void)
++{
++	return rc_map_register(&hk1_rbox_k8s_map);
++}
++
++static void __exit exit_rc_map_hk1_rbox_k8s(void)
++{
++	rc_map_unregister(&hk1_rbox_k8s_map);
++}
++
++module_init(init_rc_map_hk1_rbox_k8s)
++module_exit(exit_rc_map_hk1_rbox_k8s)
++
++MODULE_LICENSE("GPL");
++MODULE_DESCRIPTION("HK1 RBOX K8S remote controller keytable");
+diff --git a/include/media/rc-map.h b/include/media/rc-map.h
+--- a/include/media/rc-map.h
++++ b/include/media/rc-map.h
+@@ -263,6 +263,7 @@
+ #define RC_MAP_HAUPPAUGE                 "rc-hauppauge"
+ #define RC_MAP_HISI_POPLAR               "rc-hisi-poplar"
+ #define RC_MAP_HISI_TV_DEMO              "rc-hisi-tv-demo"
++#define RC_MAP_HK1_RBOX_K8S              "rc-hk1-rbox-k8s"
+ #define RC_MAP_IMON_MCE                  "rc-imon-mce"
+ #define RC_MAP_IMON_PAD                  "rc-imon-pad"
+ #define RC_MAP_IMON_RSC                  "rc-imon-rsc"
