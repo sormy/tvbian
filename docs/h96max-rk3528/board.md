@@ -6,22 +6,22 @@
 
 ## Identity
 
-| Item          | Value                                                             |
-| ------------- | ----------------------------------------------------------------- |
-| Board ID      | `h96max-rk3528`                                                   |
-| PCB           | `RK3528_DDR3_8X4_V12`; no date on the silkscreen                  |
-| SoC           | RK3528; factory tree, stock package chip `3528`                   |
-| RAM marking   | 8× Samsung K4B4G0446B DDR3, 4 per side; an owner's photos         |
-| Storage       | Samsung `KLMCG2KETM-B041`, 64 GB; an owner's unit                 |
-| Radio         | AIC8800D80, rev 7, sub-ID 2, on SDIO; Bluetooth on `uart2`        |
-| Radio marking | `SKYWB8800 / SG-WB800E` by its owner; the photo reads `WB8800D80` |
-| Ethernet      | 10/100, the SoC's internal PHY; H81601S magnetics                 |
-| Ports         | HDMI, USB-A 3.0, USB-A 2.0, LAN, microSD, AV, SPDIF, IR, DC 5 V   |
-| Buttons       | Recovery, behind the AV jack                                      |
-| Front panel   | A clock LCD on an FD655 driver; no LEDs                           |
-| Case          | Round                                                             |
-| Stock         | Android 13; the import's image `H96 Max RK3528 20230630.1201`     |
-| Import        | BOXPUT's firmware page, 2026-11-07                                |
+| Item          | Value                                                                          |
+| ------------- | ------------------------------------------------------------------------------ |
+| Board ID      | `h96max-rk3528`                                                                |
+| PCB           | `RK3528_DDR3_8X4_V12`; no date on the silkscreen                               |
+| SoC           | RK3528; factory tree, stock package chip `3528`                                |
+| RAM marking   | 8× Samsung K4B4G0446B DDR3, 4 per side; an owner's photos                      |
+| Storage       | Samsung `KLMCG2KETM-B041`, 64 GB; an owner's unit                              |
+| Radio         | AIC8800D80, rev 7, sub-ID 2, on SDIO; Bluetooth on `uart2`                     |
+| Radio marking | `SKYWB8800 / SG-WB800E` by its owner; the photo reads `WB8800D80`              |
+| Ethernet      | 10/100, the SoC's internal PHY; H81601S magnetics                              |
+| Ports         | HDMI, USB-A 3.0, USB-A 2.0, LAN, microSD, AV, SPDIF, IR, DC 5 V                |
+| Buttons       | Recovery, behind the AV jack                                                   |
+| Front panel   | A clock LCD on an FD655: digits, colon, wifi, network, play, pause, USB, timer |
+| Case          | Round                                                                          |
+| Stock         | Android 13; the import's image `H96 Max RK3528 20230630.1201`                  |
+| Import        | BOXPUT's firmware page, 2026-11-07                                             |
 
 ![Box and remote](image1.jpg)
 
@@ -166,7 +166,7 @@ for the AIC8800D80 at the same revision and sub-ID.
 | AV jack, SPDIF              | ❓   | Not run                                     |
 | GPU under lima              | 🟡   | The M2 Plus's, the same GPU node            |
 | Planes, colour, pacing, HDR | ❓   | Not run                                     |
-| Front clock LCD             | ❌   | FD655: no driver packaged, so dark          |
+| Front clock LCD             | 🟡   | `tm16xx` as FD6551, the H96 Max panel map   |
 
 ### Power
 
@@ -212,8 +212,8 @@ for the AIC8800D80 at the same revision and sub-ID.
 ## Known gaps
 
 - Nothing here has run on the box: every ❓ above.
-- The front clock LCD stays dark: no FD655 driver packaged. [tm16xx-display][tm16xx], an out-of-tree
-  driver that lists the FD655, can make it work (`docs/todo/README.md`).
+- The front clock LCD's map is the H96 Max boxes' in tm16xx-display's `devices/`, unseen on this
+  one: digits on grids 4 to 1, the symbols on grid 0.
 - The bundled remote is inferred, not pressed: a 12-button handset (power, menu, home, D-pad and OK,
   back, volume, mouse; `image1.jpg`), not the other H96 Max boxes' or the R69's. Of the factory's
   six key tables only `0xfd01` is in no other board's stock, and it holds 12 keys: mapped onto the
@@ -223,5 +223,3 @@ for the AIC8800D80 at the same revision and sub-ID.
 - Gigabit Ethernet is an option on H96's listing; this PCB and its image carry 100 Mbit.
 - The image is older than this board's own stock: its radio driver and calibration are from 2023,
   the board's from 2024.
-
-[tm16xx]: https://github.com/jefflessard/tm16xx-display

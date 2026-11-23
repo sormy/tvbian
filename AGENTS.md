@@ -298,6 +298,10 @@ board's `board.patch` shows which nodes need work, never their values: each valu
 factory tree, or it is a question. A sibling's patch applied whole carries its rails, clocks, keys
 and OPPs onto hardware that does not have them.
 
+**What the translator can do reliably, it does.** A vendor node with a mainline counterpart is a
+translation rule in `tools/dtcx/bases/`, never a hand edit in each board's patch; the patch holds
+only what no vendor node carries, such as a panel's digit map.
+
 **U-Boot handles the SoC and vendor storage only**: it may set the SoC's Ethernet address and pass
 vendor-storage entries on; a radio's address belongs to that radio's driver.
 

@@ -57,3 +57,14 @@
   directly did not work for them; how is asked. Their PCB marking is asked too.
 - `BOARD_SUPPORT=tested_by_user`, 👤 in README; `board.md` marks the microSD boot and the eMMC
   install ✅ by that report.
+
+## 2026-11-22 — the front panel, blind
+
+- The factory's `fd655_dev` drives the panel on GPIO4 C3 (clock) and C4 (data). The owner reads its
+  symbols: wifi, network, colon, pause, play, USB, timer.
+- tm16xx-display's `devices/h96-max.dtso` and `rk3566-h96-max-v56.dtso` carry one map with those
+  seven symbols: an FD6551 at `0x24`, digits on grids 4 to 1, segments `3 1 2 6 4 5 0`, the symbols
+  on grid 0. The vendor tree's patch adds the bus and disables `fd655_dev`; on next2 the translation
+  makes the bus from `fd655_dev`, and the patch puts the panel on it.
+- No other enabled node holds the two pins: `i2c0m0`, `pwm0m0` and `pwm1m0` stay disabled; the PWM
+  regulators use PWM2, 4 and 7. Untested on the box.

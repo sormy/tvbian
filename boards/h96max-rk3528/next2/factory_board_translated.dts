@@ -3751,6 +3751,15 @@
 		pinctrl-0 = <&ir_rx_gpio>;
 	};
 
+	i2c-display {
+		compatible = "i2c-gpio";
+		sda-gpios = <&gpio4 RK_PC4 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		scl-gpios = <&gpio4 RK_PC3 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		i2c-gpio,delay-us = <5>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+	};
+
 	hdmi-sound {
 		compatible = "simple-audio-card";
 		simple-audio-card,name = "rockchip,hdmi";

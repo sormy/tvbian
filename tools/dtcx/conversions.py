@@ -16,6 +16,7 @@ CELL = re.compile(r"\b(0x[0-9a-fA-F]+|[0-9]+)\b")
 SYSCONFIG_ON = 1000000  # sys_config's power_sply: 1000000 + mV, the leading 1 the rail's on
 VBUS_MICROVOLT = 5000000  # USB's VBUS
 SDIO_MICROVOLT = 3300000  # an SDIO card's supply
+I2C_GPIO_DELAY_US = 5  # half a 100 kHz clock, the TM1650 family's
 MMC_VDD_33_34 = 0x200000  # the OCR bit for a card at 3.3 V
 NSEC_PER_SEC = 1000000000
 # what aml_slot reads, and what only the vendor's driver does: its pin names for debug, its
@@ -79,6 +80,12 @@ def rk_pins(group: Node) -> dict[tuple[str, str], str]:
 def number(value: str) -> int:
     """A one-cell value, <n> or n, as a number."""
     return int(value.strip("<>").split()[0], 0)
+
+
+def open_drain(value: str) -> str:
+    """A <&bank pin flags> line driven open drain."""
+    bank, pin, flags = value.strip("<>").split()
+    return f"<{bank} {pin} ({flags} | GPIO_OPEN_DRAIN)>"
 
 
 def okay(node: Node) -> bool:
@@ -153,6 +160,7 @@ class Conversions:
             "gpu-power": self.gpu_power,
             "rk-bluetooth": self.rk_bluetooth,
             "rk-wlan": self.rk_wlan,
+            "panel-bus": self.panel_bus,
         }
         conversions[action](fnode, path, args)
 
@@ -742,6 +750,26 @@ class Conversions:
             Prop.of("pinctrl-0", "<&ir_rx_gpio>"),
         ]
         self.root.children.append(Node("ir-receiver", [], [], props))
+
+    def panel_bus(self, fnode: Node, path: str, args: list[str]) -> None:
+        """A vendor front-panel node, whose driver bit-bangs the panel's two lines, as mainline's
+        i2c-gpio bus on them, open drain; args name its clock and data properties. The panel on the
+        bus is the board's: no vendor node says its chip or digit map."""
+        clock, data = fnode.prop(args[0]), fnode.prop(args[1])
+        if not okay(fnode):
+            return
+        if clock is None or data is None:
+            self.report(UNRESOLVED, f"panel-bus: no {args[0]} or {args[1]}", path)
+            return
+        props = [
+            Prop.of("compatible", '"i2c-gpio"'),
+            Prop.of("sda-gpios", open_drain(self.relabel(data.value))),
+            Prop.of("scl-gpios", open_drain(self.relabel(clock.value))),
+            Prop.of("i2c-gpio,delay-us", f"<{I2C_GPIO_DELAY_US}>"),
+            Prop.of("#address-cells", "<1>"),
+            Prop.of("#size-cells", "<0>"),
+        ]
+        self.root.children.append(Node("i2c-display", [], [], props))
 
     def cec(self, fnode: Node, path: str, args: list[str]) -> None:
         """A vendor CEC node, enabled, as mainline's CEC controller args[0] names enabled on the

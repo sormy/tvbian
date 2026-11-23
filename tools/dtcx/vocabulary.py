@@ -83,6 +83,7 @@ BUILT = (
     "gpu-power",
     "rk-bluetooth",
     "rk-wlan",
+    "panel-bus",
 )
 
 

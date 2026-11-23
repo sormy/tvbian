@@ -405,3 +405,11 @@ Read: "RK3528 Datasheet", Rev 1.4, © 2025 Rockchip, pages 6-15 (features), from
   and `dw_hdmi` registers; the IR is `gpio_ir_recv` on next2, the same receiver; the CEC and
   Bluetooth wake keys, the HDMI jack and DDR's cooling device are todos.
 - CI: 8 caches at 1G; the Amlogic two at 0.97 GiB each.
+
+## 2026-11-22 — the front panel's bus, translated
+
+- `panel-bus`: a vendor front-panel node, `rockchip,fd655_dev` or `amlogic,fd628_dev`, becomes
+  mainline's `i2c-gpio` bus `i2c-display` on its clock and data pins, open drain. The chip and its
+  digit map stay in each board's patch: no vendor node carries them.
+- The HK1's next2 tree came out identical to its hand-written bus; its patch and the H96 Max
+  RK3528's now add only `display@24`.

@@ -131,7 +131,95 @@
  			hdmi_pins_idle: hdmi-pins-idle {
  				rockchip,pins = <0 RK_PA3 1 &pcfg_pull_none>,
  				                <0 RK_PA4 RK_FUNC_GPIO &pcfg_output_low_pull_down>,
-@@ -4173,6 +4190,18 @@
+@@ -4166,13 +4183,105 @@
+ 		};
+ 	};
+ 
++	i2c-display { /* Factory panel uses GPIO4 C3 and C4; the H96 Max panel map. */
++		compatible = "i2c-gpio";
++		sda-gpios = <&gpio4 RK_PC4 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
++		scl-gpios = <&gpio4 RK_PC3 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
++		i2c-gpio,delay-us = <5>;
++		#address-cells = <1>;
++		#size-cells = <0>;
++
++		display@24 {
++			compatible = "fdhisi,fd6551";
++			reg = <0x24>;
++			default-brightness = <3>;
++
++			digits {
++				#address-cells = <1>;
++				#size-cells = <0>;
++
++				digit@0 {
++					reg = <0>;
++					segments = <4 3>, <4 1>, <4 2>, <4 6>, <4 4>, <4 5>, <4 0>;
++				};
++
++				digit@1 {
++					reg = <1>;
++					segments = <3 3>, <3 1>, <3 2>, <3 6>, <3 4>, <3 5>, <3 0>;
++				};
++
++				digit@2 {
++					reg = <2>;
++					segments = <2 3>, <2 1>, <2 2>, <2 6>, <2 4>, <2 5>, <2 0>;
++				};
++
++				digit@3 {
++					reg = <3>;
++					segments = <1 3>, <1 1>, <1 2>, <1 6>, <1 4>, <1 5>, <1 0>;
++				};
++			};
++
++			leds {
++				#address-cells = <2>;
++				#size-cells = <0>;
++
++				led@0,0 {
++					reg = <0 0>;
++					function = "alarm";
++				};
++
++				led@0,1 {
++					reg = <0 1>;
++					function = "usb";
++				};
++
++				led@0,2 {
++					reg = <0 2>;
++					function = "pause";
++				};
++
++				led@0,3 {
++					reg = <0 3>;
++					function = "play";
++				};
++
++				led@0,4 {
++					reg = <0 4>;
++					function = "colon";
++				};
++
++				led@0,5 {
++					reg = <0 5>;
++					function = "lan";
++				};
++
++				led@0,6 {
++					reg = <0 6>;
++					function = "wlan";
++				};
++			};
++		};
++	};
++
+ 	fd655_dev {
+ 		compatible = "rockchip,fd655_dev";
+-		status = "okay";
++		status = "disabled"; /* i2c-display drives GPIO4 C3 and C4 */
+ 		clk_pin = <&gpio4 RK_PC3 GPIO_ACTIVE_HIGH>;
  		dat_pin = <&gpio4 RK_PC4 GPIO_ACTIVE_HIGH>;
  	};
  
@@ -150,7 +238,7 @@
  	adc_keys: adc-keys {
  		status = "okay";
  		compatible = "adc-keys";
-@@ -4184,7 +4213,8 @@
+@@ -4184,7 +4293,8 @@
  
  		vol-up-key {
  			label = "volume up";
@@ -160,7 +248,7 @@
  			press-threshold-microvolt = <1750>;
  		};
  	};
-@@ -4445,10 +4475,8 @@
+@@ -4445,10 +4555,8 @@
  		phandle = <0x1b2>;
  	};
  

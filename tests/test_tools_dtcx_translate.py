@@ -1486,7 +1486,15 @@ RK_MAINLINE = """/ {
 \t};
 };
 """
+RK_PANEL = """\tfd655_dev {
+\t\tcompatible = "rockchip,fd655_dev";
+\t\tstatus = "okay";
+\t\tclk_pin = <&gpio4 RK_PC3 GPIO_ACTIVE_HIGH>;
+\t\tdat_pin = <&gpio4 RK_PC4 GPIO_ACTIVE_HIGH>;
+\t};
+"""
 RK_VOCABULARY = r"""prop compatible reg rockchip,pins mainline
+node rockchip,fd655_dev panel-bus clk_pin dat_pin
 # a test's
 prop remote_pwm_id none
 node rockchip,hdmi rk-sound-card
@@ -1512,6 +1520,12 @@ def rockchip(factory: str = RK_FACTORY) -> tuple[dict[str, Node], Report]:
         base(),
     )
     return dict(walk(source.root)) | {"/": source.root}, report
+
+
+def with_panel(panel: str) -> str:
+    """The factory tree with a front-panel node at the end of its root."""
+    head, _, _ = RK_FACTORY.rpartition("};\n")
+    return head + panel + "};\n"
 
 
 class RockchipTest(unittest.TestCase):
@@ -1543,6 +1557,25 @@ class RockchipTest(unittest.TestCase):
         nodes, report = rockchip(RK_FACTORY.replace("\t\tpinctrl-0 = <&pwm3m0_pins>;\n", ""))
         self.assertNotIn("/ir-receiver", nodes)
         self.assertIn("pwm-ir", report.text())
+
+    def test_a_front_panel_is_an_i2c_gpio_bus_on_its_two_lines(self) -> None:
+        nodes, _ = rockchip(with_panel(RK_PANEL))
+        bus = values(nodes["/i2c-display"])
+        self.assertEqual(bus["compatible"], '"i2c-gpio"')
+        self.assertEqual(bus["sda-gpios"], "<&gpio4 RK_PC4 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>")
+        self.assertEqual(bus["scl-gpios"], "<&gpio4 RK_PC3 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>")
+        self.assertNotIn("/fd655_dev", nodes)
+
+    def test_a_panel_without_its_lines_is_a_question(self) -> None:
+        panel = RK_PANEL.replace("\t\tdat_pin = <&gpio4 RK_PC4 GPIO_ACTIVE_HIGH>;\n", "")
+        nodes, report = rockchip(with_panel(panel))
+        self.assertNotIn("/i2c-display", nodes)
+        self.assertIn("panel-bus", report.text())
+
+    def test_a_disabled_panel_has_no_bus(self) -> None:
+        panel = RK_PANEL.replace('"okay"', '"disabled"')
+        nodes, _ = rockchip(with_panel(panel))
+        self.assertNotIn("/i2c-display", nodes)
 
     def test_a_wrapper_goes_and_its_child_meets_mainline_s_node(self) -> None:
         nodes, _ = rockchip()

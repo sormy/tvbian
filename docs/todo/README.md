@@ -83,9 +83,6 @@ below.
 - [ ] **Every script reads as `AGENTS.md` asks**: settings named at the top, one step a line, Python
       where it parses. `extras/` already does.
 
-- [ ] **Front clock displays show the time**: the FD655 on the H96 Max RK3528, the TM1628 and kin on
-      other boxes, which no board drives today.
-
 - [ ] **`ffmpeg9` quiet off Rockchip**: Rockchip's MPP library prints `can not found match soc name`
       at every start on an Allwinner or Amlogic box.
 
