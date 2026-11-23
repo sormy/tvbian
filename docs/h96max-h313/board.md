@@ -14,6 +14,7 @@
 | OTG             | USB-A nearest SD slot                  | Owner's port description            |
 | Power           | 5 V / 2 A                              | Owner                               |
 | LED             | Blue running; red asleep, off, booting | Owner                               |
+| Buttons         | One, in the AV jack: PH9, active-low   | pin scan while pressed, 2026-11-22  |
 | IR              | Bundled H96 Max remote, NEC 0x04       | Owner; stock wake list              |
 | Serial          | RX / TX / GND beside AV                | `pcb-bottom.jpeg`                   |
 | Wi-Fi / BT chip | AIC8800D40L                            | `pcb-wifi.jpeg`, sticker on the PCB |
@@ -76,7 +77,7 @@ In the bring-up checklist's order, each kernel's mark side by side; numbers read
 | USB 1.1                 | ✅  | ✅  | 12M receiver enumerates                        |
 | USB 2.0 480M            | ❓  | ❓  | 👤 a stick in each USB-A port; `fio`           |
 | OTG port host           | ❓  | ❓  | 👤 a stick in the port nearest the SD slot     |
-| input names             | ✅  | 🟡  | `cec-remote`, `ir-remote`                      |
+| input names             | ✅  | ✅  | `recovery-button`, `cec-remote`, `ir-remote`   |
 | IR keymap               | ✅  | ✅  | `rc-h96max-h313`, 22 keys, NEC                 |
 | s2idle 20 s             | ✅  | ❓  | RTC wake, same boot                            |
 | s2idle 100 s            | ❌  | ❓  | resets with no record                          |
@@ -136,5 +137,7 @@ The full eMMC, per-unit data included; six independent readback windows match it
 
 ## Recovery
 
-FEL: the button in the AV jack, pressed with a toothpick, held while the OTG cable goes in with DC
-unplugged. The boot ROM reads it, so it recovers from any eMMC state. No U-Boot recovery button.
+FEL: the button in the AV jack, PH9, pressed with a toothpick, held while the OTG cable goes in with
+DC unplugged. It is no boot ROM pin: the loader on the eMMC reads it, the factory's or ours with
+U-Boot `0007`, so it works only while that loader does. An SD card boots before the eMMC, whatever
+the eMMC holds. Under Linux it is `KEY_VENDOR` on `/dev/input/recovery-button`.

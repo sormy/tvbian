@@ -2306,9 +2306,9 @@
 		};
 	};
 
+	/* the AV jack's button on PH9 (board.md), stock's recovery_key */
 	gpio-keys {
 		compatible = "gpio-keys";
-		status = "disabled";
 
 		key {
 			label = "recovery";

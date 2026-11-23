@@ -14,7 +14,7 @@ Boots from SD on 6.18.62, and on 7.3.3, the `-next` kernel.
 | EPHY         | AC300 package on EMAC1 MDIO, address 0             |
 | EPHY clock   | PWM5 PA12, 24 MHz bypass                           |
 | LEDs         | PH6 power, blue; PH7 standby, red; states retained |
-| Recovery     | None; FEL in the AV jack, the boot ROM's           |
+| Recovery     | PH9 in the AV jack, `gpio-keys` `KEY_VENDOR`       |
 | IR           | PH10, `rc-h96max-h313`                             |
 | USB          | Factory host mode; FEL loader uses peripheral mode |
 | Video, audio | Existing H616 mainline bindings                    |

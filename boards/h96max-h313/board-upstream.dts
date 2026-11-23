@@ -93,6 +93,7 @@
 #include <dt-bindings/clock/sun50i-h616-ccu.h>
 #include <dt-bindings/clock/sun6i-rtc.h>
 #include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/linux-event-codes.h>
 #include <dt-bindings/leds/common.h>
 #include <dt-bindings/thermal/thermal.h>
 
@@ -271,6 +272,17 @@
 			default-state = "off";
 			retain-state-suspended;
 			retain-state-shutdown;
+		};
+	};
+
+	/* the AV jack's button on PH9 (board.md), stock's recovery_key */
+	gpio-keys {
+		compatible = "gpio-keys";
+
+		key {
+			label = "recovery";
+			linux,code = <KEY_VENDOR>;
+			gpios = <&pio 7 9 GPIO_ACTIVE_LOW>; /* PH9 */
 		};
 	};
 };
