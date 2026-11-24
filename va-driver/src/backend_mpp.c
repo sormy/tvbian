@@ -485,27 +485,38 @@ static int release_target(const struct driver *drv, struct mpp_decoder *d, struc
 
 static int take_frame(struct driver *drv, struct mpp_decoder *d, VASurfaceID wanted, bool *got);
 
-/* the target's memory released once MPP's layout is known, and held again once MPP took it, so
- * that no later picture lands in it after MPP lets go; what came out meanwhile taken, as MPP may
- * first want its size change acknowledged */
-static int hold_released(struct driver *drv, struct mpp_decoder *d, struct surface *s,
-                         VASurfaceID id, bool *got)
+/* the memory last released held again once MPP took it, so that no later picture lands in it after
+ * MPP lets go; done before the next is released, so MPP starts a picture while the client works.
+ * One free at a time: MPP takes the first it freed, so each picture lands in its target's. What
+ * came out meanwhile taken, as MPP may first want its size change acknowledged. */
+static int hold_taken(struct driver *drv, struct mpp_decoder *d, VASurfaceID id, bool *got)
 {
     int ret = 0;
-    for (unsigned waited = 0; ret >= 0; waited++) {
-        /* left free before a size change MPP then announced, and too small for it */
-        if (d->released && !fits(d, d->released)) {
+    for (unsigned waited = 0; ret >= 0 && d->released; waited++) {
+        /* taken, or left free before a size change MPP then announced and too small for it, or
+         * never taken: held again either way */
+        if (mpp_buffer_group_unused(d->group) == 0 || !fits(d, d->released) ||
+            waited == OUTPUT_TIMEOUT_MS) {
             mpp_buffer_inc_ref(d->released->buffer);
             d->released = NULL;
+            break;
         }
-        if (!d->released && d->layout.size && (ret = release_target(drv, d, s)) < 0)
-            return ret;
-        if (d->released && mpp_buffer_group_unused(d->group) == 0) {
-            mpp_buffer_inc_ref(d->released->buffer);
-            d->released = NULL;
-            return ret;
-        }
-        /* not taken yet: held before the next picture's memory is released */
+        set_wait(d, 0);
+        if ((ret = take_frame(drv, d, id, got)) == 0)
+            usleep(1000);
+    }
+    return ret;
+}
+
+/* the target's memory released once MPP's layout is known: the first picture's size change may
+ * come only as MPP parses it */
+static int release_when_laid_out(struct driver *drv, struct mpp_decoder *d, struct surface *s,
+                                 VASurfaceID id, bool *got)
+{
+    int ret = 0;
+    for (unsigned waited = 0; ret >= 0 && !d->released; waited++) {
+        if (d->layout.size)
+            return release_target(drv, d, s);
         if (waited == OUTPUT_TIMEOUT_MS)
             return 0;
         set_wait(d, 0);
@@ -528,6 +539,11 @@ static int take_frame(struct driver *drv, struct mpp_decoder *d, VASurfaceID wan
                                              mpp_frame_get_buf_size(frame) };
         mpp_frame_deinit(&frame);
         return d->mpi->control(d->ctx, MPP_DEC_SET_INFO_CHANGE_READY, NULL) == MPP_OK ? 1 : -EIO;
+    }
+    /* the memory released came out decoded: held again while MPP still holds it too */
+    if (d->released && mpp_frame_get_buffer(frame) == d->released->buffer) {
+        mpp_buffer_inc_ref(d->released->buffer);
+        d->released = NULL;
     }
     VASurfaceID id = (VASurfaceID)mpp_frame_get_pts(frame);
     struct surface *s = surface_of(drv, id);
@@ -667,10 +683,8 @@ static int mpp_decode(struct driver *drv, struct context *ctx, const struct anne
     if (d->into_surfaces) {
         if (!target)
             return -EINVAL;
-        if (d->released) {
-            mpp_buffer_inc_ref(d->released->buffer);
-            d->released = NULL;
-        }
+        if ((ret = hold_taken(drv, d, ctx->target, &got)) < 0)
+            return ret;
         if (d->layout.size && (ret = release_target(drv, d, target)) < 0)
             return ret;
     }
@@ -683,7 +697,7 @@ static int mpp_decode(struct driver *drv, struct context *ctx, const struct anne
         ret = tries < MAX_PUT_TRIES ? take_frame(drv, d, ctx->target, &got) : -ETIMEDOUT;
     mpp_packet_deinit(&packet);
     if (ret >= 0 && d->into_surfaces)
-        ret = hold_released(drv, d, target, ctx->target, &got);
+        ret = release_when_laid_out(drv, d, target, ctx->target, &got);
     /* what is out already; a picture MPP still holds is sync's to wait for */
     set_wait(d, 0);
     for (int taken = 0; ret >= 0 && (ret = take_frame(drv, d, ctx->target, &got)) > 0; taken++)

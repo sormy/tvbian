@@ -297,8 +297,10 @@ VA carries none of these whole.
     one whole picture, handed out once decoded.
   - 8-bit pictures decode straight into the surface's own memory, committed to MPP's buffer group.
     The driver holds every committed buffer but the target's, so MPP can take only that one, and
-    holds it again once MPP took it. A target MPP still reads gets a spare buffer and a CPU copy.
-    Surfaces are sized at MPP's twice-the-luma.
+    holds it again once MPP took it: when the picture comes out, or at the next call, before the
+    next target is released, so MPP starts a picture while the client works and a call does not wait
+    for it. A target MPP still reads gets a spare buffer and a CPU copy. Surfaces are sized at MPP's
+    twice-the-luma.
   - VP9's rows are padded to an odd multiple of 256 bytes: a surface made after a VP9 decode config
     is laid out so from the start, and one made before is laid out again while no client has seen
     it, none once any surface was exported, as GStreamer takes one export's layout for every

@@ -566,3 +566,10 @@ real time on Cedrus whatever the driver: about 25 fps flat out, 180 of 288 frame
 - `extras/gst-plugins-bad` and its `0001` dropped: `0001` let GStreamer narrow where a driver listed
   no 10-bit format, and every 10-bit config lists P010 since MPP's narrowing went. Debian's own
   `gst-plugins-bad`, unpatched, decodes 10-bit through the driver at 63 dB on the R69-1.
+- `vaEndPicture` on MPP's surfaces waited for MPP to take the target before it returned: one picture
+  in flight, MPP's start passed to the client's decode thread. Chromium's trace on the M2 Plus,
+  YouTube 4K60 VP9, showed decode calls at a median 6.8 ms and a p99 66 ms, 81% of the slow ones
+  that wait. The wait moved to the next call's start, and the hold is taken again as soon as the
+  picture comes out; one buffer is still free at a time, which MPP takes first in, first out. With
+  AFBC on: median 2.8 ms, p99 23 ms, 56.8 of 60 pictures a second shown. The R69-1 under vendor 6.1:
+  the suite 89 pass, every picture identical, VP9 with alt-refs and the size switches included.
