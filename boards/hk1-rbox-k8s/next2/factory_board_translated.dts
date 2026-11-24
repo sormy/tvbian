@@ -2851,7 +2851,7 @@
 			reg-shift = <2>;
 			status = "okay";
 			pinctrl-names = "default";
-			pinctrl-0 = <&uart2m0_xfer>, <&uart2m0_ctsn>;
+			pinctrl-0 = <&uart2m0_xfer>, <&uart2m0_ctsn>, <&uart2m0_rtsn>;
 
 			bluetooth {
 				reset-gpios = <&gpio3 RK_PC2 GPIO_ACTIVE_LOW>;

@@ -45,7 +45,7 @@
  			vop_out: ports {
  				#address-cells = <1>;
 @@ -2679,6 +2680,8 @@
- 			pinctrl-0 = <&uart2m0_xfer>, <&uart2m0_ctsn>;
+ 			pinctrl-0 = <&uart2m0_xfer>, <&uart2m0_ctsn>, <&uart2m0_rtsn>;
  
  			bluetooth {
 +				compatible = "aicsemi,aic8800-bt"; /* the AIC8800's Bluetooth half */

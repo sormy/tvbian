@@ -52,5 +52,5 @@
       and what exists only for MPP retired: `tvb-va-driver`'s MPP backend and `libmpp` in it,
       `patches/mpp`, `patches/wpewebkit` `0001`, and our FFmpeg's `*_rkmpp` decoders.
 - [ ] **The HK1's Wi-Fi download at 2.4 GHz, every run**: nothing in two of four runs.
-- [ ] **Bluetooth flow control on the HK1**: UART2 muxes no RTS there; the vendor tree's Bluetooth
-      node holds `uart2m0_rtsn`.
+- [ ] **Bluetooth on next2 with a real device**: audio streamed and a keyboard on the HK1 and the
+      R69-1, now that UART2 has RTS; no H4 errors in the log.

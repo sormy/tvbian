@@ -2935,7 +2935,7 @@
 			reg-shift = <2>;
 			status = "okay";
 			pinctrl-names = "default";
-			pinctrl-0 = <&uart2m1_xfer>, <&uart2m1_ctsn>;
+			pinctrl-0 = <&uart2m1_xfer>, <&uart2m1_ctsn>, <&uart2m1_rtsn>;
 
 			bluetooth {
 				compatible = "aicsemi,aic8800-bt"; /* the AIC8800's Bluetooth half */

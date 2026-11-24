@@ -27,7 +27,7 @@
  			vop_out: ports {
  				#address-cells = <1>;
 @@ -2854,6 +2855,8 @@
- 			pinctrl-0 = <&uart2m0_xfer>, <&uart2m0_ctsn>;
+ 			pinctrl-0 = <&uart2m0_xfer>, <&uart2m0_ctsn>, <&uart2m0_rtsn>;
  
  			bluetooth {
 +				compatible = "aicsemi,aic8800-bt"; /* SDIO c8a1:0082, an AIC8800D80, not rtl8822cs */

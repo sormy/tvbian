@@ -583,18 +583,20 @@ class Conversions:
                 put(sequence, Prop.of("pinctrl-0", f"{state.value}, {self.relabel(pins.value)}"))
 
     def rk_bluetooth(self, fnode: Node, path: str, args: list[str]) -> None:
-        """The vendor rfkill's Bluetooth, where enabled, as a serdev node on the UART its pins name:
-        BT,reset_gpio, the level that runs the chip, as reset-gpios of the other polarity, and
-        BT,wake_gpio, high to keep it awake, as device-wakeup-gpios; the board's patch names the
-        chip."""
+        """The vendor rfkill's Bluetooth, where enabled, as a serdev node on the UART its pins name,
+        those pins, its RTS, added to the UART's: BT,reset_gpio, the level that runs the chip, as
+        reset-gpios of the other polarity, and BT,wake_gpio, high to keep it awake, as
+        device-wakeup-gpios; the board's patch names the chip."""
         if not okay(fnode):
             return
         pins, reset = fnode.prop("pinctrl-0"), fnode.prop("BT,reset_gpio")
         bus = re.search(r"&uart(\d+)m", pins.value) if pins else None
         uart = self.by_label.get(f"uart{bus[1]}") if bus else None
-        if uart is None or reset is None:
-            self.report(UNRESOLVED, "bluetooth-platdata: no UART or reset line", path)
+        state = uart.prop("pinctrl-0") if uart else None
+        if uart is None or state is None or pins is None or reset is None:
+            self.report(UNRESOLVED, "bluetooth-platdata: no UART, its pins or reset line", path)
             return
+        put(uart, Prop.of("pinctrl-0", f"{state.value}, {self.relabel(pins.value)}"))
         props = [Prop.of("reset-gpios", self.relabel(inverted(reset.value)))]
         wake = fnode.prop("BT,wake_gpio")
         if wake is not None:

@@ -2852,7 +2852,7 @@
 			reg-shift = <2>;
 			status = "okay";
 			pinctrl-names = "default";
-			pinctrl-0 = <&uart2m0_xfer>, <&uart2m0_ctsn>;
+			pinctrl-0 = <&uart2m0_xfer>, <&uart2m0_ctsn>, <&uart2m0_rtsn>;
 
 			bluetooth {
 				compatible = "aicsemi,aic8800-bt"; /* SDIO c8a1:0082, an AIC8800D80, not rtl8822cs */

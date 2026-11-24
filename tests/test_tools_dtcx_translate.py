@@ -715,7 +715,11 @@ class BoardTest(unittest.TestCase):
     def test_rockchip_bluetooth_becomes_a_serdev_node_on_its_uart(self) -> None:
         for status, written in (('"okay"', True), ('"disabled"', False)):
             with self.subTest(status=status):
-                uart = Node("serial@ff9e0000", ["uart2"])
+                uart = Node(
+                    "serial@ff9e0000",
+                    ["uart2"],
+                    props=[Prop.of("pinctrl-0", "<&uart2m0_xfer>, <&uart2m0_ctsn>")],
+                )
                 vendor = Node(
                     "wireless-bluetooth",
                     props=[
@@ -735,6 +739,10 @@ class BoardTest(unittest.TestCase):
                             "reset-gpios": "<&gpio3 RK_PC1 GPIO_ACTIVE_LOW>",
                             "device-wakeup-gpios": "<&gpio3 RK_PB4 GPIO_ACTIVE_HIGH>",
                         },
+                    )
+                    self.assertEqual(
+                        values(uart)["pinctrl-0"],
+                        "<&uart2m0_xfer>, <&uart2m0_ctsn>, <&uart2m0_rtsn>",
                     )
 
     def test_no_reset_line_no_bluetooth_node(self) -> None:

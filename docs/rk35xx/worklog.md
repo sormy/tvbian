@@ -439,3 +439,11 @@ Read: "RK3528 Datasheet", Rev 1.4, © 2025 Rockchip, pages 6-15 (features), from
   digit map stay in each board's patch: no vendor node carries them.
 - The HK1's next2 tree came out identical to its hand-written bus; its patch and the H96 Max
   RK3528's now add only `display@24`.
+
+## 2026-11-24 — next2's Bluetooth UART with its RTS
+
+- `rk-bluetooth` adds the vendor Bluetooth node's pin state, its RTS, to the UART's `pinctrl-0`;
+  next2's H4 driver turns on flow control, which had no RTS pin. Trees changed: the HK1, the R69-1
+  and the H96 Max RK3528, one line each; the 3518s' and the M2 Plus's vendor node is disabled.
+- On 7.3.5, the HK1 and the R69-1: GPIO3 A2 (pin 98) `MUX UNCLAIMED` before, `ffa00000.serial`,
+  group `uart2m0-rtsn` after; `hci0` powered, a 60 s scan finding 33 and 39 devices.

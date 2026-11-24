@@ -1059,7 +1059,7 @@
 
 &uart2 {
 	pinctrl-names = "default";
-	pinctrl-0 = <&uart2m1_xfer>, <&uart2m1_ctsn>;
+	pinctrl-0 = <&uart2m1_xfer>, <&uart2m1_ctsn>, <&uart2m1_rtsn>;
 	status = "okay";
 
 	bluetooth {
