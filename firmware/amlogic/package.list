@@ -16,3 +16,5 @@
 0644 amlogic/gxlx2/g12a_hevc_mmu.bin    /usr/lib/firmware/updates/meson/gxlx2/g12a_hevc_mmu.bin
 0644 amlogic/gxlx2/g12a_vp9.bin         /usr/lib/firmware/updates/meson/gxlx2/g12a_vp9.bin
 0644 amlogic/gxlx2/gxl_mjpeg.bin        /usr/lib/firmware/updates/meson/gxlx2/gxl_mjpeg.bin
+0644 amlogic/gxlx2/g12a_h264_multi.bin   /usr/lib/firmware/updates/meson/gxlx2/g12a_h264_multi.bin
+0644 amlogic/gxlx2/g12a_h264_multi_mmu.bin /usr/lib/firmware/updates/meson/gxlx2/g12a_h264_multi_mmu.bin
