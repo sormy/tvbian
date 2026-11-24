@@ -6,59 +6,60 @@ its `rkmpp` codecs for Rockchip's MPP lack 10-bit, scaling and AFBC. One set on 
 newest release, carries all three; `0001`–`0051` apply in order with `patch -p1`. They ship as the
 `ffmpeg9` package, `ffmpeg9` and `ffprobe9` beside Debian's FFmpeg: `./build.sh extra ffmpeg9`.
 
-| Patch  | Adds                                                                 | From      |
-| ------ | -------------------------------------------------------------------- | --------- |
-| `0001` | `v4l2request`: MPEG-2, H.264, HEVC, VP8, VP9 hwaccels                | LibreELEC |
-| `0002` | `v4l2request` VC-1                                                   | LibreELEC |
-| `0003` | raw elementary streams: unstamped packets came back all at pts 0     | ours      |
-| `0004` | MPEG-1/2, MPEG-4 and VC-1 `extradata` sent ahead of the first one    | ours      |
-| `0005` | `mjpeg_v4l2m2m`, which ffmpeg lacks                                  | ours      |
-| `0006` | encoders fill `extradata` for Matroska and MP4                       | ours      |
-| `0007` | the drain waits for a CAPTURE buffer before it reports end of file   | ours      |
-| `0008` | DRM PRIME frames and a DRM hardware context                          | LibreELEC |
-| `0009` | a bounded wait for a picture                                         | ours      |
-| `0010` | `ftp`: the URL's path decoded                                        | ours      |
-| `0011` | `-capture_max_width`, `-capture_max_height`: a scaled CAPTURE        | ours      |
-| `0012` | a reinit no longer waits for the user to free its frames             | ours      |
-| `0013` | the frames before a resolution change are dequeued, not dropped      | ours      |
-| `0014` | `deinterlace_v4l2m2m`, a V4L2 mem2mem deinterlacer filter            | LibreELEC |
-| `0015` | the deinterlacer's timestamps in its own, halved time base           | ours      |
-| `0016` | encoders copy a frame into the driver's stride, not the frame's      | ours      |
-| `0017` | `v4l2request` device options `capture_max_width`, `_height`          | ours      |
-| `0018` | `v4l2request` device option `afbc`: AFBC frames by bit depth         | ours      |
-| `0019` | `v4l2request` MPEG-4 Part 2 and H.263                                | ours      |
-| `0020` | `rkmpp`: 10-bit frames as `DRM_FORMAT_NV15`                          | ours      |
-| `0021` | `hwcontext_drm` refuses a frame whose planes its format lacks        | ours      |
-| `0022` | `rkmpp`: timestamps to MPP in microseconds                           | ours      |
-| `0023` | `mpeg2_rkmpp`, `mpeg4_rkmpp` decoders                                | ours      |
-| `0024` | `rkmpp`: `capture_max_width`, `_height`, a ½ picture                 | ours      |
-| `0025` | `rkmpp`: option `afbc`, AFBC frames by bit depth                     | ours      |
-| `0026` | `rkmpp` encoders: bitrate bounds around `-b:v`                       | ours      |
-| `0027` | `mpeg4_v4l2m2m` unpacks packed B-frames: a picture per packet        | ours      |
-| `0028` | `v4l2m2m` option `afbc`: Amlogic FBC frames by bit depth             | ours      |
-| `0029` | `extradata` sent again after a flush, for a decoder that restarts    | ours      |
-| `0030` | the capture queue restarts after a resolution change on no packet    | ours      |
-| `0031` | `rkmpp`: MPEG-2, MPEG-4, VP8 past 1920x1088 refused at open          | ours      |
-| `0032` | `v4l2m2m` encoders: a picture larger than the driver's refused       | ours      |
-| `0033` | `mjpeg_v4l2m2m` encoder, quality from `-q:v`, full range             | ours      |
-| `0034` | `mpeg1_rkmpp`, `h263_rkmpp` decoders                                 | ours      |
-| `0035` | `rkmpp`: the stream ends on MPP's end of stream; 8K, seeks after it  | ours      |
-| `0036` | `rkmpp`: option `cacheable`, frames on the cached system heap        | ours      |
-| `0037` | `v4l2request`: option `cacheable`, CAPTURE buffers non-coherent      | ours      |
-| `0038` | `rkmpp`: every packet taken before EAGAIN; resolution changes        | ours      |
-| `0039` | `h264`: option `decode_order`, pictures unreordered, off by default  | ours      |
-| `0040` | `rkmpp`: option `immediate_out`, no reorder delay, off by default    | ours      |
-| `0041` | `vc1`: `AV_CODEC_FLAG_LOW_DELAY` honoured, as MPEG-1/2/4 honour it   | ours      |
-| `0042` | `v4l2request`: option `import_capture`, caller-owned dma-bufs        | ours      |
-| `0043` | `v4l2request` VC-1: slice start codes and repeated headers           | ours      |
-| `0044` | `-hwaccel_output_delay`: decoded frames held back before passed on   | ours      |
-| `0045` | `v4l2request`: NV15/NV20 where the headers lack them                 | ours      |
-| `0046` | `v4l2m2m`: a codec's coded format is any it maps to, MJPEG's `JPEG`  | ours      |
-| `0047` | `v4l2request`: MPEG-1, on the MPEG-2 controls with our flags         | ours      |
-| `0048` | `v4l2request`: MPEG-4 a VOP whole where the decoder holds no picture | ours      |
-| `0049` | `v4l2request`: OUTPUT capabilities read for the codec's format       | ours      |
-| `0050` | `v4l2request`: non-split AFBC 16x16 mapped to its modifier           | ours      |
-| `0051` | `v4l2request`: the driver's compose top cropped off a frame          | ours      |
+| Patch  | Adds                                                                      | From      |
+| ------ | ------------------------------------------------------------------------- | --------- |
+| `0001` | `v4l2request`: MPEG-2, H.264, HEVC, VP8, VP9 hwaccels                     | LibreELEC |
+| `0002` | `v4l2request` VC-1                                                        | LibreELEC |
+| `0003` | raw elementary streams: unstamped packets came back all at pts 0          | ours      |
+| `0004` | MPEG-1/2, MPEG-4 and VC-1 `extradata` sent ahead of the first one         | ours      |
+| `0005` | `mjpeg_v4l2m2m`, which ffmpeg lacks                                       | ours      |
+| `0006` | encoders fill `extradata` for Matroska and MP4                            | ours      |
+| `0007` | the drain waits for a CAPTURE buffer before it reports end of file        | ours      |
+| `0008` | DRM PRIME frames and a DRM hardware context                               | LibreELEC |
+| `0009` | a bounded wait for a picture                                              | ours      |
+| `0010` | `ftp`: the URL's path decoded                                             | ours      |
+| `0011` | `-capture_max_width`, `-capture_max_height`: a scaled CAPTURE             | ours      |
+| `0012` | a reinit no longer waits for the user to free its frames                  | ours      |
+| `0013` | the frames before a resolution change are dequeued, not dropped           | ours      |
+| `0014` | `deinterlace_v4l2m2m`, a V4L2 mem2mem deinterlacer filter                 | LibreELEC |
+| `0015` | the deinterlacer's timestamps in its own, halved time base                | ours      |
+| `0016` | encoders copy a frame into the driver's stride, not the frame's           | ours      |
+| `0017` | `v4l2request` device options `capture_max_width`, `_height`               | ours      |
+| `0018` | `v4l2request` device option `afbc`: AFBC frames by bit depth              | ours      |
+| `0019` | `v4l2request` MPEG-4 Part 2 and H.263                                     | ours      |
+| `0020` | `rkmpp`: 10-bit frames as `DRM_FORMAT_NV15`                               | ours      |
+| `0021` | `hwcontext_drm` refuses a frame whose planes its format lacks             | ours      |
+| `0022` | `rkmpp`: timestamps to MPP in microseconds                                | ours      |
+| `0023` | `mpeg2_rkmpp`, `mpeg4_rkmpp` decoders                                     | ours      |
+| `0024` | `rkmpp`: `capture_max_width`, `_height`, a ½ picture                      | ours      |
+| `0025` | `rkmpp`: option `afbc`, AFBC frames by bit depth                          | ours      |
+| `0026` | `rkmpp` encoders: bitrate bounds around `-b:v`                            | ours      |
+| `0027` | `mpeg4_v4l2m2m` unpacks packed B-frames: a picture per packet             | ours      |
+| `0028` | `v4l2m2m` option `afbc`: Amlogic FBC frames by bit depth                  | ours      |
+| `0029` | `extradata` sent again after a flush, for a decoder that restarts         | ours      |
+| `0030` | the capture queue restarts after a resolution change on no packet         | ours      |
+| `0031` | `rkmpp`: MPEG-2, MPEG-4, VP8 past 1920x1088 refused at open               | ours      |
+| `0032` | `v4l2m2m` encoders: a picture larger than the driver's refused            | ours      |
+| `0033` | `mjpeg_v4l2m2m` encoder, quality from `-q:v`, full range                  | ours      |
+| `0034` | `mpeg1_rkmpp`, `h263_rkmpp` decoders                                      | ours      |
+| `0035` | `rkmpp`: the stream ends on MPP's end of stream; 8K, seeks after it       | ours      |
+| `0036` | `rkmpp`: option `cacheable`, frames on the cached system heap             | ours      |
+| `0037` | `v4l2request`: option `cacheable`, CAPTURE buffers non-coherent           | ours      |
+| `0038` | `rkmpp`: every packet taken before EAGAIN; resolution changes             | ours      |
+| `0039` | `h264`: option `decode_order`, pictures unreordered, off by default       | ours      |
+| `0040` | `rkmpp`: option `immediate_out`, no reorder delay, off by default         | ours      |
+| `0041` | `vc1`: `AV_CODEC_FLAG_LOW_DELAY` honoured, as MPEG-1/2/4 honour it        | ours      |
+| `0042` | `v4l2request`: option `import_capture`, caller-owned dma-bufs             | ours      |
+| `0043` | `v4l2request` VC-1: slice start codes and repeated headers                | ours      |
+| `0044` | `-hwaccel_output_delay`: decoded frames held back before passed on        | ours      |
+| `0045` | `v4l2request`: NV15/NV20 where the headers lack them                      | ours      |
+| `0046` | `v4l2m2m`: a codec's coded format is any it maps to, MJPEG's `JPEG`       | ours      |
+| `0047` | `v4l2request`: MPEG-1, on the MPEG-2 controls with our flags              | ours      |
+| `0048` | `v4l2request`: MPEG-4 a VOP whole where the decoder holds no picture      | ours      |
+| `0049` | `v4l2request`: OUTPUT capabilities read for the codec's format            | ours      |
+| `0050` | `v4l2request`: non-split AFBC 16x16 mapped to its modifier                | ours      |
+| `0051` | `v4l2request`: the driver's compose top cropped off a frame               | ours      |
+| `0052` | a picture the driver could not decode comes out flagged as a decode error | ours      |
 
 `0001`, `0002` and `0014` are LibreELEC's `packages/multimedia/ffmpeg/patches/v4l2-request` and
 `vf-deinterlace-v4l2m2m` at LibreELEC.tv `96d9f0f`: Jonas Karlman's request-API series, posted to

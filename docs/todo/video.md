@@ -93,6 +93,11 @@ FFmpeg's, and what no chip has measured yet.
       at 165 fps through it and 189 through `tvb-va-driver`, both by `ffmpeg9`, decode only.
 - [ ] fuseamp asks for compressed frames: `afbc` on `v4l2request` and `*_rkmpp`, `-afbc` on
       `*_v4l2m2m`, where the plane takes the modifier.
+- [ ] `0052` tested, if a player relies on it: a picture a stateless driver could not decode
+      (`V4L2_BUF_FLAG_ERROR`) comes out flagged `FF_DECODE_ERROR_INVALID_BITSTREAM`, not as a blank
+      decoded frame. Shipped untested; one `v4l2request` run with a stream the driver refuses
+      mid-way (Cedrus on the H313, or `rkvdec` on `next2`) shows the flag and no change to clean
+      streams.
 
 ## Not measured yet
 
