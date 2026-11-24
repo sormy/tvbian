@@ -167,6 +167,8 @@ int surface_adopt_backing(struct surface *s, int fd, const struct backing_layout
         close(fd);
         return -ENOMEM;
     }
+    s->backing->modifier = layout->modifier;
+    s->backing->top_offset = layout->top_offset;
     int ret = s->picture ? copy_picture_to_backing(s, s->picture) : 0;
     release_picture(s);
     return ret;
@@ -188,7 +190,7 @@ int surface_ensure_backing(struct surface *s)
     int fd = dmabuf_alloc(size);
     if (fd < 0)
         return -errno;
-    const struct backing_layout layout = { pitch, pitch * luma_rows, size };
+    const struct backing_layout layout = { .pitch = pitch, .chroma_offset = pitch * luma_rows, .size = size };
     return surface_adopt_backing(s, fd, &layout);
 }
 
@@ -529,10 +531,36 @@ static void export_picture(const struct engine_picture *p, uint32_t fourcc, bool
     fill_layers(out, fourcc, p->drm_format, separate, planes);
 }
 
+/* one plane, as FFmpeg's v4l2-request and Kodi hand AFBC to the display and GPU; for a client
+ * that takes a layer a plane, the format's layers on that one plane, all but the first copies the
+ * display does not read */
+static void export_afbc(int fd, size_t size, uint64_t modifier, uint32_t whole_format,
+                        uint32_t fourcc, bool separate, unsigned pitch,
+                        VADRMPRIMESurfaceDescriptor *out)
+{
+    out->num_objects = 1;
+    out->objects[0].fd = dup(fd);
+    out->objects[0].size = size;
+    out->objects[0].drm_format_modifier = modifier;
+    out->num_layers = separate ? 2 : 1;
+    for (unsigned i = 0; i < out->num_layers; i++) {
+        out->layers[i].drm_format = separate ? plane_format_of(fourcc, i) : whole_format;
+        out->layers[i].num_planes = 1;
+        out->layers[i].pitch[0] = pitch;
+    }
+}
+
 static void export_backing(struct surface *s, bool separate, VADRMPRIMESurfaceDescriptor *out)
 {
     const struct backing *b = s->backing;
     s->exported = true;
+    if (b->modifier != DRM_FORMAT_MOD_LINEAR) {
+        uint32_t whole = s->fourcc == VA_FOURCC_P010 ? DRM_FORMAT_YUV420_10BIT
+                                                     : DRM_FORMAT_YUV420_8BIT;
+        export_afbc(b->fd, b->size, b->modifier, whole, s->fourcc, separate, b->pitch, out);
+        out->height += b->top_offset;
+        return;
+    }
     const struct plane_layout planes[2] = { { 0, 0, b->pitch }, { 0, b->chroma_offset, b->pitch } };
     out->num_objects = 1;
     out->objects[0].fd = dup(b->fd);
@@ -543,19 +571,16 @@ static void export_backing(struct surface *s, bool separate, VADRMPRIMESurfaceDe
 
 static bool is_compressed(const struct surface *s)
 {
-    return is_compressed_picture(s->picture);
+    return is_compressed_picture(s->picture) ||
+           (s->backing && s->backing->modifier != DRM_FORMAT_MOD_LINEAR);
 }
 
-/* one plane, as FFmpeg's v4l2-request and Kodi hand Cedrus's AFBC to the display and GPU */
-static void export_compressed(const struct engine_picture *p, VADRMPRIMESurfaceDescriptor *out)
+static void export_compressed(const struct engine_picture *p, uint32_t fourcc, bool separate,
+                              VADRMPRIMESurfaceDescriptor *out)
 {
-    out->num_objects = 1;
-    out->objects[0].fd = dup(p->fds[0]);
-    out->objects[0].size = p->sizes[0];
-    out->objects[0].drm_format_modifier = p->modifier;
-    out->num_layers = 1;
-    out->layers[0].drm_format = p->drm_format;
-    out->layers[0].num_planes = 1;
+    export_afbc(p->fds[0], p->sizes[0], p->modifier, p->drm_format, fourcc, separate,
+                p->plane_pitch[0], out);
+    out->height += p->top_offset;
 }
 
 static VAStatus export_surface_handle(VADriverContextP ctx, VASurfaceID surface_id,
@@ -577,10 +602,8 @@ static VAStatus export_surface_handle(VADriverContextP ctx, VASurfaceID surface_
     out->height = s->height;
     pthread_mutex_lock(&drv->lock);
     drv->layout_seen = true;
-    if (is_compressed(s) && separate)
-        status = VA_STATUS_ERROR_UNIMPLEMENTED;
-    else if (is_compressed(s))
-        export_compressed(s->picture, out);
+    if (is_compressed_picture(s->picture))
+        export_compressed(s->picture, s->fourcc, separate, out);
     else if (exportable(s->picture, s->fourcc, separate))
         export_picture(s->picture, s->fourcc, separate, out);
     else if (ensure_decodable_backing(drv, surface_id, s) == 0)

@@ -66,12 +66,31 @@ settings.
       `patches/ffmpeg/0039`; a meson build of its own, and no licence yet.
 - [ ] **Chromium's sandbox**: every engine's device opened in `vaInitialize`, before the sandbox
       closes; today each opens at its first context.
-- [ ] **AFBC on `rk35xx-next2`**: `rkvdec` writes `AN68` and `AN6a`, 16x16 sparse, not split, for
-      H.264, HEVC and VP9; the driver offers Cedrus's split AFBC alone. The driver half is
-      `research/va-driver/afbc-detect.patch`. GStreamer's `va` offers downstream the modifier a
-      plain surface exports, linear: it needs a probe with the AFBC modifiers listed. Then Falkon's
-      video-plane sink takes AFBC onto VOP2's Cluster0, where 4K60 runs at 48 to 55 fps linear.
-- [ ] **MPP's FBC**: AFBC from MPP on the vendor kernel, for a client that lists the modifier.
+- [ ] **AFBC for the client that lists it, on MPP**: Cedrus and `rkvdec` give AFBC to a client
+      listing the modifier at `vaCreateSurfaces`; MPP only under `TVB_VA_AFBC`, a box-wide test
+      switch that every 8-bit H.264, HEVC and VP9 client then gets, CPU readers refused.
+- [ ] **Chromium lists the AFBC modifier**, so the switch goes: it creates surfaces with no list.
+      With the switch, YouTube 4K60 VP9 on the M2 Plus shows 56.8 of 60 pictures a second.
+- [ ] **MPP's AFBC layout refused when it differs from the plan**: the driver plans it from MPP
+      1.1.0's own sizing, checked on the RK3528; a mismatch now lands in spare buffers it cannot
+      copy.
+- [ ] **The two-layer AFBC export only where asked**: NV12's second layer is a copy of the first,
+      for Chromium; another client may read it as a plane.
+- [ ] **10-bit AFBC** (`AN6a`, MPP's 10-bit FBC): offered, never shown on a plane.
+- [ ] **GStreamer's `va` offers AFBC downstream**: it offers the modifier a plain surface exports.
+- [ ] **GStreamer's DMA path on MPP**: VP9 4K to `DMA_DRM` caps never prerolls, old build and new.
+- [ ] **Chromium's linear YouTube 4K60 VP9 on the M2 Plus**: decode calls p99 216 ms, 10 pictures a
+      second shown, where AFBC shows 56.8.
+- [ ] **The suite as a player drives VA**: surfaces exported before decoding, decoded in real time,
+      the slowest pictures against one frame's interval; it decodes back to back today.
+- [ ] **The suite through GStreamer's DMA path**: every clip to `DMA_DRM` caps, as WebKit takes
+      them; it converts to system memory today, which hid the MPP hang above.
+- [ ] **A clip as a site encodes it**: VP9 and AV1 with alt-refs, show-existing frames and the rate
+      control a site uses, beside libvpx's real-time clips.
+- [ ] **Cedrus's AFBC by its own probe**: the driver now asks which AFBC CAPTURE lists, where it
+      named Cedrus's; not run on the H313 since.
+- [ ] **The AFBC code committed**: the suite with the switch off on `sunxi-h616` and `rk35xx-next2`;
+      `rk35xx` passes, 89 of 89.
 - [ ] **`VideoProc` scaling**: for Jellyfin's `scale_vaapi`, and NV12 to ARGB where Chromium's GL
       cannot import NV12; it converts 8-bit and 10-bit at one size today.
 - [ ] **CBR from the first second on `sunxi-h616`**: Cedrus-enc's first frame is ten times its

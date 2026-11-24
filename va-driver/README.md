@@ -125,11 +125,18 @@ Key: ✓ offered, ✗ the engine can but this driver cannot yet, ➖ the engine 
   10-bit config lists P010 first, so the target decides: one that shows 10-bit takes the picture as
   it is, one that shows 8-bit asks `VideoProc` to narrow it. GStreamer's `va` decoders take only a
   10-bit format for a 10-bit stream, which every config lists.
-- **`sunxi-h616` AFBC:** HEVC and VP9 decode into Cedrus's AFBC (`AS12`, `AS01`) when every render
-  target listed `DRM_FORMAT_MOD_ARM_AFBC(16x16 | SPARSE | SPLIT)` in
-  `VASurfaceAttribDRMFormatModifiers` and the render node is Panfrost's; linear otherwise, and never
-  on Lima. Cedrus's buffer is exported as one `DRM_FORMAT_YUV420_8BIT` or `_10BIT` layer of one
-  plane; separate layers, derive and images are refused, as the CPU cannot read it.
+- **AFBC:** the request backend asks its HEVC decoder which AFBC CAPTURE lists: Cedrus's
+  `AS12`/`AS01` (`DRM_FORMAT_MOD_ARM_AFBC(16x16 | SPARSE | SPLIT)`) or `rkvdec`'s `AN68`/`AN6a`
+  (`16x16 | SPARSE`). A context whose render targets all listed that modifier in
+  `VASurfaceAttribDRMFormatModifiers` decodes into it where CAPTURE lists it for the stream; linear
+  otherwise. The buffer exports as one `DRM_FORMAT_YUV420_8BIT` or `_10BIT` layer of one plane, or
+  with separate layers as the surface's NV12 or P010 layers on that one plane, the second a copy the
+  display does not read; derive and images are refused, as the CPU cannot read it.
+- **AFBC for every client, a testing switch:** `TVB_VA_AFBC=1`, or `afbc=1` in
+  `/etc/tvb-va-driver.conf`, makes every 8-bit H.264, HEVC and VP9 decode AFBC whatever the client
+  listed: the request backend's CAPTURE, and MPP's `MPP_FRAME_FBC_AFBC_V2` decoded into the surfaces
+  in place, laid out from MPP's own sizing when the surface is made. A client that reads pictures on
+  the CPU is refused under it.
 - **`meson-gxl` scaled decode:** a `VAProcPipelineParameterBuffer` on an HEVC or VP9 decode context
   (`VAConfigAttribDecProcessing`) asks the decoder's scaled CAPTURE through the COMPOSE selection
   (`meson-codecs/0017`). Only 1/2 and 1/4 in both directions, as the decoder takes; any other size

@@ -39,6 +39,11 @@ const char *setting_from(const char *path, const char *env, const char *key)
     return value;
 }
 
+bool setting_is_on(const char *value)
+{
+    return value && value[0] == '1';
+}
+
 const char *setting(const char *env, const char *key)
 {
     return setting_from(CONFIG_PATH, env, key);

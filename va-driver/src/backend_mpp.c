@@ -24,6 +24,7 @@
 #include <mpp_soc.h>
 
 #include "driver.h"
+#include "settings.h"
 
 
 #ifndef DRM_FORMAT_NV15
@@ -36,6 +37,19 @@
 #define MAX_PUT_TRIES 10
 /* frame waits for a picture at end of stream, after MPP was told it ended */
 #define MAX_DRAIN_TRIES 10
+/* MPP's AFBC (MPP_FRAME_FBC_AFBC_V2), as mpp_buf_slot.c sizes it on a Linux build */
+#define MPP_AFBC DRM_FORMAT_MOD_ARM_AFBC(AFBC_FORMAT_MOD_BLOCK_SIZE_16x16 | AFBC_FORMAT_MOD_SPARSE)
+#define AFBC_HDR_ALIGN 64
+#define AFBC_BLOCK_PIXELS 256
+#define AFBC_HEADER_BYTES 16
+/* an 8-bit 4:2:0 block's 12 bits a pixel, its slot 128-byte aligned */
+#define AFBC_8_BITS 12
+#define AFBC_BLOCK_BYTES 384
+/* H.264's and HEVC's pictures start 4 rows down, 16 rows past the picture for deblocking */
+#define AFBC_TOP_ROWS 4
+#define AFBC_EXTRA_ROWS 16
+/* rows aligned past any codec's own, so a buffer is never short */
+#define AFBC_ROW_ALIGN 64
 /* more pictures or size changes than any DPB holds, out of one call: MPP is looping, not working */
 #define MAX_TAKES 64
 /* a JPEG decoded, or the engine is gone */
@@ -140,6 +154,15 @@ static const struct mpp_candidate {
 #define CLASS_4K_HEIGHT 2304
 #define CLASS_1080P_WIDTH 1920
 #define CLASS_1080P_HEIGHT 1088
+
+/* the experiment's codecs: 8-bit H.264, HEVC and VP9 as AFBC */
+static bool afbc_wanted(VAProfile profile)
+{
+    return setting_is_on(setting(AFBC_ENV, AFBC_KEY)) &&
+           (profile == VAProfileH264ConstrainedBaseline || profile == VAProfileH264Main ||
+            profile == VAProfileH264High || profile == VAProfileHEVCMain ||
+            profile == VAProfileVP9Profile0);
+}
 
 static unsigned align_up(unsigned value, unsigned alignment)
 {
@@ -291,6 +314,10 @@ static int mpp_decoder_open(struct driver *drv, struct context *ctx)
             MPP_OK ||
         d->mpi->control(d->ctx, MPP_DEC_SET_EXT_BUF_GROUP, d->group) != MPP_OK)
         return -ENODEV;
+    MppFrameFormat afbc = MPP_FRAME_FBC_AFBC_V2;
+    if (afbc_wanted(ctx->config->offer->profile) &&
+        d->mpi->control(d->ctx, MPP_DEC_SET_OUTPUT_FORMAT, &afbc) != MPP_OK)
+        return -ENOTSUP;
     /* a JPEG's 4:2:2 or 4:4:4 converted by the engine to the NV12 a surface takes */
     MppFrameFormat nv12 = MPP_FMT_YUV420SP;
     if (ctx->config->codec->kind == CODEC_JPEG &&
@@ -330,6 +357,14 @@ static struct engine_picture *picture_of(struct mpp_decoder *d, MppFrame frame, 
         .plane_pitch = { pitch, pitch },
         .release = release_mpp_picture,
     };
+    if (MPP_FRAME_FMT_IS_AFBC(mpp_frame_get_fmt(frame))) {
+        p->base.drm_format = DRM_FORMAT_YUV420_8BIT;
+        p->base.modifier = MPP_AFBC;
+        p->base.top_offset = mpp_frame_get_offset_y(frame);
+        p->base.plane_offset[1] = 0;
+        p->base.plane_pitch[0] = mpp_frame_get_fbc_hdr_stride(frame) * AFBC_8_BITS / 8;
+        p->base.plane_pitch[1] = 0;
+    }
     return &p->base;
 }
 
@@ -423,7 +458,22 @@ static struct backing_layout jpeg_layout(unsigned width, unsigned height)
 {
     unsigned pitch = align_up(width, JPEG_ALIGN);
     unsigned luma = pitch * align_up(height, JPEG_ALIGN);
-    return (struct backing_layout){ pitch, luma, (size_t)luma * JPEG_BYTES_PER_PIXEL };
+    return (struct backing_layout){ .pitch = pitch, .chroma_offset = luma,
+                                    .size = (size_t)luma * JPEG_BYTES_PER_PIXEL };
+}
+
+/* the AFBC MPP decodes into, before it says: VOP2 takes the header row stride as the pitch */
+static struct backing_layout afbc_layout(VAProfile profile, unsigned width, unsigned height)
+{
+    unsigned stride = align_up(width, AFBC_HDR_ALIGN);
+    unsigned rows = align_up(height, AFBC_ROW_ALIGN) + AFBC_EXTRA_ROWS;
+    unsigned blocks = stride * rows / AFBC_BLOCK_PIXELS;
+    unsigned size = align_up(blocks * AFBC_HEADER_BYTES, AFBC_HDR_ALIGN) + blocks * AFBC_BLOCK_BYTES;
+    return (struct backing_layout){ .pitch = stride * AFBC_8_BITS / 8,
+                                    .size = align_up(size, (unsigned)sysconf(_SC_PAGESIZE)),
+                                    .modifier = MPP_AFBC,
+                                    .top_offset = profile == VAProfileVP9Profile0 ? 0
+                                                                                  : AFBC_TOP_ROWS };
 }
 
 static bool plan_mpp_layout(VAProfile decoding, uint32_t fourcc, unsigned width, unsigned height,
@@ -431,6 +481,10 @@ static bool plan_mpp_layout(VAProfile decoding, uint32_t fourcc, unsigned width,
 {
     if (fourcc != VA_FOURCC_NV12)
         return false;
+    if (afbc_wanted(decoding)) {
+        *out = afbc_layout(decoding, width, height);
+        return true;
+    }
     if (decoding == VAProfileJPEGBaseline) {
         *out = jpeg_layout(width, height);
         return true;
@@ -440,14 +494,16 @@ static bool plan_mpp_layout(VAProfile decoding, uint32_t fourcc, unsigned width,
     unsigned units = (width + VP9_PITCH_UNIT - 1) / VP9_PITCH_UNIT;
     unsigned pitch = (units | 1) * VP9_PITCH_UNIT;
     unsigned luma = pitch * align_up(height, VP9_ROW_ALIGN);
-    *out = (struct backing_layout){ pitch, luma, (size_t)luma * VP9_SIZE_NUM / VP9_SIZE_DEN };
+    *out = (struct backing_layout){ .pitch = pitch, .chroma_offset = luma,
+                                    .size = (size_t)luma * VP9_SIZE_NUM / VP9_SIZE_DEN };
     return true;
 }
 
 static bool laid_out_as_mpp(const struct mpp_decoder *d, const struct backing *b)
 {
     return b->size >= d->layout.size && b->pitch == d->layout.pitch &&
-           b->chroma_offset == d->layout.chroma_offset;
+           b->chroma_offset == d->layout.chroma_offset && b->modifier == d->layout.modifier &&
+           b->top_offset == d->layout.top_offset;
 }
 
 /* where MPP pads rows, memory the client has not seen is laid out again as MPP decodes, so the
@@ -474,7 +530,9 @@ static int release_target(const struct driver *drv, struct mpp_decoder *d, struc
     if (ret)
         return ret;
     const struct backing *b = s->backing;
-    const struct backing_layout layout = { b->pitch, b->chroma_offset, b->size };
+    const struct backing_layout layout = { .pitch = b->pitch,
+                                           .chroma_offset = b->chroma_offset,
+                                           .size = b->size };
     struct committed *target = committed_of(d, b->fd);
     if (!target && !(target = commit(d, b->fd, &layout, false)))
         return -ENOBUFS;
@@ -535,8 +593,16 @@ static int take_frame(struct driver *drv, struct mpp_decoder *d, VASurfaceID wan
         return 0;
     if (mpp_frame_get_info_change(frame)) {
         unsigned pitch = mpp_frame_get_hor_stride(frame);
-        d->layout = (struct backing_layout){ pitch, pitch * mpp_frame_get_ver_stride(frame),
-                                             mpp_frame_get_buf_size(frame) };
+        d->layout = (struct backing_layout){ .pitch = pitch,
+                                             .chroma_offset = pitch * mpp_frame_get_ver_stride(frame),
+                                             .size = mpp_frame_get_buf_size(frame) };
+        if (MPP_FRAME_FMT_IS_AFBC(mpp_frame_get_fmt(frame)))
+            d->layout = (struct backing_layout){
+                .pitch = mpp_frame_get_fbc_hdr_stride(frame) * AFBC_8_BITS / 8,
+                .size = mpp_frame_get_buf_size(frame),
+                .modifier = MPP_AFBC,
+                .top_offset = mpp_frame_get_offset_y(frame),
+            };
         mpp_frame_deinit(&frame);
         return d->mpi->control(d->ctx, MPP_DEC_SET_INFO_CHANGE_READY, NULL) == MPP_OK ? 1 : -EIO;
     }

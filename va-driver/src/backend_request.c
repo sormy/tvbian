@@ -22,6 +22,7 @@
 /* after request.h: they need videodev2.h's types */
 #include "mpeg4-ctrls.h"
 #include "vc1-ctrls.h"
+#include "settings.h"
 
 #define MEDIA_NODES "/sys/bus/media/devices"
 #define CODED_BUFFER_SIZE (4 << 20)
@@ -45,9 +46,35 @@
 #define V4L2_PIX_FMT_YUV420_8_AFBC_16X16_SPLIT v4l2_fourcc('A', 'S', '1', '2')
 #define V4L2_PIX_FMT_YUV420_10_AFBC_16X16_SPLIT v4l2_fourcc('A', 'S', '0', '1')
 #endif
-#define CEDRUS_AFBC                                                                                \
-    DRM_FORMAT_MOD_ARM_AFBC(AFBC_FORMAT_MOD_BLOCK_SIZE_16x16 | AFBC_FORMAT_MOD_SPARSE |            \
-                            AFBC_FORMAT_MOD_SPLIT)
+/* rkvdec's AFBC, which VOP2 scans out */
+#ifndef V4L2_PIX_FMT_AFBC_YUV420_16x16
+#define V4L2_PIX_FMT_AFBC_YUV420_16x16 v4l2_fourcc('A', 'N', '6', '8')
+#define V4L2_PIX_FMT_AFBC_YUV420_16x16_10 v4l2_fourcc('A', 'N', '6', 'a')
+#endif
+#define AFBC_16X16_SPARSE (AFBC_FORMAT_MOD_BLOCK_SIZE_16x16 | AFBC_FORMAT_MOD_SPARSE)
+
+/* an AFBC a decoder may write, and its modifier */
+struct afbc_layout {
+    uint32_t eight_bit;
+    uint32_t ten_bit;
+    uint64_t modifier;
+};
+
+static const struct afbc_layout afbc_layouts[] = {
+    { V4L2_PIX_FMT_YUV420_8_AFBC_16X16_SPLIT, V4L2_PIX_FMT_YUV420_10_AFBC_16X16_SPLIT,
+      DRM_FORMAT_MOD_ARM_AFBC(AFBC_16X16_SPARSE | AFBC_FORMAT_MOD_SPLIT) },
+    { V4L2_PIX_FMT_AFBC_YUV420_16x16, V4L2_PIX_FMT_AFBC_YUV420_16x16_10,
+      DRM_FORMAT_MOD_ARM_AFBC(AFBC_16X16_SPARSE) },
+};
+#define NUM_AFBC_LAYOUTS (sizeof(afbc_layouts) / sizeof(afbc_layouts[0]))
+
+static const struct afbc_layout *afbc_layout_of(uint64_t modifier)
+{
+    for (unsigned i = 0; i < NUM_AFBC_LAYOUTS; i++)
+        if (afbc_layouts[i].modifier == modifier)
+            return &afbc_layouts[i];
+    return NULL;
+}
 
 #define VLD VAEntrypointVLD
 #define H264_PROFILE V4L2_CID_MPEG_VIDEO_H264_PROFILE
@@ -330,6 +357,9 @@ static int assign_capture(struct request_ctx *rq, VASurfaceID surface)
 
 static uint32_t surface_fourcc_of_capture(const struct request_ctx *rq)
 {
+    const struct afbc_layout *afbc = afbc_layout_of(rq->compressed_modifier);
+    if (afbc)
+        return rq->picture.pixelformat == afbc->ten_bit ? VA_FOURCC_P010 : VA_FOURCC_NV12;
     switch (rq->picture.pixelformat) {
     case V4L2_PIX_FMT_NV12:
         return VA_FOURCC_NV12;
@@ -350,12 +380,16 @@ static bool gpu_imports(unsigned pitch, size_t chroma_offset)
 static int lend_capture(struct request_ctx *rq, const struct capture_buffer *c, struct surface *s)
 {
     const struct v4l2_pix_format *f = &rq->picture;
-    const struct backing_layout layout = { f->bytesperline, f->bytesperline * f->height, c->size };
+    const struct backing_layout layout = { .pitch = f->bytesperline,
+                                           .chroma_offset = f->bytesperline * f->height,
+                                           .size = c->size,
+                                           .modifier = rq->compressed_modifier };
     struct stat st;
     int ret;
     surface_drop_unseen_backing(s);
+    /* Panfrost's pitch rule is for linear planes; AFBC goes to the display */
     if (!s->backing && s->fourcc == surface_fourcc_of_capture(rq) &&
-        gpu_imports(layout.pitch, layout.chroma_offset) &&
+        (layout.modifier || gpu_imports(layout.pitch, layout.chroma_offset)) &&
         (ret = surface_adopt_backing(s, dup(c->fd), &layout)) < 0)
         return ret;
     return s->backing && !fstat(s->backing->fd, &st) && st.st_ino == c->inode;
@@ -553,6 +587,27 @@ int request_repeat_reference(struct request_ctx *rq, VASurfaceID reference)
 #define PROBE_SIDE 64
 #define PROBE_STEP 16
 
+/* a fresh decoder of the coded format, its OUTPUT set to that size; -1 where none takes it */
+static int open_coded_at(uint32_t pixelformat, unsigned width, unsigned height, bool *mplane)
+{
+    uint32_t flags;
+    int fd = v4l2_open_coded(pixelformat, true, mplane, &flags);
+    if (fd < 0)
+        return -1;
+    struct v4l2_format format = { .type = *mplane ? V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE
+                                                  : V4L2_BUF_TYPE_VIDEO_OUTPUT };
+    if (*mplane)
+        format.fmt.pix_mp = (struct v4l2_pix_format_mplane){ .width = width, .height = height,
+                                                             .pixelformat = pixelformat };
+    else
+        format.fmt.pix = (struct v4l2_pix_format){ .width = width, .height = height,
+                                                   .pixelformat = pixelformat };
+    if (!ioctl(fd, VIDIOC_S_FMT, &format))
+        return fd;
+    close(fd);
+    return -1;
+}
+
 /* whether Cedrus takes a 10-bit stream's header at this size: it checks 10-bit sizes there, which
  * TRY_FMT cannot know. A fresh context, as a header taken sets the context's depth. */
 static bool takes_ten_bit(VAProfile profile, unsigned width, unsigned height)
@@ -576,22 +631,36 @@ static bool takes_ten_bit(VAProfile profile, unsigned width, unsigned height)
     };
     struct v4l2_ext_controls controls = { .which = V4L2_CTRL_WHICH_CUR_VAL, .count = 1,
                                           .controls = &control };
-    uint32_t flags, pixelformat = hevc ? V4L2_PIX_FMT_HEVC_SLICE : V4L2_PIX_FMT_VP9_FRAME;
-    int fd = v4l2_open_coded(pixelformat, true, &mplane, &flags);
+    /* the context checks the headers of the codec it is set to */
+    int fd = open_coded_at(hevc ? V4L2_PIX_FMT_HEVC_SLICE : V4L2_PIX_FMT_VP9_FRAME, width, height,
+                           &mplane);
     if (fd < 0)
         return false;
-    /* the context checks the headers of the codec it is set to */
-    struct v4l2_format format = { .type = mplane ? V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE
-                                                 : V4L2_BUF_TYPE_VIDEO_OUTPUT };
-    if (mplane)
-        format.fmt.pix_mp = (struct v4l2_pix_format_mplane){ .width = width, .height = height,
-                                                             .pixelformat = pixelformat };
-    else
-        format.fmt.pix = (struct v4l2_pix_format){ .width = width, .height = height,
-                                                   .pixelformat = pixelformat };
-    bool taken = !ioctl(fd, VIDIOC_S_FMT, &format) && !ioctl(fd, VIDIOC_TRY_EXT_CTRLS, &controls);
+    bool taken = !ioctl(fd, VIDIOC_TRY_EXT_CTRLS, &controls);
     close(fd);
     return taken;
+}
+
+/* a size every decoder here takes, for asking what it writes */
+#define AFBC_PROBE_WIDTH 1920
+#define AFBC_PROBE_HEIGHT 1080
+
+/* the AFBC the HEVC decoder lists, by its modifier; 0 for none */
+static uint64_t afbc_listed(void)
+{
+    bool mplane;
+    uint32_t flags;
+    uint64_t found = 0;
+    int fd = open_coded_at(V4L2_PIX_FMT_HEVC_SLICE, AFBC_PROBE_WIDTH, AFBC_PROBE_HEIGHT, &mplane);
+    if (fd < 0)
+        return 0;
+    enum v4l2_buf_type capture =
+        mplane ? V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE : V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    for (unsigned i = 0; !found && i < NUM_AFBC_LAYOUTS; i++)
+        if (v4l2_queue_takes(fd, capture, afbc_layouts[i].eight_bit, &flags))
+            found = afbc_layouts[i].modifier;
+    close(fd);
+    return found;
 }
 
 /* the largest side up to max, in steps, a 10-bit header is taken at */
@@ -622,9 +691,9 @@ static void size_ten_bit(struct offer *o)
 static int request_init(struct driver *drv)
 {
     static struct offer offers[NUM_CANDIDATES];
-    /* the AFBC a decoder may list, as Cedrus does: kept by a context whose targets all list its
-     * modifier and whose CAPTURE lists its format */
-    drv->compressed_modifier = CEDRUS_AFBC;
+    /* the AFBC the decoder lists: kept by a context whose targets all list its modifier and
+     * whose CAPTURE lists its format for the stream */
+    drv->compressed_modifier = afbc_listed();
     drv->offers = offers;
     drv->num_offers = v4l2_offers(request_candidates, NUM_CANDIDATES, offers);
     /* a dump without the device: the controls written are under test, not the decode */
@@ -695,9 +764,9 @@ static int announce_format(struct request_ctx *rq, enum codec_kind kind, unsigne
 
 static uint32_t capture_format(const struct request_ctx *rq, bool ten_bit)
 {
-    if (rq->compressed_modifier)
-        return ten_bit ? V4L2_PIX_FMT_YUV420_10_AFBC_16X16_SPLIT
-                       : V4L2_PIX_FMT_YUV420_8_AFBC_16X16_SPLIT;
+    const struct afbc_layout *afbc = afbc_layout_of(rq->compressed_modifier);
+    if (afbc)
+        return ten_bit ? afbc->ten_bit : afbc->eight_bit;
     if (!ten_bit)
         return V4L2_PIX_FMT_NV12;
     /* Cedrus writes P010, rkvdec NV15 */
@@ -880,7 +949,7 @@ static int request_decoder_open(struct driver *drv, struct context *ctx)
     rq->ctx = ctx;
     if (!(rq->codec_state = calloc(1, codec->state_size)))
         return -ENOMEM;
-    if (ctx->targets_take_compressed)
+    if (ctx->targets_take_compressed || setting_is_on(setting(AFBC_ENV, AFBC_KEY)))
         rq->compressed_modifier = drv->compressed_modifier;
     if (dump)
         return (rq->dump = fopen(dump, "a")) ? 0 : -errno;
@@ -900,8 +969,9 @@ static struct engine_picture *picture_of(struct request_ctx *rq, unsigned index)
     const struct v4l2_pix_format *f = &rq->picture;
     const struct capture_buffer *c = &rq->captures[index];
     struct engine_picture *p = calloc(1, sizeof(*p));
+    const struct afbc_layout *afbc = afbc_layout_of(rq->compressed_modifier);
     bool ten_bit = f->pixelformat == V4L2_PIX_FMT_P010 || f->pixelformat == V4L2_PIX_FMT_NV15 ||
-                   f->pixelformat == V4L2_PIX_FMT_YUV420_10_AFBC_16X16_SPLIT;
+                   (afbc && f->pixelformat == afbc->ten_bit);
     if (!p)
         return NULL;
     *p = (struct engine_picture){
@@ -915,6 +985,7 @@ static struct engine_picture *picture_of(struct request_ctx *rq, unsigned index)
     if (rq->compressed_modifier) {
         p->drm_format = ten_bit ? DRM_FORMAT_YUV420_10BIT : DRM_FORMAT_YUV420_8BIT;
         p->modifier = rq->compressed_modifier;
+        p->plane_pitch[0] = f->bytesperline;
     } else {
         p->drm_format = f->pixelformat == V4L2_PIX_FMT_NV15 ? DRM_FORMAT_NV15
                         : ten_bit                              ? DRM_FORMAT_P010
@@ -1093,7 +1164,8 @@ static bool plan_request_layout(VAProfile decoding, uint32_t fourcc, unsigned wi
             bool nv12 = (mplane ? capture.fmt.pix_mp.pixelformat : capture.fmt.pix.pixelformat) ==
                         V4L2_PIX_FMT_NV12;
             if (nv12 && rows >= height && pitch >= width && gpu_imports(pitch, pitch * rows))
-                layout = (struct backing_layout){ pitch, pitch * rows, size };
+                layout = (struct backing_layout){ .pitch = pitch, .chroma_offset = pitch * rows,
+                                                  .size = size };
         }
         close(fd);
     }

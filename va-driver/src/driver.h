@@ -108,6 +108,11 @@ struct config {
     unsigned rate_control;
 };
 
+/* an experiment: every picture an engine can write as AFBC so, for a display plane, whatever the
+ * client listed */
+#define AFBC_ENV "TVB_VA_AFBC"
+#define AFBC_KEY "afbc"
+
 /* NV12's two, or three where a decoder writes Y, U and V apart */
 #define PICTURE_PLANES 3
 
@@ -123,6 +128,8 @@ struct engine_picture {
     unsigned plane_object[PICTURE_PLANES];
     unsigned plane_offset[PICTURE_PLANES];
     unsigned plane_pitch[PICTURE_PLANES];
+    /* rows the picture starts down its buffer: MPP's AFBC */
+    unsigned top_offset;
     void (*release)(struct engine_picture *picture);
     void *engine_data;
 };
@@ -135,6 +142,9 @@ struct backing {
     uint8_t *map;
     unsigned pitch;
     unsigned chroma_offset;
+    /* an engine's compressed layout, lent as the surface's memory; 0 for linear */
+    uint64_t modifier;
+    unsigned top_offset;
 };
 
 /* Where a surface's planes lie in memory of its own. */
@@ -145,6 +155,9 @@ struct backing_layout {
     unsigned pitch;
     unsigned chroma_offset;
     size_t size;
+    uint64_t modifier;
+    /* rows the picture starts down its memory: MPP's AFBC */
+    unsigned top_offset;
 };
 
 struct surface {

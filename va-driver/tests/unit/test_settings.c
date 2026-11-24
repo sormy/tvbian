@@ -44,5 +44,8 @@ int main(void)
     unsetenv(ENV);
     unlink(path);
     check_value(path, NULL);
+    /* a switch is on for 1 alone: 0, empty or none leave it off */
+    CHECK(setting_is_on("1") && !setting_is_on("0") && !setting_is_on("") && !setting_is_on(NULL),
+          "setting_is_on");
     return unit_report("settings");
 }

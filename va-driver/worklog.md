@@ -573,3 +573,10 @@ real time on Cedrus whatever the driver: about 25 fps flat out, 180 of 288 frame
   picture comes out; one buffer is still free at a time, which MPP takes first in, first out. With
   AFBC on: median 2.8 ms, p99 23 ms, 56.8 of 60 pictures a second shown. The R69-1 under vendor 6.1:
   the suite 89 pass, every picture identical, VP9 with alt-refs and the size switches included.
+- AFBC by the decoder's own variant, and a box-wide switch for clients that list no modifier.
+  `rkvdec` on next2 7.3.5, the R69-1, 4K60 decode only, linear then AFBC: VP9 5.47 to 4.47 s, HEVC
+  2.88 to 2.20 s, H.264 2.59 to 2.34 s. MPP on vendor 6.1, AFBC into the surfaces Chromium makes:
+  the layout planned from `mpp_buf_slot.c`'s sizing matched MPP's own on all three codecs (pitch
+  5760 at 4K, 4 rows down for H.264 and HEVC, 0 for VP9), and 4K decodes at 112, 115 and 97 fps.
+  Chromium on the M2 Plus, YouTube 4K60 VP9, its video on Cluster0 as `YU08`: 56.8 of 60 pictures a
+  second shown. The switch read `TVB_VA_AFBC=0` as on at first; a value is on only for `1` now.
