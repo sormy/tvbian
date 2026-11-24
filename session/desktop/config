@@ -1,0 +1,16 @@
+#!/bin/sh
+# Asks for the desktop's first account, on a box with no regular account yet
+set -e
+. /usr/share/debconf/confmodule
+FIRST_UID=1000
+LAST_UID=59999
+regular=$(awk -F: -v lo=$FIRST_UID -v hi=$LAST_UID '$3 >= lo && $3 <= hi' /etc/passwd)
+# with an account there, nothing is made: not even from an answer given earlier
+if [ -n "$regular" ]; then
+  db_set tvb-desktop/user-name ""
+  exit 0
+fi
+db_input high tvb-desktop/user-name || true
+db_go || true
+db_get tvb-desktop/user-name
+[ -z "$RET" ] || { db_input high tvb-desktop/user-password || true; db_go || true; }

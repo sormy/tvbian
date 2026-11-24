@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<!-- labwc for the greeter: gtkgreet alone. One inert binding each, so labwc loads none of its own -->
+<labwc_config>
+  <core>
+    <!-- wlroots 0.18 frees a lazily started Xwayland's socket sources it still polls: an HDMI replug crashes labwc -->
+    <xwaylandPersistence>yes</xwaylandPersistence>
+  </core>
+  <keyboard>
+    <keybind key="XF86_NoSymbol" />
+  </keyboard>
+  <mouse>
+    <context name="Root">
+      <mousebind button="Middle" action="Press" />
+    </context>
+  </mouse>
+</labwc_config>

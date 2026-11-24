@@ -1,6 +1,6 @@
 /* the bar and the dock; dark.css and light.css set the colours */
 * {
-  font-family: Inter, sans-serif;
+  font-family: Inter, FontAwesome, sans-serif;
   font-size: 13px;
 }
 
@@ -29,9 +29,24 @@ window#waybar.dock .modules-center {
 #clock,
 #tray,
 #custom-appearance,
-#pulseaudio,
-#network {
+#custom-display,
+#bluetooth,
+#pulseaudio {
   padding: 0 10px;
+}
+
+/* an icon a little larger than the text beside it */
+#custom-display,
+#bluetooth,
+#pulseaudio {
+  font-size: 15px;
+}
+
+/* off and muted, dimmed rather than spelled out */
+#bluetooth.off,
+#bluetooth.disabled,
+#pulseaudio.muted {
+  opacity: 0.45;
 }
 
 #image {

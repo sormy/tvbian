@@ -1,6 +1,7 @@
 #!/bin/bash
 # Build a session package, inside the build container: Debian's programs as its depends and our
-# defaults for them, from session/<name>/package.list and its session.conf.
+# defaults for them, from session/<name>/package.list and its session.conf; its debconf questions
+# from its templates and config, and its own install steps from its postinst, where it has them.
 #   session.sh <name>   -> /out/debs/tvb-<name>_<revision>_all.deb
 set -euo pipefail
 NAME=$1
@@ -21,7 +22,14 @@ set -e
 # the drop-ins this package adds: a running box sees them now
 [ ! -d /run/systemd/system ] || systemctl daemon-reload
 SCRIPT
+[ ! -f "$SRC/postinst" ] || cat "$SRC/postinst" >>"$ROOT/DEBIAN/postinst"
 chmod 0755 "$ROOT/DEBIAN/postinst"
+debconf=""
+if [ -f "$SRC/templates" ]; then
+  install -m 0644 "$SRC/templates" "$ROOT/DEBIAN/templates"
+  install -m 0755 "$SRC/config" "$ROOT/DEBIAN/config"
+  debconf=", debconf"
+fi
 
 # one line each: a conf may wrap its lists
 oneline() { tr '\n' ' ' <<<"$1" | tr -s ' ' | sed 's/^ //; s/ $//'; }
@@ -30,7 +38,7 @@ Package: $PACKAGE
 Version: $VERSION
 Architecture: all
 Maintainer: TVBian <archive@tvbian.com>
-Depends: $(oneline "$DEPENDS")
+Depends: $(oneline "$DEPENDS")$debconf
 Recommends: $(oneline "$RECOMMENDS")
 Section: x11
 Priority: optional

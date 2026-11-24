@@ -1,0 +1,19 @@
+# the first account, if the config script asked for one; its password never stays in debconf
+. /usr/share/debconf/confmodule
+db_get tvb-desktop/user-name
+name=$RET
+db_get tvb-desktop/user-password
+password=$RET
+db_set tvb-desktop/user-password ""
+if [ "$1" = configure ] && [ -n "$name" ] && ! id "$name" >/dev/null 2>&1; then
+  groups=$(for g in audio video render input; do
+    if getent group "$g" >/dev/null; then printf '%s,' "$g"; fi
+  done)
+  useradd -m -s /bin/bash ${groups:+-G "${groups%,}"} "$name"
+  [ -z "$password" ] || echo "$name:$password" | chpasswd
+fi
+# the greeter's labwc takes the seat from seatd, whose socket is the video group's: without it,
+# libseat fails there first, in red on the greeter's terminal, before it falls back to logind
+if [ "$1" = configure ] && getent group video >/dev/null && id _greetd >/dev/null 2>&1; then
+  usermod -a -G video _greetd
+fi

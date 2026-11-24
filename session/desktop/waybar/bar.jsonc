@@ -1,19 +1,29 @@
-// the menu bar: the launcher on the left, the status on the right
+// the menu bar: the launcher on the left, the status on the right; Wi-Fi is nm-applet's, in the tray
 {
   "layer": "top",
   "position": "top",
   "height": 26,
   "modules-left": ["custom/menu"],
   "modules-center": ["clock"],
-  "modules-right": ["tray", "custom/appearance", "pulseaudio", "network"],
+  "modules-right": ["tray", "custom/appearance", "custom/display", "bluetooth", "pulseaudio"],
   "custom/menu": { "format": "TVBian", "on-click": "fuzzel", "tooltip": false },
   "custom/appearance": { "format": "◐", "on-click": "tvb-appearance toggle", "tooltip": false },
+  // the icons are Font Awesome 4.7's: desktop, bluetooth, volume off, down and up
+  "custom/display": { "format": "\uf108", "on-click": "wdisplays", "tooltip-format": "Displays" },
+  "bluetooth": {
+    "format": "\uf293",
+    "format-connected": "\uf293",
+    "tooltip-format": "Bluetooth: {status}",
+    "tooltip-format-connected": "Bluetooth: {device_enumerate}",
+    "tooltip-format-enumerate-connected": "{device_alias}",
+    "on-click": "blueman-manager"
+  },
   "clock": { "format": "{:%a %d %b  %H:%M}" },
-  "pulseaudio": { "format": "vol {volume}%", "format-muted": "muted", "on-click": "pavucontrol" },
-  "network": {
-    "format-wifi": "{essid}",
-    "format-ethernet": "wired",
-    "format-disconnected": "offline",
-    "on-click": "nm-connection-editor"
+  "pulseaudio": {
+    "format": "{icon}",
+    "format-muted": "\uf026",
+    "format-icons": { "default": ["\uf026", "\uf027", "\uf028"] },
+    "tooltip-format": "Volume {volume}%",
+    "on-click": "pavucontrol-qt"
   }
 }

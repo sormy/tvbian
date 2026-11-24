@@ -6,7 +6,8 @@ from /out/debs (the session's, `whitesur-theme`, `tvb-va-driver`), its labwc sta
 on the CPU renderer, and its defaults, panels and switch checked.
 
 On a box, from tools/validate/desktop.py, with `--box --clips DIR`: the same in a headless labwc of
-its own, then the logged-in session as it runs: its panels, renderer, scale, idle cost and video.
+its own, then the logged-in session as it runs: its panels, renderer, scale, idle cost and video;
+with nobody logged in, the video in a headless labwc on the GPU as the box's desktop user.
 
 Prints `session.<check> verdict` lines; exits 1 on any failure.
 """
@@ -33,7 +34,12 @@ from types import ModuleType
 DEBS = Path("/out/debs")
 XDG_CONFIG = Path("/etc/xdg/labwc")
 SHARE = Path("/usr/share/tvb-desktop")
+# pipewire-alsa's: ALSA's default would go to a PipeWire that only runs in a session
+ALSA_TO_PIPEWIRE = Path("/usr/share/alsa/alsa.conf.d/99-pipewire-default.conf")
+FIRST_ACCOUNT = "tvb-check-first"
+DESKTOP_GROUPS = {"audio", "video", "render", "input"}
 RUNTIME = Path("/tmp/tvb-session-check")
+HEADLESS_RUNTIME = Path("/tmp/tvb-session-check-headless")
 INTERFACE = "org.gnome.desktop.interface"
 DARK = {
     "gtk-theme": "'WhiteSur-Dark'",
@@ -44,15 +50,17 @@ DARK = {
 }
 LIGHT = {
     "gtk-theme": "'WhiteSur-Light'",
-    "icon-theme": "'WhiteSur'",
+    "icon-theme": "'WhiteSur-light'",
     "color-scheme": "'prefer-light'",
 }
 # autostart's programs, and how many of each; lxpolkit needs the system bus a container lacks
 PANELS = {"waybar": 2, "swaybg": 1, "mako": 1, "swayidle": 1}
 # what the check needs beyond the session's own depends
-TOOLS = ["dbus-daemon", "dbus-bin"]
+TOOLS = ["dbus-daemon", "dbus-bin", "debconf-utils"]
 SETTLE_S = 10
 POLL_S = 0.5
+# regular accounts, as Debian numbers them
+FIRST_UID, LAST_UID = 1000, 60000
 # a picture of the bar, the dock and the gradient: a flat or empty screen has a handful
 MIN_COLOURS = 64
 CASE_TIMEOUT = 300
@@ -65,6 +73,8 @@ IDLE_S = 30
 IDLE_CPU_MAX = 10.0
 # /proc/<pid>/stat after the command's closing parenthesis, counted from 0
 UTIME_FIELD, STIME_FIELD = 11, 12
+# of a clip's length, both its position at the end and the time it took
+PLAYED_SHARE = 0.95
 # of the frames a clip shows once playing, the share mpv may drop
 DROP_MAX = 0.01
 # going full screen drops a handful: judged apart
@@ -108,9 +118,13 @@ def install(name: str) -> Iterator[Line]:
         return
     run(["apt-get", "update", "-qq"])
     env = dict(os.environ, DEBIAN_FRONTEND="noninteractive")
+    # the session's apps, as --install-recommends gives them; not its depends' recommends
+    _, recommends = run(["dpkg-deb", "-f", str(debs[0]), "Recommends"])
+    apps = [name.strip() for name in recommends.split(",") if name.strip()]
     rc, log = run(
         ["apt-get", "install", "-y", "-qq", "--no-install-recommends"]
         + [str(deb) for deb in debs if deb]
+        + apps
         + TOOLS,
         env,
     )
@@ -118,18 +132,23 @@ def install(name: str) -> Iterator[Line]:
 
 
 def configs() -> Iterator[Line]:
-    for path in (XDG_CONFIG / "rc.xml", XDG_CONFIG / "menu.xml"):
+    greeter = SHARE / "greeter"
+    for path in (
+        XDG_CONFIG / "rc.xml",
+        XDG_CONFIG / "menu.xml",
+        greeter / "rc.xml",
+        greeter / "menu.xml",
+    ):
+        key = f"config.{'greeter.' if path.parent == greeter else ''}{path.name}"
         try:
             ElementTree.parse(path)
-            yield f"config.{path.name}", "pass"
+            yield key, "pass"
         except (OSError, ElementTree.ParseError) as error:
-            yield f"config.{path.name}", f"failed: {error}"
+            yield key, f"failed: {error}"
     greeter = tomllib.loads((SHARE / "greetd.toml").read_text())["default_session"]["command"]
     absent = [path for path in re.findall(r"/[\w./-]+", greeter) if not Path(path).exists()]
-    absent += [p for p in ("cage", "gtkgreet") if not shutil.which(p)]
+    absent += [p for p in ("labwc", "gtkgreet") if not shutil.which(p)]
     yield "config.greetd", "pass" if not absent else f"failed: no {', '.join(absent)}"
-    rc, log = run(["sh", "-n", "/etc/chromium.d/tvb-desktop"])
-    yield "config.chromium", "pass" if rc == 0 else f"failed: {last_line(log)}"
     rc, log = run(
         ["mpv", "--no-config", "--include=/etc/mpv/mpv.conf", "--vo=null", "--ao=null"]
         + ["--frames=3", "av://lavfi:testsrc"]
@@ -229,13 +248,22 @@ def colours_of_ppm(data: bytes) -> int:
 
 
 def screenshot(session: Session) -> Line:
+    """Retaken until the panels have drawn: their processes start before their first frame."""
     shot = RUNTIME / "shot.ppm"
-    rc, log = run(["grim", "-t", "ppm", str(shot)], session.env)
-    if rc != 0 or not shot.exists():
+    log = ""
+    colours = 0
+
+    def drawn() -> bool:
+        nonlocal log, colours
+        rc, log = run(["grim", "-t", "ppm", str(shot)], session.env)
+        colours = colours_of_ppm(shot.read_bytes()) if rc == 0 and shot.exists() else 0
+        return colours >= MIN_COLOURS
+
+    if wait_for(drawn):
+        return "headless.screenshot", f"pass: {colours} colours"
+    if not shot.exists():
         return "headless.screenshot", f"failed: {last_line(log)}"
-    colours = colours_of_ppm(shot.read_bytes())
-    verdict = "pass" if colours >= MIN_COLOURS else "failed"
-    return "headless.screenshot", f"{verdict}: {colours} colours"
+    return "headless.screenshot", f"failed: {colours} colours"
 
 
 class Live:
@@ -252,9 +280,10 @@ class Live:
             "XDG_RUNTIME_DIR": str(runtime),
             "WAYLAND_DISPLAY": socket,
             "DBUS_SESSION_BUS_ADDRESS": found.get("DBUS_SESSION_BUS_ADDRESS", ""),
-            "GST_VA_ALL_DRIVERS": "1",
             "HOME": f"/home/{self.user}",
         }
+        # GStreamer's decoders as the session chose them: tvb-va-driver's, or not on meson
+        self.env |= {k: v for k, v in found.items() if k.startswith("GST_")}
 
     def run(self, cmd: list[str]) -> tuple[int, str]:
         settings = [f"{k}={v}" for k, v in self.env.items()]
@@ -320,31 +349,96 @@ def live_idle(live: Live) -> Line:
     return "live.idle", f"{verdict}: {used:.1f} % of a core over {IDLE_S} s, {in_use} MiB in use"
 
 
-def live_playback(live: Live, clip: Path) -> Line:
-    """Frames dropped once playing, judged; those dropped while going full screen, reported."""
-    key = f"live.playback.{clip.stem}"
+def live_playback(live: Live, clip: Path, where: str) -> Line:
+    """Played to its end in real time; frames dropped once playing, judged; those dropped while
+    going full screen, reported."""
+    key = f"{where}.playback.{clip.stem}"
     status = "STATUS ${=time-pos} ${hwdec-current} ${estimated-frame-count} ${frame-drop-count}"
+    status += " ${=duration}"
+    started = time.monotonic()
     rc, log = live.run(["mpv", "--fs", "--ao=null", f"--term-status-msg={status}", str(clip)])
+    wall = time.monotonic() - started
     samples = [
         line.split()[1:]
         for line in log.replace("\r", "\n").splitlines()
-        if line.startswith("STATUS ") and len(line.split()) == 5
+        if line.startswith("STATUS ") and len(line.split()) == 6
     ]
     if rc != 0 or not samples:
         return key, f"failed: {last_line(log)}"
-    _, hwdec, frames, dropped = samples[-1]
+    position, hwdec, frames, dropped, duration = samples[-1]
     if hwdec != "vaapi":
         return key, f"failed: decoded by {hwdec}, not vaapi"
+    length = float(duration) * PLAYED_SHARE
+    if float(position) < length or wall < length:
+        return (
+            key,
+            f"failed: played {float(position):.1f} of {float(duration):.1f} s in {wall:.1f} s",
+        )
     warm = next((int(s[3]) for s in samples if float(s[0]) >= WARMUP_S), int(dropped))
     steady = int(dropped) - warm
     verdict = "pass" if steady <= int(frames) * DROP_MAX else "failed"
     return key, f"{verdict}: {steady} of {frames} dropped, {warm} going full screen"
 
 
+def desktop_user() -> str | None:
+    """The box's first account with a home: who a desktop session runs as."""
+    for entry in Path("/etc/passwd").read_text().splitlines():
+        name, _, uid, _, _, home, _ = entry.split(":")
+        if FIRST_UID <= int(uid) < LAST_UID and Path(home).is_dir():
+            return name
+    return None
+
+
+class HeadlessLive:
+    """labwc headless on the GPU as a user, with a bus of its own: a logged-in session's stand-in."""
+
+    def __init__(self, user: str) -> None:
+        HEADLESS_RUNTIME.mkdir(mode=0o700, exist_ok=True)
+        shutil.chown(HEADLESS_RUNTIME, user)
+        env = {
+            "XDG_RUNTIME_DIR": str(HEADLESS_RUNTIME),
+            "WLR_BACKENDS": "headless",
+            "WLR_RENDERER": "gles2",
+            "WLR_HEADLESS_OUTPUTS": "1",
+            "WLR_LIBINPUT_NO_DEVICES": "1",
+        }
+        command = ["runuser", "-u", user, "--", "env", *[f"{k}={v}" for k, v in env.items()]]
+        self.process = subprocess.Popen(
+            [*command, "dbus-run-session", "--", "labwc"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        wait_for(lambda: any(HEADLESS_RUNTIME.glob("wayland-?")))
+        _, listing = run(["pgrep", "-u", user, "-x", "labwc"])
+        self.live = Live(int(listing.split()[0])) if listing.split() else None
+
+    def close(self) -> None:
+        os.killpg(self.process.pid, signal.SIGTERM)
+        self.process.wait(timeout=CASE_TIMEOUT)
+        shutil.rmtree(HEADLESS_RUNTIME, ignore_errors=True)
+
+
+def headless_playback(clips: Path) -> Iterator[Line]:
+    user = desktop_user()
+    if user is None:
+        yield "headless", "not run: nobody is logged in, and the box has no desktop user"
+        return
+    session = HeadlessLive(user)
+    try:
+        if session.live is None:
+            yield "headless", f"failed: labwc did not start as {user}"
+            return
+        for clip in sorted(clips.glob("*.mp4")):
+            yield live_playback(session.live, clip, "headless")
+    finally:
+        session.close()
+
+
 def live_checks(clips: Path) -> Iterator[Line]:
     live = logged_in()
     if live is None:
-        yield "live", "not run: nobody is logged in"
+        yield from headless_playback(clips)
         return
     want = dict(PANELS, lxpolkit=1)
     got = counts(want, live.user)
@@ -354,7 +448,44 @@ def live_checks(clips: Path) -> Iterator[Line]:
     yield live_scale(live)
     yield live_idle(live)
     for clip in sorted(clips.glob("*.mp4")):
-        yield live_playback(live, clip)
+        yield live_playback(live, clip, "live")
+
+
+def alsa_default() -> Line:
+    present = ALSA_TO_PIPEWIRE.exists()
+    return "config.alsa", "failed: ALSA's default goes to PipeWire" if present else "pass"
+
+
+def first_account(name: str) -> Iterator[Line]:
+    """The account the install asks for: made with the desktop's groups, its password not kept; asked
+    only while the box has no regular account."""
+    answers = f"tvb-{name} tvb-{name}/user-name string {FIRST_ACCOUNT}\n"
+    answers += f"tvb-{name} tvb-{name}/user-password password check\n"
+    run(["sh", "-c", f"printf '{answers}' | debconf-set-selections"])
+    env = dict(os.environ, DEBIAN_FRONTEND="noninteractive")
+    rc, log = run(["dpkg-reconfigure", f"tvb-{name}"], env)
+    _, groups = run(["id", "-nG", FIRST_ACCOUNT])
+    _, kept = run(["sh", "-c", f"debconf-show tvb-{name} | grep user-password"])
+    missing = (DESKTOP_GROUPS & set(run(["getent", "group"])[1].replace(":", " ").split())) - set(
+        groups.split()
+    )
+    if rc != 0 or not groups:
+        yield "install.account", f"failed: {last_line(log)}"
+    elif missing or "check" in kept:
+        yield "install.account", f"failed: groups {groups.strip()}, password kept: {'check' in kept}"
+    else:
+        yield "install.account", "pass"
+    run(
+        [
+            "sh",
+            "-c",
+            f"printf 'tvb-{name} tvb-{name}/user-name string tvb-check-second\\n' | debconf-set-selections",
+        ]
+    )
+    run(["dpkg-reconfigure", f"tvb-{name}"], env)
+    second = run(["id", "tvb-check-second"])[0] == 0
+    yield "install.account.once", "failed: asked again with an account there" if second else "pass"
+    run(["userdel", "-r", FIRST_ACCOUNT])
 
 
 def check(name: str, clips: Path | None) -> Iterator[Line]:
@@ -363,7 +494,9 @@ def check(name: str, clips: Path | None) -> Iterator[Line]:
         yield from installed
         if any(verdict.startswith("failed") for _, verdict in installed):
             return
+        yield from first_account(name)
     yield from configs()
+    yield alsa_default()
     session = Session()
     try:
         yield settings(session.env, DARK, "settings.dark")

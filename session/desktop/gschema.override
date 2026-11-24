@@ -5,3 +5,7 @@ icon-theme='WhiteSur-dark'
 cursor-theme='WhiteSur-cursors'
 color-scheme='prefer-dark'
 font-name='Inter 10'
+
+# an app drawing its own title bar puts its buttons where labwc's rc.xml puts them: on the left
+[org.gnome.desktop.wm.preferences]
+button-layout='close,minimize,maximize:'

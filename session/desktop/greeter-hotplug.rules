@@ -1,0 +1,3 @@
+# a screen plugged in after a headless boot: the greeter gave up with no output, so start it on this
+# one. Only a failed greeter: one running, or stopped on purpose to take the display, is left alone
+ACTION=="change", SUBSYSTEM=="drm", ENV{HOTPLUG}=="1", RUN+="/bin/sh -c 'systemctl is-failed --quiet greetd.service || exit 0; systemctl reset-failed greetd.service; systemctl --no-block start greetd.service'"

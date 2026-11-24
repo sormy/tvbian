@@ -21,7 +21,8 @@ if [ "$mode" = toggle ]; then
 fi
 case $mode in
   light)
-    set_scheme WhiteSur-Light WhiteSur prefer-light
+    # WhiteSur's own status icons are pale, for a dark bar: its -light variant draws them dark
+    set_scheme WhiteSur-Light WhiteSur-light prefer-light
     mkdir -p "$(dirname "$USER_THEMERC")"
     cp "$LIGHT_THEMERC" "$USER_THEMERC"
     ;;

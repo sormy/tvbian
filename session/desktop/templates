@@ -1,0 +1,9 @@
+Template: tvb-desktop/user-name
+Type: string
+Description: Name of the account to log in to the desktop:
+ The box has no account to log in with yet. This one gets sound, video and the GPU. Leave it empty
+ to add one later with adduser.
+
+Template: tvb-desktop/user-password
+Type: password
+Description: Its password:

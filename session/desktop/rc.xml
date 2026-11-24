@@ -2,6 +2,8 @@
 <labwc_config>
   <core>
     <gap>4</gap>
+    <!-- wlroots 0.18 frees a lazily started Xwayland's socket sources it still polls: an HDMI replug crashes labwc -->
+    <xwaylandPersistence>yes</xwaylandPersistence>
   </core>
   <theme>
     <name>TVBian</name>
@@ -27,6 +29,9 @@
     </keybind>
     <keybind key="Print">
       <action name="Execute" command="sh -c 'grim ~/screenshot-$(date +%F-%H%M%S).png'" />
+    </keybind>
+    <keybind key="S-Print">
+      <action name="Execute" command="sh -c 'grim -g &quot;$(slurp)&quot; ~/screenshot-$(date +%F-%H%M%S).png'" />
     </keybind>
   </keyboard>
   <mouse>

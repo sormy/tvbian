@@ -1,7 +1,10 @@
 #!/usr/bin/python3
-"""Scale each output to its density, as macOS does: about 128 points an inch, in quarter steps.
+"""Each output in a mode of its panel's shape, scaled to its density as macOS does: about 128 points
+an inch, in quarter steps.
 
-A screen whose EDID gives no size, and anything coarser than the target, stays at 1.
+A screen whose preferred mode is not its panel's shape, as some monitors' scalers prefer 16:9 on a
+16:10 or 3:2 panel and letterbox it, is given the mode closest to the panel's shape instead. A screen
+whose EDID gives no size keeps its mode at scale 1, as does anything coarser than the target.
 """
 
 import json
@@ -12,15 +15,20 @@ from typing import TypedDict
 POINTS_PER_INCH = 128
 SCALE_STEP = 0.25
 MM_PER_INCH = 25.4
+# how far a mode's shape may stray from the panel's before it is letterboxed enough to replace
+ASPECT_TOLERANCE = 0.05
 
 
 class Mode(TypedDict):
     width: int
+    height: int
+    refresh: float
     current: bool
 
 
 class PhysicalSize(TypedDict):
     width: int
+    height: int
 
 
 class Head(TypedDict):
@@ -46,21 +54,48 @@ class Output:
         return max(1.0, steps * SCALE_STEP)
 
 
-def enabled_outputs(heads: list[Head]) -> list[Output]:
+def aspect(width: float, height: float) -> float:
+    return width / height
+
+
+def fitting_mode(head: Head) -> Mode | None:
+    """The current mode, unless its shape strays from the panel's: then the closest in shape, the
+    largest of those, the fastest of those. None while the output has no mode yet."""
+    current = next((mode for mode in head["modes"] if mode["current"]), None)
+    if current is None:
+        return None
+    size = head["physical_size"]
+    if size["width"] <= 0 or size["height"] <= 0:
+        return current
+    panel = aspect(size["width"], size["height"])
+
+    def stray(mode: Mode) -> float:
+        return abs(aspect(mode["width"], mode["height"]) / panel - 1)
+
+    if stray(current) <= ASPECT_TOLERANCE:
+        return current
+    return min(
+        head["modes"],
+        key=lambda mode: (round(stray(mode), 2), -mode["width"] * mode["height"], -mode["refresh"]),
+    )
+
+
+def enabled_outputs(heads: list[Head]) -> list[tuple[Output, Mode]]:
+    fitted = [(head, fitting_mode(head)) for head in heads if head["enabled"]]
     return [
-        Output(head["name"], mode["width"], head["physical_size"]["width"])
-        for head in heads
-        if head["enabled"]
-        for mode in head["modes"]
-        if mode["current"]
+        (Output(head["name"], mode["width"], head["physical_size"]["width"]), mode)
+        for head, mode in fitted
+        if mode is not None
     ]
 
 
 def main() -> None:
     heads: list[Head] = json.loads(subprocess.check_output(["wlr-randr", "--json"]))
-    for output in enabled_outputs(heads):
-        scale = str(output.scale())
-        subprocess.run(["wlr-randr", "--output", output.name, "--scale", scale], check=True)
+    for output, mode in enabled_outputs(heads):
+        command = ["wlr-randr", "--output", output.name, "--scale", str(output.scale())]
+        if not mode["current"]:
+            command += ["--mode", f"{mode['width']}x{mode['height']}@{mode['refresh']}"]
+        subprocess.run(command, check=True)
 
 
 if __name__ == "__main__":

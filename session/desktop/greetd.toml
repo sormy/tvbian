@@ -1,7 +1,7 @@
-# gtkgreet full screen and scaled under cage on VT 7, starting labwc
+# gtkgreet full screen under a locked-down labwc on VT 7, starting labwc; kanshi scales each screen
 [terminal]
 vt = 7
 
 [default_session]
-command = "cage -s -- sh -c '/usr/libexec/tvb-desktop/scale-outputs; exec gtkgreet -l -s /usr/share/tvb-desktop/greeter.css -c labwc'"
+command = "labwc -C /usr/share/tvb-desktop/greeter -s /usr/libexec/tvb-desktop/greeter"
 user = "_greetd"

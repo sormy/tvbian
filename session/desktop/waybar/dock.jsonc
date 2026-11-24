@@ -6,7 +6,7 @@
   "margin-bottom": 6,
   "exclusive": false,
   "name": "dock",
-  "modules-center": ["image#terminal", "image#files", "image#firefox", "image#chromium", "wlr/taskbar"],
+  "modules-center": ["image#terminal", "image#files", "image#browser", "wlr/taskbar"],
   "image#terminal": {
     "path": "/usr/share/icons/WhiteSur/apps/scalable/utilities-terminal.svg",
     "size": 40,
@@ -17,15 +17,10 @@
     "size": 40,
     "on-click": "pcmanfm"
   },
-  "image#firefox": {
-    "path": "/usr/share/icons/WhiteSur/apps/scalable/firefox-esr.svg",
+  "image#browser": {
+    "path": "/usr/share/icons/WhiteSur/apps/scalable/web-browser.svg",
     "size": 40,
-    "on-click": "firefox-esr"
-  },
-  "image#chromium": {
-    "path": "/usr/share/icons/WhiteSur/apps/scalable/chromium.svg",
-    "size": 40,
-    "on-click": "chromium"
+    "on-click": "falkon"
   },
   "wlr/taskbar": { "format": "{icon}", "icon-size": 40, "on-click": "activate" }
 }
