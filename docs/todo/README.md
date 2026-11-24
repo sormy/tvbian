@@ -227,6 +227,7 @@ below.
 | `docs/todo/kodi.md`             | Kodi 22 on our FFmpeg, built on trixie      |
 | `docs/todo/extras-upstream.md`  | extras built from an upstream release       |
 | `docs/todo/rk35xx.md`           | Rockchip boards, every one                  |
+| `docs/todo/rk35xx-mainline.md`  | Rockchip on mainline: what is left          |
 | `docs/todo/rk35xx-boot-log.md`  | boot log cleanup                            |
 | `docs/todo/rk35xx-uboot-usb.md` | USB in our U-Boot                           |
 | `docs/todo/allwinner.md`        | Allwinner boards, every one                 |

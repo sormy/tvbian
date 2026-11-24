@@ -4,10 +4,7 @@
       core runs on SCMI.
 - [ ] **The analog codec's timing on 6.1**: 3.02 s against 6.12's 2.03 s for a 2 s clip.
 - [ ] **USB Ethernet on the SuperSpeed hub** through every warm boot and under load.
-- [ ] **Wi-Fi download at 2.4 GHz on next2, every run**: nothing in two of four runs.
 - [ ] **The FD650B-S's status icons**, if the panel has them.
-- [ ] **Bluetooth flow control on next2**: UART2 muxes no RTS there; the vendor tree's Bluetooth
-      node holds `uart2m0_rtsn`.
 - [ ] **The SDIO power-off delay at its measured minimum**: 2 s is the only value tried.
 
 ## 👤 By hand
