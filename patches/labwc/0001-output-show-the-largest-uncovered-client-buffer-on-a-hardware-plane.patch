@@ -1,0 +1,711 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 21 Nov 2026 00:00:00 +0000
+Subject: [PATCH] output: show the largest uncovered client buffer on a hardware
+ plane
+
+On a GPU that can barely composite its screen, as the Mali-450 at
+2256x1504, compositing a browser's page every frame costs 17 ms of a
+33 ms budget. The display hardware can show that buffer on an overlay
+plane and scale it there, at no GPU cost.
+
+Each frame, the largest opaque dmabuf client buffer that nothing above
+it covers, and that fills at least an eighth of the output, is taken
+out of composition onto an output layer. An opaque rect stands in its
+place in the scene, so what lies beneath it, as the window a page is
+part of, damages nothing when it repaints. The surface's commits
+schedule frames and it hears its frames done, as composited ones do.
+A buffer the backend does not accept is composited again from the next
+frame and not offered again at that size.
+
+Output layers need the DRM backend's libliftoff interface, so this
+works only with WLR_DRM_FORCE_LIBLIFTOFF set; otherwise nothing
+changes.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+--- a/include/labwc.h
++++ b/include/labwc.h
+@@ -423,6 +423,7 @@
+ 
+ 	bool leased;
+ 	bool gamma_lut_changed;
++	struct output_planes *planes;
+ };
+ 
+ #undef LAB_NR_LAYERS
+--- a/include/output-planes.h
++++ b/include/output-planes.h
+@@ -0,0 +1,33 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef LABWC_OUTPUT_PLANES_H
++#define LABWC_OUTPUT_PLANES_H
++
++#include <stdbool.h>
++#include <time.h>
++
++struct output;
++struct wlr_output_state;
++
++/*
++ * One client buffer shown by the display hardware on a plane of its own,
++ * instead of composited by the GPU: the largest opaque dmabuf on the output
++ * that nothing covers, as a browser's page or a video. Needs the DRM backend's
++ * libliftoff interface (WLR_DRM_FORCE_LIBLIFTOFF), the only one that takes
++ * output layers; without it, nothing changes.
++ */
++void output_planes_init(struct output *output);
++void output_planes_finish(struct output *output);
++
++/* Before the frame is built: takes a buffer out of composition onto the plane */
++void output_planes_prepare(struct output *output, struct wlr_output_state *state);
++
++/*
++ * After the frame is committed, when the backend says whether it took the
++ * layer: a refused buffer is composited again from the next frame
++ */
++void output_planes_committed(struct output *output);
++
++/* The plane's surface hears its frames were shown, as composited ones do */
++void output_planes_send_frame_done(struct output *output, const struct timespec *now);
++
++#endif /* LABWC_OUTPUT_PLANES_H */
+--- a/src/common/scene-helpers.c
++++ b/src/common/scene-helpers.c
+@@ -9,6 +9,7 @@
+ #include "common/scene-helpers.h"
+ #include "labwc.h"
+ #include "magnifier.h"
++#include "output-planes.h"
+ #include "output-state.h"
+ 
+ struct wlr_surface *
+@@ -101,6 +102,7 @@
+ 		return true;
+ 	}
+ 
++	output_planes_prepare(output, state);
+ 	if (!wlr_scene_output_build_state(scene_output, state, NULL)) {
+ 		wlr_log(WLR_ERROR, "Failed to build output state for %s",
+ 			wlr_output->name);
+@@ -128,6 +130,7 @@
+ 		committed = wlr_output_commit_state(wlr_output, state);
+ 	}
+ 	if (committed) {
++		output_planes_committed(output);
+ 		if (state == &output->pending) {
+ 			wlr_output_state_finish(&output->pending);
+ 			wlr_output_state_init(&output->pending);
+--- a/src/meson.build
++++ b/src/meson.build
+@@ -14,6 +14,7 @@
+   'osd.c',
+   'osd-field.c',
+   'output.c',
++  'output-planes.c',
+   'output-state.c',
+   'output-virtual.c',
+   'overlay.c',
+--- a/src/output-planes.c
++++ b/src/output-planes.c
+@@ -0,0 +1,566 @@
++// SPDX-License-Identifier: GPL-2.0-only
++#include "output-planes.h"
++#include <math.h>
++#include <drm_fourcc.h>
++#include <stdlib.h>
++#include <time.h>
++#include <wlr/backend/drm.h>
++#include <wlr/types/wlr_buffer.h>
++#include <wlr/types/wlr_compositor.h>
++#include <wlr/types/wlr_output_layout.h>
++#include <wlr/types/wlr_output_layer.h>
++#include <wlr/types/wlr_scene.h>
++#include <wlr/types/wlr_subcompositor.h>
++#include <wlr/util/box.h>
++#include <wlr/util/log.h>
++#include <wlr/util/transform.h>
++#include "common/mem.h"
++#include "labwc.h"
++
++/* Smaller buffers cost the GPU too little to be worth a plane */
++#define MIN_OUTPUT_FRACTION 8
++
++/* A refusal may be the moment's, as a buffer committed before its surface settles: tried again after */
++#define REFUSED_SURFACE_RETRY_MS 2000
++#define REFUSED_UNDERLAY_RETRY_MS 5000
++
++/* A page, and a video beneath it that shows through its hole */
++enum { LAYER_UNDER, LAYER_TOP, LAYER_COUNT };
++
++struct output_planes;
++
++struct plane_layer {
++	struct output_planes *planes;
++	struct wlr_output_layer *layer;
++	/* Out of composition, shown by the plane */
++	struct wlr_scene_buffer *shown;
++	/*
++	 * Opaque in its place in the composition, so what lies under it, as the
++	 * window a page is part of, damages nothing when it repaints
++	 */
++	struct wlr_scene_rect *stand_in;
++	struct wl_listener shown_destroy;
++	struct wl_listener shown_commit;
++	struct wl_listener stand_in_destroy;
++};
++
++struct output_planes {
++	struct output *output;
++	struct plane_layer layers[LAYER_COUNT];
++	struct wlr_output_layer_state states[LAYER_COUNT];
++	size_t state_count;
++	/* A surface whose buffers the planes refused, at that size: not offered again for a while */
++	struct wlr_surface *refused;
++	int refused_width, refused_height;
++	int64_t refused_at_ms;
++	/* No plane took a layer under the composited output: the video goes above for a while */
++	int64_t underlay_refused_at_ms;
++};
++
++static void
++scene_node_size(struct wlr_scene_node *node, int *width, int *height)
++{
++	*width = 0;
++	*height = 0;
++	if (node->type == WLR_SCENE_NODE_RECT) {
++		struct wlr_scene_rect *rect = wlr_scene_rect_from_node(node);
++		*width = rect->width;
++		*height = rect->height;
++	} else if (node->type == WLR_SCENE_NODE_BUFFER) {
++		struct wlr_scene_buffer *buffer = wlr_scene_buffer_from_node(node);
++		if (buffer->dst_width > 0 && buffer->dst_height > 0) {
++			*width = buffer->dst_width;
++			*height = buffer->dst_height;
++		} else {
++			*width = buffer->buffer_width;
++			*height = buffer->buffer_height;
++			wlr_output_transform_coords(buffer->transform, width, height);
++		}
++	}
++}
++
++/* A node that draws anything: an invisible rect only takes input */
++static bool
++scene_node_draws(struct wlr_scene_node *node)
++{
++	if (node->type == WLR_SCENE_NODE_RECT) {
++		return wlr_scene_rect_from_node(node)->color[3] > 0;
++	}
++	struct wlr_scene_buffer *buffer = wlr_scene_buffer_from_node(node);
++	return buffer->buffer && buffer->opacity > 0;
++}
++
++static int64_t
++now_ms(void)
++{
++	struct timespec now;
++	clock_gettime(CLOCK_MONOTONIC, &now);
++	return (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
++}
++
++static bool
++plane_eligible(struct output_planes *planes, struct wlr_scene_buffer *buffer,
++		const struct wlr_box *box, const struct wlr_box *output_box)
++{
++	struct wlr_dmabuf_attributes dmabuf;
++	struct wlr_scene_surface *surface = wlr_scene_surface_try_from_buffer(buffer);
++	if (!buffer->buffer || !surface || (surface->surface == planes->refused
++				&& buffer->buffer_width == planes->refused_width
++				&& buffer->buffer_height == planes->refused_height
++				&& now_ms() - planes->refused_at_ms < REFUSED_SURFACE_RETRY_MS)
++			|| buffer->opacity < 1 || buffer->transform != WL_OUTPUT_TRANSFORM_NORMAL
++			|| !wlr_buffer_get_dmabuf(buffer->buffer, &dmabuf)) {
++		return false;
++	}
++	struct wlr_box inside;
++	if (!wlr_box_intersection(&inside, box, output_box) || !wlr_box_equal(&inside, box)) {
++		return false;
++	}
++	return (int64_t)box->width * box->height * MIN_OUTPUT_FRACTION
++		>= (int64_t)output_box->width * output_box->height;
++}
++
++/* Few buffers are big enough to qualify: windows and their large subsurfaces */
++#define MAX_CANDIDATES 8
++
++struct candidate {
++	struct wlr_scene_buffer *buffer;
++	struct wlr_box box;
++	/* The first node drawn above it, and whether another one is */
++	struct wlr_scene_node *coverer;
++	bool covered_more;
++};
++
++struct search {
++	struct output_planes *planes;
++	struct wlr_box output_box;
++	struct candidate candidates[MAX_CANDIDATES];
++	size_t count;
++};
++
++static bool
++is_shown(struct output_planes *planes, struct wlr_scene_node *node)
++{
++	for (int i = 0; i < LAYER_COUNT; i++) {
++		if (planes->layers[i].shown && node == &planes->layers[i].shown->node) {
++			return true;
++		}
++	}
++	return false;
++}
++
++static bool
++is_stand_in(struct output_planes *planes, struct wlr_scene_node *node)
++{
++	for (int i = 0; i < LAYER_COUNT; i++) {
++		if (planes->layers[i].stand_in && node == &planes->layers[i].stand_in->node) {
++			return true;
++		}
++	}
++	return false;
++}
++
++/*
++ * Every eligible buffer, bottom to top, each with what is drawn above it,
++ * which a plane would hide; those on the planes count though disabled
++ */
++static void
++search_scene(struct wlr_scene_node *node, int lx, int ly, struct search *search)
++{
++	if (!node->enabled && !is_shown(search->planes, node)) {
++		return;
++	}
++	lx += node->x;
++	ly += node->y;
++	if (node->type == WLR_SCENE_NODE_TREE) {
++		struct wlr_scene_node *child;
++		wl_list_for_each(child, &wlr_scene_tree_from_node(node)->children, link) {
++			search_scene(child, lx, ly, search);
++		}
++		return;
++	}
++	struct wlr_box box = { .x = lx, .y = ly }, overlap;
++	scene_node_size(node, &box.width, &box.height);
++	if (scene_node_draws(node) && !is_stand_in(search->planes, node)) {
++		for (size_t i = 0; i < search->count; i++) {
++			struct candidate *candidate = &search->candidates[i];
++			if (!wlr_box_intersection(&overlap, &box, &candidate->box)) {
++				continue;
++			}
++			if (!candidate->coverer) {
++				candidate->coverer = node;
++			} else if (candidate->coverer != node) {
++				candidate->covered_more = true;
++			}
++		}
++	}
++	if (node->type == WLR_SCENE_NODE_BUFFER && search->count < MAX_CANDIDATES
++			&& plane_eligible(search->planes, wlr_scene_buffer_from_node(node),
++				&box, &search->output_box)) {
++		search->candidates[search->count++] = (struct candidate){
++			.buffer = wlr_scene_buffer_from_node(node),
++			.box = box,
++		};
++	}
++}
++
++/* Where the buffer lets what lies beneath it show, in layout coordinates */
++static void
++translucent_region(struct candidate *candidate, pixman_region32_t *region)
++{
++	pixman_region32_init_rect(region, 0, 0, candidate->box.width, candidate->box.height);
++	pixman_region32_subtract(region, region, &candidate->buffer->opaque_region);
++	pixman_region32_translate(region, candidate->box.x, candidate->box.y);
++}
++
++/* A decoder's picture: YUV, opaque, and drawn by the GPU at a cost or, in AFBC, not at all */
++static bool
++is_video(struct wlr_scene_buffer *buffer)
++{
++	struct wlr_dmabuf_attributes dmabuf;
++	if (!wlr_buffer_get_dmabuf(buffer->buffer, &dmabuf)) {
++		return false;
++	}
++	switch (dmabuf.format) {
++	case DRM_FORMAT_NV12:
++	case DRM_FORMAT_P010:
++	case DRM_FORMAT_YUV420_8BIT:
++	case DRM_FORMAT_YUV420_10BIT:
++		return true;
++	default:
++		return false;
++	}
++}
++
++/*
++ * The largest buffer nothing covers, and a buffer only it covers that fills
++ * where it is translucent; a translucent one without such a buffer stays
++ * composited, since the composition beneath the planes holds its stand-in.
++ * Failing those, the largest video with anything over it goes under: the
++ * composition draws all of that over the video's punch, as over the video
++ */
++static void
++choose(struct search *search, struct candidate **top, struct candidate **under)
++{
++	*top = NULL;
++	*under = NULL;
++	for (size_t i = 0; i < search->count; i++) {
++		struct candidate *candidate = &search->candidates[i];
++		if (candidate->coverer) {
++			continue;
++		}
++		pixman_region32_t translucent;
++		translucent_region(candidate, &translucent);
++		bool opaque = !pixman_region32_not_empty(&translucent);
++		struct candidate *filler = NULL;
++		for (size_t j = 0; j < i && !opaque; j++) {
++			struct candidate *below = &search->candidates[j];
++			pixman_box32_t box = { below->box.x, below->box.y,
++				below->box.x + below->box.width, below->box.y + below->box.height };
++			if (below->coverer == &candidate->buffer->node && !below->covered_more
++					&& pixman_region32_contains_rectangle(&translucent, &box) != PIXMAN_REGION_OUT) {
++				pixman_region32_t uncovered;
++				pixman_region32_init_rect(&uncovered, box.x1, box.y1,
++					below->box.width, below->box.height);
++				pixman_region32_subtract(&uncovered, &translucent, &uncovered);
++				bool fills = !pixman_region32_not_empty(&uncovered);
++				pixman_region32_fini(&uncovered);
++				if (fills) {
++					filler = below;
++				}
++			}
++		}
++		pixman_region32_fini(&translucent);
++		if ((!opaque && !filler) || (*top && (int64_t)candidate->box.width * candidate->box.height
++				<= (int64_t)(*top)->box.width * (*top)->box.height)) {
++			continue;
++		}
++		*top = candidate;
++		*under = filler;
++	}
++	if (*under) {
++		return;
++	}
++	for (size_t i = 0; i < search->count; i++) {
++		struct candidate *candidate = &search->candidates[i];
++		if (candidate->coverer && is_video(candidate->buffer) && (!*under
++				|| (int64_t)candidate->box.width * candidate->box.height
++				> (int64_t)(*under)->box.width * (*under)->box.height)) {
++			*under = candidate;
++		}
++	}
++}
++
++static void
++handle_shown_commit(struct wl_listener *listener, void *data)
++{
++	struct plane_layer *layer = wl_container_of(listener, layer, shown_commit);
++	/* Nothing composited changed: the plane's new buffer still needs a commit */
++	wlr_output_update_needs_frame(layer->planes->output->wlr_output);
++}
++
++static void
++forget_shown(struct plane_layer *layer)
++{
++	wl_list_remove(&layer->shown_destroy.link);
++	wl_list_remove(&layer->shown_commit.link);
++	layer->shown = NULL;
++}
++
++static void
++drop_stand_in(struct plane_layer *layer)
++{
++	if (layer->stand_in) {
++		wl_list_remove(&layer->stand_in_destroy.link);
++		wlr_scene_node_destroy(&layer->stand_in->node);
++		layer->stand_in = NULL;
++	}
++}
++
++static void
++handle_stand_in_destroy(struct wl_listener *listener, void *data)
++{
++	struct plane_layer *layer = wl_container_of(listener, layer, stand_in_destroy);
++	wl_list_remove(&layer->stand_in_destroy.link);
++	layer->stand_in = NULL;
++}
++
++static void
++take_off_plane(struct plane_layer *layer)
++{
++	if (!layer->shown) {
++		return;
++	}
++	drop_stand_in(layer);
++	wlr_scene_node_set_enabled(&layer->shown->node, true);
++	forget_shown(layer);
++}
++
++/*
++ * Its window may be tearing down its scene: the stand-in beside it goes with
++ * it, or is dropped with the next frame, never from inside that teardown
++ */
++static void
++handle_shown_destroy(struct wl_listener *listener, void *data)
++{
++	struct plane_layer *layer = wl_container_of(listener, layer, shown_destroy);
++	if (layer->stand_in) {
++		wlr_scene_node_set_enabled(&layer->stand_in->node, false);
++	}
++	forget_shown(layer);
++}
++
++/*
++ * The stand-in clears the composited output to transparent where the buffer
++ * shows, under whatever is drawn over it: an underlay shows through, and a
++ * plane over the output covers it. Input passes through it to the client.
++ */
++static void
++put_on_plane(struct plane_layer *layer, struct wlr_scene_buffer *buffer, bool underlay)
++{
++	take_off_plane(layer);
++	layer->shown = buffer;
++	static const float black[4] = { 0, 0, 0, 1 };
++	layer->stand_in = wlr_scene_rect_create(buffer->node.parent, 0, 0, black);
++	wlr_scene_rect_set_punch(layer->stand_in, true);
++	wlr_output_layer_set_underlay(layer->layer, underlay);
++	wlr_scene_node_place_above(&layer->stand_in->node, &buffer->node);
++	layer->stand_in_destroy.notify = handle_stand_in_destroy;
++	wl_signal_add(&layer->stand_in->node.events.destroy, &layer->stand_in_destroy);
++	wlr_scene_node_set_enabled(&buffer->node, false);
++	layer->shown_destroy.notify = handle_shown_destroy;
++	wl_signal_add(&buffer->node.events.destroy, &layer->shown_destroy);
++	layer->shown_commit.notify = handle_shown_commit;
++	wl_signal_add(&wlr_scene_surface_try_from_buffer(buffer)->surface->events.commit,
++		&layer->shown_commit);
++}
++
++static void
++show(struct plane_layer *layer, struct candidate *candidate, bool underlay)
++{
++	if (!candidate) {
++		take_off_plane(layer);
++	} else if (candidate->buffer != layer->shown || layer->layer->underlay != underlay) {
++		put_on_plane(layer, candidate->buffer, underlay);
++	}
++}
++
++void
++output_planes_init(struct output *output)
++{
++	if (!getenv("WLR_DRM_FORCE_LIBLIFTOFF") || !wlr_output_is_drm(output->wlr_output)) {
++		return;
++	}
++	struct output_planes *planes = znew(*planes);
++	planes->output = output;
++	for (int i = 0; i < LAYER_COUNT; i++) {
++		planes->layers[i].planes = planes;
++		planes->layers[i].layer = wlr_output_layer_create(output->wlr_output);
++	}
++	output->planes = planes;
++}
++
++void
++output_planes_finish(struct output *output)
++{
++	struct output_planes *planes = output->planes;
++	if (!planes) {
++		return;
++	}
++	for (int i = 0; i < LAYER_COUNT; i++) {
++		take_off_plane(&planes->layers[i]);
++		drop_stand_in(&planes->layers[i]);
++		wlr_output_layer_destroy(planes->layers[i].layer);
++	}
++	free(planes);
++	output->planes = NULL;
++}
++
++/* The client's own buffer: the display imports it once, where each commit wraps it anew */
++static struct wlr_buffer *
++scanout_buffer(struct wlr_buffer *buffer)
++{
++	struct wlr_client_buffer *client = wlr_client_buffer_get(buffer);
++	return client && client->source ? client->source : buffer;
++}
++
++static void
++fill_state(struct plane_layer *layer, struct wlr_output_layer_state *state,
++		const struct wlr_box *box, const struct wlr_box *output_box, double scale)
++{
++	wlr_scene_node_set_position(&layer->stand_in->node,
++		layer->shown->node.x, layer->shown->node.y);
++	wlr_scene_rect_set_size(layer->stand_in, box->width, box->height);
++	int x = box->x - output_box->x, y = box->y - output_box->y;
++	*state = (struct wlr_output_layer_state){
++		.layer = layer->layer,
++		.buffer = scanout_buffer(layer->shown->buffer),
++		.src_box = layer->shown->src_box,
++		.dst_box = {
++			.x = round(x * scale),
++			.y = round(y * scale),
++			.width = round((x + box->width) * scale) - round(x * scale),
++			.height = round((y + box->height) * scale) - round(y * scale),
++		},
++	};
++}
++
++void
++output_planes_prepare(struct output *output, struct wlr_output_state *state)
++{
++	struct output_planes *planes = output->planes;
++	if (!planes) {
++		return;
++	}
++	for (int i = 0; i < LAYER_COUNT; i++) {
++		if (!planes->layers[i].shown) {
++			drop_stand_in(&planes->layers[i]);
++		}
++	}
++	struct wlr_output *wlr_output = output->wlr_output;
++	struct search search = { .planes = planes };
++	if (wlr_output->transform == WL_OUTPUT_TRANSFORM_NORMAL) {
++		wlr_output_layout_get_box(output->server->output_layout, wlr_output,
++			&search.output_box);
++		search_scene(&output->server->scene->tree.node, 0, 0, &search);
++	}
++	struct candidate *chosen[LAYER_COUNT];
++	choose(&search, &chosen[LAYER_TOP], &chosen[LAYER_UNDER]);
++	/*
++	 * A video beneath a page goes under the composited output, the page
++	 * staying composited over it with whatever it draws over the video;
++	 * where no plane can stack so, both go on planes over the output
++	 */
++	bool underlay = chosen[LAYER_UNDER] && (!planes->underlay_refused_at_ms
++		|| now_ms() - planes->underlay_refused_at_ms >= REFUSED_UNDERLAY_RETRY_MS);
++	if (underlay) {
++		chosen[LAYER_TOP] = NULL;
++		if (wlr_output->render_format != DRM_FORMAT_ARGB8888) {
++			wlr_output_state_set_render_format(state, DRM_FORMAT_ARGB8888);
++		}
++	}
++	/* Every layer, bottom to top as they stack: an unused one shows nothing */
++	for (int i = 0; i < LAYER_COUNT; i++) {
++		show(&planes->layers[i], chosen[i], underlay && i == LAYER_UNDER);
++		planes->states[i] = (struct wlr_output_layer_state){ .layer = planes->layers[i].layer };
++		if (chosen[i]) {
++			fill_state(&planes->layers[i], &planes->states[i],
++				&chosen[i]->box, &search.output_box, wlr_output->scale);
++		}
++	}
++	planes->state_count = LAYER_COUNT;
++	wlr_output_state_set_layers(state, planes->states, planes->state_count);
++}
++
++void
++output_planes_committed(struct output *output)
++{
++	struct output_planes *planes = output->planes;
++	if (!planes) {
++		return;
++	}
++	struct wlr_scene_buffer *refused = NULL;
++	bool underlay = false;
++	for (size_t i = 0; i < planes->state_count; i++) {
++		if (planes->states[i].buffer && !planes->states[i].accepted) {
++			for (int j = 0; j < LAYER_COUNT; j++) {
++				if (planes->layers[j].layer == planes->states[i].layer) {
++					refused = planes->layers[j].shown;
++					underlay |= planes->layers[j].layer->underlay;
++				}
++			}
++		}
++	}
++	if (!refused) {
++		return;
++	}
++	if (underlay) {
++		wlr_log(WLR_INFO, "no plane took a layer under the composited output: "
++			"videos go on planes over it for a while");
++		planes->underlay_refused_at_ms = now_ms();
++		for (int i = 0; i < LAYER_COUNT; i++) {
++			take_off_plane(&planes->layers[i]);
++		}
++		planes->state_count = 0;
++		wlr_output_update_needs_frame(output->wlr_output);
++		return;
++	}
++	wlr_log(WLR_INFO, "planes refused a %dx%d buffer: composited for a while",
++		refused->buffer_width, refused->buffer_height);
++	planes->refused = wlr_scene_surface_try_from_buffer(refused)->surface;
++	planes->refused_width = refused->buffer_width;
++	planes->refused_height = refused->buffer_height;
++	planes->refused_at_ms = now_ms();
++	/* Neither works without the other: the page's hole needs the video beneath */
++	for (int i = 0; i < LAYER_COUNT; i++) {
++		take_off_plane(&planes->layers[i]);
++	}
++	planes->state_count = 0;
++	wlr_output_update_needs_frame(output->wlr_output);
++}
++
++void
++output_planes_send_frame_done(struct output *output, const struct timespec *now)
++{
++	struct output_planes *planes = output->planes;
++	if (!planes) {
++		return;
++	}
++	for (int i = 0; i < LAYER_COUNT; i++) {
++		if (!planes->layers[i].shown) {
++			continue;
++		}
++		/*
++		 * The parents too: a window a plane's buffer covers is hidden from
++		 * the composition, yet its commits apply its subsurfaces' state,
++		 * such as a new subsurface showing at all
++		 */
++		struct wlr_surface *surface =
++			wlr_scene_surface_try_from_buffer(planes->layers[i].shown)->surface;
++		while (surface) {
++			wlr_surface_send_frame_done(surface, now);
++			struct wlr_subsurface *subsurface = wlr_subsurface_try_from_wlr_surface(surface);
++			surface = subsurface ? subsurface->parent : NULL;
++		}
++	}
++}
+--- a/src/output.c
++++ b/src/output.c
+@@ -26,6 +26,7 @@
+ #include "layers.h"
+ #include "node.h"
+ #include "output-state.h"
++#include "output-planes.h"
+ #include "output-virtual.h"
+ #include "protocols/cosmic-workspaces.h"
+ #include "protocols/ext-workspace.h"
+@@ -155,6 +156,7 @@
+ 	struct timespec now = { 0 };
+ 	clock_gettime(CLOCK_MONOTONIC, &now);
+ 	wlr_scene_output_send_frame_done(output->scene_output, &now);
++	output_planes_send_frame_done(output, &now);
+ }
+ 
+ static void
+@@ -164,6 +166,7 @@
+ 	struct seat *seat = &output->server->seat;
+ 	regions_evacuate_output(output);
+ 	regions_destroy(seat, &output->regions);
++	output_planes_finish(output);
+ 	if (seat->overlay.active.output == output) {
+ 		overlay_hide(seat);
+ 	}
+@@ -474,6 +477,7 @@
+ 	wlr_output->data = output;
+ 	output->server = server;
+ 	output_state_init(output);
++	output_planes_init(output);
+ 
+ 	wl_list_insert(&server->outputs, &output->link);
+ 

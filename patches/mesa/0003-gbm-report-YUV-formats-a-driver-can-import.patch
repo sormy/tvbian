@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Mon, 23 Nov 2026 13:31:37 -0500
+Subject: [PATCH] gbm: report YUV formats a driver can import
+
+gbm_device_is_format_supported() answers only for the formats in the
+visuals table, all RGB, so it reports NV12 unsupported even where the
+driver imports NV12 dma-bufs, as EGL already does. Chromium on Wayland
+asks it before importing a decoded video frame for a hardware overlay
+(gbm_wrapper's GetSupportedGbmFlags), so on Mesa no VA-API frame can
+become an overlay: the import is refused, the swap fails and the GPU
+process restarts.
+
+For a format without a visual, answer from the driver's dma-buf format
+list, as for any other format, unless the use includes rendering or
+the cursor, which need a visual.
+---
+ src/gbm/backends/dri/gbm_dri.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/src/gbm/backends/dri/gbm_dri.c b/src/gbm/backends/dri/gbm_dri.c
+index 316b251..91f2be4 100644
+--- a/src/gbm/backends/dri/gbm_dri.c
++++ b/src/gbm/backends/dri/gbm_dri.c
+@@ -353,7 +353,11 @@ gbm_dri_is_format_supported(struct gbm_device *gbm,
+       return 0;
+ 
+    format = core->v0.format_canonicalize(format);
+-   if (gbm_format_to_pipe_format(format) == 0)
++   /* A format without a visual, such as YUV, is never rendered to, but the
++    * driver may still import it: its dma-buf formats answer the other uses. */
++   if (gbm_format_to_pipe_format(format) == 0 &&
++       (!dri->has_dmabuf_import ||
++        (usage & (GBM_BO_USE_RENDERING | GBM_BO_USE_CURSOR))))
+       return 0;
+ 
+    /* If there is no query, fall back to the small table which was originally

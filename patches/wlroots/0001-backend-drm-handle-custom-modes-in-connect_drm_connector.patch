@@ -1,0 +1,69 @@
+From bcba7cb12b58e8f844378143d2085f618b6ed600 Mon Sep 17 00:00:00 2001
+From: Simon Ser <contact@emersion.fr>
+Date: Thu, 6 Mar 2025 15:58:42 +0100
+Subject: [PATCH] backend/drm: handle custom modes in connect_drm_connector()
+
+On startup, some connectors might be already lit up with a custom
+mode. We weren't correctly populating the current output state in
+this case.
+
+(cherry picked from commit ca1f9f86e67da124a377091bee1862e11617860d)
+---
+ backend/drm/drm.c | 27 +++++++++++++++++++--------
+ 1 file changed, 19 insertions(+), 8 deletions(-)
+
+diff --git a/backend/drm/drm.c b/backend/drm/drm.c
+index ea23f1741..085352914 100644
+--- a/backend/drm/drm.c
++++ b/backend/drm/drm.c
+@@ -1582,6 +1582,7 @@ static bool connect_drm_connector(struct wlr_drm_connector *wlr_conn,
+ 
+ 	wlr_log(WLR_INFO, "Detected modes:");
+ 
++	bool found_current_mode = false;
+ 	for (int i = 0; i < drm_conn->count_modes; ++i) {
+ 		if (drm_conn->modes[i].flags & DRM_MODE_FLAG_INTERLACE) {
+ 			continue;
+@@ -1600,14 +1601,7 @@ static bool connect_drm_connector(struct wlr_drm_connector *wlr_conn,
+ 		if (current_modeinfo != NULL && memcmp(&mode->drm_mode,
+ 				current_modeinfo, sizeof(*current_modeinfo)) == 0) {
+ 			wlr_output_state_set_mode(&state, &mode->wlr_mode);
+-
+-			uint64_t mode_id = 0;
+-			get_drm_prop(drm->fd, wlr_conn->crtc->id,
+-				wlr_conn->crtc->props.mode_id, &mode_id);
+-
+-			wlr_conn->crtc->own_mode_id = false;
+-			wlr_conn->crtc->mode_id = mode_id;
+-			wlr_conn->refresh = calculate_refresh_rate(current_modeinfo);
++			found_current_mode = true;
+ 		}
+ 
+ 		wlr_log(WLR_INFO, "  %"PRId32"x%"PRId32" @ %.3f Hz %s",
+@@ -1618,6 +1612,23 @@ static bool connect_drm_connector(struct wlr_drm_connector *wlr_conn,
+ 		wl_list_insert(modes.prev, &mode->wlr_mode.link);
+ 	}
+ 
++	if (current_modeinfo != NULL) {
++		int32_t refresh = calculate_refresh_rate(current_modeinfo);
++
++		if (!found_current_mode) {
++			wlr_output_state_set_custom_mode(&state,
++				current_modeinfo->hdisplay, current_modeinfo->vdisplay, refresh);
++		}
++
++		uint64_t mode_id = 0;
++		get_drm_prop(drm->fd, wlr_conn->crtc->id,
++			wlr_conn->crtc->props.mode_id, &mode_id);
++
++		wlr_conn->crtc->own_mode_id = false;
++		wlr_conn->crtc->mode_id = mode_id;
++		wlr_conn->refresh = refresh;
++	}
++
+ 	free(current_modeinfo);
+ 
+ 	wlr_output_init(output, &drm->backend, &output_impl, drm->session->event_loop, &state);
+-- 
+GitLab
+

@@ -1,0 +1,42 @@
+From c157adb452029f5976f8a412fac6f1113d02a686 Mon Sep 17 00:00:00 2001
+From: Joel Winarske <joel.winarske@gmail.com>
+Date: Wed, 20 Nov 2024 15:15:47 -0800
+Subject: [PATCH] Build error fix for `-Werror=sign-conversion`
+
+-resolves https://gitlab.freedesktop.org/emersion/libliftoff/-/issues/83
+
+Signed-off-by: Joel Winarske <joel.winarske@gmail.com>
+---
+ alloc.c          | 2 +-
+ example/common.c | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/alloc.c b/alloc.c
+index 4fe49ff..8b2745e 100644
+--- a/alloc.c
++++ b/alloc.c
+@@ -420,7 +420,7 @@ check_alloc_valid(struct liftoff_output *output, struct alloc_result *result,
+ static bool
+ check_plane_output_compatible(struct liftoff_plane *plane, struct liftoff_output *output)
+ {
+-	return (plane->possible_crtcs & (1 << output->crtc_index)) != 0;
++	return (plane->possible_crtcs & (1UL << output->crtc_index)) != 0;
+ }
+ 
+ static int
+diff --git a/example/common.c b/example/common.c
+index 0613217..5725c7f 100644
+--- a/example/common.c
++++ b/example/common.c
+@@ -51,7 +51,7 @@ pick_crtc(int drm_fd, drmModeRes *drm_res, drmModeConnector *connector)
+ 
+ 			for (j = 0; !found && j < drm_res->count_crtcs; j++) {
+ 				/* Can the CRTC drive the connector? */
+-				if (enc->possible_crtcs & (1 << j)) {
++				if (enc->possible_crtcs & (1UL << j)) {
+ 					crtc_id = drm_res->crtcs[j];
+ 					found = true;
+ 				}
+-- 
+GitLab
+

@@ -1,0 +1,45 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Mon, 23 Nov 2026 14:08:21 -0500
+Subject: [PATCH] viz: drop an overlay candidate's clip that clips nothing
+
+Outside delegated compositing, OverlayCandidateFactory keeps the quad's
+clip_rect on every candidate, and bakes it into the display and uv
+rects only for required (protected) overlays. Web content always
+carries the clip of its window, so a video wholly inside it still
+reaches the platform with a clip_rect. WaylandOverlayManager refuses
+any candidate with one, so on Wayland without delegated compositing
+no ordinary video is promoted: Viz.DisplayCompositor.OverlayStrategy
+records kNoStrategyAllFail for every frame.
+
+A clip_rect that contains the candidate's display rect changes no
+pixels, so drop it. Clipped candidates are unchanged.
+---
+ .../viz/service/display/overlay_candidate_factory.cc     | 9 +++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/components/viz/service/display/overlay_candidate_factory.cc b/components/viz/service/display/overlay_candidate_factory.cc
+index d0377af9..92a2b05a 100644
+--- a/components/viz/service/display/overlay_candidate_factory.cc
++++ b/components/viz/service/display/overlay_candidate_factory.cc
+@@ -451,6 +451,20 @@ OverlayCandidate::CandidateStatus OverlayCandidateFactory::FromDrawQuadResource(
+     }
+   }
+ 
++  // A clip that holds the whole candidate clips nothing. Dropping it lets
++  // platforms that cannot clip overlays, Wayland without delegated
++  // compositing, take a video that lies inside the page's clip. At a
++  // fractional scale the display rect can overshoot its clip by a rounding
++  // error, which clips nothing either.
++  if (!context_.is_delegated_context && candidate.clip_rect) {
++    constexpr float kRoundingError = 0.01f;
++    gfx::RectF clip(*candidate.clip_rect);
++    clip.Outset(kRoundingError);
++    if (clip.Contains(OverlayCandidate::DisplayRectInTargetSpace(candidate))) {
++      candidate.clip_rect.reset();
++    }
++  }
++
+   candidate.has_mask_filter = !sqs->mask_filter_info.IsEmpty();
+ 
+   // Conditionally set the rounded corners once the candidate's |display_rect|

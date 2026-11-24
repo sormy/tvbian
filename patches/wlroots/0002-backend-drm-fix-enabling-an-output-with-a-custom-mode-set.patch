@@ -1,0 +1,44 @@
+From 38f18cd68422928300addd8756f51646904fe6fd Mon Sep 17 00:00:00 2001
+From: Simon Ser <contact@emersion.fr>
+Date: Thu, 6 Mar 2025 16:04:49 +0100
+Subject: [PATCH] backend/drm: fix enabling an output with a custom mode set
+
+Since 5567aefb1c56 ("backend/drm: Don't add pollute fixed modes
+list with custom modes"), when a custom mode is set on an output,
+current_mode will be NULL.
+
+Instead of checking current_mode, check width/height.
+
+Closes: https://gitlab.freedesktop.org/wlroots/wlroots/-/issues/3946
+(cherry picked from commit 94cb8e2bc78f9e03e2811929c850810d0f2427d7)
+---
+ backend/drm/drm.c | 13 ++++++-------
+ 1 file changed, 6 insertions(+), 7 deletions(-)
+
+diff --git a/backend/drm/drm.c b/backend/drm/drm.c
+index 085352914..4b918b706 100644
+--- a/backend/drm/drm.c
++++ b/backend/drm/drm.c
+@@ -796,13 +796,12 @@ static bool drm_connector_prepare(struct wlr_drm_connector_state *conn_state, bo
+ 		return false;
+ 	}
+ 
+-	if ((state->committed & WLR_OUTPUT_STATE_ENABLED) && state->enabled) {
+-		if (output->current_mode == NULL &&
+-				!(state->committed & WLR_OUTPUT_STATE_MODE)) {
+-			wlr_drm_conn_log(conn, WLR_DEBUG,
+-				"Can't enable an output without a mode");
+-			return false;
+-		}
++	if ((state->committed & WLR_OUTPUT_STATE_ENABLED) && state->enabled &&
++			output->width == 0 && output->height == 0 &&
++			!(state->committed & WLR_OUTPUT_STATE_MODE)) {
++		wlr_drm_conn_log(conn, WLR_DEBUG,
++			"Can't enable an output without a mode");
++		return false;
+ 	}
+ 
+ 	if ((state->committed & WLR_OUTPUT_STATE_ADAPTIVE_SYNC_ENABLED) &&
+-- 
+GitLab
+

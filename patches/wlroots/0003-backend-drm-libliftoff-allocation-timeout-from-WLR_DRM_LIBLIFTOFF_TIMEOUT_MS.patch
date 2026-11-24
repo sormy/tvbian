@@ -1,0 +1,60 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sat, 21 Nov 2026 00:00:00 +0000
+Subject: [PATCH] backend/drm/libliftoff: allocation timeout from
+ WLR_DRM_LIBLIFTOFF_TIMEOUT_MS
+
+libliftoff gives up searching for a plane allocation after 1 ms by
+default. Each candidate costs an atomic test commit, and on SoCs whose
+test commits are slow, as the RK3528's VOP2 on its vendor kernel, the
+budget runs out after two tests, before the overlay planes worth trying,
+and every output layer is composited. Let the compositor's user set the
+budget; an allocation is searched only when the layers change, so a
+larger one costs little.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+--- a/backend/drm/libliftoff.c
++++ b/backend/drm/libliftoff.c
+@@ -384,6 +384,29 @@
+ 	}
+ }
+ 
++#if HAVE_LIBLIFTOFF_0_5
++/*
++ * How long libliftoff may search for a plane allocation, from
++ * WLR_DRM_LIBLIFTOFF_TIMEOUT_MS: its own 1 ms default runs out on SoCs whose
++ * atomic test commits are slow, before it reaches the planes worth trying
++ */
++static int64_t liftoff_timeout_ns(void) {
++	static int64_t timeout_ns = -1;
++	if (timeout_ns < 0) {
++		const char *value = getenv("WLR_DRM_LIBLIFTOFF_TIMEOUT_MS");
++		char *end = NULL;
++		long ms = value ? strtol(value, &end, 10) : 0;
++		if (value && (*end != '\0' || ms < 0)) {
++			wlr_log(WLR_ERROR, "Invalid WLR_DRM_LIBLIFTOFF_TIMEOUT_MS: %s", value);
++			ms = 0;
++		}
++		// zero leaves libliftoff's default
++		timeout_ns = (int64_t)ms * 1000 * 1000;
++	}
++	return timeout_ns;
++}
++#endif
++
+ static bool commit(struct wlr_drm_backend *drm,
+ 		const struct wlr_drm_device_state *state,
+ 		struct wlr_drm_page_flip *page_flip, uint32_t flags, bool test_only) {
+@@ -429,7 +452,10 @@
+ 		struct wlr_drm_crtc *crtc = conn->crtc;
+ 
+ #if HAVE_LIBLIFTOFF_0_5
+-		int ret = liftoff_output_apply(crtc->liftoff, req, flags, NULL);
++		struct liftoff_output_apply_options options = {
++			.timeout_ns = liftoff_timeout_ns(),
++		};
++		int ret = liftoff_output_apply(crtc->liftoff, req, flags, &options);
+ #else
+ 		int ret = liftoff_output_apply(crtc->liftoff, req, flags);
+ #endif

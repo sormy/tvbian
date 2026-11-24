@@ -1,0 +1,29 @@
+From c4226a79b7a52f59bb51789b1eda112658609125 Mon Sep 17 00:00:00 2001
+From: Simon Ser <contact@emersion.fr>
+Date: Mon, 24 Aug 2026 10:37:29 +0200
+Subject: [PATCH] Document why HOTSPOT_{X,Y} properties can't be discarded
+
+---
+ plane.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/plane.c b/plane.c
+index 1f2a8ea..6cfe7f1 100644
+--- a/plane.c
++++ b/plane.c
+@@ -420,6 +420,12 @@ plane_apply(struct liftoff_plane *plane, struct liftoff_layer *layer,
+ 			if (strcmp(layer_prop->name, "FB_DAMAGE_CLIPS") == 0) {
+ 				continue; /* Damage can be omitted */
+ 			}
++			/* HOTSPOT_X and HOTSPOT_Y can't be ignored: when
++			 * DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT is enabled, the
++			 * DRM client must use the cursor plane for actual
++			 * cursors and not for other purposes, because the
++			 * underlying platform may desynchronize cursor plane
++			 * position from KMS state. */
+ 			drmModeAtomicSetCursor(req, cursor);
+ 			return -EINVAL;
+ 		}
+-- 
+GitLab
+

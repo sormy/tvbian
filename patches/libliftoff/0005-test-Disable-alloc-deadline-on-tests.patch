@@ -1,0 +1,139 @@
+From 343a7d02cf5417e0732d8ba73089f86dd6173253 Mon Sep 17 00:00:00 2001
+From: David Turner <david.turner@raspberrypi.com>
+Date: Wed, 5 Mar 2025 16:02:25 +0000
+Subject: [PATCH] test: Disable alloc deadline on tests
+
+I've been seeing occasional spurious CI failures due to
+liftoff_output_apply() deadline timeouts, presumably when the runner is
+busy.  Disable the allocation deadline in all tests to stop this
+happening.
+---
+ test/test_alloc.c     | 16 ++++++++++++----
+ test/test_candidate.c |  4 +++-
+ test/test_dynamic.c   |  8 ++++++--
+ test/test_priority.c  |  4 +++-
+ test/test_prop.c      |  4 +++-
+ 5 files changed, 27 insertions(+), 9 deletions(-)
+
+diff --git a/test/test_alloc.c b/test/test_alloc.c
+index 8d0caf7..a002c46 100644
+--- a/test/test_alloc.c
++++ b/test/test_alloc.c
+@@ -803,7 +803,9 @@ run_test(const struct test_case *test)
+ 	}
+ 
+ 	req = drmModeAtomicAlloc();
+-	ret = liftoff_output_apply(output, req, 0, NULL);
++	ret = liftoff_output_apply(output, req, 0, &(struct liftoff_output_apply_options){
++		.timeout_ns = INT64_MAX,
++	});
+ 	assert(ret == 0);
+ 	ret = drmModeAtomicCommit(drm_fd, req, 0, NULL);
+ 	assert(ret == 0);
+@@ -875,7 +877,9 @@ test_basic(void)
+ 	liftoff_mock_plane_add_compatible_layer(mock_plane, layer);
+ 
+ 	req = drmModeAtomicAlloc();
+-	ret = liftoff_output_apply(output, req, 0, NULL);
++	ret = liftoff_output_apply(output, req, 0, &(struct liftoff_output_apply_options){
++		.timeout_ns = INT64_MAX,
++	});
+ 	assert(ret == 0);
+ 	ret = drmModeAtomicCommit(drm_fd, req, 0, NULL);
+ 	assert(ret == 0);
+@@ -913,7 +917,9 @@ test_no_props_fail(void)
+ 	liftoff_mock_plane_add_compatible_layer(mock_plane, layer);
+ 
+ 	req = drmModeAtomicAlloc();
+-	ret = liftoff_output_apply(output, req, 0, NULL);
++	ret = liftoff_output_apply(output, req, 0, &(struct liftoff_output_apply_options){
++		.timeout_ns = INT64_MAX,
++	});
+ 	assert(ret == 0);
+ 	ret = drmModeAtomicCommit(drm_fd, req, 0, NULL);
+ 	assert(ret == 0);
+@@ -959,7 +965,9 @@ test_composition_no_props(void)
+ 	liftoff_mock_plane_add_compatible_layer(mock_plane, layer_with_fb);
+ 
+ 	req = drmModeAtomicAlloc();
+-	ret = liftoff_output_apply(output, req, 0, NULL);
++	ret = liftoff_output_apply(output, req, 0, &(struct liftoff_output_apply_options){
++		.timeout_ns = INT64_MAX,
++	});
+ 	assert(ret == 0);
+ 	ret = drmModeAtomicCommit(drm_fd, req, 0, NULL);
+ 	assert(ret == 0);
+diff --git a/test/test_candidate.c b/test/test_candidate.c
+index 5e7f698..74a0bcb 100644
+--- a/test/test_candidate.c
++++ b/test/test_candidate.c
+@@ -60,7 +60,9 @@ test_basic(void)
+ 	liftoff_layer_set_property(layer, "COLOR_RANGE", 0);
+ 
+ 	req = drmModeAtomicAlloc();
+-	ret = liftoff_output_apply(output, req, 0, NULL);
++	ret = liftoff_output_apply(output, req, 0, &(struct liftoff_output_apply_options){
++		.timeout_ns = INT64_MAX,
++	});
+ 	assert(ret == 0);
+ 	ret = drmModeAtomicCommit(drm_fd, req, 0, NULL);
+ 	assert(ret == 0);
+diff --git a/test/test_dynamic.c b/test/test_dynamic.c
+index 3a95a7f..8c1049d 100644
+--- a/test/test_dynamic.c
++++ b/test/test_dynamic.c
+@@ -50,7 +50,9 @@ first_commit(struct context *ctx)
+ 	assert(ctx->commit_count == 0);
+ 
+ 	req = drmModeAtomicAlloc();
+-	ret = liftoff_output_apply(ctx->output, req, 0, NULL);
++	ret = liftoff_output_apply(ctx->output, req, 0, &(struct liftoff_output_apply_options){
++		.timeout_ns = INT64_MAX,
++	});
+ 	assert(ret == 0);
+ 	ret = drmModeAtomicCommit(ctx->drm_fd, req, 0, NULL);
+ 	assert(ret == 0);
+@@ -72,7 +74,9 @@ second_commit(struct context *ctx, bool want_reuse_prev_alloc)
+ 	int ret;
+ 
+ 	req = drmModeAtomicAlloc();
+-	ret = liftoff_output_apply(ctx->output, req, 0, NULL);
++	ret = liftoff_output_apply(ctx->output, req, 0, &(struct liftoff_output_apply_options){
++		.timeout_ns = INT64_MAX,
++	});
+ 	assert(ret == 0);
+ 	if (want_reuse_prev_alloc) {
+ 		/* The library should perform only one TEST_ONLY commit with the
+diff --git a/test/test_priority.c b/test/test_priority.c
+index cf2e4c5..41ede18 100644
+--- a/test/test_priority.c
++++ b/test/test_priority.c
+@@ -76,7 +76,9 @@ main(int argc, char *argv[])
+ 
+ 			liftoff_layer_set_property(layer, "FB_ID", fbs[j % 2]);
+ 
+-			ret = liftoff_output_apply(output, req, 0, NULL);
++			ret = liftoff_output_apply(output, req, 0, &(struct liftoff_output_apply_options){
++				.timeout_ns = INT64_MAX,
++			});
+ 			assert(ret == 0);
+ 			ret = drmModeAtomicCommit(drm_fd, req, 0, NULL);
+ 			assert(ret == 0);
+diff --git a/test/test_prop.c b/test/test_prop.c
+index 05193c7..093b581 100644
+--- a/test/test_prop.c
++++ b/test/test_prop.c
+@@ -34,7 +34,9 @@ commit(int drm_fd, struct liftoff_output *output)
+ 	int ret;
+ 
+ 	req = drmModeAtomicAlloc();
+-	ret = liftoff_output_apply(output, req, 0, NULL);
++	ret = liftoff_output_apply(output, req, 0, &(struct liftoff_output_apply_options){
++		.timeout_ns = INT64_MAX,
++	});
+ 	assert(ret == 0);
+ 	ret = drmModeAtomicCommit(drm_fd, req, 0, NULL);
+ 	assert(ret == 0);
+-- 
+GitLab
+

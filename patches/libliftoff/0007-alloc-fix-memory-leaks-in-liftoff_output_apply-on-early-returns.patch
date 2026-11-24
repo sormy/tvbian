@@ -1,0 +1,67 @@
+From b579f1c2b0ef823139eb7690ef22f54266fa85e8 Mon Sep 17 00:00:00 2001
+From: YaoBing Xiao <xiaoyaobing@uniontech.com>
+Date: Mon, 12 May 2025 11:34:12 +0800
+Subject: [PATCH] alloc: fix memory leaks in liftoff_output_apply on early
+ returns
+
+The liftoff_output_apply function allocated temporary memory for plane
+allocation steps but failed to free it in some early exit paths, such as
+when clock_gettime or output_choose_layers failed. This commit refactors
+the function to use a single cleanup label to ensure that all dynamically
+allocated memory is freed in all return paths, preventing memory leaks.
+---
+ alloc.c | 15 +++++++++++----
+ 1 file changed, 11 insertions(+), 4 deletions(-)
+
+diff --git a/alloc.c b/alloc.c
+index a947b07..1cfefc2 100644
+--- a/alloc.c
++++ b/alloc.c
+@@ -1056,12 +1056,14 @@ liftoff_output_apply(struct liftoff_output *output, drmModeAtomicReq *req,
+ 	result.best = malloc(result.planes_len * sizeof(result.best[0]));
+ 	if (step.alloc == NULL || result.best == NULL) {
+ 		liftoff_log_errno(LIFTOFF_ERROR, "malloc");
+-		return -ENOMEM;
++		ret = -ENOMEM;
++		goto error;
+ 	}
+ 
+ 	if (clock_gettime(CLOCK_MONOTONIC, &result.started_at) != 0) {
+ 		liftoff_log_errno(LIFTOFF_ERROR, "clock_gettime");
+-		return -errno;
++		ret = -errno;
++		goto error;
+ 	}
+ 
+ 	result.timeout_ns = options->timeout_ns;
+@@ -1088,7 +1090,7 @@ liftoff_output_apply(struct liftoff_output *output, drmModeAtomicReq *req,
+ 	step.composited = false;
+ 	ret = output_choose_layers(output, &result, &step);
+ 	if (ret != 0) {
+-		return ret;
++		goto error;
+ 	}
+ 
+ 	liftoff_log(LIFTOFF_DEBUG,
+@@ -1123,7 +1125,7 @@ liftoff_output_apply(struct liftoff_output *output, drmModeAtomicReq *req,
+ 
+ 	ret = apply_current(device, req);
+ 	if (ret != 0) {
+-		return ret;
++		goto error;
+ 	}
+ 
+ 	free(step.alloc);
+@@ -1132,4 +1134,9 @@ liftoff_output_apply(struct liftoff_output *output, drmModeAtomicReq *req,
+ 	mark_layers_clean(output);
+ 
+ 	return 0;
++
++error:
++	free(step.alloc);
++	free(result.best);
++	return ret;
+ }
+-- 
+GitLab
+

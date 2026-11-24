@@ -1,0 +1,27 @@
+From cba41a6aa97e5a4127912514cf7971d2bab436ba Mon Sep 17 00:00:00 2001
+From: zorowk <pengwenhao@uniontech.com>
+Date: Fri, 16 May 2025 11:25:35 +0800
+Subject: [PATCH] device: fix memory leak on plane creation failure
+
+If `liftoff_plane_create()` fails during the registration loop,
+the function returns early without freeing the plane resource list
+obtained from `drmModeGetPlaneResources()`, leading to a memory leak.
+---
+ device.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/device.c b/device.c
+index e84efa0..74f5d7d 100644
+--- a/device.c
++++ b/device.c
+@@ -90,6 +90,7 @@ liftoff_device_register_all_planes(struct liftoff_device *device)
+ 
+ 	for (i = 0; i < drm_plane_res->count_planes; i++) {
+ 		if (liftoff_plane_create(device, drm_plane_res->planes[i]) == NULL) {
++			drmModeFreePlaneResources(drm_plane_res);
+ 			return -errno;
+ 		}
+ 	}
+-- 
+GitLab
+

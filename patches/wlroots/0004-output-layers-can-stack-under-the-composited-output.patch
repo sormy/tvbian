@@ -1,0 +1,173 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 22 Nov 2026 00:00:00 +0000
+Subject: [PATCH] output-layer: layers can stack under the composited output
+
+Output layers always stack over the composited output, so a video on a
+plane hides whatever the compositor draws over it, a page's controls and
+the pointer included. Some display engines only offer their video plane
+under the primary one, as Amlogic's does.
+
+An underlay layer takes a zpos under the composition layer's, and a
+scene rect can punch its pixels to transparent, unblended, so the
+composited output shows the underlay where it should; input passes
+through it to what lies beneath.
+
+---
+--- a/include/wlr/types/wlr_output_layer.h
++++ b/include/wlr/types/wlr_output_layer.h
+@@ -54,9 +54,19 @@
+ 
+ 	struct wlr_fbox src_box;
+ 	struct wlr_box dst_box;
++
++	// Stacked under the composited output: seen where it is transparent
++	bool underlay;
+ };
+ 
+ /**
++ * Stack the layer under the output's composited content instead of over it:
++ * it shows where that content is transparent, which needs the output to
++ * render in a format with alpha.
++ */
++void wlr_output_layer_set_underlay(struct wlr_output_layer *layer, bool underlay);
++
++/**
+  * State for an output layer.
+  */
+ struct wlr_output_layer_state {
+--- a/include/wlr/types/wlr_scene.h
++++ b/include/wlr/types/wlr_scene.h
+@@ -136,6 +136,8 @@
+ 	struct wlr_scene_node node;
+ 	int width, height;
+ 	float color[4];
++	// Clears its pixels to transparent, unblended: see wlr_scene_rect_set_punch()
++	bool punch;
+ };
+ 
+ struct wlr_scene_outputs_update_event {
+@@ -372,6 +374,14 @@
+ void wlr_scene_rect_set_size(struct wlr_scene_rect *rect, int width, int height);
+ 
+ /**
++ * Make the rectangle clear its pixels to transparent instead of painting its
++ * color: nothing under it is drawn, and an output layer stacked under the
++ * output's content (see wlr_output_layer_set_underlay()) shows through it.
++ * Input passes through it to what lies beneath.
++ */
++void wlr_scene_rect_set_punch(struct wlr_scene_rect *rect, bool punch);
++
++/**
+  * Change the color of an existing rectangle node.
+  */
+ void wlr_scene_rect_set_color(struct wlr_scene_rect *rect, const float color[static 4]);
+--- a/types/wlr_output_layer.c
++++ b/types/wlr_output_layer.c
+@@ -14,6 +14,10 @@
+ 	return layer;
+ }
+ 
++void wlr_output_layer_set_underlay(struct wlr_output_layer *layer, bool underlay) {
++	layer->underlay = underlay;
++}
++
+ void wlr_output_layer_destroy(struct wlr_output_layer *layer) {
+ 	if (layer == NULL) {
+ 		return;
+--- a/backend/drm/libliftoff.c
++++ b/backend/drm/libliftoff.c
+@@ -331,18 +331,27 @@
+ 		if (crtc->props.vrr_enabled != 0) {
+ 			ok = ok && add_prop(req, crtc->id, crtc->props.vrr_enabled, state->vrr_enabled);
+ 		}
++		// Underlays stack beneath the composition layer, the others over it
++		size_t underlays = 0;
++		if (state->base->committed & WLR_OUTPUT_STATE_LAYERS) {
++			for (size_t i = 0; i < state->base->layers_len; i++) {
++				underlays += state->base->layers[i].layer->underlay;
++			}
++		}
+ 		ok = ok &&
+-			set_plane_props(crtc->primary, crtc->primary->liftoff_layer, state->primary_fb, 0, 0, 0) &&
+-			set_plane_props(crtc->primary, crtc->liftoff_composition_layer, state->primary_fb, 0, 0, 0);
++			set_plane_props(crtc->primary, crtc->primary->liftoff_layer, state->primary_fb, 0, 0, underlays) &&
++			set_plane_props(crtc->primary, crtc->liftoff_composition_layer, state->primary_fb, 0, 0, underlays);
+ 		liftoff_layer_set_property(crtc->primary->liftoff_layer,
+ 			"FB_DAMAGE_CLIPS", state->fb_damage_clips);
+ 		liftoff_layer_set_property(crtc->liftoff_composition_layer,
+ 			"FB_DAMAGE_CLIPS", state->fb_damage_clips);
+ 
+ 		if (state->base->committed & WLR_OUTPUT_STATE_LAYERS) {
++			size_t under = 0, over = underlays + 1;
+ 			for (size_t i = 0; i < state->base->layers_len; i++) {
+ 				const struct wlr_output_layer_state *layer_state = &state->base->layers[i];
+-				ok = ok && set_layer_props(drm, layer_state, i + 1,
++				ok = ok && set_layer_props(drm, layer_state,
++					layer_state->layer->underlay ? under++ : over++,
+ 					fb_damage_clips_arr);
+ 			}
+ 		}
+--- a/types/scene/wlr_scene.c
++++ b/types/scene/wlr_scene.c
+@@ -240,7 +240,7 @@
+ 
+ 	if (node->type == WLR_SCENE_NODE_RECT) {
+ 		struct wlr_scene_rect *scene_rect = wlr_scene_rect_from_node(node);
+-		if (scene_rect->color[3] != 1) {
++		if (scene_rect->color[3] != 1 && !scene_rect->punch) {
+ 			return;
+ 		}
+ 	} else if (node->type == WLR_SCENE_NODE_BUFFER) {
+@@ -631,6 +631,15 @@
+ 	scene_node_update(&rect->node, NULL);
+ }
+ 
++void wlr_scene_rect_set_punch(struct wlr_scene_rect *rect, bool punch) {
++	if (rect->punch == punch) {
++		return;
++	}
++
++	rect->punch = punch;
++	scene_node_update(&rect->node, NULL);
++}
++
+ void wlr_scene_rect_set_color(struct wlr_scene_rect *rect, const float color[static 4]) {
+ 	if (memcmp(rect->color, color, sizeof(rect->color)) == 0) {
+ 		return;
+@@ -1160,6 +1169,10 @@
+ 				!scene_buffer->point_accepts_input(scene_buffer, &rx, &ry)) {
+ 			return false;
+ 		}
++	} else if (node->type == WLR_SCENE_NODE_RECT &&
++			wlr_scene_rect_from_node(node)->punch) {
++		// It stands for what lies beneath it, which takes the input
++		return false;
+ 	}
+ 
+ 	at_data->rx = rx;
+@@ -1242,6 +1255,15 @@
+ 	case WLR_SCENE_NODE_RECT:;
+ 		struct wlr_scene_rect *scene_rect = wlr_scene_rect_from_node(node);
+ 
++		if (scene_rect->punch) {
++			wlr_render_pass_add_rect(data->render_pass, &(struct wlr_render_rect_options){
++				.box = dst_box,
++				.color = { 0 },
++				.clip = &render_region,
++				.blend_mode = WLR_RENDER_BLEND_MODE_NONE,
++			});
++			break;
++		}
+ 		wlr_render_pass_add_rect(data->render_pass, &(struct wlr_render_rect_options){
+ 			.box = dst_box,
+ 			.color = {
+@@ -1515,7 +1537,7 @@
+ 	} else if (node->type == WLR_SCENE_NODE_RECT) {
+ 		struct wlr_scene_rect *rect = wlr_scene_rect_from_node(node);
+ 
+-		return rect->color[3] == 0.f;
++		return rect->color[3] == 0.f && !rect->punch;
+ 	} else if (node->type == WLR_SCENE_NODE_BUFFER) {
+ 		struct wlr_scene_buffer *buffer = wlr_scene_buffer_from_node(node);
+ 

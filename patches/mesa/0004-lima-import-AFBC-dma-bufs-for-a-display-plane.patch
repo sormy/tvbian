@@ -1,0 +1,66 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Mon, 23 Nov 2026 00:00:00 +0000
+Subject: [PATCH] lima: import AFBC dma-bufs for a display plane
+
+A video decoder's AFBC picture reaches a display plane through clients
+that wrap every dma-buf in a GBM buffer first, as Chromium does on
+Wayland. Lima refuses the modifier, so the import fails and the client
+cannot hand the picture on, though the GPU need never read it.
+
+Accept Arm AFBC modifiers on import, external only and untiled. The
+Mali-450 cannot decode AFBC: sampling such a resource reads compressed
+bytes, which a client composites only when no plane takes the picture.
+---
+--- a/src/gallium/drivers/lima/lima_screen.c
++++ b/src/gallium/drivers/lima/lima_screen.c
+@@ -526,6 +526,12 @@
+                                          enum pipe_format format,
+                                          bool *external_only)
+ {
++   if (lima_is_arm_afbc(modifier)) {
++      if (external_only)
++         *external_only = true;
++      return true;
++   }
++
+    for (int i = 0; i < ARRAY_SIZE(lima_available_modifiers); i++) {
+       if (lima_available_modifiers[i] == modifier) {
+          if (external_only)
+--- a/src/gallium/drivers/lima/lima_resource.c
++++ b/src/gallium/drivers/lima/lima_resource.c
+@@ -357,6 +357,10 @@
+       res->tiled = false;
+       break;
+    default:
++      if (lima_is_arm_afbc(handle->modifier)) {
++         res->tiled = false;
++         break;
++      }
+       fprintf(stderr, "Attempted to import unsupported modifier 0x%llx\n",
+                   (long long)handle->modifier);
+       goto err_out;
+--- a/src/gallium/drivers/lima/lima_resource.h
++++ b/src/gallium/drivers/lima/lima_resource.h
+@@ -26,6 +26,7 @@
+ #define H_LIMA_RESOURCE
+ 
+ #include "pipe/p_state.h"
++#include "drm-uapi/drm_fourcc.h"
+ 
+ /* max texture size is 4096x4096 */
+ #define LIMA_MAX_MIP_LEVELS 13
+@@ -100,4 +101,13 @@
+ void
+ lima_resource_context_init(struct lima_context *ctx);
+ 
++/* Mali-450 cannot decode AFBC: such a dma-buf is imported for a display plane
++ * to scan out, and sampling it reads compressed bytes. */
++static inline bool
++lima_is_arm_afbc(uint64_t modifier)
++{
++   return modifier >> 52 ==
++          (DRM_FORMAT_MOD_ARM_TYPE_AFBC | DRM_FORMAT_MOD_VENDOR_ARM << 4);
++}
++
+ #endif

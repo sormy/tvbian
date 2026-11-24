@@ -1,0 +1,102 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 22 Nov 2026 00:00:00 +0000
+Subject: [PATCH] alloc: planes with a mutable zpos stack as their layers
+
+libliftoff reads each plane's zpos and keeps layers on planes whose fixed
+order matches theirs. Where the driver lets every plane's zpos change, as
+Rockchip's VOP2 and Allwinner's DE3 do, the plane order is no constraint:
+each plane takes its layer's zpos, so layers stack as they are on
+whichever planes, a layer under the composition layer included. They go
+first by priority, then zpos: the order that settles however they overlap.
+
+---
+--- a/include/private.h
++++ b/include/private.h
+@@ -45,6 +45,9 @@
+ 
+ 	int page_flip_counter;
+ 	int test_commit_counter;
++
++	/* Some plane's stacking is fixed: zpos is only read, never written */
++	bool has_fixed_zpos;
+ };
+ 
+ struct liftoff_output {
+@@ -94,6 +97,7 @@
+ 	uint32_t possible_crtcs;
+ 	uint32_t type;
+ 	int zpos; /* greater values mean closer to the eye */
++	bool zpos_mutable;
+ 	struct liftoff_list link; /* liftoff_device.planes */
+ 
+ 	drmModePropertyRes **props;
+--- a/alloc.c
++++ b/alloc.c
+@@ -322,8 +322,12 @@
+ 		return false;
+ 	}
+ 
++	/*
++	 * Where every plane's zpos is mutable, each plane takes its layer's
++	 * zpos: the layers stack as they are, on whichever planes
++	 */
+ 	zpos_prop = layer_get_core_property(layer, LIFTOFF_PROP_ZPOS);
+-	if (zpos_prop != NULL) {
++	if (zpos_prop != NULL && output->device->has_fixed_zpos) {
+ 		if ((int)zpos_prop->value > step->last_layer_zpos &&
+ 		    has_allocated_layer_over(output, step, layer)) {
+ 			/* This layer needs to be on top of the last
+@@ -754,6 +758,18 @@
+ 
+ 	this_zpos = layer_get_core_property(this, LIFTOFF_PROP_ZPOS);
+ 	other_zpos = layer_get_core_property(other, LIFTOFF_PROP_ZPOS);
++
++	// Where every plane takes its layer's zpos, the order above is no
++	// order: a busy layer under the composition layer would rank over the
++	// layers it does not intersect and under those it does, and the sort
++	// would never settle. The busiest layers simply go first.
++	if (!this->output->device->has_fixed_zpos && this_zpos != NULL && other_zpos != NULL) {
++		if (this->current_priority != other->current_priority) {
++			return this->current_priority > other->current_priority;
++		}
++		return this_zpos->value > other_zpos->value;
++	}
++
+ 	intersects = layer_intersects(this, other);
+ 
+ 	if (this_zpos != NULL && other_zpos != NULL) {
+--- a/plane.c
++++ b/plane.c
+@@ -97,6 +97,7 @@
+ 			has_type = true;
+ 		} else if (strcmp(prop->name, "zpos") == 0) {
+ 			plane->zpos = value;
++			plane->zpos_mutable = !(prop->flags & DRM_MODE_PROP_IMMUTABLE);
+ 			has_zpos = true;
+ 		} else if (strcmp(prop->name, "IN_FORMATS") == 0) {
+ 			plane->in_formats_blob = drmModeGetPropertyBlob(device->drm_fd,
+@@ -125,6 +126,9 @@
+ 		plane->zpos = guess_plane_zpos_from_type(device, plane->id,
+ 							 plane->type);
+ 	}
++	if (!plane->zpos_mutable) {
++		device->has_fixed_zpos = true;
++	}
+ 
+ 	/* During plane allocation, we will use the plane list order to fill
+ 	 * planes with FBs. Primary planes need to be filled first, then planes
+@@ -380,9 +384,10 @@
+ 
+ 	for (i = 0; i < layer->props_len; i++) {
+ 		layer_prop = &layer->props[i];
+-		if (layer_prop->core_index == LIFTOFF_PROP_ZPOS) {
+-			/* We don't yet support setting the zpos property. We
+-			 * only use it (read-only) during plane allocation. */
++		if (layer_prop->core_index == LIFTOFF_PROP_ZPOS &&
++		    layer->output->device->has_fixed_zpos) {
++			/* Planes stack as they are: their zpos is only read
++			 * during plane allocation */
+ 			continue;
+ 		}
+ 

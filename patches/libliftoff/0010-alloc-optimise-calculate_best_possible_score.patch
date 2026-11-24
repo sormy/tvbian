@@ -1,0 +1,219 @@
+From a55e28bbd971af207b69abc6d5ccb7ea57e82584 Mon Sep 17 00:00:00 2001
+From: David Turner <david.turner@raspberrypi.com>
+Date: Tue, 13 May 2025 15:54:12 +0100
+Subject: [PATCH] alloc: optimise calculate_best_possible_score
+
+When many planes are available, profiling shows significant amounts of
+time going into calculate_best_possible_score(), especially
+-count_remaining_compatible_planes().  Optimise this function by
+counting potential planes and layers at the beginning of time and
+tracking them each time we allocate, instead of counting both of these
+from scratch every time calculate_best_possible_score() is run.
+
+Benchmarking shows that this change roughly halves the time spent in
+allocation (excluding time spent in test commits).
+---
+ alloc.c | 119 +++++++++++++++++++++++++++++++++-----------------------
+ 1 file changed, 70 insertions(+), 49 deletions(-)
+
+diff --git a/alloc.c b/alloc.c
+index 1cfefc2..6fd3205 100644
+--- a/alloc.c
++++ b/alloc.c
+@@ -96,6 +96,13 @@ struct alloc_step {
+ 	int last_layer_zpos;
+ 	int primary_layer_zpos, primary_plane_zpos;
+ 
++	/* Number of remaining planes compatible with this output */
++	int remaining_compatible_planes;
++
++	/* Number of remaining scoring (i.e. unallocated, visible,
++	 * non-composition) layers */
++	int remaining_scoring_layers;
++
+ 	bool composited; /* per-output */
+ 
+ 	char log_prefix[64];
+@@ -124,9 +131,15 @@ check_deadline(struct timespec start, int64_t timeout_ns)
+ 	return timespec_to_nsec(now) - timeout_ns < timespec_to_nsec(start);
+ }
+ 
++static bool
++check_plane_output_compatible(struct liftoff_plane *plane, struct liftoff_output *output)
++{
++	return (plane->possible_crtcs & (1UL << output->crtc_index)) != 0;
++}
++
+ static void
+ plane_step_init_next(struct alloc_step *step, struct alloc_step *prev,
+-		     struct liftoff_layer *layer)
++		     struct liftoff_layer *layer, struct liftoff_output *output)
+ {
+ 	struct liftoff_plane *plane;
+ 	struct liftoff_layer_property *zpos_prop;
+@@ -139,6 +152,12 @@ plane_step_init_next(struct alloc_step *step, struct alloc_step *prev,
+ 	step->alloc = prev->alloc;
+ 	step->alloc[prev->plane_idx] = layer;
+ 
++	if (check_plane_output_compatible(plane, output)) {
++		step->remaining_compatible_planes = prev->remaining_compatible_planes - 1;
++	} else {
++		step->remaining_compatible_planes = prev->remaining_compatible_planes;
++	}
++
+ 	if (layer != NULL && layer == layer->output->composition_layer) {
+ 		assert(!prev->composited);
+ 		step->composited = true;
+@@ -148,8 +167,10 @@ plane_step_init_next(struct alloc_step *step, struct alloc_step *prev,
+ 
+ 	if (layer != NULL && layer != layer->output->composition_layer) {
+ 		step->score = prev->score + 1;
++		step->remaining_scoring_layers = prev->remaining_scoring_layers - 1;
+ 	} else {
+ 		step->score = prev->score;
++		step->remaining_scoring_layers = prev->remaining_scoring_layers;
+ 	}
+ 
+ 	zpos_prop = NULL;
+@@ -417,60 +438,17 @@ check_alloc_valid(struct liftoff_output *output, struct alloc_result *result,
+ 	return true;
+ }
+ 
+-static bool
+-check_plane_output_compatible(struct liftoff_plane *plane, struct liftoff_output *output)
+-{
+-	return (plane->possible_crtcs & (1UL << output->crtc_index)) != 0;
+-}
+-
+-static int
+-count_remaining_compatible_planes(struct liftoff_output *output,
+-				  struct alloc_step *step)
+-{
+-	struct liftoff_list *link;
+-	struct liftoff_plane *plane;
+-	int remaining = 0;
+-
+-	for (link = step->plane_link; link != &output->device->planes; link = link->next) {
+-		plane = liftoff_container_of(link, plane, link);
+-		if (plane->layer == NULL &&
+-		    check_plane_output_compatible(plane, output)) {
+-			remaining++;
+-		}
+-	}
+-
+-	return remaining;
+-}
+-
+ static int
+ calculate_best_possible_score(struct liftoff_output *output, struct alloc_result *result,
+ 			      struct alloc_step *step)
+ {
+-	struct liftoff_layer *layer;
+ 	int remaining_planes, remaining_layers, remaining_allocs;
+ 
+-	remaining_planes = count_remaining_compatible_planes(output, step);
+-
+-	/* Count number of remaining scoring layers */
+-	remaining_layers = 0;
+-	liftoff_list_for_each(layer, &output->layers, link) {
+-		/* Allocated layers are already included in current score */
+-		if (is_layer_allocated(step, layer)) {
+-			continue;
+-		}
+-		/* Invisible layers won't be allocated */
+-		if (!layer_is_visible(layer)) {
+-			continue;
+-		}
+-		/* Composition layer isn't included in the score */
+-		if (layer == output->composition_layer) {
+-			continue;
+-		}
+-		remaining_layers++;
+-	}
+-
++	remaining_layers = step->remaining_scoring_layers;
++	remaining_planes = step->remaining_compatible_planes;
+ 	remaining_allocs = remaining_layers < remaining_planes
+ 		? remaining_layers : remaining_planes;
++
+ 	return step->score + remaining_allocs;
+ }
+ 
+@@ -571,7 +549,7 @@ output_choose_layers(struct liftoff_output *output, struct alloc_result *result,
+ 				    "%s Layer %p -> plane %"PRIu32": success",
+ 				    step->log_prefix, (void *)layer, plane->id);
+ 			/* Continue with the next plane */
+-			plane_step_init_next(&next_step, step, layer);
++			plane_step_init_next(&next_step, step, layer, output);
+ 			ret = output_choose_layers(output, result, &next_step);
+ 			if (ret != 0) {
+ 				return ret;
+@@ -591,7 +569,7 @@ output_choose_layers(struct liftoff_output *output, struct alloc_result *result,
+ 
+ skip:
+ 	/* Try not to use the current plane */
+-	plane_step_init_next(&next_step, step, NULL);
++	plane_step_init_next(&next_step, step, NULL, output);
+ 	ret = output_choose_layers(output, result, &next_step);
+ 	if (ret != 0) {
+ 		return ret;
+@@ -983,6 +961,46 @@ non_composition_layers_length(struct liftoff_output *output)
+ 	return n;
+ }
+ 
++/* Count the number of planes compatible with this output */
++static int
++count_compatible_planes(struct liftoff_output *output)
++{
++	struct liftoff_plane *plane;
++	int count = 0;
++
++	liftoff_list_for_each(plane, &output->device->planes, link) {
++		if (check_plane_output_compatible(plane, output)) {
++			count++;
++		}
++	}
++
++	return count;
++}
++
++/* Count number of scoring (visible, non-composition) layers */
++static int
++count_scoring_layers(struct liftoff_output *output)
++{
++	struct liftoff_layer *layer;
++	int count = 0;
++
++	liftoff_list_for_each(layer, &output->layers, link) {
++		/* Invisible layers won't be allocated */
++		if (!layer_is_visible(layer)) {
++			continue;
++		}
++
++		/* Composition layer isn't included in the score */
++		if (layer == output->composition_layer) {
++			continue;
++		}
++
++		count++;
++	}
++
++	return count;
++}
++
+ int
+ liftoff_output_apply(struct liftoff_output *output, drmModeAtomicReq *req,
+ 		     uint32_t flags,
+@@ -1052,6 +1070,9 @@ liftoff_output_apply(struct liftoff_output *output, drmModeAtomicReq *req,
+ 	result.flags = flags;
+ 	result.planes_len = liftoff_list_length(&device->planes);
+ 
++	step.remaining_compatible_planes = count_compatible_planes(output);
++	step.remaining_scoring_layers = count_scoring_layers(output);
++
+ 	step.alloc = malloc(result.planes_len * sizeof(step.alloc[0]));
+ 	result.best = malloc(result.planes_len * sizeof(result.best[0]));
+ 	if (step.alloc == NULL || result.best == NULL) {
+-- 
+GitLab
+

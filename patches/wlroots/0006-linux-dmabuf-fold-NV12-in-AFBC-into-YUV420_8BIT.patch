@@ -1,0 +1,65 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Mon, 23 Nov 2026 00:00:00 +0000
+Subject: [PATCH] linux-dmabuf: fold NV12 in AFBC into YUV420_8BIT
+
+Arm's AFBC stores 4:2:0 video in one plane, which DRM names
+DRM_FORMAT_YUV420_8BIT. A client knowing only NV12, as Chromium does for
+a VA-API decoder's exported surface, sends an AFBC picture as NV12 with
+a second plane, and a display engine that lists YUV420_8BIT under AFBC
+(Rockchip's VOP2 Cluster windows on mainline) has no plane for it.
+
+Take NV12 with an AFBC modifier as YUV420_8BIT, its first plane alone.
+YUV420_8BIT and YUV420_10BIT, 4:2:0 without alpha, join the opaque
+formats, or the picture counts as translucent and stays off the planes.
+---
+--- a/render/pixel_format.c
++++ b/render/pixel_format.c
+@@ -183,6 +183,8 @@
+ 	DRM_FORMAT_VYUY,
+ 	DRM_FORMAT_NV12,
+ 	DRM_FORMAT_P010,
++	DRM_FORMAT_YUV420_8BIT,
++	DRM_FORMAT_YUV420_10BIT,
+ };
+ 
+ static const size_t pixel_format_info_size =
+--- a/types/wlr_linux_dmabuf_v1.c
++++ b/types/wlr_linux_dmabuf_v1.c
+@@ -226,6 +226,28 @@
+ 	return true;
+ }
+ 
++static bool is_arm_afbc(uint64_t modifier) {
++	const uint64_t arm_type_bits = ~((1ULL << 52) - 1);
++	return (modifier & arm_type_bits) ==
++		DRM_FORMAT_MOD_ARM_CODE(DRM_FORMAT_MOD_ARM_TYPE_AFBC, 0);
++}
++
++/* Arm's AFBC holds 4:2:0 in one plane, as YUV420_8BIT; a client that knows only
++ * NV12, such as a video decoder's exported surface, lists a second plane too. */
++static void fold_afbc_nv12(struct wlr_dmabuf_attributes *attribs) {
++	if (attribs->format != DRM_FORMAT_NV12 || !is_arm_afbc(attribs->modifier)) {
++		return;
++	}
++	for (int i = 1; i < attribs->n_planes; i++) {
++		close(attribs->fd[i]);
++		attribs->fd[i] = -1;
++		attribs->stride[i] = 0;
++		attribs->offset[i] = 0;
++	}
++	attribs->n_planes = 1;
++	attribs->format = DRM_FORMAT_YUV420_8BIT;
++}
++
+ static void params_create_common(struct wl_resource *params_resource,
+ 		uint32_t buffer_id, int32_t width, int32_t height, uint32_t format,
+ 		uint32_t flags) {
+@@ -286,6 +308,7 @@
+ 	attribs.width = width;
+ 	attribs.height = height;
+ 	attribs.format = format;
++	fold_afbc_nv12(&attribs);
+ 
+ 	if (width < 1 || height < 1) {
+ 		wl_resource_post_error(params_resource,

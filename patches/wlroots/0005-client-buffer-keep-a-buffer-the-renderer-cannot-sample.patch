@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Mon, 23 Nov 2026 00:00:00 +0000
+Subject: [PATCH] buffer: keep a client buffer the renderer cannot sample
+
+A surface's buffer the renderer cannot import, such as a video decoded
+to AFBC on a GPU without AFBC (Mali-450), is dropped at commit: the
+surface keeps showing its previous buffer, though a display plane could
+scan the new one out.
+
+Keep the client buffer without a texture instead. The scene already
+handles one, as after its renderer is destroyed: a plane may still show
+it, and composition skips it.
+---
+--- a/types/buffer/client.c
++++ b/types/buffer/client.c
+@@ -66,10 +66,10 @@
+ 
+ struct wlr_client_buffer *wlr_client_buffer_create(struct wlr_buffer *buffer,
+ 		struct wlr_renderer *renderer) {
++	// A buffer the renderer cannot sample, AFBC on a GPU without it, may still be scanned out
+ 	struct wlr_texture *texture = wlr_texture_from_buffer(renderer, buffer);
+ 	if (texture == NULL) {
+-		wlr_log(WLR_ERROR, "Failed to create texture");
+-		return NULL;
++		wlr_log(WLR_DEBUG, "Failed to create texture, the buffer is left to scan-out");
+ 	}
+ 
+ 	struct wlr_client_buffer *client_buffer = calloc(1, sizeof(*client_buffer));
+@@ -78,14 +78,14 @@
+ 		return NULL;
+ 	}
+ 	wlr_buffer_init(&client_buffer->base, &client_buffer_impl,
+-		texture->width, texture->height);
++		buffer->width, buffer->height);
+ 	client_buffer->source = buffer;
+ 	client_buffer->texture = texture;
+ 
+ 	wl_signal_add(&buffer->events.destroy, &client_buffer->source_destroy);
+ 	client_buffer->source_destroy.notify = client_buffer_handle_source_destroy;
+ 
+-	wl_signal_add(&texture->renderer->events.destroy, &client_buffer->renderer_destroy);
++	wl_signal_add(&renderer->events.destroy, &client_buffer->renderer_destroy);
+ 	client_buffer->renderer_destroy.notify = client_buffer_handle_renderer_destroy;
+ 
+ 	// Ensure the buffer will be released before being destroyed

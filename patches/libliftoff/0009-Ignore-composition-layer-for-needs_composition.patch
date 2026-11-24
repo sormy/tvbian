@@ -1,0 +1,53 @@
+From 52835770145cbd66c3557159827c0c06e10c4642 Mon Sep 17 00:00:00 2001
+From: David Turner <david.turner@raspberrypi.com>
+Date: Thu, 22 May 2025 14:28:24 +0100
+Subject: [PATCH] Ignore composition layer for needs_composition
+
+Currently the liftoff_output_needs_composition() check will return true
+if the composition layer is not allocated to a plane.  But if all other
+layers fit on planes (so we don't need composition) then the composition
+layer won't be allocated because it's unneeded.  So modify
+liftoff_output_needs_composition() to ignore the composition layer.
+
+The alloc@composition-3x test covers this case (expecting the wrong
+result) so update it to expect the correct result.
+
+Fixes #86
+---
+ output.c          | 6 ++++++
+ test/test_alloc.c | 2 +-
+ 2 files changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/output.c b/output.c
+index 7ae8623..1ec1ca0 100644
+--- a/output.c
++++ b/output.c
+@@ -63,6 +63,12 @@ liftoff_output_needs_composition(struct liftoff_output *output)
+ 	struct liftoff_layer *layer;
+ 
+ 	liftoff_list_for_each(layer, &output->layers, link) {
++		/* If all layers fit on planes then the composition layer
++		 * won't be allocated to a plane and is unneeded. */
++		if (layer == output->composition_layer) {
++			continue;
++		}
++
+ 		if (liftoff_layer_needs_composition(layer)) {
+ 			return true;
+ 		}
+diff --git a/test/test_alloc.c b/test/test_alloc.c
+index a002c46..06c48b7 100644
+--- a/test/test_alloc.c
++++ b/test/test_alloc.c
+@@ -598,7 +598,7 @@ static const struct test_case tests[] = {
+ 	},
+ 	{
+ 		.name = "composition-3x",
+-		.needs_composition = true,
++		.needs_composition = false,
+ 		.layers = {
+ 			{
+ 				.width = 1920,
+-- 
+GitLab
+

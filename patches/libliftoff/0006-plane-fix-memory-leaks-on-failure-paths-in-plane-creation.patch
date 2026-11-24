@@ -1,0 +1,115 @@
+From 4671a595bc508143a430f96102e3c81b5ddf2d20 Mon Sep 17 00:00:00 2001
+From: YaoBing Xiao <xiaoyaobing@uniontech.com>
+Date: Wed, 30 Apr 2025 10:50:38 +0800
+Subject: [PATCH] plane: fix memory leaks on failure paths in plane creation
+
+Ensure all allocated resources (drmModePlane, drmModeObjectProperties,
+drmModePropertyRes, drmModePropertyBlob) are properly freed if any
+intermediate step fails during liftoff_plane_create(). Introduce a
+unified fail label to handle cleanup. This prevents memory leaks when
+drm calls or allocations fail.
+---
+ plane.c | 35 ++++++++++++++++++++++++-----------
+ 1 file changed, 24 insertions(+), 11 deletions(-)
+
+diff --git a/plane.c b/plane.c
+index a2f637e..1f2a8ea 100644
+--- a/plane.c
++++ b/plane.c
+@@ -37,8 +37,8 @@ struct liftoff_plane *
+ liftoff_plane_create(struct liftoff_device *device, uint32_t id)
+ {
+ 	struct liftoff_plane *plane, *cur;
+-	drmModePlane *drm_plane;
+-	drmModeObjectProperties *drm_props;
++	drmModePlane *drm_plane = NULL;
++	drmModeObjectProperties *drm_props = NULL;
+ 	uint32_t i;
+ 	drmModePropertyRes *prop;
+ 	uint64_t value;
+@@ -63,30 +63,30 @@ liftoff_plane_create(struct liftoff_device *device, uint32_t id)
+ 	drm_plane = drmModeGetPlane(device->drm_fd, id);
+ 	if (drm_plane == NULL) {
+ 		liftoff_log_errno(LIFTOFF_ERROR, "drmModeGetPlane");
+-		return NULL;
++		goto fail;
+ 	}
+ 	plane->id = drm_plane->plane_id;
+ 	plane->possible_crtcs = drm_plane->possible_crtcs;
+ 	drmModeFreePlane(drm_plane);
++	drm_plane = NULL;
+ 
+ 	drm_props = drmModeObjectGetProperties(device->drm_fd, id,
+ 					       DRM_MODE_OBJECT_PLANE);
+ 	if (drm_props == NULL) {
+ 		liftoff_log_errno(LIFTOFF_ERROR, "drmModeObjectGetProperties");
+-		return NULL;
++		goto fail;
+ 	}
++
+ 	plane->props = calloc(drm_props->count_props, sizeof(plane->props[0]));
+ 	if (plane->props == NULL) {
+ 		liftoff_log_errno(LIFTOFF_ERROR, "calloc");
+-		drmModeFreeObjectProperties(drm_props);
+-		return NULL;
++		goto fail;
+ 	}
+ 	for (i = 0; i < drm_props->count_props; i++) {
+ 		prop = drmModeGetProperty(device->drm_fd, drm_props->props[i]);
+ 		if (prop == NULL) {
+ 			liftoff_log_errno(LIFTOFF_ERROR, "drmModeGetProperty");
+-			drmModeFreeObjectProperties(drm_props);
+-			return NULL;
++			goto fail;
+ 		}
+ 		plane->props[i] = prop;
+ 		plane->props_len++;
+@@ -103,7 +103,7 @@ liftoff_plane_create(struct liftoff_device *device, uint32_t id)
+ 									value);
+ 			if (plane->in_formats_blob == NULL) {
+ 				liftoff_log_errno(LIFTOFF_ERROR, "drmModeGetPropertyBlob");
+-				return NULL;
++				goto fail;
+ 			}
+ 		}
+ 
+@@ -113,14 +113,14 @@ liftoff_plane_create(struct liftoff_device *device, uint32_t id)
+ 		}
+ 	}
+ 	drmModeFreeObjectProperties(drm_props);
++	drm_props = NULL;
+ 
+ 	if (!has_type) {
+ 		liftoff_log(LIFTOFF_ERROR,
+ 			    "plane %"PRIu32" is missing the 'type' property",
+ 			    plane->id);
+-		free(plane);
+ 		errno = EINVAL;
+-		return NULL;
++		goto fail;
+ 	} else if (!has_zpos) {
+ 		plane->zpos = guess_plane_zpos_from_type(device, plane->id,
+ 							 plane->type);
+@@ -147,6 +147,19 @@ liftoff_plane_create(struct liftoff_device *device, uint32_t id)
+ 	}
+ 
+ 	return plane;
++
++fail:
++	drmModeFreePlane(drm_plane);
++	drmModeFreeObjectProperties(drm_props);
++
++	for (i = 0; i < plane->props_len; i++) {
++		drmModeFreeProperty(plane->props[i]);
++	}
++	free(plane->props);
++	drmModeFreePropertyBlob(plane->in_formats_blob);
++	free(plane);
++
++	return NULL;
+ }
+ 
+ void
+-- 
+GitLab
+

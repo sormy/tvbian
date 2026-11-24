@@ -1,0 +1,25 @@
+From 9114b1e4dc8646b8f6512518567477926922905e Mon Sep 17 00:00:00 2001
+From: Simon Ser <contact@emersion.fr>
+Date: Tue, 30 Sep 2025 22:29:17 +0200
+Subject: [PATCH] readme: drop CI badge
+
+GitLab already provides UI to display per-commit build status.
+---
+ README.md | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/README.md b/README.md
+index 847da4b..45ed94a 100644
+--- a/README.md
++++ b/README.md
+@@ -1,7 +1,5 @@
+ # libliftoff
+ 
+-[![builds.sr.ht status](https://builds.sr.ht/~emersion/libliftoff/commits/master.svg)](https://builds.sr.ht/~emersion/libliftoff/commits/master)
+-
+ Lightweight KMS plane library.
+ 
+ libliftoff eases the use of KMS planes from userspace without standing in your
+-- 
+GitLab
+

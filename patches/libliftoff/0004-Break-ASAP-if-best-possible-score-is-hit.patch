@@ -1,0 +1,50 @@
+From d84c37ac7637f14c8281a6a0f2b5b0cbe69341df Mon Sep 17 00:00:00 2001
+From: David Turner <david.turner@raspberrypi.com>
+Date: Thu, 21 Dec 2023 14:39:38 +0000
+Subject: [PATCH] Break ASAP if best possible score is hit
+
+Previously we just checked once at the beginning of
+output_choose_layers() whether we'd already reached the best possible
+score.  Instead, check in every iteration of the per-layer loop.
+
+Before this patch, `bench -p 15 -l 14` does 105 atomic test commits.
+After this patch, `bench -p 15 -l 14` does 14 atomic test commits
+---
+ alloc.c | 14 +++++++++-----
+ 1 file changed, 9 insertions(+), 5 deletions(-)
+
+diff --git a/alloc.c b/alloc.c
+index d7be6e2..a947b07 100644
+--- a/alloc.c
++++ b/alloc.c
+@@ -504,11 +504,6 @@ output_choose_layers(struct liftoff_output *output, struct alloc_result *result,
+ 	plane = liftoff_container_of(step->plane_link, plane, link);
+ 
+ 	best_possible_score = calculate_best_possible_score(output, result, step);
+-	if (result->best_score >= best_possible_score) {
+-		/* Even if we find a layer for all remaining planes, we won't
+-		 * find a better allocation. Give up. */
+-		return 0;
+-	}
+ 
+ 	cursor = drmModeAtomicGetCursor(result->req);
+ 
+@@ -537,6 +532,15 @@ output_choose_layers(struct liftoff_output *output, struct alloc_result *result,
+ 			break;
+ 		}
+ 
++		if (result->best_score >= best_possible_score) {
++			/* Even if we find a layer for all remaining planes, we won't
++			 * find a better allocation. Give up. */
++			liftoff_log(LIFTOFF_DEBUG,
++				    "%sEarly-exit because %d is the best possible score",
++				    step->log_prefix, result->best_score);
++			return 0;
++		}
++
+ 		/* Try to use this layer for the current plane */
+ 		ret = plane_apply(plane, layer, result->req);
+ 		if (ret == -EINVAL) {
+-- 
+GitLab
+
