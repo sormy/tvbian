@@ -139,6 +139,11 @@ another, so nothing rots when one is rewritten.
 | `patches/meson-dw-hdmi/README.md`        | mainline HDMI for the GXLX2 (S905L3), in-tree                         |
 | `patches/meson-codecs/README.md`         | the video decoder in-tree and the encoders beside it on the GXLX2     |
 | `patches/gst-plugins-good/README.md`     | VC-1 through V4L2 on GStreamer 1.26.2: the patched plugin, by hand    |
+| `patches/labwc/README.md`                | labwc showing a client's large buffer on a hardware plane             |
+| `patches/libliftoff/README.md`           | libliftoff: upstream's fixes since 0.5.0, a drop-in for Debian's      |
+| `patches/wlroots/README.md`              | wlroots giving libliftoff's plane search time on slow atomic tests    |
+| `patches/gstreamer/README.md`            | GStreamer's plugin registry not rescanned each time a device is used  |
+| `patches/wpewebkit/README.md`            | WPE WebKit's sandbox letting Rockchip's MPP in                        |
 | `patches/mpp/README.md`                  | Rockchip's MPP: its probe a call; IEP2 keeping every field            |
 | `patches/ffmpeg/README.md`               | FFmpeg 9.0.2: V4L2 request, mem2mem and Rockchip MPP codecs           |
 | `patches/kodi/README.md`                 | Kodi 22 on GBM: handing the screen to another program                 |

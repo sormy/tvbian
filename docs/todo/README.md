@@ -22,6 +22,12 @@ below.
       options (filesystems, USB and Bluetooth devices, networking, input), each family adding only
       its SoC's; today they build from 4066 generic options (`rk35xx-next`) to 6524 (`meson64`), and
       their default CPU governors differ.
+- [ ] **Orphaned packages retired from the repo**: `release/expire.py` keeps every package's newest
+      version for good, so a package no release publishes any more (an extra dropped, as
+      `gst-plugins-bad`, or a package renamed) stays in the index forever and boxes keep it
+      installed. Wanted: expiry notices a package no run's plan names and retires it
+      `TVB_APT_KEEP_DAYS` after its last publication, the policy older versions follow; the
+      kernel-release rule (kept while what it serves stays) unchanged.
 - [ ] **Our Mesa in the published repo**: `extras/mesa` is unreleased, so a box installing Mesa gets
       Debian's, a third of Panfrost's on-screen speed at 2256×1504. Ours outranks Debian's by
       version once published.

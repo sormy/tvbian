@@ -18,28 +18,31 @@ session leaves the server.
 
 One suggested setup, light enough for a Mali-450:
 
-| Part            | Choice                                 | Why                                        |
-| --------------- | -------------------------------------- | ------------------------------------------ |
-| Compositor      | `labwc`                                | stacking, no animations; Raspberry Pi OS's |
-| Top bar         | `waybar`                               | a macOS-like menu bar                      |
-| Dock            | `waybar`                               | a macOS-like dock                          |
-| Theme           | WhiteSur, dark or light                | the macOS look; `extras/whitesur`          |
-| Font            | Inter                                  | close to the macOS system font             |
-| Login           | `greetd` with a graphical greeter      | Wayland-native                             |
-| Audio           | PipeWire                               | Debian's default                           |
-| 3D              | our Mesa (`extras/mesa`)               | Debian's is a third of Panfrost's speed    |
-| Video in apps   | our VA-API driver (`tvb-va-driver`)    | browsers and players decode in hardware    |
-| Browser, player | Firefox, Chromium, mpv, with VA-API on | their settings, not patches                |
+| Part            | Choice                                                                         | Why                                                         |
+| --------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------- |
+| Compositor      | `labwc`                                                                        | stacking, no animations; Raspberry Pi OS's                  |
+| Top bar         | `waybar`                                                                       | a macOS-like menu bar                                       |
+| Dock            | `waybar`                                                                       | a macOS-like dock                                           |
+| Theme           | WhiteSur, dark or light                                                        | the macOS look; `extras/whitesur`                           |
+| Font            | Inter                                                                          | close to the macOS system font                              |
+| Login           | `greetd` with a graphical greeter                                              | Wayland-native                                              |
+| Audio           | PipeWire                                                                       | Debian's default                                            |
+| 3D              | our Mesa (`extras/mesa`)                                                       | Debian's is a third of Panfrost's speed                     |
+| Video in apps   | our VA-API driver (`tvb-va-driver`)                                            | browsers and players decode in hardware                     |
+| Browser, player | Falkon, mpv, with VA-API on                                                    | Falkon draws on every GPU; Firefox and Chromium need GLES 3 |
+| Apps            | foot, pcmanfm, featherpad, lximage-qt, qpdfview, xarchiver, galculator, lxtask | light; Qt ones share Falkon's Qt                            |
+| Settings        | pavucontrol-qt, wdisplays, blueman, nm-applet, from the bar                    | audio, screens, Bluetooth, Wi-Fi                            |
 
-Apps leave hardware decode off by default, so the session also ships the system-wide defaults that
-send each one's video through VA-API:
+Two toolkits, each by role: GTK 3 for the shell, which waybar and gtkgreet are, and Qt 6 for apps,
+which Falkon brings and the rest share nearly free; no GTK 4 and no Python but blueman's.
+`apt install --install-recommends tvb-desktop` installs it: the session's own parts are its depends,
+its apps recommends, each removable alone. Apps leave hardware decode off by default, so the session
+also ships the system-wide defaults that send each one's video through VA-API:
 
-| App       | Where                                 | What                                              |
-| --------- | ------------------------------------- | ------------------------------------------------- |
-| Firefox   | `/usr/lib/firefox-esr/defaults/pref/` | `media.ffmpeg.vaapi.enabled`, the RDD sandbox off |
-| Chromium  | `/etc/chromium.d/`                    | `--enable-features=VaapiVideoDecoder` and kin     |
-| mpv       | `/etc/mpv/mpv.conf`                   | `hwdec=vaapi`, `vo=dmabuf-wayland`, H.264 sites   |
-| GStreamer | `tvb-va-driver`                       | `GST_VA_ALL_DRIVERS=1`                            |
+| App       | Where               | What                                            |
+| --------- | ------------------- | ----------------------------------------------- |
+| mpv       | `/etc/mpv/mpv.conf` | `hwdec=vaapi`, `vo=dmabuf-wayland`, H.264 sites |
+| GStreamer | `tvb-va-driver`     | `GST_VA_ALL_DRIVERS=1` everywhere but meson     |
 
 The GPU and decoder of each SoC:
 
@@ -53,23 +56,21 @@ The GPU and decoder of each SoC:
 - [ ] **The desktop runs at 1080p on every family**, idle CPU under 5 %, no dropped frames moving a
       window; 4K output only where the GPU holds it.
 - [ ] **3D in hardware**: `glmark2-es2-wayland` runs on the GPU, not `llvmpipe`, on both kernels.
-- [ ] **Video in hardware in Debian's apps**: Firefox, Chromium and mpv play H.264 and HEVC 1080p
-      through VA-API, CPU under 30 %, on each family.
-- [ ] **The defaults above, shipped by `tvb-desktop`**, each checked by the app's own report
-      (`about:support`, `chrome://gpu`, mpv's `hwdec-current`), not assumed.
+- [ ] **Video in hardware in the desk's apps**: Falkon and mpv play H.264 and HEVC 1080p through
+      VA-API, CPU under 30 %, on each family.
+- [ ] **The defaults above, shipped by `tvb-desktop`**, each checked by the app's own report (mpv's
+      `hwdec-current`), not assumed.
 - [ ] **Encode in hardware** where the SoC has an encoder: `ffmpeg -c:v h264_v4l2m2m` or the MPP
       encoder from a webcam, measured.
 - [ ] **Our Mesa and VA-API driver are published** in the repo, so `apt` picks ours over Debian's.
-- [ ] **A browser that keeps up on `lima`**: Firefox's WebRender and Chromium's GPU process both
-      need OpenGL ES 3.0, and the Mali-450 has 2.0, so both paint on the CPU; so does WebKitGTK,
-      whose GTK gets no GL context. `cog` and Qt WebEngine's `falkon` draw on Lima, yet decode video
-      on the CPU.
+- [ ] **Falkon on WPE as the desk's `falkon`** (`falkon-wpe.md`): Debian's, on Qt WebEngine, draws
+      on Lima yet decodes video on the CPU.
 - [ ] **Hardware video in WebKit on `rk35xx`**: its sandbox hides `/dev/mpp_service` and the device
       tree that MPP reads, so `cog` decodes in software.
 - [ ] **YouTube in mpv out of the box**: Debian's `yt-dlp` is too old for YouTube.
 - [ ] **A screen plugged in after login gets its scale**: `scale-outputs` runs at login only.
 - [ ] **Measured on a `lima` box and a `panfrost` box**: frame rate of the desktop, a 1080p video in
-      Firefox, memory after login.
+      Falkon, memory after login.
 
 ## TV: `tvb-kodi`, `tvb-fuseamp`
 

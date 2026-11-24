@@ -66,3 +66,16 @@ no-SD-slot route, remote pairing, serial, recovery.
 - One move per commit, by `git mv`, with every reference in the repo fixed in the same commit.
 - After each: `./build.sh release` and a diff of the images' payload files against the commit
   before. Only paths in the repo move; a file on a box moves only where the step says so.
+
+## Next: packages by purpose
+
+Replaces the folders above once done.
+
+- [ ] **Reorganize into `packages/<group>/<name>`**, grouped by what a package is for (`kernel`,
+      `wireless`, `display`, `video`, `desktop`, …), in place of today's split by how each is built
+      (`extras/`, `patches/`, `modules/`, `session/`, `va-driver/`, `firmware/`). Each package one
+      directory with one recipe structure: its source, its patches, its build, its tests, its
+      README. Each states its kind: an **overlay** (Debian's source at a pinned version, our patches
+      over it), one that **tracks Debian** (a suite's newest source at build time, as `wpewebkit`
+      from sid), or **our own** (an upstream release or our code). The build, the release plan and
+      the bump process read that kind instead of each tree's conventions.
