@@ -2,7 +2,6 @@
 
 - [ ] **The GPU's clocks on 6.1 with their measured reason**: both `ACLK_GPU_MALI`, where next2's
       core runs on SCMI.
-- [ ] **The analog codec's timing on 6.1**: 3.02 s against 6.12's 2.03 s for a 2 s clip.
 - [ ] **USB Ethernet on the SuperSpeed hub** through every warm boot and under load.
 - [ ] **The FD650B-S's status icons**, if the panel has them.
 - [ ] **The SDIO power-off delay at its measured minimum**: 2 s is the only value tried.

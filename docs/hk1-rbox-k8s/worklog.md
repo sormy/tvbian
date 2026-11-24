@@ -468,3 +468,9 @@
 - 6.1 with the patch, four boots with the screen attached: each `connected`, the 256-byte EDID,
   `SNKDET` 1, and 2256×1504 at 60 Hz set at 12.8 s with the console on HDMI. Before it, four of four
   `disconnected`.
+
+## 2026-11-24 — the analog codec on time
+
+- The 6.1 codec's "3.02 s for a 2 s clip" was a misreading: `audio`'s clip is 3 s, and its `2` is
+  the channel count. Every HK1 regression reads 3.01–3.03 s on all three kernels. On 6.1, by hand:
+  3.03 s and 3.02 s for 3 s at 44.1 and 48 kHz, 2.02 s for 2 s.
