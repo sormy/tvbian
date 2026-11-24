@@ -230,9 +230,9 @@ or binding. A patch needed only by another listed patch is not named.
 
 The base is the `soc` named by the `.translate.conf`. A board kept on its vendor kernel uses the
 target base's `soc` and `soc-patches` instead, which may name a reference board file. A board's
-`BOARD_KERNEL_DTB_UPSTREAM` overrides both, and `--soc <url>` tries another for one run (see
-`trees.md` for choosing). The dtsi is read as cpp would splice it, with every header fetched from
-its own tree. The proof compiles with `-@`, like the board's own build.
+`BOARD_KERNEL_DTB_BASE` overrides both, and `--soc <url>` tries another for one run (see `trees.md`
+for choosing). The dtsi is read as cpp would splice it, with every header fetched from its own tree.
+The proof compiles with `-@`, like the board's own build.
 
 ## board.dts and phandles
 

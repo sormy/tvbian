@@ -59,7 +59,7 @@ for BOARD in $BOARDS; do
 	fi
 	SOURCE=$(sed -n "s/^${KEY}_DTB_SOURCE=//p" "$DIR/board.conf")
 	TARGET=$(sed -n "s/^${KEY}_DTB_TARGET=//p" "$DIR/board.conf")
-	VIEW_BASE=$(sed -n "s/^${KEY}_DTB_UPSTREAM=//p" "$DIR/board.conf")
+	VIEW_BASE=$(sed -n "s/^${KEY}_DTB_BASE=//p" "$DIR/board.conf")
 	for base in "$SOURCE" "$TARGET"; do
 		[ -f "$BASES/$base.conf" ] ||
 			{ echo "boards/$BOARD/board.conf: ${KEY}_DTB_SOURCE/_TARGET names no base in tools/dtcx/bases/: '$base'"; exit 1; }

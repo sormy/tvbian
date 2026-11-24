@@ -222,7 +222,7 @@ def upstream_args(board: str) -> list[str]:
     """upstream.py's arguments for the board's kernel tree, as build-dtb.sh gives them."""
     text = (ROOT / "boards" / board / "board.conf").read_text()
     conf = dict(re.findall(r"^BOARD_KERNEL_DTB_(\w+)=(\S+)$", text, re.MULTILINE))
-    base = ["--soc", conf["UPSTREAM"]] if "UPSTREAM" in conf else []
+    base = ["--soc", conf["BASE"]] if "BASE" in conf else []
     return [*base, conf["SOURCE"], conf["TARGET"]]
 
 

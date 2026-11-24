@@ -62,8 +62,8 @@ In order: each stage is the way back for the next.
      SoC dtsi plus only the board's changes, and proves it describes the dtb
      (`tools/dtcx/README.md`). Its size is what an upstream board file would be; a block in it that
      no board fact explains is a bug.
-   - **The view's base is tried, not assumed** (`BOARD_KERNEL_DTB_UPSTREAM`): build the view over
-     each upstream board of the SoC and keep the one that shrinks it most; else the SoC dtsi.
+   - **The view's base is tried, not assumed** (`BOARD_KERNEL_DTB_BASE`): build the view over each
+     upstream board of the SoC and keep the one that shrinks it most; else the SoC dtsi.
    - **Fix translation bugs in the tool**, with a test that fails without the fix, then re-run every
      board's translation: unchanged, or changed only as intended. A conf refactor must leave every
      tree byte-identical.

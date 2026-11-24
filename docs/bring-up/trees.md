@@ -73,7 +73,7 @@ patch, targeting mainline's tree.
   root compatible names either the template (`rockchip,rk3518-evb1-ddr4-v10`,
   `rockchip,rk3528-evb2-ddr3-v10`) or just the SoC (`allwinner,h616`, `amlogic, Gxl`); the base is
   that reference board's file or the SoC dtsi. The base conf's `soc` sets the default, and a board's
-  `BOARD_KERNEL_DTB_UPSTREAM` overrides it.
+  `BOARD_KERNEL_DTB_BASE` overrides it.
   - A template's name says nothing about its RAM: every box here names a DDR4 EVB, but none is DDR4
     (the M2 Plus is DDR3; the 3518, 3518D and R69-1 are LPDDR3). DRAM belongs to the loader, not the
     tree.
