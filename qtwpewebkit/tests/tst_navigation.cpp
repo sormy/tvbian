@@ -156,6 +156,17 @@ private Q_SLOTS:
         QCOMPARE(page->title(), QStringLiteral("ünïcode ✓"));
     }
 
+    // a browser closes a tab only once its page agrees
+    void requestClose()
+    {
+        ShownView shown;
+        QWebEnginePage* page = shown.page();
+        QVERIFY(loadsOk(page, m_server->url("/a")));
+        QSignalSpy closeRequested(page, &QWebEnginePage::windowCloseRequested);
+        page->triggerAction(QWebEnginePage::RequestClose);
+        QTRY_COMPARE(closeRequested.count(), 1);
+    }
+
     void sameDocumentNavigation_data()
     {
         QTest::addColumn<QString>("script");
@@ -407,6 +418,26 @@ private Q_SLOTS:
         QTRY_COMPARE(opened->page()->url(), m_server->url("/b"));
         QTRY_COMPARE(opened->page()->title(), QStringLiteral("b"));
         QCOMPARE(evaluate(opened->page(), QStringLiteral("window.opener !== null")), QVariant(true));
+    }
+
+    // A browser that makes more than one page while handling the request opens the window in any of them
+    void windowOpenedInALaterPage()
+    {
+        ShownView shown;
+        QWebEnginePage* page = shown.page();
+        page->settings()->setAttribute(QWebEngineSettings::JavascriptCanOpenWindows, true);
+        QVERIFY(loadsOk(page, m_server->url("/a")));
+        std::unique_ptr<ShownView> first, opened;
+        connect(page, &QWebEnginePage::newWindowRequested, this, [&](QWebEngineNewWindowRequest& request) {
+            first = std::make_unique<ShownView>();
+            opened = std::make_unique<ShownView>();
+            request.openIn(opened->page());
+        });
+        evaluate(page, QStringLiteral("window.open('/b')"));
+        QTRY_VERIFY(opened);
+        QTRY_COMPARE(opened->page()->url(), m_server->url("/b"));
+        QTRY_COMPARE(opened->page()->title(), QStringLiteral("b"));
+        QCOMPARE(page->url(), m_server->url("/a"));
     }
 
     // Falkon leaves windows to the engine: with JavascriptCanOpenWindows off, its default, only a user's click

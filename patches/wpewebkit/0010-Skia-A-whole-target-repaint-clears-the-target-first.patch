@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 22 Nov 2026 00:00:00 +0000
+Subject: [PATCH] [Skia] A whole-target repaint clears the target first
+
+With damage used for compositing, a frame clears the target only when it
+has a clear color, which outside async scrolling it does not; a frame that
+repaints the whole target, as each frame of a scroll, then draws over the
+old contents. A tiled GPU, as the Mali-450, reads those contents back into
+its tile memory before it draws, a whole-target read for nothing: on the
+Mali-450 a 1156x695 copy takes 4.2 ms without a clear and 2.4 ms with one.
+Clear the target when it is redrawn whole.
+
+---
+--- a/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.cpp
++++ b/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.cpp
+@@ -624,6 +624,10 @@
+                 damageRegion->fillCanvasInDeviceSpace(canvas, clearPaint);
+             } else
+                 canvas.clear(*clearColor);
++        } else if (!damageRegion) {
++            // The whole target is redrawn, so its old contents are not needed: clearing it says so, and
++            // spares a tiled GPU reading them back into its tile memory before it draws.
++            canvas.clear(SK_ColorTRANSPARENT);
+         }
+ 
+         PaintContext context;

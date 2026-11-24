@@ -53,8 +53,21 @@ static const guint middleButton = 2;
 
 // where QtWebEngine logs a page's console messages by default
 Q_LOGGING_CATEGORY(jsConsole, "js")
-// While a page handles a window.open: a page made then is related to its view, so the popup keeps window.opener
+// While a page handles a window.open: the first page made then is related to its view, so the popup keeps
+// window.opener; WebKit gives the window's features to that one view only
 static WebKitWebView* openerOfNewPages = nullptr;
+static QWebEnginePage* relatedPageOfNewWindow = nullptr;
+
+static WebKitWebView* newWebView(WebKitWebView* related, WebKitNetworkSession* session, WebKitUserContentManager* contents,
+    WebKitSettings* settings)
+{
+    // a related view takes its display and network session from the view it is related to
+    if (related)
+        return WEBKIT_WEB_VIEW(g_object_new(WEBKIT_TYPE_WEB_VIEW, "related-view", related, "user-content-manager", contents,
+            "settings", settings, nullptr));
+    return WEBKIT_WEB_VIEW(g_object_new(WEBKIT_TYPE_WEB_VIEW, "display", QtWpeWebKit::display(), "network-session", session,
+        "user-content-manager", contents, "settings", settings, nullptr));
+}
 
 QWebEnginePage* QtWpeWebKit::pageOf(WebKitWebView* webView)
 {
@@ -259,12 +272,21 @@ struct QWebEnginePage::WebViewSignals {
     // the URL itself, and WebKit gets no view back
     static WebKitWebView* create(WebKitWebView* view, WebKitNavigationAction* action, QWebEnginePage* page)
     {
-        QWebEngineNewWindowRequest request(destinationOf(action), urlOf(action), webkit_navigation_action_is_user_gesture(action), view);
+        const QUrl url = urlOf(action);
+        QWebEngineNewWindowRequest request(destinationOf(action), url, webkit_navigation_action_is_user_gesture(action), view);
         openerOfNewPages = view;
+        relatedPageOfNewWindow = nullptr;
         Q_EMIT page->newWindowRequested(request);
         openerOfNewPages = nullptr;
         QWebEnginePage* opened = request.openedPage();
-        return opened ? WEBKIT_WEB_VIEW(g_object_ref(opened->m_webView)) : nullptr;
+        if (!opened)
+            return nullptr;
+        if (opened == std::exchange(relatedPageOfNewWindow, nullptr))
+            return WEBKIT_WEB_VIEW(g_object_ref(opened->m_webView));
+        // Another page took the window: WebKit would not find the window's features on it. It loads the address
+        // itself, the popup without an opener
+        webkit_web_view_load_uri(opened->m_webView, url.toEncoded().constData());
+        return nullptr;
     }
 
     static gboolean scriptDialog(WebKitWebView*, WebKitScriptDialog* dialog, QWebEnginePage* page)
@@ -512,17 +534,15 @@ QWebEnginePage::QWebEnginePage(QWebEngineProfile* profile, QObject* parent)
     , m_openerView(openerOfNewPages && webkit_web_view_get_network_session(openerOfNewPages) == profile->networkSession()
               ? openerOfNewPages
               : nullptr)
-    , m_webView(WEBKIT_WEB_VIEW(g_object_new(WEBKIT_TYPE_WEB_VIEW,
-          "related-view", m_openerView,
-          "display", QtWpeWebKit::display(),
-          "network-session", profile->networkSession(),
-          "user-content-manager", m_userContentManager,
-          "settings", m_settings->webKitSettings(),
-          nullptr)))
+    , m_webView(newWebView(m_openerView, profile->networkSession(), m_userContentManager, m_settings->webKitSettings()))
     , m_history(std::make_unique<QWebEngineHistory>(this))
     , m_stateScript(webkit_user_script_new_for_world(stateScript, WEBKIT_USER_CONTENT_INJECT_TOP_FRAME,
           WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START, QtWpeWebKit::internalWorld, nullptr, nullptr))
 {
+    if (m_openerView) {
+        relatedPageOfNewWindow = this;
+        openerOfNewPages = nullptr;
+    }
     webkit_user_content_manager_add_script(m_userContentManager, m_stateScript);
     webkit_user_content_manager_register_script_message_handler(m_userContentManager, stateHandler, QtWpeWebKit::internalWorld);
     profile->scripts()->addManager(m_userContentManager);
@@ -597,6 +617,9 @@ void QWebEnginePage::triggerAction(WebAction action, bool)
         break;
     case ExitFullScreen:
         setFullScreen(m_webView, false);
+        break;
+    case RequestClose:
+        webkit_web_view_try_close(m_webView);
         break;
     case DownloadLinkToDisk:
         if (m_view)

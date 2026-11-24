@@ -252,6 +252,52 @@ private Q_SLOTS:
         QCOMPARE(injected.contains(QLatin1String("frame")), runsOnSubFrames);
     }
 
+    void headerUrls_data()
+    {
+        QTest::addColumn<QString>("header");
+        QTest::addColumn<bool>("runs");
+        QTest::newRow("no header") << QString() << true;
+        QTest::newRow("@include this page") << QStringLiteral("@include %1") << true;
+        QTest::newRow("@include another page") << QStringLiteral("@include %1/other") << false;
+        QTest::newRow("@include with ?, not a wildcard") << QStringLiteral("@include *pag?") << false;
+        QTest::newRow("@include ending in the path") << QStringLiteral("@include */page") << true;
+        QTest::newRow("@include an application's page") << QStringLiteral("@include falkon:speeddial") << false;
+        QTest::newRow("@exclude this page") << QStringLiteral("@exclude */page") << false;
+        QTest::newRow("@include, then @exclude it") << QStringLiteral("@include *\n// @exclude %1") << false;
+        QTest::newRow("@match any host") << QStringLiteral("@match *://*/page") << true;
+        QTest::newRow("@match another path") << QStringLiteral("@match *://*/other") << false;
+        QTest::newRow("@match <all_urls>") << QStringLiteral("@match <all_urls>") << true;
+        QTest::newRow("@match malformed") << QStringLiteral("@match page") << false;
+    }
+
+    // A Greasemonkey header's URLs pick the pages a script runs on, as in QtWebEngine
+    void headerUrls()
+    {
+        QFETCH(QString, header);
+        QFETCH(bool, runs);
+        m_server->route("/page", pageHtml.toUtf8());
+        const QUrl url = m_server->url("/page");
+        const QString source = header.isEmpty()
+            ? QStringLiteral("window.ran = true;")
+            : QStringLiteral("// ==UserScript==\n// %1\n// ==/UserScript==\nwindow.ran = true;").arg(QString(header).replace(QLatin1String("%1"), url.toString()));
+        QWebEngineProfile profile;
+        profile.scripts()->insert(userScript(source, QWebEngineScript::DocumentReady));
+        ShownView shown(new QWebEnginePage(&profile));
+        QVERIFY(loadsOk(shown.page(), url));
+        QCOMPARE(evaluate(shown.page(), QStringLiteral("window.ran === true")), QVariant(runs));
+    }
+
+    void headerSettings()
+    {
+        QWebEngineScript script;
+        script.setSourceCode(
+            QStringLiteral("// ==UserScript==\n// @name   from header\n// @run-at document-start\n// ==/UserScript==\n"));
+        QCOMPARE(script.name(), QStringLiteral("from header"));
+        QCOMPARE(script.injectionPoint(), QWebEngineScript::DocumentCreation);
+        script.setSourceCode(QStringLiteral("// ==UserScript==\n// @run-at document-idle\n// ==/UserScript==\n"));
+        QCOMPARE(script.injectionPoint(), QWebEngineScript::Deferred);
+    }
+
     void scriptCollection()
     {
         QWebEngineProfile profile;

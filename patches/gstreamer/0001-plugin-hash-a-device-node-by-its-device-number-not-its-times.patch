@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Fri, 20 Nov 2026 00:00:00 +0000
+Subject: [PATCH] plugin: hash a device node by its device number, not its
+ times
+
+A plugin's external dependency on device nodes, such as va's on
+/dev/dri/renderD* or v4l2codecs' on /dev/video*, is hashed by the
+nodes' size, mtime and ctime. The kernel updates a node's times as the
+device is used, so any program that opens the GPU makes the cached
+plugin stale and the next process to start rescans it and rewrites the
+whole registry: on an RK3528, half a second of every browser start.
+A node names the same device while its device number is the same, so
+hash that.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+--- a/gst/gstplugin.c
++++ b/gst/gstplugin.c
+@@ -1673,6 +1673,13 @@
+ #endif
+     return (guint) - 1;
+ 
++#ifndef G_OS_WIN32
++  /* a device node's times change as it is used; the device is the same while
++   * its number is */
++  if (S_ISCHR (s->st_mode) || S_ISBLK (s->st_mode))
++    return (guint) s->st_rdev;
++#endif
++
+   /* completely random formula */
+   return ((s->st_size << 3) + (s->st_mtime << 5)) ^ s->st_ctime;
+ }

@@ -5,7 +5,7 @@ set -euo pipefail
 
 PACKAGE_VERSION=$1
 INPUTS=$2
-BUILD_DEPENDS="cmake ninja-build pkg-config g++ qt6-base-dev qt6-webchannel-dev libegl-dev libgles-dev"
+BUILD_DEPENDS="cmake ninja-build pkg-config g++ qt6-base-dev qt6-base-private-dev qt6-webchannel-dev libegl-dev libgles-dev libwayland-dev wayland-protocols"
 WORK=/work/qtwpewebkit
 STAGE=$WORK/stage
 # the library's package, named for its soname

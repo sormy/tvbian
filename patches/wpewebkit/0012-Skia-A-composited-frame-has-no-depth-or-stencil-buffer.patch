@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 22 Nov 2026 00:00:00 +0000
+Subject: [PATCH] [Skia] A composited frame has no depth or stencil buffer
+
+Every buffer the compositor renders into gets a depth and stencil
+renderbuffer, which the TextureMapper clips with. Composited with Skia it
+goes unused, but a tiled GPU still loads and stores it with every frame:
+on the Mali-450, a 1734x1042 frame costs 8.8 ms with one attached and
+3.6 ms without. Composited with Skia, attach none; Skia is told there are
+no stencil bits and clips without them.
+
+---
+--- a/Source/WebKit/WebProcess/WebPage/CoordinatedGraphics/AcceleratedSurface.cpp
++++ b/Source/WebKit/WebProcess/WebPage/CoordinatedGraphics/AcceleratedSurface.cpp
+@@ -182,6 +182,11 @@
+     glGenFramebuffers(1, &m_fbo);
+     glBindFramebuffer(GL_FRAMEBUFFER, m_fbo);
+ 
++    // Only the TextureMapper clips with the stencil. Skia, told there is none, clips without one, and a
++    // tiled GPU then loads and stores no depth and stencil buffer with every frame.
++    if (m_surface->useSkia())
++        return;
++
+     glGenRenderbuffers(1, &m_depthStencilBuffer);
+     glBindRenderbuffer(GL_RENDERBUFFER, m_depthStencilBuffer);
+     glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8_OES, size.width(), size.height());

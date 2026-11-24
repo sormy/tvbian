@@ -1,0 +1,17 @@
+<!doctype html><title>net</title><script>
+// Throughput of one large download and of many small sequential ones, as a segment player fetches
+async function get(url) { const r = await fetch(url, { cache: "no-store" }); return (await r.arrayBuffer()).byteLength; }
+async function speed(urls) {
+  const start = performance.now(); let bytes = 0;
+  for (const url of urls) bytes += await get(url);
+  const ms = performance.now() - start;
+  return `${(bytes * 8 / 1e3 / ms).toFixed(1)}Mbit/s(${(ms / urls.length).toFixed(0)}ms/req)`;
+}
+(async () => {
+  const base = "https://speed.cloudflare.com/__down?bytes=";
+  const small = await speed(Array.from({ length: 20 }, (_, i) => base + (200000 + i)));
+  const large = await speed([base + 4000000]);
+  document.title = `net small=${small} large=${large} proto=${performance.getEntriesByType("resource").slice(-1)[0]?.nextHopProtocol}`;
+  fetch("/report?" + encodeURIComponent(document.title));
+})();
+</script>

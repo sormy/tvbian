@@ -14,4 +14,8 @@ sed -i 's/^Description: lightweight web browser based on Qt WebEngine$/Descripti
 # WebKit spellchecks with Hunspell's dictionaries
 sed -i 's/^ libsvtav1enc0$/ libsvtav1enc0, hunspell-en-us | hunspell-dictionary/' debian/control
 grep -q 'hunspell-dictionary' debian/control
+# Qt draws SVG icons, Falkon's own and the theme's, only with its SVG plugins, which QtWebEngine's
+# packages brought along: without them the tabs' close and new-tab buttons are blank
+sed -i '/^Package: falkon$/,/^Depends:/ s/^Depends: /Depends: qt6-svg-plugins, /' debian/control
+grep -q 'qt6-svg-plugins' debian/control
 ! grep -qi webengine <(sed -n '/^Package: falkon$/,/^$/p' debian/control)

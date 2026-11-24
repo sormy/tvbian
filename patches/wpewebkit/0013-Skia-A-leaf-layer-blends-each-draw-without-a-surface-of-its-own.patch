@@ -1,0 +1,61 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 22 Nov 2026 00:00:00 +0000
+Subject: [PATCH] [Skia] A leaf layer blends each draw without a surface of
+ its own
+
+A layer with a blend mode is painted into an intermediate surface, which
+is then blended, so the mode applies to the layer as a whole. A leaf with
+a single kind of content and no effect of its own, as an image with
+mix-blend-mode, covers each pixel with one draw at most: blending each
+draw is the same, and spares a surface, a render pass and a flush every
+frame. Tiles at an angle keep the surface, as they share the anti-aliased
+pixels along their seams.
+
+---
+--- a/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.h
++++ b/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.h
+@@ -266,6 +266,7 @@
+     void paintWithReplica(SkCanvas&, PaintContext&);
+     void paintWithMaskAndBackdrop(SkCanvas&, PaintContext&);
+     void paintWithBlendMode(SkCanvas&, PaintContext&);
++    bool drawsEachPixelOnce() const;
+     void paintWithFilterAndMask(SkCanvas&, PaintContext&);
+     void paintSelf(SkCanvas&, PaintContext&);
+     void paintContents(SkCanvas&, PaintContext&);
+--- a/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.cpp
++++ b/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.cpp
+@@ -1765,6 +1765,12 @@
+         blendMode = SkBlendMode::kSrcOver;
+     SetForScope scopedBlendMode(context.blendMode, context.blendMode ? context.blendMode : blendMode);
+ 
++    // Each of its draws blends with what lies under it as the layer as a whole would: no surface of its own
++    if (drawsEachPixelOnce()) {
++        paintWithFilterAndMask(canvas, context);
++        return;
++    }
++
+     ComputeOverlapRegionData data {
+         .mode = ComputeOverlapRegionMode::Intersection,
+         .clipBounds = canvas.getDeviceClipBounds(),
+@@ -1810,6 +1816,20 @@
+     }
+ }
+ 
++// A leaf with a single kind of content and no effect of its own covers each pixel with one draw at most
++bool SkiaCompositingLayer::drawsEachPixelOnce() const
++{
++    if (!m_children.isEmpty() || filter() || m_mask || m_replica || m_replicatedLayer || m_backdrop.filter || m_debugBorder)
++        return false;
++    // Tiles at an angle share the anti-aliased pixels along their seams
++    const auto& transform = m_transforms.combined;
++    if (m_backingStore && !(transform.isAffine() && !transform.b() && !transform.c()))
++        return false;
++    const bool solidColor = m_contentsSolidColor.isValid() && m_contentsSolidColor.isVisible();
++    const bool contents = m_contentsBuffer || m_imageBackingStore;
++    return !!m_backingStore + solidColor + contents <= 1;
++}
++
+ FloatRect SkiaCompositingLayer::transformedFlattenedBounds() const
+ {
+     auto bounds = m_transforms.combined.mapRect(m_rect);

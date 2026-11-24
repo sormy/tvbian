@@ -1,5 +1,6 @@
 #include "qwebenginesettings.h"
 
+#include <QCoreApplication>
 #include <QSet>
 #include <wpe/webkit.h>
 
@@ -59,6 +60,19 @@ const QHash<Settings::FontSize, std::pair<SizeGetter, SizeSetter>> sizeAccessors
 
 const int defaultMinimumLogicalFontSize = 6;
 
+// WebKit's user agent ends with the application's own product token, as Epiphany's "Epiphany/46"
+void setApplicationUserAgent(WebKitSettings* settings)
+{
+    QString name = QCoreApplication::applicationName();
+    if (name.isEmpty())
+        return;
+    name[0] = name[0].toUpper();
+    // a token's version has no spaces: "25.04.1 (abc123)" is 25.04.1
+    const QByteArray version = QCoreApplication::applicationVersion().section(QLatin1Char(' '), 0, 0).toUtf8();
+    webkit_settings_set_user_agent_with_application_details(settings, name.toUtf8().constData(),
+        version.isEmpty() ? nullptr : version.constData());
+}
+
 } // namespace
 
 QWebEngineSettings::QWebEngineSettings(QWebEngineSettings* parent)
@@ -70,6 +84,8 @@ QWebEngineSettings::QWebEngineSettings(QWebEngineSettings* parent)
     // Chromium has them always, and QtWebEngine no setting for them; WebKit leaves them off
     webkit_settings_set_enable_webrtc(m_webKitSettings, TRUE);
     webkit_settings_set_enable_media_stream(m_webKitSettings, TRUE);
+    if (!m_parent)
+        setApplicationUserAgent(m_webKitSettings);
     apply();
 }
 

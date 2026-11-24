@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 22 Nov 2026 00:00:00 +0000
+Subject: [PATCH] [Skia] Blur larger shadows at half resolution sooner
+
+Skia blurs in one full-resolution pass an axis up to sigma 4, a shader of
+up to 14 texture reads a pixel (72 and 84 instructions on the Mali-450,
+whose fragment processors sample slowly), and downscales first only above
+that. A CSS box-shadow, on almost every element of a modern page, is
+mostly in that range. Downscale above sigma 2: such a shadow is blurred at
+half resolution with half the taps, a fraction of the reads, and is as
+soft to the eye.
+
+---
+--- a/Source/ThirdParty/skia/src/core/SkBlurEngine.h
++++ b/Source/ThirdParty/skia/src/core/SkBlurEngine.h
+@@ -191,7 +191,9 @@
+     // used, but never updated after the linear filtering optimization reduced the number of
+     // sample() calls required. Keep it at 4 for now to better isolate performance changes due to
+     // switching to a runtime effect and constant loop structure.
+-    static constexpr float kMaxLinearSigma = 4.f; // -> radius = 27 -> linear kernel width = 28
++    // Halved for GPUs that sample slowly, as the Mali-450: a larger blur is downscaled first, so a
++    // CSS shadow takes a fraction of the texture reads, blurred at half resolution.
++    static constexpr float kMaxLinearSigma = 2.f;
+     // NOTE: There is no defined kMaxBlurSigma for direct 2D blurs since it is entirely dependent on
+     // the ratio between the two axes' sigmas, but generally it will be small on the order of a
+     // 5x5 kernel.

@@ -81,7 +81,7 @@ void QWebEngineScriptCollection::sync()
     removeUserScripts();
     // WebKit runs scripts at document start or end only: Deferred runs at the end too
     for (const QWebEngineScript& script : std::as_const(m_scripts))
-        m_userScripts.append(QtWpeWebKit::newUserScript(script.sourceCode().toUtf8(), script.worldId(), script.runsOnSubFrames(),
+        m_userScripts.append(QtWpeWebKit::newUserScript(script.injectedSourceCode().toUtf8(), script.worldId(), script.runsOnSubFrames(),
             script.injectionPoint() == QWebEngineScript::DocumentCreation));
     for (WebKitUserContentManager* manager : std::as_const(m_managers)) {
         for (WebKitUserScript* userScript : std::as_const(m_userScripts))

@@ -1,0 +1,28 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 22 Nov 2026 00:00:00 +0000
+Subject: [PATCH] [Skia] A BT.709 video frame is shown in the screen's sRGB
+
+A BT.709 frame is tagged with the Rec.709 transfer function and the sRGB
+gamut, so Skia converts its transfer function to the screen's sRGB per
+pixel: a log2 and an exp2 a channel each way, 50 instructions a pixel on
+the Mali-450 where the YUV to RGB matrix alone takes a fraction of that,
+over every pixel of every frame, at 98 ms a 1080p frame. The two curves
+are all but the same to the eye; tag the frame sRGB, as most Linux video
+paths treat it, and convert only by the matrix.
+
+---
+--- a/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayerBufferYUV.cpp
++++ b/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayerBufferYUV.cpp
+@@ -280,8 +280,10 @@
+ 
+     sk_sp<SkColorSpace> colorSpace = [&] {
+         switch (m_transferFunction) {
++        // The screen's own: a BT.709 picture shown as sRGB is all but the same, and Skia then converts
++        // no transfer function per pixel, two pow()s a channel that a weak GPU pays for every frame
+         case TransferFunction::Bt709:
+-            return SkColorSpace::MakeRGB(SkNamedTransferFn::kRec709, SkNamedGamut::kSRGB);
++            return SkColorSpace::MakeSRGB();
+         case TransferFunction::Pq:
+             return SkColorSpace::MakeRGB(SkNamedTransferFn::kPQ, SkNamedGamut::kRec2020);
+         }

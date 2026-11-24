@@ -2,6 +2,8 @@
 
 #include "keyboard.h"
 #include "platform.h"
+#include "subsurface.h"
+#include "videoplanes.h"
 
 #include <EGL/egl.h>
 #include <cstring>
@@ -114,6 +116,7 @@ WebWidget::WebWidget(WPEView* view, QWidget* parent)
         self->toplevelChanged();
     }), this);
     connect(this, &QOpenGLWidget::frameSwapped, this, &WebWidget::frameShown);
+    m_subsurface = Subsurface::create(this, m_view);
 }
 
 void WebWidget::toplevelChanged()
@@ -132,6 +135,8 @@ WebWidget::WebWidget(WebKitWebView* webView, QWidget* parent)
     : WebWidget(webkit_web_view_get_wpe_view(webView), parent)
 {
     m_webView = WEBKIT_WEB_VIEW(g_object_ref(webView));
+    if (m_subsurface)
+        VideoPlanes::add(m_subsurface.get(), m_webView);
     g_signal_connect_swapped(m_webView, "notify::title", G_CALLBACK(+[](WebWidget* self) {
         Q_EMIT self->titleChanged(self->title());
     }), this);
@@ -169,11 +174,9 @@ WebWidget::~WebWidget()
         doneCurrent();
     }
     // The view may outlive this widget: give WebKit its buffers back
-    for (WPEBuffer** buffer : { &m_pending, &m_drawn, &m_shown }) {
-        if (*buffer)
-            wpe_view_buffer_released(wpeView(), *buffer);
-        g_clear_object(buffer);
-    }
+    VideoPlanes::remove(m_subsurface.get());
+    m_subsurface.reset();
+    releaseBuffers();
     g_clear_object(&m_webView);
     g_object_unref(m_view);
 }
@@ -200,8 +203,26 @@ QUrl WebWidget::url() const
     return m_webView ? QUrl::fromEncoded(webkit_web_view_get_uri(m_webView)) : QUrl();
 }
 
+void WebWidget::releaseBuffers()
+{
+    for (WPEBuffer** buffer : { &m_pending, &m_drawn, &m_shown }) {
+        if (*buffer)
+            wpe_view_buffer_released(wpeView(), *buffer);
+        g_clear_object(buffer);
+    }
+}
+
 void WebWidget::presentBuffer(WPEBuffer* buffer)
 {
+    if (m_subsurface && isVisible() && m_subsurface->present(buffer)) {
+        if (!std::exchange(m_onSubsurface, true)) {
+            releaseBuffers();
+            update();
+        }
+        return;
+    }
+    if (std::exchange(m_onSubsurface, false))
+        m_subsurface->hide();
     if (m_pending)
         wpe_view_buffer_released(wpeView(), m_pending);
     g_set_object(&m_pending, buffer);
@@ -242,6 +263,11 @@ void WebWidget::paintGL()
 {
     glClearColor(1, 1, 1, 1);
     glClear(GL_COLOR_BUFFER_BIT);
+    // Qt repaints the widget as its place in the window changes: the frames' surface follows
+    if (m_onSubsurface) {
+        m_subsurface->place();
+        return;
+    }
     glBindTexture(GL_TEXTURE_2D, m_texture);
     if (m_pending) {
         if (!(WPE_IS_BUFFER_SHM(m_pending) ? uploadPixels(WPE_BUFFER_SHM(m_pending)) : importImage(m_pending)))
@@ -318,6 +344,14 @@ void WebWidget::showEvent(QShowEvent* event)
     QOpenGLWidget::showEvent(event);
 }
 
+// A fractional scale arrives after the window's first frames, as a change of its pixel ratio alone
+bool WebWidget::event(QEvent* event)
+{
+    if (event->type() == QEvent::DevicePixelRatioChange)
+        screenChanged();
+    return QOpenGLWidget::event(event);
+}
+
 // The page's screen is the window's
 void WebWidget::screenChanged()
 {
@@ -328,6 +362,8 @@ void WebWidget::screenChanged()
 
 void WebWidget::hideEvent(QHideEvent* event)
 {
+    if (std::exchange(m_onSubsurface, false))
+        m_subsurface->hide();
     wpe_view_unmap(wpeView());
     QOpenGLWidget::hideEvent(event);
 }

@@ -15,7 +15,8 @@ public:
     QUrl sourceUrl() const { return m_sourceUrl; }
     void setSourceUrl(const QUrl& url) { m_sourceUrl = url; }
     QString sourceCode() const { return m_sourceCode; }
-    void setSourceCode(const QString& code) { m_sourceCode = code; }
+    // a Greasemonkey header in the code sets the name, injection point and URLs, as QtWebEngine reads it
+    void setSourceCode(const QString& code);
     InjectionPoint injectionPoint() const { return m_injectionPoint; }
     void setInjectionPoint(InjectionPoint point) { m_injectionPoint = point; }
     quint32 worldId() const { return m_worldId; }
@@ -30,6 +31,9 @@ public:
     }
 
 private:
+    friend class QWebEngineScriptCollection;
+    QString injectedSourceCode() const;
+
     QString m_name;
     QUrl m_sourceUrl;
     QString m_sourceCode;

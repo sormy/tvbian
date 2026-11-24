@@ -118,8 +118,55 @@ call's, in hardware on every family. What it still lacks.
       and WebKit captures through GStreamer, so `vajpegdec` through `tvb-va-driver` takes it where
       its JPEG decode works; Chromium and Firefox decode it on the CPU.
 
+## Page start-up
+
+YouTube's home page on the M2 Plus settles 22 s after Enter cold and 13 to 18 s warm (22 November):
+9 s to the server's skeleton, then 13 s booting about 10 MB of script on one Cortex-A53 core,
+parsing and running it while three cores sit mostly idle. Measured and ruled out, each within a
+second of the baseline: JSC's JIT sooner (`JSC_thresholdForJITAfterWarmUp=100`), one compiler thread
+each, the `performance` governor, Falkon's ad-blocker off, `-mtune=cortex-a53`, a Safari user agent.
+JSC obeys the options: with its JIT off the cold load takes 31 s.
+
+The public suites on the M2 Plus (23 November), each browser in a fresh profile on a headless
+2256x1504 output at scale 1.5, Speedometer 10 iterations:
+
+| Browser                    | Speedometer 3.1 | JetStream 2.2 |
+| -------------------------- | --------------- | ------------- |
+| Falkon                     | 0.778           | 22.40         |
+| MiniBrowser, WPE WebKit    | 0.845           | 22.62         |
+| Chromium 156, V8 and Blink | 1.02            | 25.46         |
+
+Falkon's own cost is the ad-blocker (0.72 with it, 0.78 without, at 3 iterations); JetStream 3.0
+runs in both WebKits (14.16 and 14.23) but not in Chromium, whose preload of its 466 MB fails. Ideas
+to probe:
+
+- [ ] **Chromium's time on the same box, as the target**: YouTube cold and warm in Debian's Chromium
+      or in Falkon on QtWebEngine, so the gap to V8 is a number, and how much of it its code cache
+      closes.
+- [ ] **A bytecode cache for a page's scripts**: V8 keeps a script's compiled bytecode with the HTTP
+      cache from about its second load, so a warm start skips most parsing and compiling; JSC
+      compiles every script anew each visit. It has the machinery (Apple's `JSScript` caches
+      bytecode), not the plumbing into the network cache. Parsing and bytecode generation were about
+      a seventh of the main thread's time on YouTube's boot.
+- [ ] **A script parsed off the main thread**: V8 streams a large script's parse and compile to
+      other cores as it downloads; JSC parses on the main thread once it has it all.
+- [ ] **WebKit built with profile-guided and link-time optimization**: an instrumented build run on
+      YouTube and other heavy sites on a box, then a rebuild with the profile, as browsers ship;
+      worth perhaps a tenth to a fifth on the engine's own code: parser, runtime, DOM, style.
+- [ ] **YouTube kept resident**: a page already booted, throttled in the background, opens at once;
+      a preload at idle after login would hide even the first boot. Costs a few hundred MB of the 4
+      GB and a design for where the page lives.
+
 ## Falkon
 
+- [ ] **The ad-blocker's generic hiding at its cost**: EasyList's 13,636 `##selector` rules become
+      `css-display-none` on every page and frame, one stylesheet each style recalculation checks;
+      Speedometer 3.1 on the M2 Plus scores 0.72 with it and 0.79 without, plain WebKit 0.82. To
+      choose: drop generic hiding (network and site rules stay), or apply only the selectors whose
+      classes and ids the page has, as uBlock Origin does.
+- [ ] **A page's screen wake lock**: `navigator.wakeLock.request("screen")` is refused with
+      `NotAllowedError` (seen in Speedometer), so a video site cannot keep the screen from blanking
+      while it plays; QtWebEngine grants it, and `swayidle` would need the inhibit passed on.
 - [ ] **Inspect Element at the clicked node**: Falkon's panel holds WebKit's own Web Inspector,
       Safari's: `setInspectedPage` shows it in the devtools page's view
       (`webkit_web_view_toggle_inspector`, the view WebKit makes taken into a `WebWidget`), tested
@@ -144,7 +191,14 @@ call's, in hardware on every family. What it still lacks.
       buffers are linear; on Panfrost, AFBC would cut the bandwidth of each pass after.
 - [ ] **Video on its own plane**: decoded pictures go through `glupload` and `glcolorconvert` (NV12
       to RGBA), WebKit's compositing, `qtwpewebkit`'s pass and the compositor's; WPE's hole-punch
-      would put them on a display plane and spare every pass.
+      would put them on a display plane and spare every pass. In progress: `tvbvideoplanesink` hands
+      the decoder's dma-buf to a subsurface under the page, labwc puts it on a plane; 4K60 at 48 to
+      55 fps on the M2 Plus, and about one start in five freezes the video.
+- [ ] **Video in AFBC on its plane**: `tvb-va-driver` can offer each decoder's own AFBC
+      (`research/va-driver/afbc-detect.patch`), but GStreamer's `va` offers downstream only the
+      linear modifier a plain surface exports (`sys/va/gstvacaps.c`); then `tvbvideoplanesink`
+      taking `DMA_DRM` caps with it, and labwc putting it on the one plane that reads it (Cluster0
+      on the RK3528). Less memory traffic at 4K60; Panfrost on the H313 samples AFBC too.
 - [ ] **A texture per page buffer**: `WebWidget::paintGL` binds each frame's EGLImage to its one
       texture with `glEGLImageTargetTexture2DOES`; WPE keeps the EGLImage per buffer already, so a
       texture per buffer would leave nothing to rebind.
@@ -217,12 +271,12 @@ call's, in hardware on every family. What it still lacks.
       `0004`. Doubtful: `0003`, a script's DOM node as an empty object, QtWebEngine's behaviour
       rather than a bug. `0009` goes as a bug report, its fix the floor found from the stream
       (above), not 32 MiB. Falkon's own (`patches/falkon`: the `FALKON_WPE` build switch, AdBlock
-      through content blockers, Hunspell's dictionaries) go to KDE next, so Debian's Falkon builds
-      on qtwpewebkit without ours. Against WebKit's main, 20 November 2026: `0009` is fixed upstream
-      another way, pause at 20 MiB and resume at 2 MiB (bug 322499, PR 72408): drop ours, backport
-      it, check the H313's 4K. `0008` is half fixed by PR 75999 (a forced gesture no longer revokes
-      the user's): backport it, then see whether ours is still needed. `0001` goes as a follow-up to
-      bug 311007 (V4L2 in the sandbox), rebased. `0004` as "is-popup too late in create", after bug
-      325290, with a `TestUIClient.cpp` test. `0007` with a layout test on bug 248767. `0003`,
-      `0005`, `0006` reverse upstream choices (JS handles; bug 271345; Apple's reverted CORS
-      enforcement): opt-in API, or kept in qtwpewebkit instead.
+      through content blockers) go to KDE next, so Debian's Falkon builds on qtwpewebkit without
+      ours. Against WebKit's main, 20 November 2026: `0009` is fixed upstream another way, pause at
+      20 MiB and resume at 2 MiB (bug 322499, PR 72408): drop ours, backport it, check the H313's
+      4K. `0008` is half fixed by PR 75999 (a forced gesture no longer revokes the user's): backport
+      it, then see whether ours is still needed. `0001` goes as a follow-up to bug 311007 (V4L2 in
+      the sandbox), rebased. `0004` as "is-popup too late in create", after bug 325290, with a
+      `TestUIClient.cpp` test. `0007` with a layout test on bug 248767. `0003`, `0005`, `0006`
+      reverse upstream choices (JS handles; bug 271345; Apple's reverted CORS enforcement): opt-in
+      API, or kept in qtwpewebkit instead.

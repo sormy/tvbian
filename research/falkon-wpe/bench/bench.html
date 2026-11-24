@@ -1,0 +1,32 @@
+<!doctype html><meta charset=utf-8><title>bench</title>
+<body style="margin:0;background:#000"><video id=v muted autoplay playsinline loop style="width:100vw;height:100vh"></video>
+<script>
+// Plays ?src muted and reports, after a warm-up, the frames presented and dropped in a window, to /report
+const params = new URLSearchParams(location.search);
+const src = params.get("src"), warmup = +(params.get("warmup") || 5), window_s = +(params.get("window") || 10);
+const video = document.getElementById("v");
+const report = text => fetch("/report?" + encodeURIComponent(`${params.get("tag") || ""} ${src} ${text}`));
+const type = src.endsWith(".webm") ? 'video/webm; codecs="vp9"' : src.startsWith("hevc") ? 'video/mp4; codecs="hvc1.1.6.L153.B0"' : 'video/mp4; codecs="avc1.640033"';
+const quality = () => video.getVideoPlaybackQuality();
+video.onerror = () => report(`error code=${video.error && video.error.code} ${video.error && video.error.message}`);
+video.src = src;
+video.play().catch(e => report(`play rejected ${e}`));
+// frames the browser hands to the compositor, one callback each, and the media time they show:
+// the same measure in every browser, unlike getVideoPlaybackQuality's counters
+let measuring = false, frames = 0, played = 0, lastMedia = null, began = 0;
+const counted = (now, meta) => {
+  if (measuring) {
+    frames++;
+    if (lastMedia !== null && meta.mediaTime > lastMedia) played += meta.mediaTime - lastMedia;
+  }
+  lastMedia = meta.mediaTime;
+  video.requestVideoFrameCallback(counted);
+};
+if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(counted);
+setTimeout(() => { measuring = true; began = performance.now(); }, warmup * 1000);
+setTimeout(() => {
+  const seconds = (performance.now() - began) / 1000;
+  const q = quality();
+  report(`result size=${video.videoWidth}x${video.videoHeight} rvfc=${video.requestVideoFrameCallback ? "yes" : "no"} fps=${(frames / seconds).toFixed(1)} media=${(played / seconds).toFixed(2)}x dropped-total=${q.droppedVideoFrames}`);
+}, (warmup + window_s) * 1000);
+</script>

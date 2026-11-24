@@ -1,5 +1,6 @@
 #include "platform.h"
 
+#include "videoplanes.h"
 #include "webwidget.h"
 
 #include <EGL/egl.h>
@@ -382,6 +383,7 @@ WPEDisplay* display()
         GError* error = nullptr;
         if (!wpe_display_connect(display, &error))
             qFatal("QtWpeWebKit: %s", error->message);
+        VideoPlanes::listen();
         return display;
     }();
     return display;

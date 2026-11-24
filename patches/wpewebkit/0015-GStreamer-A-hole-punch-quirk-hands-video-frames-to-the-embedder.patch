@@ -1,0 +1,187 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Sun, 22 Nov 2026 00:00:00 +0000
+Subject: [PATCH] [GStreamer] A hole-punch quirk hands video frames to the
+ embedder
+
+The GPU of a Mali-450 class board cannot draw a 4K, or even a full screen
+1080p, video frame within a 60 Hz frame, while its display controller
+scales one on a plane for free. With WEBKIT_GST_HOLE_PUNCH_QUIRK=tvbian
+the page draws a hole where the video is, and the tvbvideoplanesink
+element hands the decoded frames, the hole's rectangle and the page they
+belong to to the embedder, which shows them under the page.
+
+A media player learns the identifier of its page, the one
+webkit_web_view_get_page_id() returns, to tell the embedder's views apart.
+
+The page's buffer keeps its alpha channel, so the video shows through the
+hole.
+
+---
+--- a/Source/WebCore/platform/graphics/MediaPlayer.h
++++ b/Source/WebCore/platform/graphics/MediaPlayer.h
+@@ -38,6 +38,7 @@
+ #include <WebCore/MediaPlayerEnums.h>
+ #include <WebCore/MediaPlayerIdentifier.h>
+ #include <WebCore/MediaPromiseTypes.h>
++#include <WebCore/PageIdentifier.h>
+ #include <WebCore/PlatformDynamicRangeLimit.h>
+ #include <WebCore/PlatformLayer.h>
+ #include <WebCore/PlatformMediaDecodingType.h>
+@@ -310,6 +311,7 @@
+     virtual String mediaPlayerSourceApplicationIdentifier() const { return emptyString(); }
+ 
+     virtual String mediaPlayerElementId() const { return emptyString(); }
++    virtual std::optional<PageIdentifier> mediaPlayerPageIdentifier() const { return std::nullopt; }
+ 
+     virtual void mediaPlayerEngineFailedToLoad() { }
+ 
+@@ -650,6 +652,7 @@
+     long platformErrorCode() const;
+ 
+     String elementId() const;
++    std::optional<PageIdentifier> pageIdentifier() const;
+ 
+     CachedResourceLoader* cachedResourceLoader() const;
+     Ref<PlatformMediaResourceLoader> mediaResourceLoader();
+--- a/Source/WebCore/platform/graphics/MediaPlayer.cpp
++++ b/Source/WebCore/platform/graphics/MediaPlayer.cpp
+@@ -2088,6 +2088,11 @@
+     return protect(client())->mediaPlayerElementId();
+ }
+ 
++std::optional<PageIdentifier> MediaPlayer::pageIdentifier() const
++{
++    return protect(client())->mediaPlayerPageIdentifier();
++}
++
+ bool MediaPlayer::supportsPlayAtHostTime() const
+ {
+     return protect(m_private)->supportsPlayAtHostTime();
+--- a/Source/WebCore/html/HTMLMediaElement.h
++++ b/Source/WebCore/html/HTMLMediaElement.h
+@@ -912,6 +912,7 @@
+     Vector<String> mediaPlayerPreferredAudioCharacteristics() const override;
+ 
+     String mediaPlayerElementId() const override { return m_id; }
++    std::optional<PageIdentifier> mediaPlayerPageIdentifier() const override;
+ 
+ #if PLATFORM(IOS_FAMILY)
+     String mediaPlayerNetworkInterfaceName() const override;
+--- a/Source/WebCore/html/HTMLMediaElement.cpp
++++ b/Source/WebCore/html/HTMLMediaElement.cpp
+@@ -8579,6 +8579,11 @@
+     return SleepType::Display;
+ }
+ 
++std::optional<PageIdentifier> HTMLMediaElement::mediaPlayerPageIdentifier() const
++{
++    return document().pageID();
++}
++
+ String HTMLMediaElement::mediaPlayerReferrer() const
+ {
+     RefPtr frame = document().frame();
+--- a/Source/WebCore/platform/gstreamer/GStreamerQuirks.cpp
++++ b/Source/WebCore/platform/gstreamer/GStreamerQuirks.cpp
+@@ -26,6 +26,7 @@
+ #include "GStreamerCommon.h"
+ #include "GStreamerHolePunchQuirkBcmNexus.h"
+ #include "GStreamerHolePunchQuirkFake.h"
++#include "GStreamerHolePunchQuirkTVBian.h"
+ #include "GStreamerHolePunchQuirkRialto.h"
+ #include "GStreamerHolePunchQuirkWesteros.h"
+ #include "GStreamerQuirkAmLogic.h"
+@@ -150,7 +151,7 @@
+         return;
+ 
+     if (WTF::equalLettersIgnoringASCIICase(identifierString.span(), "help"_s)) {
+-        gst_printerrln("Supported quirks for WEBKIT_GST_HOLE_PUNCH_QUIRK are: fake, bcmnexus, rialto, westeros");
++        gst_printerrln("Supported quirks for WEBKIT_GST_HOLE_PUNCH_QUIRK are: fake, bcmnexus, rialto, tvbian, westeros");
+         return;
+     }
+ 
+@@ -161,6 +162,8 @@
+         m_holePunchQuirk = WTF::makeUnique<GStreamerHolePunchQuirkRialto>();
+     else if (WTF::equalLettersIgnoringASCIICase(identifierString.span(), "westeros"_s))
+         m_holePunchQuirk = WTF::makeUnique<GStreamerHolePunchQuirkWesteros>();
++    else if (WTF::equalLettersIgnoringASCIICase(identifierString.span(), "tvbian"_s))
++        m_holePunchQuirk = WTF::makeUnique<GStreamerHolePunchQuirkTVBian>();
+     else if (WTF::equalLettersIgnoringASCIICase(identifierString.span(), "fake"_s))
+         m_holePunchQuirk = WTF::makeUnique<GStreamerHolePunchQuirkFake>();
+     else
+--- /dev/null
++++ b/Source/WebCore/platform/gstreamer/GStreamerHolePunchQuirkTVBian.h
+@@ -0,0 +1,46 @@
++/*
++ * Copyright (C) 2026 TVBian
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Library General Public
++ * License as published by the Free Software Foundation; either
++ * version 2 of the License, or (at your option) any later version.
++ */
++
++#pragma once
++
++#if USE(GSTREAMER)
++
++#include "GStreamerCommon.h"
++#include "GStreamerQuirks.h"
++#include "MediaPlayer.h"
++#include <wtf/text/MakeString.h>
++
++namespace WebCore {
++
++// Video frames go to the embedder, which shows them on a display plane under the page's hole
++class GStreamerHolePunchQuirkTVBian final : public GStreamerHolePunchQuirk {
++public:
++    const ASCIILiteral identifier() const final { return "TVBianHolePunch"_s; }
++
++    GstElement* createHolePunchVideoSink(bool, const MediaPlayer* player) final
++    {
++        auto* sink = makeGStreamerElement("tvbvideoplanesink"_s);
++        if (!sink)
++            return nullptr;
++        if (auto pageIdentifier = player ? player->pageIdentifier() : std::nullopt)
++            g_object_set(sink, "page-id", static_cast<guint64>(pageIdentifier->toUInt64()), nullptr);
++        return sink;
++    }
++
++    bool setHolePunchVideoRectangle(GstElement* sink, const IntRect& rect) final
++    {
++        auto rectangle = makeString(rect.x(), ',', rect.y(), ',', rect.width(), ',', rect.height());
++        g_object_set(sink, "rectangle", rectangle.ascii().data(), nullptr);
++        return true;
++    }
++};
++
++} // namespace WebCore
++
++#endif // USE(GSTREAMER)
+--- a/Source/WebKit/WebProcess/WebPage/CoordinatedGraphics/AcceleratedSurface.cpp
++++ b/Source/WebKit/WebProcess/WebPage/CoordinatedGraphics/AcceleratedSurface.cpp
+@@ -1067,6 +1067,10 @@
+ bool AcceleratedSurface::isOpaque() const
+ {
+     ASSERT(RunLoop::isMain());
++    // A video beneath the page shows through its hole
++    static const bool punchesHoles = !!g_getenv("WEBKIT_GST_HOLE_PUNCH_QUIRK");
++    if (punchesHoles)
++        return false;
+     Locker locker { m_backgroundColorLock };
+     return !m_backgroundColor || m_backgroundColor->isOpaque();
+ }
+--- a/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.cpp
++++ b/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.cpp
+@@ -810,8 +810,8 @@
+ #if ENABLE(VIDEO)
+             if (is<CoordinatedPlatformLayerBufferHolePunch>(*m_contentsBuffer)) {
+ #if USE(GSTREAMER)
+-                TransformationMatrix matrix = canvas.getLocalToDevice();
+-                downcast<CoordinatedPlatformLayerBufferHolePunch>(*m_contentsBuffer).setHolePunchVideoRectangle(enclosingIntRect(matrix.mapRect(m_contentsRect)));
++                // In the frame's pixels: the canvas may be an intermediate surface's
++                downcast<CoordinatedPlatformLayerBufferHolePunch>(*m_contentsBuffer).setHolePunchVideoRectangle(enclosingIntRect(combinedTransform(context).mapRect(m_contentsRect)));
+ #endif
+                 SkPaint paint = setupPaint();
+                 paint.setBlendMode(SkBlendMode::kClear);

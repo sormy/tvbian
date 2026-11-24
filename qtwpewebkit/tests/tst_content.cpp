@@ -151,6 +151,18 @@ private Q_SLOTS:
         QCOMPARE(evaluate(shown.page(), QStringLiteral("navigator.userAgent")), QVariant(agent));
     }
 
+    // WebKit's agent ends with the application's product token, as a WebKit browser's does
+    void defaultUserAgentNamesTheApplication()
+    {
+        const QString name = QCoreApplication::applicationName(), version = QCoreApplication::applicationVersion();
+        QCoreApplication::setApplicationName(QStringLiteral("falkon"));
+        QCoreApplication::setApplicationVersion(QStringLiteral("25.04.1 (abc123)"));
+        const QString agent = QWebEngineProfile().httpUserAgent();
+        QCoreApplication::setApplicationName(name);
+        QCoreApplication::setApplicationVersion(version);
+        QVERIFY2(agent.endsWith(QLatin1String(" Falkon/25.04.1")), qPrintable(agent));
+    }
+
     void defaultAttributes_data()
     {
         QTest::addColumn<int>("attribute");

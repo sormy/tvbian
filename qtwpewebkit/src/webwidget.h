@@ -6,6 +6,7 @@
 #include <QContextMenuEvent>
 #include <QOpenGLWidget>
 #include <QUrl>
+#include <memory>
 
 typedef struct _WebKitWebView WebKitWebView;
 typedef struct _WPEBuffer WPEBuffer;
@@ -13,6 +14,8 @@ typedef struct _WPEBufferSHM WPEBufferSHM;
 typedef struct _WPEView WPEView;
 
 namespace QtWpeWebKit {
+
+class Subsurface;
 
 class WebWidget : public QOpenGLWidget, protected QOpenGLFunctions {
     Q_OBJECT
@@ -47,6 +50,7 @@ Q_SIGNALS:
     void keySent(QKeyEvent* event);
 
 protected:
+    bool event(QEvent* event) override;
     void initializeGL() override;
     void paintGL() override;
     void resizeGL(int width, int height) override;
@@ -79,6 +83,8 @@ private:
     void frameShown();
     bool importImage(WPEBuffer* buffer);
     bool uploadPixels(WPEBufferSHM* buffer);
+    // WebKit's buffers this holds, given back to it
+    void releaseBuffers();
 
     WPEView* m_view;
     WebKitWebView* m_webView = nullptr;
@@ -87,6 +93,9 @@ private:
     WPEBuffer* m_shown = nullptr;
     GLuint m_texture = 0;
     bool m_swapRedBlue = false;
+    // frames handed to the compositor, not drawn here, where it takes them
+    std::unique_ptr<Subsurface> m_subsurface;
+    bool m_onSubsurface = false;
     QOpenGLShaderProgram m_program;
     QPointF m_lastPointer;
     bool m_loadFailed = false;
