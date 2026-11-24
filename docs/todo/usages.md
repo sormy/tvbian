@@ -69,6 +69,20 @@ The GPU and decoder of each SoC:
       tree that MPP reads, so `cog` decodes in software.
 - [ ] **YouTube in mpv out of the box**: Debian's `yt-dlp` is too old for YouTube.
 - [ ] **A screen plugged in after login gets its scale**: `scale-outputs` runs at login only.
+- [ ] **`scale-outputs` picks the scale by the panel's shape**, not by its pixel count alone.
+- [ ] **A greeter without the session chooser**: one session installed, nothing to choose; the login
+      screen in the desktop's own look.
+- [ ] **The bar's status as icons**: display, Bluetooth and volume drawn as icons; Wi-Fi as its
+      signal, without the network's name.
+- [ ] **The desktop fluid at the screen's own resolution on Mali-450**: at 4K, `wdisplays` and a
+      moved window are a slideshow on the M2 Plus.
+- [ ] **Lean on the M2 Plus**: only what the desk needs started at login, measured against the 1080p
+      row above.
+- [ ] **Falkon finished as an app**: blank icons (`qt6-svg-plugins` missing), tabs without a close
+      button, 10 s to its first window, Qt's own theme in place of the system's.
+- [ ] **The patched Chromium as a desk browser**: `research/chromium-gles2/patch.py` applied to
+      Debian's binary by a dpkg trigger, its overlay and VA-API switches in `tvb-va-driver`'s
+      Chromium file; YouTube 4K60 windowed at 60 fps, 40 today, decode starved by the page's CPU.
 - [ ] **Measured on a `lima` box and a `panfrost` box**: frame rate of the desktop, a 1080p video in
       Falkon, memory after login.
 

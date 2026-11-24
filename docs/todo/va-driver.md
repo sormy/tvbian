@@ -21,6 +21,8 @@ settings.
       about one run in three, on either driver build.
 - [ ] **`meson-gxl` VC-1 with slices refuses every wrong picture after a drain**: `vc1-ap-slices`
       lets one through at 17 dB.
+- [ ] **VP9 profile 2 offered on `rk35xx-next2`**: `rkvdec` decodes it, 2160p at about 61 fps
+      through `ffmpeg9`'s own path, and `tvb-va-driver` offers it not, there or on the M2 Plus.
 - [ ] **Smooth from the first picture**: decoders stutter for the first seconds of a play, seen by
       eye, not measured; a warm-up before the first picture shows, a short delay in place of drops.
       Kernel or driver is not known: the first pictures' times, through VA and `ffmpeg9`'s own path,
@@ -78,13 +80,15 @@ settings.
       for Chromium; another client may read it as a plane.
 - [ ] **10-bit AFBC** (`AN6a`, MPP's 10-bit FBC): offered, never shown on a plane.
 - [ ] **GStreamer's `va` offers AFBC downstream**: it offers the modifier a plain surface exports.
-- [ ] **GStreamer's DMA path on MPP**: VP9 4K to `DMA_DRM` caps never prerolls, old build and new.
 - [ ] **Chromium's linear YouTube 4K60 VP9 on the M2 Plus**: decode calls p99 216 ms, 10 pictures a
       second shown, where AFBC shows 56.8.
-- [ ] **The suite as a player drives VA**: surfaces exported before decoding, decoded in real time,
-      the slowest pictures against one frame's interval; it decodes back to back today.
+- [ ] **The suite as a player drives VA**: each decode call's time, its slowest against one frame's
+      interval. A real-time sink does not show it, as GStreamer decodes ahead of the sink: no late
+      picture at 4K60 VP9 before the stall fix or after. Nor does libvpx's test pattern, which MPP
+      decodes too easily to stall.
 - [ ] **The suite through GStreamer's DMA path**: every clip to `DMA_DRM` caps, as WebKit takes
-      them; it converts to system memory today, which hid the MPP hang above.
+      them, into `fakevideosink`; it converts to system memory today. GStreamer's latency tracer
+      stalls such a pipeline, so it cannot time it.
 - [ ] **A clip as a site encodes it**: VP9 and AV1 with alt-refs, show-existing frames and the rate
       control a site uses, beside libvpx's real-time clips.
 - [ ] **Cedrus's AFBC by its own probe**: the driver now asks which AFBC CAPTURE lists, where it

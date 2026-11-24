@@ -583,3 +583,7 @@ real time on Cedrus whatever the driver: about 25 fps flat out, 180 of 288 frame
 - With the AFBC code in and its switch off, the suite: the H313 on 7.3.5 90 pass, the R69-1 on next2
   7.3.5 80 pass, none failing on either; every clip identical or within its PSNR as before. No clip
   asks for AFBC, so Cedrus's probed AFBC is not exercised by it.
+- The GStreamer DMA "hang" on MPP was GStreamer's latency tracer: the same 4K VP9 alt-ref pipeline
+  to `DMA_DRM` caps plays in 4.2 s without it and never ends with it; HEVC 4K too. Played in real
+  time into `fakevideosink` with QoS, neither the build before the stall fix nor after shows a late
+  picture: GStreamer decodes ahead of its sink, so a slow call hides in its queue.

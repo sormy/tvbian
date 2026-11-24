@@ -119,8 +119,8 @@ What spans the family's boards.
       for H.264 from `codec_hevc_common.c`, references in its compressed buffers; then CAPTURE
       buffers as output only, so `codec_h264_multi_queue_frame` hands each picture out at the
       stream's reorder depth. The multi-instance firmware it needs, `gxlx2/g12a_h264_multi.bin` and
-      `g12a_h264_multi_mmu.bin` from the M20's stock, is extracted and kept out of the firmware
-      package until the port runs (uncommitted, `firmware/amlogic/`).
+      `g12a_h264_multi_mmu.bin` from the M20's stock, ships in the firmware package since 23
+      November, loaded by nothing until the port runs.
 - [ ] **Constrained baseline from `meson-venc`'s H.264**: it encodes with the CABAC microcode
       (`ga_h264_enc_cabac`), so Main only, and a WebKit call, which asks for constrained baseline,
       cannot use it. The tree also names a CAVLC microcode (`gxl_h264_enc`), untried on the GXLX2.
