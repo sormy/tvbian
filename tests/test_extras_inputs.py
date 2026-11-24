@@ -21,7 +21,7 @@ class ExtrasInputsTest(unittest.TestCase):
     def test_the_driver_hands_its_inputs_on(self) -> None:
         driver = (EXTRAS / "build.sh").read_text()
         self.assertRegex(driver, r'INPUTS=\$\(bash /repo/release/inputs\.sh extra "\$NAME"')
-        self.assertRegex(driver, r'exec bash "\$EXTRA/build\.sh" "\$PACKAGE_VERSION" "\$INPUTS"')
+        self.assertRegex(driver, r'bash "\$EXTRA/build\.sh" "\$PACKAGE_VERSION" "\$INPUTS"')
 
     def test_every_own_build_stamps_them(self) -> None:
         self.assertTrue(own_builds(), "no extra builds itself: the test reads nothing")

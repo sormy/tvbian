@@ -17,6 +17,17 @@ INPUTS=$(bash /repo/release/inputs.sh extra "$NAME" "$UPSTREAM_VERSION")
 OUT=/out/debs
 # shellcheck source=/dev/null
 . /repo/build-env/ccache.sh
+# an extra too big to share the cache (CCACHE_SIZE) keeps one of its own, out of the kernels' reach
+if [ -n "${CCACHE_DIR:-}" ] && [ -n "${CCACHE_SIZE:-}" ]; then
+  export CCACHE_DIR=$CCACHE_DIR/extras/$NAME CCACHE_MAXSIZE=$CCACHE_SIZE
+  # such a build's precompiled headers, which the cache otherwise refuses to share
+  export CCACHE_SLOPPINESS=$CCACHE_SLOPPINESS,pch_defines,time_macros
+fi
+# the build's own hits and misses, at its end
+if [ -n "${CCACHE_DIR:-}" ]; then
+  ccache -z >/dev/null
+  trap 'ccache -s | grep -E "Hits|Misses" || true' EXIT
+fi
 
 # the newest build of each package of another extra it builds against
 install_build_with() {
@@ -35,11 +46,12 @@ install_build_with() {
   done
   [ ${#debs[@]} -gt 0 ] || return 0
   apt-get update -qq
-  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends "${debs[@]}" >/dev/null
+  # local builds keep their version: a rebuild replaces what an earlier one installed
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --reinstall --no-install-recommends "${debs[@]}" >/dev/null
 }
 
 install_build_with
-[ ! -f "$EXTRA/build.sh" ] || exec bash "$EXTRA/build.sh" "$PACKAGE_VERSION" "$INPUTS"
+[ ! -f "$EXTRA/build.sh" ] || { bash "$EXTRA/build.sh" "$PACKAGE_VERSION" "$INPUTS"; exit; }
 
 WORK=/work/extras/$SOURCE
 LOG=$WORK/build.log
