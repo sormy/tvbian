@@ -89,8 +89,6 @@ settings.
       control a site uses, beside libvpx's real-time clips.
 - [ ] **Cedrus's AFBC by its own probe**: the driver now asks which AFBC CAPTURE lists, where it
       named Cedrus's; not run on the H313 since.
-- [ ] **The AFBC code committed**: the suite with the switch off on `sunxi-h616` and `rk35xx-next2`;
-      `rk35xx` passes, 89 of 89.
 - [ ] **`VideoProc` scaling**: for Jellyfin's `scale_vaapi`, and NV12 to ARGB where Chromium's GL
       cannot import NV12; it converts 8-bit and 10-bit at one size today.
 - [ ] **CBR from the first second on `sunxi-h616`**: Cedrus-enc's first frame is ten times its

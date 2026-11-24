@@ -580,3 +580,6 @@ real time on Cedrus whatever the driver: about 25 fps flat out, 180 of 288 frame
   5760 at 4K, 4 rows down for H.264 and HEVC, 0 for VP9), and 4K decodes at 112, 115 and 97 fps.
   Chromium on the M2 Plus, YouTube 4K60 VP9, its video on Cluster0 as `YU08`: 56.8 of 60 pictures a
   second shown. The switch read `TVB_VA_AFBC=0` as on at first; a value is on only for `1` now.
+- With the AFBC code in and its switch off, the suite: the H313 on 7.3.5 90 pass, the R69-1 on next2
+  7.3.5 80 pass, none failing on either; every clip identical or within its PSNR as before. No clip
+  asks for AFBC, so Cedrus's probed AFBC is not exercised by it.
