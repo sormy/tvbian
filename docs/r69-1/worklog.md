@@ -1969,6 +1969,103 @@ nothing failed. The previous tree is kept at `/root/board.dtb.known-good`.
   187/191 and 186/183 Mbit/s at 40 MHz HE; BLE scan 26 and 23; no MMC error, failed unit or IOMMU
   fault; every reboot back. `dmesg` warnings 143 and 155, most from `[drm]`, as before.
 
+## 2026-11-17 — next2: the soak, the Wi-Fi reload and a stable MAC
+
+- The morning's next2 suite ran to its end: `wifi.reloads 0/1 back` lost the only network (no
+  Ethernet cable), and the soak ran unreachable. Not a hang.
+- The reload: unloading `aic8800_bsp` leaves the chip unanswering, and the next load finds the card
+  removed (`-ENOMEDIUM`): the driver's generic platform has no hook to power-cycle it. Rebinding the
+  MMC host (`ffc20000.mmc`) brought `wlan0` back in 9 s. `97-power-cycle-through-the-mmc-host.patch`
+  does that at power-off: two reloads back in about 10 s each, a fresh
+  `mmc1: new UHS-I speed SDR104 SDIO card` before each power-on.
+- The MAC was random on every load (`rwnx_cfg80211_init: mac … from random`): mainline fills no
+  `system_serial`. `99-stable-mac.patch` now takes the tail from a CRC32 of the SoC's OTP id, named
+  `soc-id` on a `wifi@1` node under the SDIO host (next2 tree `6db750e1`): `8a:00:33:d3:75:46` at
+  boot, after two reloads and after a reboot. Vendor derives its tail from `system_serial`, another
+  address.
+- Regulatory: the AIC8800 registers its phy self-managed with permissive custom rules (`custregd`
+  defaults to true, `default_ccode "00"`; `iw reg get`:
+  `phy#0 (self-managed) country 00: DFS-UNSET`), so the radio ignores the system's country on every
+  kernel. The suite reads only the global domain: on next2 it stays at the connected AP's (`US`, or
+  `98` when intersected) and `iw reg set DE` does not take.
+- Patch 97 on vendor 6.12.69 (`rk35xx-next`): two reloads, `wlan0` back each time at the same
+  address, `8a:00:33:65:64:b6` from the SoC serial as before; no new warning.
+- The reload failure recorded under the efuse and firmware trials ("reloading our driver never works
+  here", `-123`) was the same bug, on vendor too: the driver's generic platform has no power hook.
+  Patch 97 fixes it on both kernels.
+- `known.conf`: the Seekwave lines (`firmware.failed: SWT6621S…`, `modules.missing: aic8800_*`)
+  named this box and the H96 Max RK3528, which carry the AIC8800; they are the 3518s' and the M2
+  Plus's now, and this box's `modules.missing` line covers the H96 Max RK3528 too.
+
+## 2026-11-17 — next2: CMA, the HDMI ladder, PVTM applied
+
+- `pvtm 1553 at 1416000 kHz, 950750 uV`, bin L5, applied; `power_allocator` on `soc-thermal` with a
+  `cpufreq-cpu0` cooling device. S/PDIF card, IR receiver (NEC) and USB3 at 5 Gbit/s up.
+- An in-place `dpkg -i` of the next2 kernel from next2 rewrote `extlinux.conf` with next2 as the
+  default entry on the vendor DTB; the one-shot menu replaced it before the reboot.
+- `display.py` ran the 64 MiB pool out (57.5 MiB peak, then `ENOMEM` on a 1080p capture buffer): it
+  never freed a buffer, harmless behind the vendor's display IOMMU. Freed now; the run then failed
+  at 4K60 itself, two 4K NV12 frames and a 4K ARGB interface at once.
+- With `cma=256M`: peak 16661 pages, 65.1 MiB. `BOARD_CMA=128M` in each `next2/board.conf`.
+- The first `display.py` after a boot skipped HDMI (`no active CRTC`): the composite checks leave
+  their mode on `video_port1`, `Box` took it as the active CRTC, and the HDMI encoder refuses it
+  (`[ENCODER:73:TMDS-73] incompatible with [CRTC:66:video_port1]`, -22). A later run worked only
+  where the console had lit HDMI first. `Box` now tries each CRTC until one takes the mode.
+- Ladder: 4K60, 4K30, 4K24, 1080p120/60/50/24, 1080i60/50, 720p120/60/50, 576p50, 480p60 sustained;
+  4K50 two underruns (`POST_BUF_EMPTY` at vp0); 576i50 and 480i60 pruned by the driver. Composite
+  writeback refuses every capture format, PAL and NTSC.
+- `cma=128M`, the first `display.py` after a fresh boot: HDMI up after the composite checks, peak
+  65.1 MiB again, 4K50 sustained with no underrun; only composite writeback failed.
+- Composite modeset 1054–1110 ms, PAL and NTSC, three runs each (`display.py` records it now): the
+  TVE driver's `TVE_SETTLE_MS`, 1 s between the encoder and the DAC, which the vendor driver also
+  waits on every enable. Parity; shortening it needs a TV to check.
+- Video matrix on next2 (`r69-1-next2-7.3.4.json`): H.264 to 4080x4080, HEVC and VP9 to 7680x4320,
+  VP8 and MPEG-2 at 1080p, H.264 encode to 1080p. 10-bit refused only because the box's `ffmpeg9`
+  predated `0045`; with today's build H.264 10-bit, HEVC Main10 and VP9 profile 2 pass at 1080p and
+  2160p (61, 91 and 59 fps at 2160p).
+- MJPEG through `jpegd`: `mjpeg_v4l2m2m` found no device, the driver offering `JPEG` where FFmpeg
+  looked only for `MJPG`; `0046` takes either. Passes at 1080p (317 fps) and 2160p (89 fps).
+- MPEG-1 on Hantro VDPU2 (`media-hantro-vdpu2-mpeg1.patch`, FFmpeg `0047`): passes at 720p (161 fps)
+  and 1080p (73 fps), 74.5 dB against the software decode; MPEG-2 unchanged. FFmpeg's encoder never
+  writes full-pel vectors, so that path is untried.
+- The RGA2E on mainline's RGA2 driver (`rockchip,rk3528-rga`, `rockchip,rk3288-rga`): probes, HW
+  version 3.07, `/dev/video1`; a job never completes, one interrupt counted, `v4l2-compliance` stuck
+  in `dqbuf`. The vendor drives it through `rga2_mmu` (`0xff850f00`), not RGA2's own MMU, which the
+  mainline driver programs.
+- The variant without the internal MMU (`media-rga-rk3528.patch`, the RGA behind `rga_mmu`): a hard
+  lockup on CPU 0 seconds after it registered (`dmesg-ramoops-0`: `Hard LOCKUP`, NMI unanswered).
+  Without the internal MMU the RGA shares SPI 105 with its IOMMU, and `rga_isr` read `RGA_INT`
+  unclocked while the RGA slept; `media-rga-shared-irq.patch` answers only while it is in use.
+- Two next2 boots before it ended a second in: the stuck `v4l2-compliance` (D state on the first RGA
+  attempt) held the shutdown ~170 s, `watchdog did not stop!`, and the carried-over watchdog reset
+  the next boot.
+- With it, next2 boots clean and the RGA runs: 30 frames, NV12 640x480 to XRGB 320x240, one
+  interrupt a job, the colour bars intact.
+- The tree with the GPU's OPP table back (700 and 800 MHz, `mali-supply` the CPU rail) reset the box
+  about 5 s into boot, twice, no panic recorded: as `lima`'s devfreq first sets the clock.
+- HEVC encode on the VEPU540C (`media-rkvenc-rk3528-vepu540c-hevc.patch`, MPP's VEPU540C H.265
+  registers; the RFC's SPS took 64x64 CTUs where this encoder codes 32x32): `hevc_v4l2m2m` passes at
+  720p (46.7 dB) and 1080p (47.2 dB) against the source; H.264 47.3 and 47.5 dB. 2160p refused by
+  both, the encoder's 1080p.
+- H.263 on VDPU2 passes at 176x144 (2041 fps), 352x288 (909) and 704x576 (294), 69 to 74.5 dB;
+  1408x1152 refused, past the 1088 lines the format allows. The last fault: Hantro kept H.264's
+  hold-capture flag for `MG4S`, so FFmpeg sent packets, not the picture MPP frames.
+- IEP2 (`media-rockchip-iep2.patch`) probes as `rockchip-iep2`; `deinterlace_v4l2m2m` after a 1080i
+  H.264 decode passes at 42.4 dB.
+- MPEG-4 still fails: FFmpeg read the OUTPUT capabilities before setting `MG4S`, the default
+  format's, so it sent the first video packet alone (7777 of 109387 bytes) and the decoder ran out
+  of stream (`0x41`, then `0x1001`). FFmpeg `0049` reads them again once the format is set.
+- MPEG-4 ASP on VDPU2 passes at 1080p, 83.3 fps, 76.0 dB, with FFmpeg `0049`. The first retest ran
+  the old FFmpeg: `apt install` of a rebuilt `ffmpeg9` with the same version string keeps the
+  installed one; `dpkg -i` replaces it.
+- H.263 16CIF with the format allowing 1152 lines: IOMMU write faults just past the picture, and the
+  704x576 rerun after it changed verdict (`flaky`). The limit is back at 1088 lines; the buffer the
+  decoder needs for 16CIF is a todo.
+- VDPP (`media-rockchip-vdpp.patch`, MPP's VDPP v1 scaler, enhancement off): 1280x720 NV12 to
+  1920x1080 NV12, 10 frames, the colour bars' luma stepping 179 to 16 across the frame. It shares
+  the IEP2's engine, resets and IOMMU: each claims the released resets while streaming, the other
+  gets `-EBUSY`; the IEP2 deinterlace still passes beside it.
+
 ## 2026-11-17 — PVTM matches vendor on the R69-1
 
 - Vendor 6.1 `pvtm=1552`, `pvtm-volt-sel=5`; next2 `pvtm 1545 at 1416000 kHz, 950750 uV`, bin 5.
@@ -1977,6 +2074,155 @@ nothing failed. The previous tree is kept at `/root/board.dtb.known-good`.
 
 - With the BSP's `active` PWM pin state mapped to `default`, PWM5 took the Ethernet LED's pin
   (`could not request pin 144`). With it `none`, the box boots clean on tree `2e010ce8`.
+
+## 2026-11-18 — next2: the last codecs, 480i and 576i
+
+- The full matrix (`r69-1-next2-full2`): MJPEG at 6144x4096 reset the box mid-case (the suite's
+  `hang`), and the encodes after it ran on the vendor kernel the box came back on: not a next2
+  encode failure. The decode limits otherwise held: H.264 to 4080x4080, HEVC and VP9 to 7680x4320,
+  VP8, MPEG-1, MPEG-2 and MPEG-4 to 1080p, H.263 to 704x576.
+- The RK3528's codec blocks, from MPP's `mpp_soc.c` and the vendor tree: decoders VDPU382 (rkvdec),
+  the JPEG decoder, VDPU2 and the AVS+ decoder; one encoder, the VEPU540C, which MPP drives for
+  H.264, HEVC and JPEG (`hal_jpege_vepu540c`). AVS+ is parked; mapping its registers alone was tried
+  and dropped.
+- 480i and 576i: DRM gives both at 13.5 MHz with `DRM_MODE_FLAG_DBLCLK`; the RK3528's HDMI glue
+  pruned them `NOCLOCK`, its PHY check at 13.5 MHz where the link runs 27. The Rockchip kernel's
+  VOP2 doubles `crtc_clock` and divides its core clock, and its dw-hdmi sets the input and output
+  repetition and its pixel repeater; `drm-dw-hdmi-dblclk.patch` does the same on opt-in.
+- JPEG encode on the VEPU540C (`media-rkvenc-rk3528-vepu540c-jpeg.patch`, MPP's JPEG registers at
+  `0x400` and its reciprocal quantiser tables at `0x2c80`): the driver writes each picture's header
+  from the kernel's Annex K tables at the JPEG compression quality (default 90; FFmpeg's `-q:v` sets
+  it), the core codes the scan after it.
+- With `media-rkvenc-rk3528-vepu540c-jpeg.patch` rkvenc lists `JPEG`; `mjpeg_v4l2m2m` passes at 720p
+  (190 fps, 49.5 dB) and 1080p (69 fps, 50.0 dB), 2160p refused as the encoder's 1080p. H.264 and
+  HEVC encode unchanged, 46.7 to 47.5 dB.
+- With the reworked double-clock patches 480i60 and 576i50 are offered and sustained (600 and 501
+  commits, no underrun). 480p and 480i at 59.94 Hz (27.027 MHz) are still pruned `NOCLOCK`.
+- MPEG-4 decoded no frame for two runs (status `0x41`, then `0x1001`, out of stream): the next2
+  installer `dpkg -i`s every deb it stages, and a stale `ffmpeg9` from before FFmpeg `0049` sat in
+  the stage, so each install rolled FFmpeg back. With the current one MPEG-4 passes again, 84.5 fps,
+  75.98 dB, twice.
+- H.263 16CIF: the Rockchip kernel's MPP decodes it with the same registers as at 4CIF but the
+  picture size (`reg120` `0x2c024000`), so the decoder needs nothing more. The fault was Hantro's:
+  the RK3528's NV12 stopped at 1088 lines, so the capture buffer held 1088 of the 1152 lines the
+  decoder writes. With NV12 and `MG4S` to 1152 lines, 1408x1152 passes, 80 fps, 78.2 dB.
+- MJPEG decodes 1920x1080 (319 fps), 3840x2160 (82) and 4096x4096 (41), 55.1 dB. 6000x4000 broke and
+  6144x4096 took the box: the kernel log, streamed over SSH, ends in the OOM report, 786 MB mapped.
+  FFmpeg's default 16 OUTPUT and 20 CAPTURE buffers at two bytes a pixel coded fill the 1.5 GB;
+  `media-rkjpegd-queue-memory.patch` gives a queue at most an eighth of the RAM.
+- With the queues bounded, MJPEG decodes 6000x4000 (27.8 fps), 6144x4096 (28.6), 6144x5120 (23.1)
+  and 6144x6144 (19.4), 55.1 dB each, and the box stays up; H.263 1408x1152 still passes.
+- `CONFIG_RESET_GPIO` stays off: in every next2 tree only the SDIO power sequences carry
+  `reset-gpios`, which take the GPIO-array path with it off, the one every radio has run on; the
+  Seekwave boot node takes its GPIOs itself.
+- ramoops: both vendor kernels build without `CONFIG_PSTORE_BOOT_LOG`, so the tree's `boot-log-size`
+  lays out nothing and their zones sit where mainline's do (vendor 6.12: `dmesg-0 0x18000@0x110000`,
+  `console 0x80000@0x140000`). Vendor 6.12 recovered next2's OOM panic from the MJPEG crash as
+  `dmesg-ramoops-0`. The todo was wrong; a conversion shifting next2's region past a boot-log zone
+  was tried and reverted.
+- `phy-inno-hdmi-27027khz.patch`: 480p at 60.00 Hz (27.027 MHz) is offered and sustained (601
+  commits, 60.1/s). 480i at 60.00 Hz is still pruned: 13.514 MHz doubled is 27.028 MHz, and the
+  PHY's rate lookup takes an exact table entry. 4K50 was offered but not sustained again.
+- AIC8800: `custregd` defaults to true in the driver's code (its description says 0), making the
+  wiphy self-managed at `00`. Reloaded on next2 with `custregd=0`: the phy follows the global US
+  domain, `iw reg set DE` moves the global domain and the phy to DE, and the link to the 5200 MHz AP
+  comes back. Patch `96` makes off the default; set back to US after.
+- Composite writeback with `drm.debug`: PAL's capture held one colour throughout, (40, 200, 40), the
+  last HDMI check's fill, so nothing was written into it.
+- Composite writeback refused every format: the engine has no stride, so the driver takes rows
+  unpadded only, and the suite's 720-wide captures had dumb buffers' 64-byte pitch. With
+  `display.py` framing them unpadded the check takes NV12, and the capture is black (Y 16,
+  chroma 128) where vendor 6.12 captures the bars, one field (288 or 240 rows) of a frame-high
+  buffer.
+- The VOP's registers during PAL, vendor against next2: the overlay port select and VP1's mixer
+  match, and vendor shows the bars through Esmart2 (`0x1c00`), Esmart3 disabled; next2 put them on
+  Esmart3, the one window `drm-rk3528-vop2-vp1.patch` gave VP1. The BSP's window data gives Esmart2
+  layer id 0 in VP1's mixer and Esmart3 id 1. The patch now lets Esmart2 onto VP1 at id 0, two
+  layers in VP1's mixer, and the writeback patch counts a field's lines on an interlaced mode.
+- The kernel with Esmart2 on VP1, the writeback counting a field, both 27.027 and 27.028 MHz and
+  AIC8800 patch `96`: `custregd` reads `N` unforced, the domain US; 480i60 at 60.00 Hz offered and
+  sustained, every mode to 1080p120 sustained. Composite writeback, now 720x288 and 720x240, still
+  black. 4K60 holds; 4K50, 4K30 and 4K24 each underran (2, 4, 3) in one run, where the kernel before
+  held 4K30.
+- fuseamp's suite on this kernel: no video reaches a plane. Each picture logs
+  `cannot scan out a NV12 picture`, the framebuffer for the request decoder's dma-buf refused, so
+  HDMI shows the interface alone and every writeback is black. `vop_mmu` is disabled in every next2
+  tree, after it hung the 3518; without it the VOP scans out contiguous memory only, and rkvdec's
+  buffers are IOMMU pages. No underruns at 4K 24/30/50/60 there, with no video plane.
+- Vendor stops the VOP's DMA, attaches its IOMMU on the first CRTC enable, and keeps runtime PM off
+  it (`rockchip,disable-device-link-resume`); mainline enables it on the VOP's first resume. A
+  bootloader's live scanout meeting the IOMMU would hang there, but our U-Boot
+  (`generic-rk3528_defconfig`) has no video: a lead only.
+- fuseamp's vendor pass: everything passes; the 4K video lands on Cluster0 as AFBC `YU08`
+  (`0x0800000000000041`), scaled to 1080p, under the interface on Esmart0.
+- Composite, VOP registers during PAL, vendor against next2, with VP1's overlay block (`0x700`):
+  next2's Esmart3 alone writes layer select `0xfff1` and captures black; forced onto Esmart2
+  (`0xfff0`, as vendor), next2 captures the bars (234, then yellow, cyan, green, red, blue). The
+  port select (`0x504`, Esmart2 and Esmart3 to VP1) matches vendor in both. Vendor's `4K_2K_2K`
+  scale engines are Esmart0, 2 and 3, so Esmart3 is not without one.
+- Plan A, Esmart2 VP1's primary plane and Esmart3 its overlay, HDMI keeping Cluster0, Esmart0 and
+  Esmart1: NTSC's writeback keeps the bars. PAL's captured them as Y'CbCr in an RGB buffer: the
+  writeback checked the port's bus format before the encoders set it, the previous state's (none for
+  the first standard). The check moved into the CRTC's atomic check.
+- The VOP IOMMU on this box, DRM held back by `modprobe.blacklist=rockchipdrm` until the boot was
+  accepted: `modprobe rockchipdrm` locked CPU 3 hard (`dmesg-ramoops-0`: `Hard LOCKUP`, no answer to
+  the backtrace IPI); the panic rebooted the box to vendor unattended.
+- Next2 booted with DRM held back: `dclk_vop0` still at 594 MHz, vendor's 4K60 HDMI, its clocks
+  gated: the reboot leaves the VOP as vendor programmed it. Its clocks back on, it fetches vendor's
+  framebuffer through an IOMMU mapping none of it. `drm-rockchip-vop2-reset.patch` pulses the VOP's
+  resets (`SRST_A_VOP`, `SRST_H_VOP`, `SRST_D_VOP0`, `SRST_D_VOP1`) at bind, before its IOMMU
+  translates; the binding takes `resets`, the dtsi names them.
+- Traced with the ring buffer filtered to the IOMMU, VOP2, clocks, resets and runtime PM, dumped on
+  the panic (`ftrace_dump_on_oops`) into `dmesg-ramoops-0`: the locked CPU ran `modprobe`'s
+  `rpm_resume` → `genpd_power_on` → `rk_iommu_resume` → `rk_iommu_enable` → `rk_iommu_enable_stall`,
+  its first register access never completing. The VOP reset alone, and a pixel clock added to the
+  IOMMU's clocks, left it so.
+- `SYS_AUTO_GATING_CTRL` (`0x008`): vendor `0x1fffff7f`, next2 `0x1fffffff`. Bit 7, the aclk pre
+  auto gating, which the Rockchip BSP turns off on the RK3528 before attaching the IOMMU; mainline
+  clears only bit 31, at the first CRTC enable. `drm-rockchip-vop2-rk3528-aclk-gating.patch` clears
+  it at bind.
+- The bind-time clear came too late: the driver core resumes a device's suppliers before its probe
+  (`pm_runtime_get_suppliers`), and the IOMMU, attached to its default domain, enabled there. The
+  Rockchip BSP marks this IOMMU `rockchip,disable-device-link-resume`: runtime PM leaves it alone,
+  the master's attach enables it. `iommu-rockchip-attach-only.patch` reads the flag, and the aclk
+  pre auto gating is cleared in `vop2_enable` before the attach.
+- With the three (reset, gating, attach-only) and `vop_mmu` enabled: `modprobe rockchipdrm` binds
+  the VOP, HDMI and TVE, the box lives, no IOMMU fault. `display.py` 14 passed, 0 failed: composite
+  writeback keeps the bars, pacing 60.0/s, every HDMI output; the HDMI writeback checks skip, the
+  capture refused at 1080p. lima took `card0` with DRM loaded late; `display.py` now opens the card
+  with connectors.
+- fuseamp's suite on next2 with the VOP IOMMU: the request decoder's NV12 scans out, on Esmart1
+  (linear, 3840x2160 scaled to 1080p) under the interface on Esmart0; writeback captures agree with
+  the file as on vendor; its checks pass. Against vendor: 2160p60 8-bit drops 13 of 3569, where
+  vendor scans out AFBC `YU08` on Cluster0; its app's 10-bit falls to software, where the box's
+  `ffmpeg9` (FFmpeg `0046`–`0049`, uncommitted) decodes the same 10-bit 2160p in hardware, NV15,
+  with and without `capture_max_*`; no uinput in next2.
+- `vop_mmu` now enabled by the translation (`also rockchip,rk3528-vop enable vop_mmu`), each next2
+  tree changing in that status alone; `CONFIG_INPUT_UINPUT=m` in the next2 fragment.
+- With the VOP IOMMU and the synthetic screen at 1080p, compose and planes-all pass: the skip before
+  was a run whose screen came up at 4K, past the writeback's 1920. fuseamp's app links a static
+  FFmpeg of the committed patches, so its 10-bit case waits for `0046`–`0049` to be committed.
+
+## 2026-11-18 — 4K60 decode under the interface, vendor 6.12 (fuseamp)
+
+- The decoder takes 0.3 ms a picture with the interface plane drawn and hidden alike, 0 dropped, 0
+  late, CPU 14–17%; next2 on the 3518D takes 15.2–16.8 ms drawn, 0.7 ms hidden.
+- Vendor's `rockchip_ddr` `bytes` event (type 10, config `0xb`) reads bytes over a recent window,
+  not a running count: about 488 MB under a 4.4 GB/s copy, falling back after it.
+
+## 2026-11-19 — QoS against next2
+
+- Reading the VOP's QoS block (`0xff270500`) through `/dev/mem` on vendor 6.12 hung the box with no
+  screen attached: `pd_vo` reported on, but the VOP idle, its clock gated. The watchdog reset it in
+  about 30 s. The rkvdec block reads `priority=0x202 mode=0x3 bandwidth=0x100 saturation=0x40` on
+  both kernels; next2 has the VOP at `0x303`, above the decoders.
+
+## 2026-11-19 — the CPU's PVTM bin applied on next2
+
+- next2 reads pvtm 1551, bin L5, as vendor 6.1 did (`pvtm-volt-sel=5`). With
+  `rockchip_cpufreq_pvtm.apply=1`, 1416 MHz runs at 900 mV; stress-ng `--cpu 4 --verify` 5 min
+  passes at 900 mV and 52 °C, and 5 min with glmark2 beside it at 964 mV and 61 °C, the GPU's 800
+  MHz asking 962.5 mV. No kernel error. Back on vendor 6.12 after.
 
 ## 2026-11-19 — the CPU clock is not its request on next2
 

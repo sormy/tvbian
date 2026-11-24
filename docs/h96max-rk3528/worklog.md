@@ -50,6 +50,13 @@
 - The M2 itself, from #2404's stock dmesg: an RTL8211F at 1 Gbps on `gmac1`, an AIC8800 module.
   Importing it needs a tree read off an M2.
 
+## 2026-11-17 — a next2 tree, built, never booted
+
+- `next2/`: the mainline kernel's tree, translated from this factory tree with the M2 Plus's choices
+  and this board's own ports: TVE, the analog codec, S/PDIF, USB 3, IR without a keymap (the bundled
+  remote's `0xfd01` table is inferred, not pressed), the logic and GPU rails held at the factory's
+  900 mV. Built and proven; the box is not here.
+
 ## 2026-11-19 — an owner's unit runs it
 
 - An owner's 4 GB / 32 GB unit, by email: booted the image from a microSD, `tvb-install` to the

@@ -2452,6 +2452,29 @@ card once the same DDR blob was on its eMMC. The eMMC's FIT is 2026.10 again.
   failed unit or IOMMU fault; every reboot back. The kernels number the SD and SDIO hosts
   differently (`mmc1`/`mmc2` swap); both run SDR104.
 
+## 2026-11-15 — mainline next2 preparation
+
+- Owner requested mainline 7.x exploration on this box; no commits or pushes.
+- Added the separate `board-next2.*` factory translation for a first network boot.
+- Mainline 7.3.4 and the three ported Seekwave radio modules build.
+- The tree compiles; its upstream-view proof reports zero differences. Binding validation reports
+  only the board-compatible tuple.
+- Kept the proven watchdog, recovery key, LED names and radio reset delay. Display/media and voltage
+  scaling are disabled for the first boot.
+- Readback: the box runs vendor 6.12.69 from SD, reaches SSH over Wi-Fi only, and has no kexec.
+- `build/rebase/h96max-3518-power-baseline.log` records PWM, regulator and GPIO state. MMC owns
+  GPIO3_B2 as reset; the vendor radio accesses it after an unsuccessful duplicate request.
+- The mainline radio uses a nonexclusive descriptor with the same polarity and raw pin operations.
+- Fixed the translation toolkit's early-alias and macro-unit matching; 165 tests pass. Existing
+  converted-board output stays byte-identical.
+- Preparing installation beside the vendor kernel and tree, with a saved boot menu and rollback
+  guard. No mainline boot or regression result yet.
+
+- Installed the new image and radio modules beside the vendor kernels. The vendor DTB hash and boot
+  menu are unchanged. Log: `build/rebase/h96max-3518-next2-install.log`.
+- Prepared a separate next2 boot entry, initramfs menu restoration and a 180-second guard. Recovery
+  access is still required for a pre-root-mount hang; asked before selecting the entry.
+
 ## 2026-11-15 — next2 preparation: readback
 
 - 6.1.172 is installed beside the running 6.12.69; both extlinux entries use
@@ -2462,6 +2485,467 @@ card once the same DDR blob was on its eMMC. The eMMC's FIT is 2026.10 again.
 - `board-next2.patch` applies with zero fuzz; the rebuilt DTB compares canonically identical.
 - The `tvb-next2` entry takes its arguments from the saved vendor entry, plus `ttyS0,1500000n8`,
   `keep_bootcon` and `clk_ignore_unused` for the first headless boot.
+
+## 2026-11-16 — first next2 boot attempt
+
+- Owner confirmed the 3518 boots from SD; proceeded with the prepared headless test entry.
+- Before reboot: vendor 6.12.69 running, original boot menu and DTB hash intact, rollback guard
+  enabled. The next2 image and initramfs were present.
+- Selected the separate next2 entry and issued an explicit reboot.
+- SSH has not returned under the normal hostname, its mDNS name or the avahi collision name.
+- No boot log is available yet; an early boot failure and a radio failure remain distinct
+  possibilities. Do not count the kernel as booted.
+- Host monitoring: `build/rebase/h96max-3518-next2-boot-watch.log`; reboot command:
+  `build/rebase/h96max-3518-next2-reboot.log`.
+
+- The 260-second monitor expired without a confirmed next2 boot or vendor fallback. Asked for one
+  power cycle before an SD recovery. No further reboot has been scheduled.
+- Checked the built configuration: SCMI SMC, pinctrl/GPIO, DW MMC, regulators, ext4, UART and
+  watchdog are built in. RK3528's pinctrl driver accepts the factory drive-level encoding.
+
+- Owner power-cycled the box. SSH still did not return. Requested the SD card on the host to restore
+  `/var/lib/tvb-next2/extlinux.before` and inspect persistent logs.
+- No external disk is attached to the host yet. No further kernel or tree change was made.
+
+## 2026-11-16 — SD recovery completed
+
+- Identified the built-in reader's 62.2 GB card as `/dev/disk14`, partition UUID
+  `2f63de46-cb7c-4252-86bc-5e9881db7666`; its board ID is `h96max-3518`.
+- macOS denied this app raw-device access even through the administrator helper. The owner ran the
+  scoped recovery script in Terminal. Journal and pstore copies are in
+  `build/rebase/3518-sd-recovery/`.
+- The failed menu still selected `tvb-next2`; the initramfs restoration hook had not completed.
+- The first e2cp reported failure on `/dev/rdisk14s1`. Readback through `/dev/disk14s1` found the
+  vendor menu already restored. The buffered-device pass verified it byte-for-byte, checked the
+  filesystem clean and ejected the card. No filesystem-repair finding.
+- The journal contains no recorded 7.3 boot. The saved panic dump contains vendor MPP activity and
+  is historical; it does not diagnose this attempt.
+- Owner reinserted the card and powered on. SSH confirms `6.12.69-tvb-rk35xx`, original vendor DTB
+  hash, preserved boot menu and no failed systemd units. Recovery is complete.
+- Installed next2 image marker and test-tree hash match the intended files. No further reboot.
+- Requested availability of a 3.3 V UART adapter for the next diagnostic boot.
+
+## 2026-11-16 — First serial mainline boot
+
+- Captured `build/rebase/h96max-3518-next2-serial-01.log` at 1500000 baud.
+- Vendor remains the menu default; selected next2 once over serial.
+- Linux 7.3.4 panicked at 0.47 seconds in deferred probing, with `clk_gate_endisable` in the trace
+  and a synchronous external abort followed by an asynchronous SError.
+- Earlier output reports a duplicate `fe480000.sram` device and a power-domain clock acquisition
+  returning `-EPROBE_DEFER`; clock cleanup also warns in `__clk_put`.
+- Owner power-cycled; SSH confirms vendor 6.12.69 and no failed services.
+- Added the imported SRAM node's label so the translator merges the factory SRAM there.
+- First-boot policy now keeps decoder power-domain 5 disabled, as mainline describes it.
+
+- Corrected DTB SHA256: `8f42926c8b6c576ea8b08d57eb1d9e90e851ac15a8c949f5484662cff75cd653`.
+- Single-CPU retry removes the duplicate SRAM warning but still panics at 0.74 seconds.
+- The first abort is now visible: `regmap_mmio_read32le` reads PMU offset `0x1120` from
+  `rockchip_pmu_set_idle_request`, called by `genpd_power_off_work_fn`. A subsequent deferred-probe
+  clock operation raises SError.
+- Cleaned trace: `build/rebase/next2-single-cpu-clean.log`. The board needs a power cycle; vendor
+  remains the default. Power-domain shutdown is the next diagnostic target.
+
+## 2026-11-16 — Post-mortem
+
+- Wrote `research/rk3528-mainline/postmortem.md`: observed failures, recovery limits, agent
+  omissions and proposed bring-up procedure changes.
+- Root cause remains open; the PMU access trace identifies a failure site, not its cause.
+- No reboot, deployment or bring-up guide rewrite in this pass.
+
+## 2026-11-16 — Power-domain policy diagnostic
+
+- Vendor 6.12.69 recovered after the owner’s power cycle.
+- Compared cached vendor 6.12 and mainline power-domain sources. Both use PMU ack offset `0x1120`;
+  the vendor marks all RK3528 domains always-on, mainline does not.
+- Added only `pd_ignore_unused` to the corrected single-CPU test. It still aborts in
+  `genpd_power_off_work_fn` and panics at 0.73 seconds. The parameter skips the generic late-init
+  unused-domain pass, not every runtime shutdown.
+- Serial evidence: `build/logs/h96max-3518/20261116-pd-ignore-unused.log`.
+- Added a diagnostic patch applying `GENPD_FLAG_ALWAYS_ON` to RK3528 domains; build pending.
+- Owner power-cycled during the build; left vendor as default.
+
+- Diagnostic kernel build passed; installed Image SHA256 matches build output:
+  `63c6ccd75ee56db027d7432ad70f6b7958fedf607f7de357f33931870c3deffa`.
+- Preserved the previous experimental image/initrd under `/var/lib/tvb-next2/`.
+- Verified the menu byte-for-byte against the pre-install menu, vendor default `l0`, and the
+  root-mounted rollback hook in the rebuilt initramfs.
+- Rebooted for one-time serial selection, with unchanged DTB and diagnostic arguments.
+
+- The always-on diagnostic reaches systemd and a `ttyS0` login prompt. Root is the SD filesystem,
+  mounted at 4.02 seconds. Serial SysRq remains responsive past 250 seconds.
+- SDIO controller `ffc20000.mmc` fails to initialize its non-removable card; no SSH. SysRq task
+  output shows NetworkManager, wpa_supplicant and sshd running.
+- This establishes a boot outcome difference with the domain policy, not the underlying PMU fault’s
+  cause or a complete boot/network regression pass.
+- The guard had not returned the box by 250 seconds. Used serial SysRq sync, verified completion,
+  remount read-only, verified completion, then reset. No human power cycle.
+- Log: `build/logs/h96max-3518/20261116-domains-keep-on.log`.
+
+- Vendor 6.12.69 is back over SSH, with no failed units. Saved the mainline journal to
+  `build/rebase/next2-first-userspace-journal.log` (boot `bc56a856d4864ee1b83b71fd1783e997`).
+- Journal correction: the guard starts at 96.18 seconds, after a missing `zram0` device times out.
+  Its reboot deadline was about 276 seconds; serial reset was at 267.66 seconds. This run does not
+  show the guard failing its timer.
+- Radio module aliases cover SDIO IDs only. The platform boot driver is registered after SDIO
+  discovery, so exporting its OF table alone would not fix the missing card.
+- Next blocker: SDIO enumeration; collect mainline GPIO, clock and MMC state before changing it.
+
+## 2026-11-16 — Regression goal and SDIO diagnostics
+
+- Owner set the goal to get next2 passing the regression suite; no commits or pushes. Post-mortem
+  procedure changes remain deferred.
+- A one-boot `systemd.debug_shell=ttyS0` with the regular serial getty masked provides early root
+  access. Verified mainline release and vendor menu default before accepting the boot over serial.
+- Mainline `ffc20000.mmc` rebind repeats the missing-card failure. Manual `modprobe skw_sdio_lite`
+  returns `ENODEV`, waiting for a card rather than loading firmware.
+- Pinmux readback matches this board’s factory SDIO1 bus and GPIO3_B2 reset routing. Captured GPIO
+  and clock state under `/var/lib/tvb-next2/`, copied to `build/rebase/`.
+- Kernel lacks tracefs and dynamic debug. Added tracing and dynamic debug for the next MMC command
+  trace, plus the missing font, lockup detectors and zram baseline.
+- First config check caught mainline’s integer `CONFIG_BOOTPARAM_SOFTLOCKUP_PANIC`; corrected `y` to
+  `1`. Config now matches; compilation continues.
+- Returned to vendor with `systemctl reboot` from the mainline shell. No human action.
+- Staged unchanged `tools/validate/box.py` for a serial-driven system regression run.
+- Working-vendor GPIO/clock baseline: `build/rebase/next2-vendor-sdio-comparison.log`.
+  CPU/voltage/MMC baseline: `build/rebase/next2-vendor-cpu-mmc-baseline.log`.
+
+- Prepared `pmdomain-clear-failed-clock.patch`: clear the failed `of_clk_get` entry before
+  `clk_bulk_put` sees it. Mainline’s deferred clock probe currently taints the kernel, which fails
+  the system suite. Patch is not selected yet.
+- Linux 7.3.4 `checkpatch.pl --strict --no-tree`, with its spelling and const-struct tables, reports
+  zero errors, warnings or checks. Runtime verification remains open.
+- The tracing kernel build remains live; no build restart or input change was made.
+
+## 2026-11-16 — First mainline regression output
+
+- Tracing kernel build and install passed. Image hash:
+  `f94ec4a517b4b33e98cccaecfe5f476abb692010f77b24fd14774171996da790`.
+- `CONFIG_ZRAM=m` removes the missing-device startup wait; the system suite reports no failed units
+  and no missing baseline configuration.
+- Ran unchanged `box.py --profile short --suite system,storage,input` through serial. RAM
+  verification, fio, USB errors, recovery key and LED driving complete.
+- Failures: warning taint 512, unbound OP-TEE/radio/SPDIF nodes, missing radio modules, and failed
+  SDIO enumeration. Output remains on the SD at `/var/lib/tvb-next2/tracing-regression.txt`, pending
+  host collection.
+- MMC trace shows CMD5 and CMD52 returning `-ETIMEDOUT` without a response at every initialization
+  frequency. Data transfer and firmware loading have not begun.
+- GPIO stack traces identify the reset-controller path: `pre_power_on` calls
+  `reset_control_deassert` then `reset_control_assert`, followed about 12 ms later by
+  `post_power_on` deassert. This creates an enable pulse during the intended off sequence. It is a
+  candidate cause, not yet a verified fix.
+- `CONFIG_RESET_GPIO=m` selects that path. Source inspection shows disabling it makes the optional
+  reset request return NULL and selects the legacy GPIO array.
+- Added the checked clock-cleanup patch to next2; its build passes. Runtime check next, followed by
+  a separate legacy-GPIO reset test.
+- Reset traces are `/var/lib/tvb-next2/sdio-trace.txt`, `sdio-gpio-trace.txt` and
+  `sdio-gpio-stacks.txt`. Serial log: `build/logs/h96max-3518/20261116-sdio-tracing.log`.
+
+## 2026-11-16 — Clock cleanup verified, four CPUs online
+
+- Clock-cleanup Image hash: `0c327380419f4c710e2db326bf363ece84aec09451396b565aad7f236afd588a`.
+- Booted with `CONFIG_RESET_GPIO=m`, unchanged DTB and command line. The same clock acquisition
+  defers, but `/proc/sys/kernel/tainted` is `0` and no `__clk_put` warning appears. SDIO enumeration
+  still fails.
+- Mainline reports no cpuidle driver. Brought CPUs 1, 2 and 3 online separately; each returns and
+  `/sys/devices/system/cpu/online` becomes `0-3`. CPU clock is 408 MHz. This is hotplug evidence,
+  not a four-CPU cold-boot or DVFS result.
+- Started unchanged short `system,cpu` suites; results pending.
+- Prepared a separate `CONFIG_RESET_GPIO=n` diagnostic build. Source confirms the optional reset
+  request returns NULL, selecting MMC’s existing GPIO-array fallback.
+- The first tracing regression and reset traces have been collected into `build/rebase/`.
+
+- Four-CPU short `system,cpu` run completes: no taint, no missing baseline config, no failed units;
+  RAM verification passes. The CPU load reports 50 C maximum over 15 seconds. The frequency ladder
+  is absent, as expected with DVFS still disabled.
+- `CONFIG_RESET_GPIO=n` diagnostic builds successfully. Image hash:
+  `964960f50667230f1e246d3925ea10b0af77395c3dbfa8eaf8e25a1e39cfb84b`.
+- Returned to vendor for installation. The upcoming test changes only the reset controller selection
+  relative to the warning-free kernel.
+
+## 2026-11-16 — Legacy reset and chip-wake ruled out
+
+- The first legacy-reset boot never ran: the serial session ended before the menu choice, and the
+  menu timed out into vendor. Serial log: `build/logs/h96max-3518/20261116-legacy-reset-2.log`.
+- The menu prints `5:<TAB>TVBian…`; a selector must match the entry text, not `5:TVBian`.
+- `CONFIG_RESET_GPIO=n` (Image `964960f5…`) boots to the debug shell. `mmc1` still reports
+  `Failed to initialize a non-removable card` at 4.75 seconds. The reset-pulse hypothesis is wrong.
+- Vendor holds GPIO3_B4 (`HOST_WAKE_WL`) high; mainline leaves it low. Holding it high with
+  `gpioset` and rebinding `ffc20000.mmc` gives the same failure at 400, 300, 200 and 187.5 kHz.
+- Mainline muxes GPIO1_C3 to `clkm1-32k-out` with `clk_32k` enabled. SDIO1 pin pull and drive match
+  the factory tree. Neither tree has I/O-domain nodes.
+- Still open: the factory host takes `ciu-drive`/`ciu-sample` from `grf_cru`, mainline from `cru`;
+  and whether the radio is powered at all during CMD5. A scope or multimeter reading on GPIO3_B2
+  during the mainline attempt would settle the second.
+- The boot guard returned the box to vendor at 194 seconds; no human action.
+
+## 2026-11-16 — SDIO: pins, clocks and enable timing match vendor
+
+- The SD slot runs SDR104 on mainline with the same `cru` phase clocks, so the factory `grf_cru`
+  clock source is not the SDIO difference.
+- Vendor's second `clk_32k` user is HDMI CEC, not the radio. Vendor and mainline `pwrseq_simple` run
+  the same GPIO sequence; `dw_mmc-rockchip` differs only in tuning.
+- Pin configuration of GPIO3_A4–B5 and GPIO1_C3 matches vendor: pull, 12 mA drive, mux. Captures:
+  `build/rebase/vendor-sdio1-pinconf.txt`, `build/rebase/next2-sdio1-pinconf.txt`.
+- Sampling GPIO3_B2 during a rebind shows the enable high about 250 ms per attempt, low between.
+- `post-power-on-delay-ms = 1000` (DTB `7b40c3b5…`, test copy only) stretches each attempt to 1.45
+  seconds; CMD5 still gets no response. Original next2 DTB `8f42926c…` restored.
+- Reading GPIO1_C3's input register on vendor gives a constant high, so it cannot show whether 32
+  kHz is on the pad. A scope on GPIO1_C3 and GPIO3_B2 during a mainline attempt is next.
+
+## 2026-11-16 — SDIO found: the radio's PCM pins
+
+- Raw IOMUX readback (`build/rebase/vendor-iomux.txt`, `next2-iomux.txt`) differs only at
+  GPIO3_B5–B7: vendor function 1, mainline GPIO. The SDIO bus, reset and 32 kHz pins match.
+- Those pins are `i2s0m0`, SAI0's pins; the factory SAI0 feeds `bt_sco`, the radio's PCM. Mainline
+  has no SAI0 node, so the translation dropped it and the pins kept their pull-downs.
+- Adding the four `i2s0m0` groups (bias off, as factory) to `sdio-pwrseq`'s `pinctrl-0`:
+  `mmc1: new UHS-I speed SDR104 SDIO card` at 2.52 seconds, on two boots. `skw_sdio_lite` and
+  `skwbt` load; `wlan0` associates and takes an address.
+- The change lives in `build/rebase/prepare-next2-tree.py`; `board-next2.dtb` is `f1478272…`. The
+  upstream proof reports zero differences.
+- Ruled out on the way: pin pull and drive, the SDIO phase registers (`vendor-mmc-grf.txt`,
+  `next2-mmc-grf.txt`), the MMC core's rescan path and `dw_mmc` power handling.
+
+## 2026-11-16 — next2: reloads, taint, first full suite
+
+- Wi-Fi reloads failed because `cfg80211` was a module: `modprobe -r` dropped it with the driver,
+  and the running `wpa_supplicant` fell back to wext. `CONFIG_CFG80211=y` and `CONFIG_RFKILL=y`, as
+  vendor: `wifi.reloads 1/1 back`.
+- Seekwave `0011` (no `IRQF_ONESHOT` without a thread) and `0012` (`WQ_PERCPU`): `tainted 0`.
+- Full `default` profile (`build/rebase/next2-full-1.txt`): new against vendor are `spdif-out`
+  unbound (`CONFIG_SND_SOC_SPDIF=m` staged, not built), Generic PHY on the integrated PHY (todo),
+  GPU disabled (`glmark2.score failed`), no RTC to wake s2idle, and `soak.jobs 0 1 0`.
+- `soak.warnings` is the known short `SKW_CMD_GET_STA` reply, 179 times in 30 minutes.
+
+## 2026-11-16 — next2: GPU, display, and a one-shot boot that works
+
+- The serial-free one-shot never restored the vendor menu: klibc `mount` needs a device and a
+  directory, and the initramfs has no `cp`. The hook now remounts with `"$ROOT" "$rootmnt"` and
+  copies with `cat`; a next2 boot came up with `default l0` already restored.
+- GPU, VOP2, HDMI and its PHY enabled; the GPU without its OPP table, at the assigned 300 MHz.
+- `rockchip-drm` bound nothing: the translation drops the factory `display-subsystem` (no base
+  node). Folded the node into `arm64-dts-rk3528-media-display.patch`, as upstream SoC dtsi files
+  carry it. `card0` with `HDMI-A-1`; no sink attached.
+- `glmark2.score` 111 (vendor 57, 91). Two planes against vendor's four; no Writeback or Composite
+  connector. `build/rebase/next2-display-gpu-1.txt`. next2 DTB `5b403ee6…`.
+
+## 2026-11-17 — glmark2: next2 against vendor
+
+- Same suite, same rootfs, both on `lima`: next2 111, vendor 57 (`build` 169 against 92).
+- Vendor devfreq asks 700 or 800 MHz; pinned at either, `build` gives 93 FPS both times. The
+  requests do not reach the core. Clock readback says 300 MHz on both kernels, cached; the real
+  vendor rate is unmeasured. next2 assigns 300 MHz and has no devfreq.
+
+## 2026-11-17 — dEQP: next2 renders as vendor does
+
+- `build/out/validate/deqp_3.2.11.0+tvb2` (Nov 8) depended on `libegl-dev`, which pulls Debian's GLX
+  against our Mesa: it cannot install. Rebuilt from the current recipe: `deqp_3.2.11.0+tvb0~local`,
+  runtime depends only.
+- `gpu.py --gpu lima --fraction 20`: next2 and vendor both 832 pass, 22 expected fails, 18 skips, no
+  unexpected failure. The glmark2 lead is real. `build/rebase/next2-deqp.txt`, `vendor-deqp.txt`.
+- next2 took 2:34 against 1:04; its CPU-bound cases run 2.5–3× slower, and the 3D-texture
+  combination timed out once at 60 s (a flake): the CPU sits at 408 MHz with no DVFS.
+- `spdif-out` binds to `spdif-dit` with `CONFIG_SND_SOC_SPDIF=m`.
+
+## 2026-11-17 — next2: CPU DVFS on the shared rail
+
+- Vendor exposes 1200 and 1416 MHz only (`build/rebase/vendor-cpu-rail.txt`): 900.70 and 914.35 mV,
+  PWM 1700 and 1850 of 5000 ns, inverse. The factory bins 1416 MHz L0–L4 by PVTM; this unit is L4.
+- The translation merged mainline's RK3528 table: next2 offered 1608–2016 MHz, which an RK3518 must
+  not run, and 1416 MHz at 900 mV, under this unit's vendor voltage.
+- next2 keeps the factory's two OPPs, 1416 MHz at L0 (962.5 mV) for any bin. Mainline's
+  `pwm-regulator` duty, in whole percent, matches vendor at 1200 MHz to the nanosecond.
+- Readback (`next2-cpu-rail.txt`): 900.70 mV at 1200, 964.40 mV at 1416, as computed. The `cpu`
+  suite: ladder `1200@900 1416@964`, 52.5 C over 60 s on four CPUs, no throttling, no warning.
+- `maxcpus=1` dropped from the next2 entry: four CPUs boot cold. next2 DTB `075bdb0e…`.
+
+## 2026-11-17 — next2: hardware decode through rkvdec
+
+- `vdec` and `vdec_mmu` enabled; no power domain, as the dtsi patch describes. `video0: rkvdec`
+  offers `S264` and `S265`. next2 DTB `7186bb1d…`.
+- The proof flagged `sram` renumbering as a difference: `tools/dtcx/references.py` now knows `sram`
+  as a bare phandle. 169 dtcx tests pass; other boards' translations byte-identical.
+- `video.py` had no mainline Rockchip engine: borrowing `sunxi` counted Cedrus interrupts, so every
+  hardware decode read `software`, and its `VP9F` format query crashed the box script, read as a
+  hang. New `rkvdec` engine: `video-codec` interrupts, H.264/HEVC formats, no JPEG, no MPEG-1.
+- Decode, clean (`build/validate/video/h96max-3518-next2-7.3.4.json`): H.264 ≥ 4080x4080, 24 fps to
+  5120x2880; interlaced H.264 1080p at 222 fps; HEVC ≥ 8192x4320, 24 fps to 7680x4320. 10-bit H.264
+  and HEVC refused; VP9, VP8, MPEG-2, MPEG-4 and H.263 refused, Hantro not enabled.
+
+## 2026-11-17 — next2: Hantro, GPU clocks, throughput
+
+- Hantro VDPU2 (`rockchip,rk3568-vpu` at `0xff7c0000`, PD_VPU) folded into the dtsi patch: MPEG-2
+  1080p at 73.8 fps, VP8 1080p at 59.9 fps; the vendor's GRF write is not needed. VP8 past 1080p
+  decodes broken instead of refused.
+- SCMI advertises the GPU core at 200–800 MHz but holds it at 300 MHz on both kernels; asking 500 or
+  600 MHz changes nothing, and pinning 700/800 MHz hung the box (watchdog back to vendor). GPU DVFS
+  is out again.
+- `ACLK_GPU_MALI` at the vendor kernel's 498 MHz instead of 297: glmark2 116 (from 111); dEQP still
+  832 pass, 22 expected fails, in 59 s. CPU cooling map restored; next2 DTB `49151b97…`.
+- DDR runs at 786 MHz on both kernels, fixed by firmware; rkvdec at the factory's 340/600 MHz.
+- Wi-Fi down/up 236/243 Mbit/s at 1416 MHz, 229/223 under schedutil; vendor 233/225 the same hour.
+  The SDIO bus matches vendor (SDR104, 198 MHz, phase 263); the limit is the iperf path.
+
+## 2026-11-17 — next2: feature parity, first batch
+
+- Baseline (`build/rebase/next2-full-2.txt`): beyond known issues, only the PHY, untestable link (no
+  cable) and suspend (no RTC, as vendor).
+- USB3: `usb@fe500000` was disabled (the factory names it `dwc3@`, so its status never mapped); host
+  mode as factory. xHCI SuperSpeed root hub at 5000M.
+- Audio: SAI2 + codec (`asoc-rk3528-codec.patch`, W132D's import; `pa-ctl-gpios` restored), SAI3 +
+  HDMI, S/PDIF (`rk3568-spdif` fallback node), each card named as vendor's. Every card plays 3 s in
+  3.01–3.07 s at 44.1 and 48 kHz; HDMI multichannel needs a sink.
+- IR: the 3518's remote is the H313's, button for button; keymap `rc-h96max-3518`
+  (`media-rc-keymaps-h96max-3518.patch`), `gpio-ir-recv` on GPIO4_C6, `/dev/input/ir-remote` by a
+  new rule. Decoding needs `CONFIG_IR_NEC_DECODER`, built next.
+- RNG (`rk3576-rng` fallback, SCMI clock): `rockchip-rng` current. DDC moved to `i2c2` for DDC/CI:
+  `/dev/i2c-2`; untested without a sink. CEC adapter present, no sink.
+- Ethernet: `net-phy-rockchip-rk3528-fephy.patch`, vendor's T22 tuning with a fixed threshold and
+  OTP `txlevel`; binds as `Rockchip RK3528 integrated FEPHY`. Link untested without a cable.
+- JPEG: Hauer's posted v7 driver; `rockchip-jpegd` registers.
+- 10-bit: rkvdec offers NV15, but Debian's 6.12 headers lack `V4L2_PIX_FMT_NV15`, so ffmpeg9's
+  `v4l2request` never knew it. `patches/ffmpeg/0045` defines it; build pending.
+
+## 2026-11-17 — next2: power domains, boot arguments, 10-bit, planes
+
+- `pmdomain-rockchip-skip-qos-idle-only.patch` (Daniel Bozeman, posted) replaces the keep-on
+  diagnostic: idle-only domains get no QoS save or idle request, where the PMU faulted. Its
+  companion, skipping a deferring domain, left `PD_GPU` unregistered (lima `-110`); not carried.
+  With the fix alone the controller defers once, every domain registers, lima probes.
+- `pd_ignore_unused`, `clk_ignore_unused`, `keep_bootcon`, the debug shell and the masked getty are
+  off the next2 line: genpd and the clock framework disable what is unused at 1.0 s; Wi-Fi, GPU,
+  audio, video and USB3 all come up.
+- VOP2 Esmart1/Esmart2 on VP0 from vendor's data, folded into `drm-rk3528.patch`: four planes.
+- 10-bit: with `patches/ffmpeg/0045` rkvdec decodes H.264 10-bit to 6144x3456 (61 fps at 4K) and
+  HEVC Main10 to 7680x4320 (93 fps at 4K), NV15 kept as DRM frames; `video.py`'s `rkvdec` engine
+  checks them by frame count, as `rkmpp`'s.
+- IR: NEC decoder built; `rc0` enables `nec`.
+- next2 pinned to v7.3.4's commit on the GitHub mirror: a stable bump to 7.3.5 renamed the release.
+
+## 2026-11-17 — next2: encoder, composite, writeback
+
+- Encoder: Golle's posted RKVENC front end with a new VEPU540C H.264 back end (`media-rkvenc-*`),
+  register images matching MPP's over 1,073 cases. `rkvenc` registers; `h264_v4l2m2m` passes 720p
+  and 1080p at 47.3 and 47.5 dB, refuses past 1920x1088. No HEVC; MPP encodes past 1080p.
+- VP1 with Esmart3, BT.656 routing, a TVE driver and a VOP2 writeback connector
+  (`drm-rk3528-vop2-vp1`, `-bt656`, `drm-rk3528-tve`, `-vop2-writeback`). VOP, HDMI and TVE bind
+  into one card: Composite-1, HDMI-A-1, Writeback-1, as vendor.
+- `display.py`: composite PAL and NTSC modes set on a CRTC (vendor: no CRTC takes them); PAL
+  writeback reads back black, the known RK3528 limit; NTSC writeback refuses every format. HDMI
+  sections skip for no active CRTC, on vendor too.
+
+## 2026-11-17 — the mainline tree beside the vendor one; per-SoC values out of shared code
+
+- Upstream offers no newer base: torvalds master and linux-next carry 7.3.4's `rk3528.dtsi`
+  unchanged; Kwiboo's RK3528 branch adds only VDPU2, tsadc and SFC.
+- The next2 tree moved to `boards/h96max-3518/next2/` (`board.conf` with only the DTB bases, a link
+  to the factory DTB). `build-dtb.sh` builds it like any board: the result is byte-identical to the
+  hand-generated tree (`3d58dd4a`), and every other board's tree unchanged.
+- The vocabulary is now `kernel-rk3528-vendor-6.1.translate.conf`, named by its source;
+  `build-dtb.sh` and `upstream.py` apply a translation only where the target differs from the
+  source, so the vendor tree stays untranslated.
+- Display patches: the writeback AXI ids, the TVE's GRF register, standards, luma filter and DAC
+  defaults move into per-SoC data; the RK3528 overlay routing is a table, not a switch. The Esmart3
+  case had landed in RK3568's function by patch fuzz; the stack now applies at fuzz 0.
+- The display suite's compose check failed with ENOMEM on a dumb buffer: next2's VOP had no IOMMU,
+  so it allocated from the 16 MiB CMA pool. The factory tree has one, `iommu@ff847e00` (v2, SPI 109
+  shared with the VOP); added to `arm64-dts-rk3528-media-display.patch` and enabled in
+  `next2/board.patch` (tree `e955fe2e`). The box booted it and never came back: no SSH, ping or mDNS
+  for 15 minutes. Serial detached, so the hang's point is unknown. The tree before it, `3d58dd4a`,
+  is saved on the box as `/var/lib/tvb-next2/board-next2.3d58dd4a.dtb`.
+
+## 2026-11-17 — glmark2 off a headless box: void
+
+- Every `glmark2` score taken with no screen plugged in is void: next2 111 and 116, vendor 57 and 91
+  beside them. The suite forced HDMI on without an EDID, so the mode scanned out through the run was
+  whatever each kernel fell back to, and next2 likely scanned nothing at all. The near-doubling was
+  memory bandwidth, not the GPU. dEQP stands: 832 passes on both kernels say next2 renders
+  correctly, not faster.
+- Like for like, a synthetic 1080p60 screen through `edid_override` on next2: M2 Plus 39, 3518D 38.
+  Vendor on a real 1080p screen: 43–50. The `ACLK_GPU_MALI` 498 MHz choice rested on the void
+  numbers.
+- The power cycle did not bring it back: the menu still read `default tvb-next2`. The IOMMU tree's
+  boot hung before root mounted, so the initramfs hook never restored the vendor menu, and every
+  reset re-entered the same boot. Recovered from the SD on the host with `e2cp`: the saved
+  `extlinux.before` (`default l0`) back as the menu, `board-next2.3d58dd4a.dtb` back as
+  `board-next2.dtb`; both read back identical, `fsck.ext4 -n` clean. The journal on the card ends at
+  08:19, before the hung boot.
+- Ethernet on next2, with a cable now: the RK3528 FEPHY driver binds,
+  `Link is Up - 100Mbps/Full - flow control rx/tx`, iperf3 93.8 Mbit/s each way against the host,
+  vendor's wire speed. Tree `3d58dd4a`, the encoder/TVE kernel.
+
+## 2026-11-18 — next2: its own tree again
+
+- `boards/h96max-3518/next2/` back, generated from this board's factory tree like the others; it
+  replaces the hand-built `3d58dd4a`. Against that one: PVTM data and the trim cell, the GPU held at
+  300 MHz, `vop_mmu` still disabled, and the keymap `rc-h96max-m2-plus`: this remote's NEC address,
+  `0x4040` in the factory tree, is the M2 Plus's and the 3518D's.
+- Back on vendor 6.12.69 for the install; the next2 boot waits for the kernel with PVTM report-only.
+- Installed from vendor (the live menu held an old `tvb-next2` entry: the saved vendor menu is the
+  live one without it) and booted once: `pvtm 1520 at 1416000 kHz, 950750 uV`, bin 4, reported, not
+  applied. Root mounted, the vendor menu restored; `power_allocator` with a cooling device; the
+  analog, S/PDIF and HDMI cards; USB3 at 5 Gbit/s; the IR receiver on NEC; Ethernet and Wi-Fi up; no
+  failed unit.
+
+## 2026-11-18 — next2: the VOP IOMMU hang, on serial
+
+- Serial on the UART0 header at 1500000 baud. Test boots run from an extra menu entry chosen at
+  U-Boot's prompt (`prompt 1`, `timeout 300`), the default left on vendor.
+- The tree with `vop_mmu` enabled hangs silently: no line after `rockchip_drm_init` starts
+  (`initcall_debug`, `ignore_loglevel`, `drm.debug=0x1e`, IOMMU and VOP2 `dyndbg` all quiet).
+  `rockchip,disable-mmu-reset`, which mainline already reads as the vendor does (skip the forced
+  reset), changes nothing. The vendor's `vop_mmu` carries `rockchip,disable-device-link-resume` and
+  `rockchip,shootdown-entire` instead, neither in mainline; the VOP and its IOMMU share SPI 109.
+- No watchdog reset followed any hang, though vendor's systemd arms it (80 s, 89 s in hardware) and
+  it counts across a soft reboot: either it never fired or the reset stranded the box. The SD card
+  runs SDR104 at 1.8 V, which a watchdog reset does not undo; `no-1-8-v` is not read by dw_mmc, so
+  the next test tree drops the `sd-uhs-*` modes to keep the card at 3.3 V.
+
+## 2026-11-18 — next2: the VOP's IOMMU, test 4
+
+- The IOMMU tree with `rockchip,disable-mmu-reset`, the SD's UHS modes dropped, and
+  `watchdog.handle_boot_enabled=0`: the IOMMUs probe, the SD comes up at high speed, and the boot
+  stops at 1.96 s in the DRM modules' init, as before. The console stays silent and no watchdog
+  reset follows: the watchdog is not running at boot, so the kernel has none to hand over. The box
+  waits for a power cycle.
+
+## 2026-11-18 — next2 with the VOP IOMMU
+
+- `modprobe rockchipdrm` by hand with `vop_mmu` on first, the serial console logging: the box lives,
+  where the earlier IOMMU attach hung it; then a normal boot, no failed units.
+- `video.py` (`h96max-3518-next2-candidate`): decode H.264 to 4080x4080, HEVC to 8192x4320, VP9 and
+  the 10-bit ones to 7680x4320, VP8, MPEG-1, MPEG-2, MPEG-4 to 1080p, H.263 to 1408x1152, MJPEG to
+  6144x5120; encode H.264 and HEVC to 8192x4320, JPEG to 3840x2160.
+- `display.py`: 16 passed, 0 failed. Three `POST_BUF_EMPTY irq err at vp1` after the composite
+  checks.
+- The latest next2 installed: AFBC, the collocated MVs compressed (frames only for H.264), cache
+  hints on rkvdec and Hantro, the dma-buf sync. `video.py --suite afbc,decode`, H.264, HEVC 10-bit
+  and VP9 at 1080p and 2160p pass, linear and AFBC; MPEG-2 passes 1080p and refuses 2160p; no kernel
+  lines.
+
+## 2026-11-19 — GPU scaling and the CPU's PVTM bin on next2
+
+- GPU scaling (the 300 MHz `opp-suspend` row and the GPU's table): glmark2 150, 134, 136 over three
+  rounds, suspending between them, 18 rate changes, no lima error.
+- The stock firmware's log (`stock/h96max-3518/dmesg.txt`): CPU `pvtm=1539`, `pvtm-volt-sel=4`; GPU
+  `pvtm=916`, `pvtm-volt-sel=6`. next2 reads the CPU at 1522, bin L4, and with
+  `rockchip_cpufreq_pvtm.apply=1` runs 1416 MHz at 912.5 mV, the stock firmware's; stress-ng
+  `--cpu 4 --verify` 5 min passes at 914 mV and 51 °C, and with glmark2 beside it at 964 mV and 63
+  °C. Vendor 6.12 logs no PVTM and runs 1416 MHz at 900 mV, below the stock firmware's.
+- The GPU's PVTPLL count at 0xff310018 read 896 at 800 MHz and 964 mV, and 895 at 300 MHz and 914
+  mV, with the GPU active: it does not follow rate or rail as the CPU's does.
+- GPU PVTM, CPU and GPU bins applied by default, GPU bus at 498 MHz: CPU 1519, bin L4, 1416 MHz at
+  912.5 mV; GPU 897, bin L5 (stock 916, 6), 700 and 800 MHz at 900 mV. glmark2 at 800 MHz 150;
+  stress-ng CPU at 914 mV and 55 °C, CPU and GPU at 914 mV and 62 °C, both passed; the GPU suspended
+  at idle, 75 rate changes, no kernel error.
+- The final next2 (the DMC's vote a floor, not a range: a trained rate added between rows pinned the
+  rail, and the 3518's CPU at bin L4, 912.5 mV at 1416 MHz, could not rise past it): DDR held at its
+  top rate, no change; `video.py --suite afbc,decode` H.264, HEVC 10-bit, VP9 at 1080p and 2160p
+  pass, MPEG-2 refuses 2160p; no kernel error.
+- rkvenc's recovery without the CRU pulse (the variant's clears, then the empty IOMMU domain; a core
+  the clears leave busy is reset at power-down): `video.py --suite encode` H.264 to 8192x4320, HEVC
+  to 4096x2304 (4096x4096 refused), JPEG to 3840x2160 pass; H.264 8192x8192 is the OOM killer on
+  FFmpeg at `rkvenc_ref_alloc`, 2 GB; no kernel error.
 
 ## 2026-11-19 — the CPU clock is not its request on next2
 

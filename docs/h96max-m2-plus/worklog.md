@@ -620,6 +620,40 @@ MPP 1.1.0's `osal/mpp_soc.c`, the `rk3528` entry, against `patches/ffmpeg/`; not
 - VP9 sizes through `tvb-va-driver`, 10 frames each: profile 0 at 8192×4320 identical to software;
   profile 2 at 1920×1080, 3840×2160, 4096×2304 and 8192×4320, 64, 65, 62 and 58 dB as NV12.
 
+## 2026-11-17 — next2, the mainline kernel, moves here
+
+- Scope: next2 is tested on this box first; its tree is `next2/`, translated from this factory tree.
+  The 3518's next2 folder is retired.
+- The translation kept each CPU OPP's default voltage, below every bin's: 825 mV for 408–1200 MHz
+  where L0 asks 875–900 mV. `voltage_bins` now folds each row into its highest bin. This chip is bin
+  L2 (`pvtm-volt-sel=2`, vendor 6.1); the folded table is at or above its every voltage.
+- First boot: `mmc1: Failed to initialize a non-removable card`, the 3518's SAI0-pin failure. With
+  the `i2s0m0` groups in `sdio-pwrseq` and the vendor tree's 200 ms power-off delay: SDR104 at 1.27
+  s, `wlan0` up. No Ethernet cable here (carrier 0 on vendor too); the FEPHY driver binds.
+- `vdd_logic` and `vdd_gpu` read 1006 and 1148 mV, each regulator's maximum, against 849 and 873 mV
+  on vendor: mainline has no consumer for them and ignores `regulator-init-microvolt`. Pinned at its
+  900 mV; both read 900 mV after.
+- Under `stress-ng --cpu 4`: 2016 MHz at 1100.9 mV, 60 °C.
+- Keymap renamed `rc-h96max-m2-plus`: this box's factory IR tables equal the 3518's.
+- glmark2 on next2: the suite's 51 against the 3518's 116 was the forced HDMI connector's fallback
+  mode, not the GPU. With no EDID the connector takes whatever mode the driver picks (2048x1152
+  here) and scans it out through the run. At a synthetic 1080p60 through `edid_override`: 39 here,
+  38 on the 3518D (RK3518, same kernel); GPU core 300 MHz and bus 297 MHz on both. The two GPU paths
+  are identical in the trees. `box.py`'s `screen()` now presents that synthetic screen when nothing
+  is plugged in.
+- greetd fails on every next2 boot with no screen attached: cage exits, and after five restarts
+  systemd stops. With the synthetic screen it starts and stays.
+- va-api on next2: FFmpeg's `v4l2request` decodes H.264 1080p at 370 fps and 4K at 98–102, HEVC
+  1080p at 351 and 4K at 93–94, at MPP's level. `tvb-va-driver` needs the multi-planar V4L2 API for
+  rkvdec and Hantro; that is the driver's.
+- `rk_iommu ff740800.iommu: FORCE_RESET command timed out` at boot: the decoder's IOMMU. Mainline's
+  RK3576 tree sets `rockchip,disable-mmu-reset` on the same IOMMU beside its VDPU383; added to the
+  RK3528 dtsi patch. Untested on the box yet.
+- The translation dropped the factory's 600 MHz CPU OPP: a row with no unit address met any mainline
+  node of its name, and mainline's GPU table has `opp-600000000`; the two vendor rows then
+  conflicted. An OPP row now meets only a row of its own table. The next2 ladder has all nine of the
+  vendor kernel's frequencies, 600 MHz at 875 mV.
+
 ## 2026-11-17 — the M2 Plus on the new kernel (va-api's run)
 
 - VP9 through rkvdec: bit-exact against libvpx at 1080p and 4K, 60 of 60 frames each, through
@@ -640,6 +674,89 @@ MPP 1.1.0's `osal/mpp_soc.c`, the `rk3528` entry, against `patches/ffmpeg/`; not
 
 - The PVTM driver asked for 900 mV with a range up to `INT_MAX`, which the boot voltage already met,
   so the regulator core left the rail where it was.
+
+## 2026-11-18 — next2: PVTM with bins applied, and back
+
+- Rebuilt next2 (bins applied by default, 128 MiB pool) installed beside vendor 6.1.172 and booted
+  once: `pvtm 1482 at 1608000 kHz, 900700 uV`, bin L6; 2016 MHz at 1025 mV (`vdd_cpu` 1023.55 mV).
+  Vendor reads 1362, bin L2. Not accepted: rebooted to vendor within a minute, idle.
+- The RK3518 boxes read what vendor does at their own point (R69-1 1553 against 1552); the RK3528's
+  count is high at 1608 MHz and 900 mV. `apply` defaults off again until it is understood.
+- Vendor 6.1.172, read-only: `pvtm=1364`, `pvtm-volt-sel=2`, measured 6.2 s into boot. Its driver
+  asks `regulator_set_voltage(volt, INT_MAX)` and reads one count `sample-time` after; ours sets 900
+  mV exactly and waits for the count to settle.
+- Vendor runs `vdd_logic` at 849 mV and `vdd_gpu` at 873 mV (`regulator_summary`), where next2 holds
+  both at the 900 mV boot voltage. The M2 Plus is the one box here with its own logic rail, and the
+  one whose count reads high: a PVTPLL fed from the logic rail would read about this much higher at
+  900 mV.
+- Not so: a next2 boot with `vdd_logic` held at 849 mV still read `pvtm 1484`, bin L6, at 51 °C.
+  That boot ran the bins-applied kernel still installed here, so 2016 MHz at 1025 mV for a minute,
+  idle; back on vendor at once. The report-only kernel goes on before the next next2 boot.
+
+## 2026-11-18 — next2 report-only kernel for VA work
+
+- Installed the report-only next2 build (PVTM reads, applies nothing) with the current next2 tree
+  and `cma=128M`. One idle boot: `PVTM bin 6 not applied: OPPs at their defaults`; the 2016 MHz OPP
+  targets 1100 mV, not L6's 1025 mV; no failed units. Back on vendor 6.1.172, default `l1`.
+- The VA driver (`tvb-va-driver`, uncommitted) on this kernel: H.264, HEVC and HEVC Main 10
+  (frame-based, NV15), VP9 and JPEG (`rockchip-jpegd`, listed as `JPEG`) match software on every
+  suite clip. Speed against FFmpeg's v4l2request: HEVC 97–100%, H.264 91–97%, VP9 97–98%; MJPEG
+  1080p 280 fps. HEVC's short-term RPS goes inline in each slice header with the SPS's count at 0;
+  rkvdec parses it. Box back on vendor 6.1.172, default `l1`.
+
+## 2026-11-18 — next2 candidate with the VOP IOMMU
+
+- `modprobe rockchipdrm` by hand with `vop_mmu` on first: the box lives; then a normal boot.
+- `video.py` (`h96max-m2-plus-next2-candidate`): decode H.264 to 4080x4080, HEVC to 8192x4320, HEVC
+  10-bit, VP9 and VP9 profile 2 to 7680x4320, VP8, MPEG-1, MPEG-2, MPEG-4 to 1080p, H.263 to
+  1408x1152, MJPEG to 6144x6144; encode H.264, HEVC and JPEG to 1080p.
+- `display.py`: 16 passed, 0 failed, composite writeback with the bars, the ladder to 4K60 and the
+  broadcast modes sustained; the HDMI writeback checks skip at the 4K screen. Three
+  `POST_BUF_EMPTY irq err at vp1` after the composite checks.
+- `greetd` fails on next2 (`start-limit-hit`: the greeter exits without a session, HDMI
+  `disconnected`, no screen attached); on the vendor boot before it the greeter ran 9 hours.
+- WebKit's sandbox fails on next2 (`bwrap: Creating new namespace failed`, tvbian): the fragment's
+  `CONFIG_EXPERT=y`, which `CFG80211_CERTIFICATION_ONUS` needs, defaults `NAMESPACES` off
+  (`default !EXPERT`), so no next2 build from it had user, PID, net, IPC or UTS namespaces. The
+  fragment sets `CONFIG_NAMESPACES=y`; the rebuilt `.config` has them all.
+- `video.py` encode past the 3518D's memory (`m2-encode-big`): 8192x8192 passes, HEVC at 48.2 dB but
+  H.264 at 30.6 dB against 47.5 at 8192x4320. 16384x8640 fails in `start_streaming` for both, before
+  the core runs, and the driver leaves its queued buffers to vb2
+  (`WARNING ... vb2_start_streaming`).
+- Falkon on next2 with namespaces and va-api's export fix (tvbian): H.264 files 1.00x at 1080p60,
+  0.99x at 4K30, 1.00x at 4K60; HEVC 1.00x at 4K30 and 4K60, 1080p60 once showing nothing; VP9 files
+  1.00x; MSE 0.83–0.98x.
+- H.264 at 8192x8192 and 8192x4320 now and then scored 30 dB in `video.py`: the decoded picture is
+  clean, one frame off. The suite wrote the encode back to raw frames at a constant rate, which
+  repeats a frame when the MKV's millisecond timestamps round off 30 fps; it now writes them as
+  decoded.
+- The encoder capped at 8192x8192, HEVC at 5120x2880, the size checked again when buffers are
+  allocated, since FFmpeg sets the raw size before the codec: two `video.py` encode runs, H.264
+  47.3–48.4 dB to 8192x8192, HEVC 46.7–48.2 dB to 4096x2304, JPEG to 3840x2160; HEVC 4096x4096 and
+  7680x4320 and both codecs at 16384x8640 refused (`REQBUFS` `-EINVAL`); no kernel lines.
+- The latest next2 installed: AFBC, the collocated MVs compressed (frames only for H.264), cache
+  hints on rkvdec and Hantro, the dma-buf sync. `video.py --suite afbc,decode`, H.264, HEVC 10-bit
+  and VP9 at 1080p and 2160p pass, linear and AFBC; MPEG-2 passes 1080p and refuses 2160p; no kernel
+  lines.
+
+## 2026-11-19 — GPU scaling; the PVTM mismatch is not the rail
+
+- GPU scaling (the 300 MHz `opp-suspend` row and the GPU's table, 300–800 MHz): glmark2 149, 139,
+  140 over three rounds, suspending between them, 18 rate changes, no lima error.
+- The CPU rail's PWM duty per voltage is the same on both kernels (`/sys/kernel/debug/pwm`): next2
+  1014 mV at 2950 ns and 1100 mV at 3900 ns of 5000; vendor 6.1 873 mV at 1400, 1000 mV at 2800 and
+  1073 mV at 3600. vendor 6.1 reads `pvtm=1364`, `pvtm-volt-sel=2`; next2 1486, L6. The factory
+  tree's PVTM table and measuring point match Rockchip's 6.1 SDK `rk3528.dtsi`.
+- Vendor 6.1 runs `vdd_logic` at 849 mV and `vdd_gpu` at 873 mV; next2 holds `vdd_logic` at 900.
+- The DMC driver at its default, the performance governor (vendor 6.1 and 6.12 hold the DDR at their
+  top trained rate too): DDR at 786 MHz, `vdd_logic` at 849 mV, vendor's, where next2 held 900; no
+  rate change through 30 s idle and 60 s of `stress-ng --stream 2 --cpu 2 --verify`, which passed;
+  the screen lit, no kernel error. Its first version, simple_ondemand told no display by BL31's
+  parameters, reset the box 8 s into boot once the DFI counted DDR3.
+- The final next2 (the DMC's vote a floor, not a range: a trained rate added between rows pinned the
+  rail, and the 3518's CPU at bin L4, 912.5 mV at 1416 MHz, could not rise past it): DDR held at its
+  top rate, no change; `video.py --suite afbc,decode` H.264, HEVC 10-bit, VP9 at 1080p and 2160p
+  pass, MPEG-2 refuses 2160p; no kernel error.
 
 ## 2026-11-19 — the CPU clock is not its request on next2
 
@@ -671,6 +788,17 @@ MPP 1.1.0's `osal/mpp_soc.c`, the `rk3528` entry, against `patches/ffmpeg/`; not
   own reboot of the boot before. A reset with no record is the watchdog's or a hang's. Not the
   rollback guard (the boot was accepted), nor the tvbian or va-api sessions. The same tests,
   repeated on later boots, reset nothing.
+
+## 2026-11-20 — next2: the manual checks on the owner's 3:2 panel
+
+- HDMI picture: the panel's native 2256x1504 at 235.7 MHz on the desktop, seen. The console, and a
+  screen plugged in after a headless boot: not yet.
+- HDMI sound: a stereo tone, left then right, and a synthetic melody, heard through the panel's
+  speakers. Multichannel and a receiver: not yet.
+- HDMI DDC/CI: the volume (VCP 0x62) read, 55, and set to 60, 5, 6 and 10, each read back;
+  brightness read, 100. Brightness set: not yet.
+- Recovery button: a toothpick press reaches the kernel as `KEY_VENDOR`. Held through power-up: not
+  yet.
 
 ## 2026-11-20 — the GPU's clock and throttling, vendor against next2
 

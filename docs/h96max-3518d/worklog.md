@@ -3208,9 +3208,214 @@ driver loads, brings in `skw_sdio_lite`, and the devices it creates bring in the
   `reboots.sh` ran `systemctl reboot` without `sudo`, refused, so the box never went down; it now
   reboots through `sudo -n`.
 
+## 2026-11-17 — next2: the soak, and why it stopped
+
+- Logged soak (temperatures, clock, rails to eMMC every 5 s): `soc-thermal` 92 °C at 5 minutes and
+  99 °C at 8, the CPU still at 1416 MHz past the 95 °C trip; stopped by hand. Vendor reads 66–68 °C
+  after 5 minutes of 4-core load. With `rockchip,hw-tshut-mode = <0>`, 120 °C resets the box through
+  the CRU, which fits the morning's unexplained return to vendor.
+- No throttling: the translated zone is the vendor's power-allocator one (`sustainable-power`, a
+  `threshold` trip at 95 °C, the cooling map on `target` at 110 °C), and mainline defaulted to
+  `step_wise`, which throttles only past the map's trip, 110 °C.
+  `CONFIG_THERMAL_DEFAULT_GOV_POWER_ALLOCATOR=y` now.
+- No calibration: the dtsi has the OTP `tsadc_trim` cell but the TSADC node never named it; it does
+  now (`nvmem-cell-names = "trim"`), so 99 °C may not have been real.
+- PVTM, report-only: `pvtm 1583 at 1416000 kHz, 950750 uV`, bin 6, at the RK3518 table's own point.
+
+## 2026-11-17 — next2: the soak again, throttling and calibration in
+
+- Kernel with `power_allocator` as the default governor, the TSADC trim cell named, PVTM applied:
+  `pvtm 1582 at 1416000 kHz, 950750 uV`, bin L6.
+- Logged soak, `stress-ng --cpu 4` for 10 minutes: `soc-thermal` 65 °C at 1:30, 74 °C at 5, 78.3 °C
+  at 10; the CPU at 1416 MHz throughout, never near the 95 °C trip. Before: 99 °C at 8 minutes.
+- `vdd_cpu` 964.4 mV under load, where vendor ran 900 mV: the L6 column for 1416 MHz is 962.5 mV.
+- Tree: the vendor's own enables now kept, so TVE, the analog card, S/PDIF, the IR receiver and USB3
+  (5 Gbit/s) came up; no failed unit.
+
 ## 2026-11-17 — glmark2 off a headless box: void
 
 - glmark2 on next2 at a synthetic 1080p60 screen through `edid_override`: 38.
+
+## 2026-11-18 — next2 candidate with the VOP IOMMU
+
+- The candidate (52 patches: the VOP reset, its aclk pre auto gating off, the attach-only IOMMU,
+  Esmart2 on VP1, JPEG encode, HDMI 480i/576i/480p60, AIC8800 `custregd` off, uinput) with `vop_mmu`
+  enabled: `modprobe rockchipdrm` by hand first, the box lives; then a normal boot, no failed units,
+  the seven video nodes.
+- `video.py` (`h96max-3518d-next2-candidate`): decode H.264 to 4080x4080, HEVC to 7680x4320, VP9 to
+  4080x4080, the 10-bit ones to 6144x3456 and over, VP8, MPEG-1, MPEG-2, MPEG-4 to 1080p, H.263 to
+  1408x1152, MJPEG to 6144x5120; encode H.264, HEVC and JPEG to 1080p.
+- `display.py`: 19 passed, 0 failed; composite PAL and NTSC writeback keep the bars; every ladder
+  and broadcast mode sustained, 4K50, 4K30 and 4K24 without an underrun. Three
+  `POST_BUF_EMPTY irq err at vp1` after the composite checks.
+- fuseamp's pass on the candidate: its display checks pass, uinput present. 2160p60 8-bit drops 108
+  and runs 3261 late in 60 s: with the 1080p interface plane drawn the decoder takes 15.2–16.8 ms a
+  picture, hidden 0.7 ms. Vendor scans out AFBC `YU08` and scales its DMC to 1056 MHz; next2 has no
+  DMC devfreq and no DFI (`rockchip_ddr` PMU) node. 10-bit waits for FFmpeg `0046`–`0049`.
+- The encoder's cap raised to the 16384x16384 `VEPU540C_ENC_RSL` holds: H.264 passes 1280x720, then
+  3840x2160 makes the encoder write to IOMMU address `0x0` and `0x100`
+  (`Page fault ... of type write`, `RKVENC encode timed out`); its IOMMU stays wedged
+  (`Enable stall request timed out`) and every later case fails, HEVC and JPEG at 720p too. The cap
+  is back at 1920x1088 until the back end programs what the hardware writes through past it.
+- With the extension line buffer (`EBUFT`/`EBUFB`, past 3072 wide) H.264 at 3840x2160 passes
+  sometimes: the core writes past the reference header (`Page fault at` exactly its end, by the
+  per-job address log), whose 8K rounding leaves 128 bytes spare at 1080p, 512 at 3840x2176, none at
+  4096x2304. Header and body in one buffer, as MPP lays them: `video.py` encode passes H.264 and
+  HEVC to 8192x4320 and JPEG to 3840x2160; 8192x8192 and past are the OOM killer on FFmpeg (2 GB),
+  not the core.
+- The watchdog resetting the core and attaching an empty IOMMU domain recovers it: after H.264
+  failed at 8192x8192 the HEVC cases pass, where before every later case failed.
+- HEVC past about 16 million pixels is intermittently garbage (5.5 dB, no fault, no timeout):
+  6144x3456 fails 5 of 9 runs, 7168x4320, 7680x4320 and 7936x4320 fail; 5120x2880, 7680x2160 and
+  8192x4320 pass, 5120x2880 16 of 16. H.264 passes every size to 8192x4320.
+
+## 2026-11-19 — AFBC from rkvdec
+
+- next2 with the AFBC formats (Gaignard's RFC v2 and our non-split 16x16), VDPU381 HEVC writing
+  `AN68`, RK3528 Cluster0 offering the AFBC modifiers, FFmpeg `0050`: `video.py --suite afbc`
+  decodes HEVC 1080p and 2160p, every frame in `AN68`, no kernel lines. The picture on screen is
+  fuseamp's pass to show.
+- fuseamp's pass, its FFmpeg on `0001`–`0050`: at 2160p60 with the interface drawn the decoder takes
+  0.8 ms a picture on AFBC against 17.2 ms on NV12, 0 late against 1002. The AFBC picture is wrong
+  in its top 9–10 of 16 bands and right below, at 1080p and 2160p alike; 10-bit (NV15, linear) is
+  right throughout. About 45 pictures in 20 s drop at 2160p60 with the interface hidden, AFBC or
+  not, none late; 1080p24 breaks cadence 24 times with none dropped, where vendor breaks none.
+- Register 20 holds the AFBC payload's offset in bits 4–31; written at bit 0 it put the payload 16
+  times too early, over the first 40 superblock rows' headers. Fixed: fuseamp's AFBC capture of a
+  1080p still matches linear at 1.000 in every band, 4 lines lower (2 in 2160p scaled to 1080);
+  rkvdec reports the 4 through the CAPTURE compose selection, FFmpeg `0051` crops them.
+- 1080p24 breaks cadence 22–38 times a minute on this next2 with FFmpeg `0001`–`0044`, against 0 on
+  the next2 before AFBC and on vendor: the kernel, with or without AFBC.
+- The 1080p24 cadence breaks were fbcon drawing on VP1: the TVE reported Composite-1 connected with
+  nothing plugged, so the console lit it beside HDMI. Reported unknown, the console drops VP1 once
+  HDMI connects: 0 breaks in 1430 pictures, VP1 off while the player runs (fuseamp).
+- AFBC with FFmpeg `0001`–`0051`: fuseamp's captures of a 1080p still and a 2160p still match linear
+  at 1.000 in every band, unshifted.
+- 10-bit HEVC as `AN6a`: fuseamp's 2160p 10-bit capture matches linear NV15 at 1.000, unshifted;
+  2160p60 10-bit with the interface drawn drops 50 in 60 s, none late, against 1058 dropped and 1891
+  late linear; the decoder takes 0.8 ms a picture drawn, 0.7 hidden, against 19.7 and 17.8. Left at
+  2160p60: 11–19 drops in 20 s with the interface hidden, none late, at 8-bit and 10-bit alike.
+- H.264 and VP9 as AFBC, by one VDPU381 helper for the picture's layout. VP9's references take the
+  header stride and the payload's offset too, and its reference motion vectors sit at
+  `colmv_offset`; read past a linear picture instead, they faulted at 1080p and hung the box at
+  2160p. `video.py --suite afbc,decode`: H.264, H.264 High10, HEVC, HEVC Main10, VP9 and VP9 profile
+  2 at 1080p and 2160p, 24 of 24, no kernel lines.
+- H.264's AFBC picture starts 4 lines down as HEVC's does, VP9's at its top: the compose top says so
+  per codec. fuseamp's captures: H.264 High and High 10, HEVC Main and Main10, VP9 profiles 0 and 2
+  all match linear at 1.000, unshifted.
+- 2160p60 HEVC Main10 on AFBC drops 50, 755, 73 and 179 in 60-s runs across two kernels, none late,
+  the decoder at 95 fps decode-only: the scanout at its bandwidth's edge, DDR at the loader's rate.
+- The DDR monitor on next2 (`rockchip,rk3528-dfi`, the DRAM type from PMU GRF `0x248`/`0x24c`,
+  LPDDR3 here): `rockchip_ddr` counts 99 MB/s idle and 4118 MB/s under a `dd` from `/dev/zero` that
+  reports 4.0 GB/s, a running count; at the RK3568's count rate of 1 it would read half.
+- BL31's DDR DVFS answers next2 (a throwaway module, no rate change): `DRAM_GET_VERSION` `0x100`;
+  `SIP_SHARE_MEM` pages at `0x100000`, below System RAM's `0x200000`; `DRAM_INIT` 0; `GET_FREQ_INFO`
+  lists 324, 528 and 666 MHz. 666 MHz is the loader's rate and the top of the list: scaling the DDR
+  adds no bandwidth on this box. Vendor shows 2160p60 Main10 with 0 dropped at the same 666 MHz, so
+  next2's remaining drops at 2160p60 are not the DDR clock's.
+- The collocated motion vectors compressed (`colmv_compress_en`, as MPP sets it on VDPU381 and
+  VDPU382): `video.py --suite afbc,decode`, H.264, HEVC and VP9 at 8 and 10 bits, 1080p and 2160p,
+  24 of 24, no kernel lines.
+- fuseamp, the 2160p60 Main10 drops: page-flip events, commits and timers are as quick on next2 as
+  on vendor; its pacer hands pictures over at 0.8 of a refresh on next2, 0.3 on vendor with sound,
+  0.5 on vendor without. Vendor's HDMI `snd_pcm_delay` reads 125–200 ms (buffer 200 ms, period 50
+  ms); next2's to compare.
+- The 2160p60 drops with AFBC were fuseamp's test tool: its picture watcher mapped each 4K buffer on
+  the commit thread, about 14 ms a picture on next2's uncached request buffers. Fixed there: 2160p60
+  8-bit drops 2 in 60 s, Main10 on AFBC 3, none late; 1080p24, 1080p60, 2160p24 and 2160p24 10-bit
+  drop none.
+- Cache hints on rkvdec's and Hantro's decoder CAPTURE. Asking for non-coherent buffers first failed
+  "dma alloc of size 19701760 failed" with a `dma_alloc_noncontiguous` WARNING: it takes no
+  attribute but `DMA_ATTR_ALLOC_SINGLE_PAGES`, and both queues set `DMA_ATTR_NO_KERNEL_MAPPING`;
+  videobuf2-dma-contig now drops it there. Readback with FFmpeg's `cacheable=1`, 120 pictures: HEVC
+  8-bit 2160p 11.8 s uncached, 2.83 s cached; MPEG-2 1080p on Hantro 2.99 s, 1.52 s; the pictures
+  identical either way.
+- videobuf2-dma-contig's dma-buf `begin_cpu_access` and `end_cpu_access` did nothing, so a client
+  skipping the QBUF and DQBUF syncs and bracketing its reads with `DMA_BUF_IOCTL_SYNC`, as the VA
+  driver does, read a non-coherent picture stale. They now sync it as `vb2_dc_finish()` and
+  `vb2_dc_prepare()` do. FFmpeg's cached readback, HEVC 8-bit 2160p: 3.04 s for 120 pictures,
+  identical to uncached.
+- H.264 MBAFF decoded wrong with the collocated MVs compressed: MPP compresses them only where
+  `frame_mbs_only_flag` is set, and the patch now does the same. va-api's `h264-mbaff` matches
+  software, 30 of 30; its interlaced MPEG-4 and VC-1 Advanced too.
+- Hantro's interlaced MPEG-2 (va-api's `mpeg2-interlaced`) differs from FFmpeg's software decode by
+  1–2 luma levels, 71.4–73.8 dB a frame. MPEG-2's IDCT is not bit-exact: FFmpeg's own `-idct auto`,
+  `simple` and `int` give three different checksums on the clip.
+- fuseamp's regression suite on the latest next2, AFBC, the MVs compressed, cache hints and the
+  dma-buf sync: no regressions. 60 s pacing with the interface drawn: 1080p24, 1080p60, 2160p24 and
+  2160p24 10-bit drop none; 2160p60 8-bit drops 3, Main10 5, none late. Captures 0.97–0.98 in every
+  band for HEVC, H.264 High and High 10, VP9 profiles 0 and 2, all on AFBC.
+
+## 2026-11-19 — GPU scaling and the CPU's PVTM bin on next2
+
+- With the GPU's OPP table, lima's first suspend reset the box within 30 s of loading; with
+  `power/control` on it ran 700 and 800 MHz. Mainline's dtsi parks the GPU at a 300 MHz
+  `opp-suspend` row, which the translation had dropped as a row only mainline's table has; it now
+  keeps an `opp-suspend` row below every vendor row, and no longer withholds the GPU's table.
+  glmark2 (build, texture, shading): 63 at 300 MHz, 137 at 700, 139 at 800; unpinned, 135–137 across
+  three rounds, the GPU suspending between them at 300 MHz, 19 rate changes, no lima error.
+- `rockchip_cpufreq_pvtm.apply=1` first left 1416 MHz at 962.5 mV: the factory's row names bins
+  L0–L4 only, the rest taking `opp-microvolt`, which the translation sets to the highest bin's. A
+  bin the factory leaves to its default now gets that default as its own column. With it: pvtm 1558,
+  L5, 1416 MHz at 900 mV; stress-ng `--cpu 4 --verify` 5 min passes at 900 mV and 81 °C, and 5 min
+  with glmark2 beside it at 964 mV and 93 °C, the GPU's 800 MHz asking 962.5 mV. The count read
+  1577, 1581 and 1558 over three boots, the lowest the warmest.
+- fuseamp's `ui_bench` on screen with the GPU scaling: cold start to first frame 1102–1169 ms over
+  five runs, against 1270–1300 ms with the GPU at 300 MHz; grid scrolling 16.7 ms a frame, none
+  dropped; keys 27–33 ms. The GPU spent most of the run at 800 MHz.
+- The GPU's PVTM, measured at boot as the vendor does (800 MHz, 950 mV, its domain powered,
+  `gpu_grf` at 0xff310000): 933, 931, bin L7; the 800 MHz row's bins past L5 take the factory's 900
+  mV. Its counter barely moves at runtime, as the CPU's at 0xff300018 does not (about 1523 at 1200
+  MHz and 900 mV and at 1416 MHz and 914 mV): next2 reads both 1–2% under the stock firmware.
+- Pinning the GPU at 800 MHz reset the box with the bus at 498 or 297 MHz, the GPU at 900 or 962.5
+  mV; with `power/control` on, the same pin ran three glmark2 rounds. A `min_freq` written while the
+  GPU was runtime-suspended reached lima's `target()` at once, its clock set with the domain off.
+  devfreq now leaves a suspended device's rate to its resume.
+- With it, a normal boot: 1416 MHz and the GPU's 700 and 800 MHz at 900 mV, the bus at 498 MHz;
+  glmark2 at 800 MHz 137 (139 with the bus at 297); stress-ng CPU at 900 mV and 70 °C, CPU and GPU
+  at 900 mV and 82 °C, both passed; the GPU suspended at idle, 82 rate changes, no kernel error.
+- fuseamp's suite on it: everything passes but 2160p24 8-bit, whose 2-3 cadence broke 8 times in
+  1427 pictures, then 4 and 4, none dropped; 0 on the kernel before. 2160p60 drops 2 (8-bit) and 3
+  (Main10), none late, as before; ui_bench cold start 1184 ms.
+- The 2160p24 cadence breaks, three runs each (fuseamp): the GPU held at 800 MHz 2, 2, 4; the GPU
+  bus at 297 MHz 4, 4, 3; both PVTM bins off 2, 4, 4. A steady 2–4 a minute whatever the setting,
+  none dropped or late; the kernel before's 0 was one run.
+- DDR scaling on next2, `devfreq-rk3528-dmc.patch` (BL31's DRAM calls, the DFI's load,
+  simple_ondemand at the vendor's 40 and 20, 50 ms): BL31 trained 324, 528 and 666 MHz; idle falls
+  to 324, `stress-ng --stream 2` takes it to 666 and back, 26 changes in two minutes, the center
+  rail at 900 mV throughout (the CPU's rail on the RK3518), no kernel error.
+- The DMC driver with simple_ondemand underflowed VP1 at a mode change, dropped 1441 pictures of a
+  2160p60 clip with no kernel line, and hung the box at the next mode set; the M2 Plus, its screen
+  lit, reset 8 s into boot. BL31 was told no display, so it switched DDR mid-scanout. VOP2 now
+  reports the fastest lit output's connector type and line time for BL31 to switch at its blanking,
+  and the driver defaults to the performance governor: vendor 6.12 on the R69-1 made no DDR change
+  in 2 h 38 min, its tree's `auto-freq-en = <0>`.
+- fuseamp's suite on it, DDR at 666 MHz, no change in 15 min: all passes; 2160p60 drops 3 (8-bit)
+  and 7 (Main10), none late. Two bursts of 10 VP1 POST_BUF_EMPTY lines, each as the stand-in screen
+  was released.
+- Hantro VDPU2 recovery: VP8 and MPEG-2 streams through FFmpeg's `noise` filter (amounts 5, 20, 80,
+  three runs each) never timed a job out; a clean clip decoded right after every one. With the
+  watchdog made 1 ms by a test-only parameter, the first timeouts pulsed the VPU's CRU resets
+  (`SRST_A_VPU`, `SRST_H_VPU`) under a core on the bus, and the box hung past its watchdog, off the
+  network until power-cycled. The vendor pulses them only inside the PMU's idle request, and only
+  after its soft reset fails; the patch now resets the IOMMU alone, after the codec's soft reset.
+- The IOMMU-only recovery under the same test, the watchdog at 1 ms: the box hung at the first
+  forced timeouts again, off the network until power-cycled. A 1 ms watchdog fires on a core
+  mid-transfer, where even the driver's own soft reset lands, unlike a job stalled on a fault; which
+  of the two resets hangs it is untested.
+- The control, mainline's recovery alone (no IOMMU reset), the watchdog at 1 ms: the box hung at the
+  first forced timeouts too. A watchdog that early ends a job the core is still running, and the
+  next job programs a busy core; it cannot judge a recovery. A stall to test one is a job the core
+  cannot finish, as the zero VOP time-increment resolution MPEG-4 the driver now refuses.
+- `display.py` on the final next2: 23 passed, 0 failed; every ladder mode sustained with no underrun
+  and no kernel line, 4K60, 4K50, 4K30, 4K24, 1080p120 to 1080p24, 1080i60 and 50, 720p120 to 50,
+  576p50, 480p60, 576i50 and 480i60.
+- fuseamp's suite on the final next2 (the DMC's floor vote, Hantro's IOMMU reset; DDR at 666 MHz,
+  CPU L6 and GPU L7 at 900 mV): all passes; 2160p60 drops 3 (8-bit) and 2 (Main10), none late, no
+  underflow line; ui_bench cold start 1257 ms, keys 27–33 ms.
+- The console after a DRM master exits: `modetest -s` on composite, then its exit, and fbcon's
+  framebuffer is back on VP1 (`allocated by = [fbcon]`); the kernel restores it on the last close.
+  fuseamp's tools leave both CRTCs off as they leave the console in `KD_GRAPHICS`.
 
 ## 2026-11-19 — the CPU clock is not its request on next2
 
