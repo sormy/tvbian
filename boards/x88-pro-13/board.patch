@@ -1,0 +1,35 @@
+--- factory_board.dts
++++ board.dts
+@@ -17,7 +17,7 @@
+ 	interrupt-parent = <&gic>;
+ 	#address-cells = <2>;
+ 	#size-cells = <2>;
+-	model = "Rockchip RK3528 X88PRO DDR4 V10 Board";
++	model = "X88 Pro 13";
+ 
+ 	aliases {
+ 		ethernet0 = &gmac0;
+@@ -1073,9 +1073,10 @@
+ 		             <GIC_SPI 93 IRQ_TYPE_LEVEL_HIGH>,
+ 		             <GIC_SPI 90 IRQ_TYPE_LEVEL_HIGH>,
+ 		             <GIC_SPI 91 IRQ_TYPE_LEVEL_HIGH>;
+-		interrupt-names = "Mali_GP_IRQ", "Mali_GP_MMU_IRQ", "IRQPP", "Mali_PP0_IRQ", "Mali_PP0_MMU_IRQ", "Mali_PP1_IRQ", "Mali_PP1_MMU_IRQ";
+-		clocks = <&scmi_clk SCMI_CLK_GPU>, <&cru ACLK_GPU_MALI>, <&cru PCLK_GPU_ROOT>;
+-		clock-names = "clk_mali", "aclk_gpu_mali", "pclk_gpu";
++		/* Lima names the GPU interrupts and clocks by function. */
++		interrupt-names = "gp", "gpmmu", "pp", "pp0", "ppmmu0", "pp1", "ppmmu1";
++		clocks = <&cru ACLK_GPU_MALI>, <&scmi_clk SCMI_CLK_GPU>;
++		clock-names = "bus", "core";
+ 		assigned-clocks = <&scmi_clk SCMI_CLK_GPU>;
+ 		assigned-clock-rates = <300000000>;
+ 		power-domains = <&power RK3528_PD_GPU>;
+@@ -2132,7 +2133,8 @@
+ 		clocks = <&cru TCLK_WDT_NS>, <&cru PCLK_WDT_NS>;
+ 		clock-names = "tclk", "pclk";
+ 		interrupts = <GIC_SPI 28 IRQ_TYPE_LEVEL_HIGH>;
+-		status = "disabled";
++		/* Let the watchdog recover a hung kernel. */
++		status = "okay";
+ 		phandle = <0x10b>;
+ 	};
+ 

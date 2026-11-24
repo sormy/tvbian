@@ -1,4 +1,4 @@
-"""Each board tree names its box as "<BOARD_NAME> (<BOARD_PCB>)", from its board.conf."""
+"""Each board tree names its box and its PCB if known."""
 
 from __future__ import annotations
 
@@ -19,7 +19,11 @@ class ModelTest(unittest.TestCase):
         checked = 0
         for board in sorted(BOARDS.glob("*/board.conf")):
             values = conf(board)
-            expected = f"{values['BOARD_NAME']} ({values['BOARD_PCB']})"
+            expected = values["BOARD_NAME"]
+            if pcb := values.get("BOARD_PCB"):
+                expected += f" ({pcb})"
+            else:
+                self.assertEqual(values.get("BOARD_SUPPORT"), "not_tested", str(board))
             for tree in ("board.dts", "uboot.dts"):
                 path = board.parent / tree
                 if not path.exists():

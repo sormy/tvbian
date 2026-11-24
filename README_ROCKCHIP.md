@@ -22,6 +22,7 @@ Amlogic boxes are in [README_AMLOGIC.md](README_AMLOGIC.md), Allwinner ones in
 | <img src="docs/h96max-m2-plus/image1.jpg" width="260"> | **[H96 Max M2 Plus][m2p]**<br>`M2_P_ZX_20250328`               | SoC RK3528 · 4 GB RAM DDR3 · 32 GB eMMC HS200 · **no SD** · USB-A 3.0 (OTG) · LAN 100M · SWT6621S Wi-Fi + BT · HDMI · AV · IR                             | [2](#2-otg-cable): OTG cable                             |
 | <img src="docs/h96max-rk3528/image1.jpg" width="260">  | **[H96 Max RK3528][rk3528]** ❓<br>`RK3528_DDR3_8X4_V12`       | SoC RK3528 · 4 GB RAM DDR3 · 64 GB eMMC HS400 · SD UHS-I · USB-A 3.0 (OTG) + USB-A 2.0 · LAN 100M · AIC8800D80 Wi-Fi + BT · HDMI · AV · SPDIF · IR · LCD  | [1](#1-sd-card): SD card<br>[2](#2-otg-cable): OTG cable |
 | <img src="docs/hk1-rbox-k8s/image1.webp" width="260">  | **[HK1 RBOX K8S][hk1]**<br>`FX-RX3528-D4`<br>`2023-08-22`      | SoC RK3528 · 4 GB RAM · 32 GB eMMC · SD · USB-A 3.0 + USB-A 2.0 · LAN 100M · AIC8800D80 Wi-Fi + BT · HDMI · AV · IR · LCD                                 |
+| <img src="docs/x88-pro-13/image1.jpg" width="260">     | **[X88 Pro 13][x88]** ❓                                       | SoC RK3528 · DDR3 seen · SD · Ethernet · HDMI · AIC8800 or Seekwave variants                                                                              | [1](#1-sd-card): SD card                                 |
 
 ❓ Not tested here: built from the box's stock firmware, waiting for an owner's report.
 
@@ -31,6 +32,7 @@ Amlogic boxes are in [README_AMLOGIC.md](README_AMLOGIC.md), Allwinner ones in
 [m2p]: docs/h96max-m2-plus/board.md
 [rk3528]: docs/h96max-rk3528/board.md
 [hk1]: docs/hk1-rbox-k8s/board.md
+[x88]: docs/x88-pro-13/board.md
 
 ## Memory
 

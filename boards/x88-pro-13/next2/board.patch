@@ -1,0 +1,35 @@
+--- factory_board_translated.dts
++++ board.dts
+@@ -14,11 +14,11 @@
+ #include <dt-bindings/soc/rockchip,vop2.h>
+ 
+ / {
+-	compatible = "rockchip,rk3528";
++	compatible = "rockchip,rk3528-hugsun-x88pro-ddr4-v10", "rockchip,rk3528";
+ 	interrupt-parent = <&gic>;
+ 	#address-cells = <2>;
+ 	#size-cells = <2>;
+-	model = "Rockchip RK3528 X88PRO DDR4 V10 Board";
++	model = "X88 Pro 13";
+ 
+ 	aliases {
+ 		ethernet0 = &gmac0;
+@@ -2722,7 +2722,7 @@
+ 			resets = <&cru SRST_A_VOP>, <&cru SRST_H_VOP>,
+ 			 <&cru SRST_D_VOP0>, <&cru SRST_D_VOP1>;
+ 			status = "okay";
+-			esmart_lb_mode = [03];
++			esmart_lb_mode = [02]; /* Esmart0 a 4K line buffer for HDMI */
+ 
+ 			vop_out: ports {
+ 				#address-cells = <1>;
+@@ -3132,7 +3132,8 @@
+ 			clocks = <&cru TCLK_WDT_NS>, <&cru PCLK_WDT_NS>;
+ 			clock-names = "tclk", "pclk";
+ 			interrupts = <GIC_SPI 28 IRQ_TYPE_LEVEL_HIGH>;
+-			status = "disabled";
++			/* Let the watchdog recover a hung kernel. */
++			status = "okay";
+ 		};
+ 
+ 		tsadc: tsadc@ffad0000 {

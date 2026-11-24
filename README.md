@@ -24,6 +24,7 @@ because we have trust issues too.
 | [H96 Max M2 Plus][m2p]      | `M2_P_ZX_20250328`         | box      | SoC RK3528 · 4 GB RAM DDR3 · 32 GB eMMC HS200 · **no SD** · USB-A 3.0 (OTG) · LAN 100M · SWT6621S Wi-Fi + BT · HDMI · AV · IR                             | [OTG][rk]       |
 | [H96 Max RK3528][rk3528] 👤 | `RK3528_DDR3_8X4_V12`      | box      | SoC RK3528 · 4 GB RAM DDR3 · 64 GB eMMC HS400 · SD UHS-I · USB-A 3.0 (OTG) + USB-A 2.0 · LAN 100M · AIC8800D80 Wi-Fi + BT · HDMI · AV · SPDIF · IR · LCD  | [SD or OTG][rk] |
 | [HK1 RBOX K8S][hk1]         | `FX-RX3528-D4`             | box      | SoC RK3528 · 4 GB RAM · 32 GB eMMC · SD · USB-A 3.0 + USB-A 2.0 · LAN 100M · AIC8800D80 Wi-Fi + BT · HDMI · AV · IR · LCD                                 | [SD or OTG][rk] |
+| [X88 Pro 13][x88] ❓        | —                          | box      | SoC RK3528 · DDR3 seen · SD · Ethernet · HDMI · AIC8800 or Seekwave variants                                                                              | [SD][rk]        |
 | [H96 Max M20][m20]          | `905_DG_ZX01_V01`          | stick    | SoC S905L3 · 2 GB RAM LPDDR3 · 16 GB eMMC HS · **no SD** · USB-C 2.0 (OTG) + USB-A 2.0 · **no LAN** · MT7668S Wi-Fi + BT · HDMI                           | [OTG][aml]      |
 | [Tanix TX1 V2.0][tx1]       | `QHZIW_H313_TX1_EMCP_V2.0` | mini box | SoC H313 · 1.5 GB RAM LPDDR3 (sold as 2 GB) · 16 GB eMMC DDR52 · **no SD** · USB-A 2.0 (OTG) · **no LAN** · ATBM6031-X Wi-Fi + BLE · HDMI · AV · IR       | [OTG][aw]       |
 | [H96 Max H313][h313]        | `BA979_627_V1.0`           | box      | SoC H313 · 2 GB RAM LPDDR3 · 16 GB eMMC HS200 · SD HS · USB-A 2.0 (OTG) + USB-A 2.0 · LAN 100M · AIC8800D40L Wi-Fi + BLE · HDMI · AV · IR                 | [SD or OTG][aw] |
@@ -38,6 +39,7 @@ because we have trust issues too.
 [m2p]: docs/h96max-m2-plus/board.md
 [rk3528]: docs/h96max-rk3528/board.md
 [hk1]: docs/hk1-rbox-k8s/board.md
+[x88]: docs/x88-pro-13/board.md
 [m20]: docs/h96max-m20/board.md
 [tx1]: docs/tanix-tx1-v2/board.md
 [h313]: docs/h96max-h313/board.md
