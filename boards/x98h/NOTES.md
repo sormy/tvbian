@@ -64,6 +64,42 @@ with `ir-keytable -t` and can send the table as an `/etc/rc_maps.cfg` entry or a
 One gotcha worth knowing: this remote has no colour buttons, and its CH+/- come
 through as `KEY_NEXT`/`KEY_PREVIOUS`.
 
+
+## Bluetooth
+
+Works, but not out of the box: the AIC8800's BT half is on **UART1** (PG6/PG7, with
+PG8/PG9 as RTS/CTS) and needs a serdev child, which the vendor DT has and a stock
+arm64 DT doesn't.
+
+The vendor nodes, from `vendor_boot_a` in the Android image:
+
+```
+bt    { compatible = "allwinner,sunxi-bt";
+        clocks = <&r_ccu ...>; clock-names = "osc32k-out";
+        bt_rst_n    = <&pio 6 19 1>; }      /* PG19, active low */
+btlpm { compatible = "allwinner,sunxi-btlpm";
+        uart_index  = <1>;
+        bt_wake     = <&pio 6 17 0>; }      /* PG17, active high */
+        bt_hostwake = <&pio 6 16 1>; }      /* PG16, active low  */
+```
+
+`aic8800-bt-overlay.dts` here is the overlay that makes it work with the in-tree
+`hci_aic8800` serdev driver (compatible `aic,aic8800-bt`).
+
+Two things that cost me the afternoon, in case they save yours:
+
+- **The polarity flags are load-bearing.** With `enable` active-high the driver
+  still logs `enable(BT_REG_ON)=1` and `bt_fw_ready=1`, but the controller never
+  registers and `btmgmt info` says "Index list with 0 items". Use
+  `enable` **active-low**, `device-wakeup` **active-high**, `host-wakeup`
+  **active-low** — that's the vendor's set and it's the difference between a dead
+  adapter and a working one.
+- **Keep `max-speed = <1500000>`.** At 115200 the driver's own handshake passes but
+  HCI Reset (0x0c03) times out, because the chip has already switched its own baud.
+
+With that, `hci0` registers, `bluetoothctl` shows the controller, and a scan finds
+devices normally.
+
 ## What's missing / unverified
 
 - **`board.dtb` here is the vendor DT pulled out of `mmcblk2p7`.** It's what the
@@ -74,3 +110,5 @@ through as `KEY_NEXT`/`KEY_PREVIOUS`.
 - Nothing here has been through the tvbian build. The panel driver and the pin
   map are tested on the box; the build integration is not.
 - `vfdd.service` needs enabling after install.
+- The BT overlay above is tested on Armbian 6.18; on tvbian it could go straight
+  into `board.dts` instead of being an overlay.
