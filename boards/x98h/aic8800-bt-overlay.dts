@@ -1,0 +1,22 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+    compatible = "allwinner,sun50i-h618";
+
+    fragment@0 {
+        target = <&uart1>;
+        __overlay__ {
+            status = "okay";
+            bluetooth {
+                compatible = "aic,aic8800-bt";
+                /* vendor flags: bt_rst_n active-low, bt_wake active-high,
+                   bt_hostwake active-low */
+                enable-gpios = <&pio 6 19 1>;
+                device-wakeup-gpios = <&pio 6 17 0>;
+                host-wakeup-gpios = <&pio 6 16 1>;
+                max-speed = <1500000>;
+            };
+        };
+    };
+};

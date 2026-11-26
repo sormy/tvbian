@@ -1,0 +1,2 @@
+# Nothing board-specific ships yet: the panel is a DT node (titanmec,tm1628 on
+# spi-gpio), not a userspace driver, and the rest of the tree is still to come.
