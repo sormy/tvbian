@@ -1,5 +1,2 @@
-# front panel: SM1628 on three GPIOs, driven from userspace (see NOTES.md)
-0755 x98h/panel/vfdd /usr/local/bin/vfdd
-0755 x98h/panel/x98h-vfd /usr/local/bin/x98h-vfd
-0644 x98h/panel/x98h_vfd.py /usr/lib/tvb/x98h_vfd.py
-0644 x98h/panel/vfdd.service /usr/lib/systemd/system/vfdd.service
+# Nothing board-specific ships yet: the panel is a DT node (titanmec,tm1628 on
+# spi-gpio), not a userspace driver, and the rest of the tree is still to come.
