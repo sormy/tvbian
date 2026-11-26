@@ -44,3 +44,20 @@ icons     bit3, per segment address: usb@4 card@6 colon@8 hd@10 cvbs@12
 `sunxi-cir` on `rc1`. The vendor tree carries the remote's power codes
 (`ir_power_key_code0..3` / `ir_addr_code0..3`); the shipped remote's full key set
 was captured on the box and can go in as an `rc_maps.cfg` entry if wanted.
+
+## Bluetooth
+
+The AIC8800's BT half is on **UART1 (PG6/PG7, PG8/PG9 as RTS/CTS)**, not USB, so it needs a
+serdev child for the in-tree `hci_aic8800` driver. `aic8800-bt-overlay.dts` is that child,
+using the vendor tree's GPIO polarities:
+
+```
+enable-gpios        = <&pio 6 19 1>;   PG19  ACTIVE LOW
+device-wakeup-gpios = <&pio 6 17 0>;   PG17  ACTIVE HIGH
+host-wakeup-gpios   = <&pio 6 16 1>;   PG16  ACTIVE LOW
+max-speed = <1500000>;
+```
+
+Two things that cost time, both load-bearing: with `enable` active-high the driver still logs
+`enable(BT_REG_ON)=1` and `bt_fw_ready=1` but the controller never registers, and `max-speed`
+must stay 1500000 (at 115200 the chip has already switched baud and HCI Reset times out).

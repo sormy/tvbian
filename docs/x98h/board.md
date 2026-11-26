@@ -185,6 +185,49 @@ board of this family. The eMMC image is at `backup/x98h-stock.img.zst` locally (
 
 - ❓ **Q1**–**Q7** Not started; this report is the beginning of that pass, not the end.
 
+
+## chip
+
+- ➖ **X1**, **X2** The Wi-Fi half is the in-tree `aic8800_sdio`; the BT half is the in-tree
+  `hci_aic8800` serdev driver. No driver was written, so the chip phase does not apply.
+- ❓ **X3** Any regulatory country: only `country 00` has been seen.
+- ❓ **X4** Module load/unload cycling not run.
+- 🟡 **X5** Firmware origin: `/lib/firmware/aic8800/{SDIO,PCIE,USB}` ships with the box's image.
+- ❓ **X6** No forced firmware hang tested.
+- ❓ **X7** 👤 Bluetooth audio pairing untested.
+
+## family
+
+- ➖ **F0**–**F16** `sunxi-h616` is an existing family (sisters: `h96max-h313`, `leffot-h313`); this
+  board adds no family work. Lines F1–F3, F7–F15 belong to the family's own run.
+
+## import
+
+- ➖ **P1**–**P8** The box is in hand; the import path is not the one taken.
+
+## alias
+
+- ➖ **A1**–**A4** Not an alias of a listed board, as far as we can tell (`Y8927_141_V1.1` is not in
+  the repo's board set).
+
+## otg
+
+- The `otg` path (no serial, service mode + dump) was effectively the one taken, without its doc:
+  image taken over the running system rather than a service mode. Recorded in `steering.md`.
+
+## regression
+
+- ➖ **R1**–**R6** No tree change has been proposed yet, so there is nothing to regress.
+
+## Marks at a glance
+
+```
+✅ 25   🟡 14   ❓ 52   ➖ +2 sections   ❌ 0
+```
+
+The ❓ are concentrated where the kit is missing (serial, TV, stock shell) or where TVBian has
+never run on the box. None of them is a "did not get to it": each names what would mark it.
+
 ## Known gaps
 
 1. **No serial console** on this box so far — blocks L1, S2–S5, B3, M8, and the whole of `trees`/
