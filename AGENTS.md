@@ -416,6 +416,10 @@ guess, a test or another board's tree.
   between packages needs `Replaces` and `Breaks`, which the release guard checks.
 - These boxes are daily drivers. Say what you're about to do to them, prefer `--no-reboot` plus an
   explicit reboot you can watch, and keep a known-good DTB where one file copy restores it.
+- **A box runs only its own factory DDR blob**: no other DDR init, rkbin's or a sibling's, is
+  written to a box or booted on it without the owner's word. Most boxes have no maskrom or FEL
+  button: U-Boot reads their recovery button, and U-Boot runs after the DDR init, so one that cannot
+  train the DRAM leaves no way back.
 - **When a box won't boot after a DTB change:** power off, pull the SD (if it boots from eMMC, boot
   an SD instead), mount its rootfs on the host and `e2cp` the known-good `board.dtb` back. The boot
   loader reads `/usr/lib/tvb/board.dtb`, the one copy, or `board-next2.dtb` for a next2 kernel, each

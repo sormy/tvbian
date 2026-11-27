@@ -71,9 +71,11 @@
    | Recovery       | this box's way into the service mode, and back               |
 
 5. **The serial pins**, on the open board. TX carries the console out, RX takes keystrokes in;
-   reading needs only GND and TX.
+   reading needs only GND and TX. The level and baud are the family's, 3.3 V on every family here:
+   never asked for, unless a separate chip drives the pads.
    1. GND reads 0 V against exposed metal: a USB, HDMI or Ethernet shell.
-   2. The supply pad reads highest, 3.3 V or 5 V; TX and RX a few mV below it.
+   2. The supply pad reads highest, 3.3 V or 5 V; TX and RX a few mV below it: the meter finds the
+      pads, not the level.
    3. GND and the box's TX first, to the adapter's RX, which only listens. The candidate that prints
       is TX.
    4. The logger at the family's baud, 1500000 on Rockchip, 115200 on Amlogic and Allwinner, a new

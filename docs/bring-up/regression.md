@@ -88,9 +88,9 @@ The unattended pass proves a device answers; these need a person, a screen or a 
 | USB 3                | a fast stick at SuperSpeed, its read rate                      | `storage.md` |
 | USB 2                | the same stick at high speed; a keyboard at low speed          | `storage.md` |
 | The OTG port         | a keyboard works on it as a host                               | `storage.md` |
-| The SD slot          | a UHS card at its UHS mode; out and in                         | `storage.md` |
+| The SD slot          | a card at stock's fastest mode; out and in                     | `storage.md` |
 | The recovery button  | held at power-on, U-Boot or the boot ROM answers on OTG        | `input.md`   |
-| The recovery path    | the factory image restored over OTG                            | `storage.md` |
+| The recovery path    | the service mode reads the eMMC; restores are the family's     | `storage.md` |
 | Buttons and LEDs     | the power button; each LED's colour and state                  | `input.md`   |
 | The front panel      | the clock shown, the time zone and brightness set              | `input.md`   |
 | The serial pads      | their labels match the signals; the console at its baud        | `system.md`  |
