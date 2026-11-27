@@ -1,0 +1,52 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] aic8800: refuse a card the platform driver did not power up
+
+The platform driver powers the card, loads its firmware and records it in
+aicbsp_sdiodev before the Wi-Fi driver probes. When the card's MMC host is
+unbound and bound under the loaded driver, the platform driver's remove
+clears that record and nothing powers the card again, so the Wi-Fi probe
+dereferences NULL in aicbsp_get_feature() and oopses in mmc_rescan, leaving
+the host's worker dead until a reboot. Refuse that probe instead: a driver
+reload powers the card and brings Wi-Fi back.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+--- a/src/SDIO/driver_fw/driver/aic8800/aic8800_bsp/aicsdio.c
++++ b/src/SDIO/driver_fw/driver/aic8800/aic8800_bsp/aicsdio.c
+@@ -2119,7 +2119,7 @@
+ }
+ 
+ struct sdio_func *get_sdio_func(void){
+-    return aicbsp_sdiodev->func;
++    return aicbsp_sdiodev ? aicbsp_sdiodev->func : NULL;
+ }
+ 
+ void set_irq_handler(void *fn){
+--- a/src/SDIO/driver_fw/driver/aic8800/aic8800_fdrv/aicwf_sdio.c
++++ b/src/SDIO/driver_fw/driver/aic8800/aic8800_fdrv/aicwf_sdio.c
+@@ -42,6 +42,7 @@
+ #include "aic_bsp_export.h"
+ extern uint8_t scanning;
+ extern bool get_fdrv_no_reg_sdio(void);
++extern struct sdio_func *get_sdio_func(void);
+ 
+ #ifdef CONFIG_SDIO_ADMA
+ unsigned char sdio_tx_buf_fill[512];
+@@ -796,6 +797,9 @@
+ 	if (func->num != 1) {
+ 		return err;
+ 	}
++	/* a card the platform driver did not power up, rebound under us: no firmware */
++	if (!get_sdio_func())
++		return err;
+ 
+ 	bus_if = kzalloc(sizeof(struct aicwf_bus), GFP_KERNEL);
+ 	if (!bus_if) {
+@@ -1223,7 +1227,6 @@
+ #endif
+ 
+ #if 1//def CONFIG_FDRV_NO_REG_SDIO
+-extern struct sdio_func *get_sdio_func(void);
+ void aicwf_sdio_probe_(struct sdio_func *func, const struct sdio_device_id *id);
+ void aicwf_sdio_remove_(struct sdio_func *func);
+ #endif

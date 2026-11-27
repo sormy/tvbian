@@ -8,6 +8,7 @@ Selected kernels: `rk35xx`, `rk35xx-next`, `rk35xx-next2`, `sunxi64`, `sunxi64-n
 | Patch     | Source                                                                            |
 | --------- | --------------------------------------------------------------------------------- |
 | `01`–`17` | radxa-pkg/aic8800's `debian/patches`, in its series order, cut to the SDIO driver |
+| `94`      | ours: the Wi-Fi probe refuses a card the platform driver did not power up         |
 | `95`      | ours: the SDIO drivers name their module, as 6.12's register call does            |
 | `96`      | ours: `custregd` off, so the wiphy follows cfg80211's domain and `iw reg set`     |
 | `97`      | ours: power-off re-probes the MMC host where no platform hook does                |
@@ -20,4 +21,4 @@ stable-MAC patch, rebased: with it, the R69 keeps `8a:00:33:65:64:b6` across boo
 ## Upstream
 
 `01`–`17` are radxa-pkg/aic8800's own. `99` went to `armbian/linux-rockchip`, whose tree carries the
-driver, as `#527`: closed without merging. `98`: not submitted.
+driver, as `#527`: closed without merging. `94` and `98`: not submitted.

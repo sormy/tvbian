@@ -29,3 +29,18 @@
   link and the suite ran `modprobe -r module`.
 - `95` sets `.drv.owner` in `aic8800_fdrv`'s `aicwf_sdio` and `aic8800_bsp`'s two SDIO drivers. On
   the R69-1, 6.1: the link names `aic8800_fdrv`; the suite's own reload code, two of two back.
+
+## 2026-11-24 — a host rebind under the loaded driver
+
+- The HK1, 6.1: `ffc20000.mmc` unbound and bound with `aic8800_fdrv` loaded. The card enumerated
+  `c8a1:0082`; `aicwf_sdio_probe` oopsed in `aicbsp_get_feature`, a NULL at `0xb4`, in
+  `mmc_rescan`'s worker. The reboot after it waited 5 minutes on unkillable processes.
+- With both modules unloaded around the rebind, five of five came back with an address.
+- `94`: the Wi-Fi probe refuses a card the platform driver did not power up, `get_sdio_func()` NULL
+  where the platform driver holds no card. Built for 6.1 and 6.12: the probe calls `get_sdio_func`
+  before its first allocation, which tests for NULL (`llvm-objdump`).
+- With `94` on the HK1, the host unbound and bound under the loaded driver: no oops, function 1
+  unbound, function 2 on `aicbsp_sdio`, no `wlan0`; unloading `aic8800_fdrv` brought it back. Three
+  of three on 6.1, three of three on 6.12.
+- Unloading the Wi-Fi driver re-probes the host (`97`), and udev loads `aic8800_fdrv` back by the
+  card's modalias: an `rmmod` of both modules finds the platform driver in use when udev wins.
