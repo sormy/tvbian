@@ -1,0 +1,24 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] drm/rockchip: dw-hdmi: a client's max bpc asks for deep colour
+
+The output depth came only from the vendor's color_depth property, 8 by
+default. A player setting the standard max bpc to 10 for an HDR10 film
+got 8-bit RGB with BT.601 colorimetry beside the PQ curve. Let max bpc
+above 8 ask for 10 bits as the vendor property does, where the sink
+takes deep colour; BT.2020 then goes out as 10-bit YCbCr.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/drivers/gpu/drm/rockchip/dw_hdmi-rockchip.c b/drivers/gpu/drm/rockchip/dw_hdmi-rockchip.c
+--- a/drivers/gpu/drm/rockchip/dw_hdmi-rockchip.c
++++ b/drivers/gpu/drm/rockchip/dw_hdmi-rockchip.c
+@@ -1046,7 +1046,8 @@
+ 	    info->hdmi.y420_dc_modes & DRM_EDID_YCBCR420_DC_30)
+ 		support_dc = true;
+ 
+-	if (hdmi->colordepth > 8 && support_dc)
++	/* a client's max bpc asks for deep colour as the vendor's property does */
++	if ((hdmi->colordepth > 8 || conn_state->max_requested_bpc > 8) && support_dc)
+ 		color_depth = 10;
+ 	else
+ 		color_depth = 8;

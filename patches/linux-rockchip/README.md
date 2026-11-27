@@ -14,6 +14,7 @@ carry only the rest.
 | `drm-rockchip-tve-composite-connector`      | the AV jack as `TV-1`, not `Composite-1` as on every other SoC              |
 | `drm-rockchip-vop2-esmart-lb-mode-param`    | the Esmart line buffers' split from the command line, over the tree's       |
 | `drm-rockchip-dw-hdmi-rk3528-hpd-at-detect` | the RK3528's hot-plug read again at each detect, not only at probe          |
+| `drm-rockchip-dw-hdmi-max-bpc-deep-colour`  | a player's max bpc 10 gets 10-bit HDMI, BT.2020 as YCbCr                    |
 | `drm-lima-devfreq-rockchip-opp`             | the GPU on SCMI: no rate set while it is off, which resets the SoC          |
 | `drm-rockchip-no-render-node`               | the display on `renderD128`: Mesa's scanout buffers refused, WebKit dies    |
 | `drm-rockchip-vop2-hdr-ext-data-size`       | a short `HDR_EXT_DATA` blob read past its end; Rockchip's 3108-byte refused |
