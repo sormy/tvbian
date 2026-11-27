@@ -1,0 +1,153 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] drm/lima: Rockchip's OPP helper, and no rate change while off
+
+The RK3528's GPU runs on an SCMI clock fed by a PVTPLL. Setting its rate
+with the GPU runtime-suspended, its clocks gated, resets the SoC: a
+governor's update, a thermal throttle or a min_freq write while the GPU
+idles. Set the rate only while the GPU is in use, and report the current
+one otherwise.
+
+Build the OPP table through rockchip_init_opp_table(), as the vendor's
+Mali driver does, so each OPP takes the chip's voltage bin: 912 mV at
+800 MHz on a bin-3 chip, where the table's default asks 950 mV.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/drivers/gpu/drm/lima/lima_devfreq.c b/drivers/gpu/drm/lima/lima_devfreq.c
+--- a/drivers/gpu/drm/lima/lima_devfreq.c
++++ b/drivers/gpu/drm/lima/lima_devfreq.c
+@@ -10,6 +10,7 @@
+ #include <linux/devfreq_cooling.h>
+ #include <linux/device.h>
+ #include <linux/platform_device.h>
++#include <linux/pm_runtime.h>
+ #include <linux/pm_opp.h>
+ #include <linux/property.h>
+ 
+@@ -34,14 +35,30 @@
+ static int lima_devfreq_target(struct device *dev, unsigned long *freq,
+ 			       u32 flags)
+ {
++	struct lima_device *ldev = dev_get_drvdata(dev);
+ 	struct dev_pm_opp *opp;
++	int ret;
+ 
+ 	opp = devfreq_recommended_opp(dev, freq, flags);
+ 	if (IS_ERR(opp))
+ 		return PTR_ERR(opp);
+ 	dev_pm_opp_put(opp);
+ 
+-	return dev_pm_opp_set_rate(dev, *freq);
++	/* the PVTPLL resets the SoC if set while the GPU's clocks are gated */
++	if (pm_runtime_get_if_in_use(dev) <= 0) {
++		/* the OPP the clock runs at: a CRU rate rounds below its OPP's */
++		*freq = clk_get_rate(ldev->clk_gpu);
++		opp = devfreq_recommended_opp(dev, freq, 0);
++		if (!IS_ERR(opp))
++			dev_pm_opp_put(opp);
++		return 0;
++	}
++
++	ret = dev_pm_opp_set_rate(dev, *freq);
++	pm_runtime_mark_last_busy(dev);
++	pm_runtime_put_autosuspend(dev);
++
++	return ret;
+ }
+ 
+ static void lima_devfreq_reset(struct lima_devfreq *devfreq)
+@@ -99,6 +116,7 @@
+ 	if (devfreq->devfreq) {
+ 		devm_devfreq_remove_device(ldev->dev, devfreq->devfreq);
+ 		devfreq->devfreq = NULL;
++		rockchip_uninit_opp_table(ldev->dev, &devfreq->opp_info);
+ 	}
+ }
+ 
+@@ -111,7 +129,6 @@
+ 	struct dev_pm_opp *opp;
+ 	unsigned long cur_freq;
+ 	int ret;
+-	const char *regulator_names[] = { "mali", NULL };
+ 
+ 	if (!device_property_present(dev, "operating-points-v2"))
+ 		/* Optional, continue without devfreq */
+@@ -120,21 +137,11 @@
+ 	spin_lock_init(&ldevfreq->lock);
+ 
+ 	/*
+-	 * clkname is set separately so it is not affected by the optional
+-	 * regulator setting which may return error.
++	 * Rockchip's helper picks the chip's voltage bin and configures the
++	 * PVTPLL behind an SCMI core clock; past its boot rate the PVTPLL
++	 * resets the SoC unless configured.
+ 	 */
+-	ret = devm_pm_opp_set_clkname(dev, "core");
+-	if (ret)
+-		return ret;
+-
+-	ret = devm_pm_opp_set_regulators(dev, regulator_names);
+-	if (ret) {
+-		/* Continue if the optional regulator is missing */
+-		if (ret != -ENODEV)
+-			return ret;
+-	}
+-
+-	ret = devm_pm_opp_of_add_table(dev);
++	ret = rockchip_init_opp_table(dev, &ldevfreq->opp_info, "core", "mali");
+ 	if (ret)
+ 		return ret;
+ 
+@@ -143,8 +150,10 @@
+ 	cur_freq = clk_get_rate(ldev->clk_gpu);
+ 
+ 	opp = devfreq_recommended_opp(dev, &cur_freq, 0);
+-	if (IS_ERR(opp))
+-		return PTR_ERR(opp);
++	if (IS_ERR(opp)) {
++		ret = PTR_ERR(opp);
++		goto err_table;
++	}
+ 
+ 	lima_devfreq_profile.initial_freq = cur_freq;
+ 	dev_pm_opp_put(opp);
+@@ -161,7 +170,8 @@
+ 					  &ldevfreq->gov_data);
+ 	if (IS_ERR(devfreq)) {
+ 		dev_err(dev, "Couldn't initialize GPU devfreq\n");
+-		return PTR_ERR(devfreq);
++		ret = PTR_ERR(devfreq);
++		goto err_table;
+ 	}
+ 
+ 	ldevfreq->devfreq = devfreq;
+@@ -173,6 +183,10 @@
+ 		ldevfreq->cooling = cooling;
+ 
+ 	return 0;
++
++err_table:
++	rockchip_uninit_opp_table(dev, &ldevfreq->opp_info);
++	return ret;
+ }
+ 
+ void lima_devfreq_record_busy(struct lima_devfreq *devfreq)
+diff --git a/drivers/gpu/drm/lima/lima_devfreq.h b/drivers/gpu/drm/lima/lima_devfreq.h
+--- a/drivers/gpu/drm/lima/lima_devfreq.h
++++ b/drivers/gpu/drm/lima/lima_devfreq.h
+@@ -7,6 +7,7 @@
+ #include <linux/devfreq.h>
+ #include <linux/spinlock.h>
+ #include <linux/ktime.h>
++#include <soc/rockchip/rockchip_opp_select.h>
+ 
+ struct devfreq;
+ struct thermal_cooling_device;
+@@ -17,6 +18,7 @@
+ 	struct devfreq *devfreq;
+ 	struct thermal_cooling_device *cooling;
+ 	struct devfreq_simple_ondemand_data gov_data;
++	struct rockchip_opp_info opp_info;
+ 
+ 	ktime_t busy_time;
+ 	ktime_t idle_time;
