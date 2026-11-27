@@ -21,13 +21,9 @@
 - [ ] **Vendor 6.12: HDMI writeback after composite**: commits still succeed; a capture is refused.
 - [ ] **Vendor kernels: an off-table HDMI mode at its own pixel clock**: 2256x1504 (235.7 MHz) runs
       the PHY at 1080p60's 148.5 MHz. Computed, as on next2, or refused.
-- [ ] **The vendor kernels' decoder reset at probe**: warm boots of the HK1's 6.1 froze in its
-      probe, a power cut alone clearing it; next2's own driver never froze. The vendor resets it on
-      errors and at shutdown only; `rkvdec2_reset`, CRU lines in the PMU idle request, is the
-      candidate at probe, not the IOMMU reset, which froze every boot.
-- [ ] **Vendor kernels: the GPU on stock's SCMI clock**, 800 MHz, not the CRU's 498 MHz cap: after
-      lima's throttling, as on next2, and its OPPs at the chip's PVTM bin; and `gpu-bus` scaling
-      `vdd_logic` with it, once `rockchip_bus.c` asks for its `bus` regulator, not `pvtm`.
+- [ ] **Vendor kernels: the GPU on stock's SCMI clock**, 800 MHz, not the CRU's 498 MHz cap, on
+      every board as on the HK1, each soaked; and `gpu-bus` scaling `vdd_logic` with it, once
+      `rockchip_bus.c` asks for its `bus` regulator, not `pvtm`.
 - [ ] **Check the `ttyFIQ0` login on a serial header.** Every Rockchip board's console is `ttyFIQ0`,
       seen in `/proc/consoles` with its getty running; never on a cable.
 
@@ -36,6 +32,12 @@
       right third of a 4K frame; ✅ on the 3518D only. Check `3840x2160p60` full-screen with no
       fringe on the right, then that a 1080p display still comes up clean.
 
+- [ ] **Vendor kernels: composite writeback captures the picture, or is refused**: on the RK3528 it
+      signals each capture done and leaves the buffer unwritten, a field's height or a frame's.
+- [ ] **Vendor kernels: lima probes in a kernel entered by kexec**: on the HK1, 6.12 entered from
+      6.1 fails `gpmmu dte write test fail`, error -5; booted from the menu, it probes.
+- [ ] **Vendor kernels: what `display.py` shows the vendor display lacks**: 4K60 at max bpc 10 as
+      YCbCr 4:2:0, AFBC rotation by 90 and 270, 3D frame packing, BG24 writeback; on the HK1.
 - [ ] **A warm reboot never strands a box.** The watchdog's count carries over a reboot, and a boot
       that outlasts what is left of it is reset partway, sometimes into a box dark until its power
       is pulled. The count restarts, or stops, before the next boot, on every kernel.

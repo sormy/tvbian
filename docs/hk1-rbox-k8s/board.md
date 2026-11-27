@@ -10,9 +10,10 @@
 | GPU            | Mali-450                             | glmark2's renderer  |
 | Factory OS     | Android 13, API 33                   | stock `build.prop`  |
 | RAM            | 4 GB                                 | owner               |
+| DRAM chips     | 8 discrete, maker unconfirmed        | owner               |
 | eMMC           | MMC32G, 31,264,342,016 bytes         | `rkdeveloptool rfi` |
 | Radio          | HK5246F, AIC8800D80                  | SDIO `c8a1:0082`    |
-| Front display  | FD650B-S                             | owner               |
+| Front display  | FD650B-S, clock digits, no icons     | owner               |
 | LEDs           | none, the panel only                 | owner               |
 | Power          | 5 V / 2 A, DC jack                   | owner               |
 | Ports          | RJ45, HDMI, AV, USB 2, USB 3, SD, IR | owner               |
@@ -43,30 +44,31 @@ Source: product specifications supplied by the owner.
 ## Serial console
 
 Pads near the IR port, marked `GND RX TX`, with an unlabelled square pad reported as NC: `ttyFIQ0`
-at 1500000 baud. Voltage is ❓.
+at 1500000 baud, 3.3 V.
 
 ## Test report
 
-| Check                 | Result | Evidence                                                          |
-| --------------------- | ------ | ----------------------------------------------------------------- |
-| Factory idbloader     | ✅     | Two factory reads and one Maskrom read match                      |
-| Stock eMMC read       | ✅     | Full size, matching idbloader and GPT copies                      |
-| Boot from SD          | ✅     | Root on SD; eMMC has the factory partition map                    |
-| Vendor warm reboots   | 🟠     | Ten cycles, zero MMC errors; USB Ethernet absent at 10            |
-| 6.1 boot after a test | 🟠     | Four froze in the decoder's probe; 16 plain ones in a row did not |
-| Panic recovery        | ✅     | SysRq crash rebooted and saved a ramoops record                   |
-| Unpinged watchdog     | ✅     | Armed at 11 s, rebooted and rearmed under systemd                 |
-| All-CPU soft lockup   | ✅     | Panic at 26 s, reboot and ramoops record                          |
+| Check               | Result | Evidence                                                   |
+| ------------------- | ------ | ---------------------------------------------------------- |
+| Factory idbloader   | ✅     | Two factory reads and one Maskrom read match               |
+| Stock eMMC read     | ✅     | Full size, matching idbloader and GPT copies               |
+| Boot from SD        | ✅     | Root on SD; eMMC has the factory partition map             |
+| Install to eMMC     | ✅     | `tvb-install`; idbloader, vendor and secure storage kept   |
+| Boot from eMMC      | ✅     | Root on eMMC, SD out; 6.1, Wi-Fi up                        |
+| Vendor warm reboots | ✅     | 20 on 6.1 and 20 on 6.12, none hung; the DMC off around it |
+| Panic recovery      | ✅     | SysRq crash rebooted and saved a ramoops record            |
+| Unpinged watchdog   | ✅     | Armed at 11 s, rebooted and rearmed under systemd          |
+| All-CPU soft lockup | ✅     | Panic at 26 s, reboot and ramoops record                   |
 
 ## Measured
 
-| Check                | Result | Evidence                                             |
-| -------------------- | ------ | ---------------------------------------------------- |
-| RAM                  | ✅     | 3921 MiB available to Linux, 3 GiB verified for 60 s |
-| CPU stress           | ✅     | 62.7 °C over 300 s, no cooling state engaged         |
-| Combined load        | ✅     | 65.5 °C in 120 s, no new warnings or Wi-Fi ping loss |
-| RAM STREAM read      | ✅     | 983 MB/s with one worker, 1925 MB/s with four        |
-| eMMC sequential read | ✅     | 242 MB/s, 512 MiB direct I/O                         |
+| Check                | Result | Evidence                                                  |
+| -------------------- | ------ | --------------------------------------------------------- |
+| RAM                  | ✅     | 3921 MiB available to Linux, 3 GiB verified for 60 s      |
+| CPU stress           | ✅     | 62.7 °C over 300 s, no cooling state engaged              |
+| Combined load        | ✅     | 65.5 °C in 120 s, no new warnings or Wi-Fi ping loss      |
+| RAM STREAM read      | ✅     | 1253 MB/s with one worker, 2794 with four; DDR at 786 MHz |
+| eMMC sequential read | ✅     | 242 MB/s, 512 MiB direct I/O                              |
 
 Wi-Fi TCP throughput on vendor 6.1, measured 2026-11-21 with `iperf3 --bind-dev wlan0`; 5 GHz after
 a driver reload: 185 Mb/s up, 198 down.
@@ -80,7 +82,7 @@ a driver reload: 185 Mb/s up, 198 down.
 
 | Check                            | Result | Evidence                                            |
 | -------------------------------- | ------ | --------------------------------------------------- |
-| USB Ethernet and unattended SSH  | 🟠     | `r8152` on `eth1`; absent after some warm boots     |
+| USB Ethernet                     | ✅     | 15 warm boots back at 1000; 309 up, 321 down Mb/s   |
 | Wi-Fi scans                      | ✅     | `nmcli` lists 2.4 and 5 GHz channels                |
 | Wi-Fi association and throughput | ✅     | Both bands. 5 GHz link reported HE-MCS 11           |
 | Built-in Ethernet link           | ✅     | 100 Mb/s full duplex. TCP 93.7 up, 94.1 down        |
@@ -95,47 +97,58 @@ a driver reload: 185 Mb/s up, 198 down.
 | Analog codec timing | ✅     | 3.02 s at 44.1 and 48 kHz                               |
 | Composite writeback | ❌     | PAL and NTSC modes set; the colour bars lost            |
 | HDMI picture        | ✅     | A screen attached at boot: EDID, 2256×1504 at 60 Hz set |
-| Front-panel display | ✅     | Owner confirmed visible output                          |
 
 ## Video on vendor 6.1
 
-| Codec            | Decode                                    | Encode                             |
-| ---------------- | ----------------------------------------- | ---------------------------------- |
-| H.264            | ✅ 3840×2160, exact                       | ✅ 3840×2160                       |
-| Interlaced H.264 | ✅ 1080i, 60 progressive outputs          | ❓                                 |
-| HEVC             | ✅ 3840×2160, exact                       | ✅ 3840×2160                       |
-| HEVC Main10      | ✅ 8192×4320, frame count                 | ❓                                 |
-| VC-1             | ❌ V4L2 wrapper found no hardware decoder | ❓                                 |
-| VP9 profile 0    | ✅ 8192×4320, exact                       | ❓                                 |
-| VP8              | ✅ 1920×1080, exact                       | ❓                                 |
-| MPEG-1           | ✅ 1080p60 clip, 30 frames, 75.71 dB luma | ❓                                 |
-| MPEG-2           | ✅ 1920×1080, Y-PSNR 75.76 dB             | ❓                                 |
-| MPEG-4 Part 2    | ✅ 1920×1080, Y-PSNR 75.98 dB             | ❓                                 |
-| \1\n             | 4K to 1080p, scaled                       | ✅ H.264 67.00, HEVC 65.35 dB luma | ➖  |
+| Codec            | Decode                                     | Encode       |
+| ---------------- | ------------------------------------------ | ------------ |
+| H.264            | ✅ 8192×8192, exact                        | ✅ 8192×8192 |
+| Interlaced H.264 | ✅ 1080i, 60 progressive outputs           | ❓           |
+| HEVC             | ✅ 8192×8192, exact                        | ✅ 8192×8192 |
+| HEVC Main10      | ✅ 8192×8192, frame count                  | ➖           |
+| VC-1             | ❓ no FFmpeg path                          | ➖           |
+| VP9 profile 0    | ✅ 8192×4320, exact                        | ➖           |
+| VP8              | ✅ 1920×1080, exact                        | ➖           |
+| H.264 10-bit     | ✅ 8192×8192                               | ➖           |
+| VP9 profile 2    | ✅ 8192×4320                               | ➖           |
+| H.263            | ✅ 1408×1152                               | ➖           |
+| MPEG-1           | ✅ 1080p60 clip, 30 frames, 75.71 dB luma  | ➖           |
+| MPEG-2           | ✅ 1920×1080, Y-PSNR 75.76 dB              | ➖           |
+| MPEG-4 Part 2    | ✅ 1920×1080, Y-PSNR 75.98 dB              | ➖           |
+| Decoder scaling  | ✅ 4K to 1080p, H.264 67.00, HEVC 65.35 dB | ➖           |
+
+Encode fps at 1920×1080: H.264 53.6, HEVC 60.5. The encoder is 8-bit: Rockchip's MPP and
+next2's driver take 8-bit sources only, and a 10-bit one comes out 8-bit Main.
 
 Interlaced H.264 uses the patched MPP bundled with `ffmpeg9`.
 
-| Decode speed                 | Result | Evidence             |
-| ---------------------------- | ------ | -------------------- |
-| H.264 High, 3840×2160 at 60  | 🟠     | 42.3 fps, 600 frames |
-| HEVC Main10, 7680×4320 at 25 | 🟠     | 16.4 fps, 50 frames  |
+Decode speed, the engine alone (`tools/validate/video.py` decode), the DDR at 786 MHz:
+
+| Codec at 3840×2160 | Result | fps   |
+| ------------------ | ------ | ----- |
+| H.264              | ✅     | 61.6  |
+| H.264 10-bit       | ✅     | 58.0  |
+| HEVC               | ✅     | 116.9 |
+| HEVC Main10        | ✅     | 112.4 |
+| H.264 4:2:2, 4:0:0 | ❌     | —     |
+
+FFmpeg's `h264_rkmpp` refuses MPP's 4:2:2 and 4:0:0 frames.
 
 ## Vendor 6.12 test
 
-| Check                        | Result | Evidence                                   |
-| ---------------------------- | ------ | ------------------------------------------ |
-| SD boot                      | ✅     | 6.12.69 reached SSH                        |
-| Wi-Fi                        | ✅     | 205 Mb/s up and 174 Mb/s down              |
-| Bluetooth                    | ✅     | H4 driver up; LE discovery                 |
-| Front-panel clock            | ✅     | TM16xx bound and the display timer started |
-| USB Ethernet, SuperSpeed hub | ❌     | Adapter absent on the test boot            |
-| H.264 decode                 | ✅     | Exact 1080p output                         |
-| Interlaced H.264 decode      | ✅     | All 60 source luma fields matched          |
-| HDMI flip pacing             | ✅     | 3601 commits in 60 s                       |
-| Composite writeback          | ❌     | PAL and NTSC lost colour bars              |
-| SDR to HDR mapping           | ✅     | PQ and HLG within one code                 |
-| Analog codec timing          | ✅     | 2.027 s at 44.1 kHz and 2.019 s at 48 kHz  |
-| Picture and sound on a TV    | ❓     | Real sink pending                          |
+| Check                   | Result | Evidence                                   |
+| ----------------------- | ------ | ------------------------------------------ |
+| SD boot                 | ✅     | 6.12.69 reached SSH                        |
+| Wi-Fi                   | ✅     | 205 Mb/s up and 174 Mb/s down              |
+| Bluetooth               | ✅     | H4 driver up; LE discovery                 |
+| Front-panel clock       | ✅     | TM16xx bound and the display timer started |
+| H.264 decode            | ✅     | Exact 1080p output                         |
+| Interlaced H.264 decode | ✅     | All 60 source luma fields matched          |
+| HDMI flip pacing        | ✅     | 3601 commits in 60 s                       |
+| Composite writeback     | ❌     | PAL and NTSC lost colour bars              |
+| SDR to HDR mapping      | ✅     | PQ and HLG within one code                 |
+| Analog codec timing     | ✅     | 2.027 s at 44.1 kHz and 2.019 s at 48 kHz  |
+| HDR10 film on a screen  | ✅     | 10-bit YCbCr 4:2:2, BT.2020, PQ, smooth    |
 
 HDMI writeback rejects capture after a composite test. HDMI display commits still succeed.
 
@@ -147,11 +160,9 @@ HDMI writeback rejects capture after a composite test. HDMI display commits stil
 | Wi-Fi association and upload | ✅     | DHCP and 120 Mb/s at 2.4 GHz                 |
 | Wi-Fi download at 2.4 GHz    | ❌     | Four runs: nothing twice, 13.1 and 74.7 Mb/s |
 | Wi-Fi download at 5 GHz      | ✅     | 209 Mb/s over six seconds                    |
-| USB Ethernet, SuperSpeed hub | 🟠     | 941 Mb/s on retest; xHCI dropped first       |
 | Bluetooth discovery          | ✅     | UART2 H4, 8 found, no HCI errors             |
 | HDMI scanout, synthetic 4K60 | ✅     | 601 flips, none late or refused              |
 | Composite writeback          | ✅     | PAL and NTSC keep six colour bars            |
-| \1\n                         |
 
 ## Video on mainline 7.3
 
@@ -170,42 +181,43 @@ HDMI writeback rejects capture after a composite test. HDMI display commits stil
 
 ## Hands-on checks
 
-| Check                | 6.1 | next2 | Evidence                                        |
-| -------------------- | --- | ----- | ----------------------------------------------- |
-| The IR remote        | ✅  | ✅    | All 12 keys canonical in `evtest`               |
-| The BLE remote       | ❓  | ❓    |                                                 |
-| Bluetooth keyboard   | ❓  | ❓    | Scans find devices on both                      |
-| Wi-Fi, owner's       | ✅  | ✅    | Joined on both                                  |
-| Sleep and wake       | ✅  | ❌    | The remote's power key; next2 never wakes       |
-| Power off and on     | ✅  | ❌    | On from the remote after `poweroff.target`      |
-| Reboots by hand      | 🟠  | ✅    | 6.1 froze four times in the decoder's probe     |
-| HDMI on a screen     | ✅  | ✅    | EDID, 23 modes; 6.1 sets 2256×1504 at 60 Hz     |
-| HDMI sound           | ❓  | ❓    |                                                 |
-| The GPU on a screen  | ❓  | ❓    |                                                 |
-| A player on a screen | ❓  | ❓    |                                                 |
-| HDR on an HDR TV     | ❓  | ❓    |                                                 |
-| The AV jack          | ❓  | ❓    |                                                 |
-| S/PDIF               | ➖  | ➖    | No S/PDIF port                                  |
-| A monitor's DDC/CI   | ❓  | ❓    |                                                 |
-| Ethernet             | ❓  | ❓    | 100 Mb/s, all the port has; 10 Mb/s not tried   |
-| USB 3                | ❓  | ❓    | A USB Ethernet adapter at SuperSpeed, no stick  |
-| USB 2                | ❓  | ❓    |                                                 |
-| The OTG port         | ❓  | ❓    |                                                 |
-| The SD slot          | ❓  | ❓    | Boots from SD; UHS mode and hotplug not checked |
-| The recovery button  | ✅  | ✅    | Factory Loader on OTG                           |
-| The recovery path    | ❓  | ❓    | Loader reads the idbloader back; no restore yet |
-| Buttons and LEDs     | ➖  | ➖    | No LEDs; the panel only                         |
-| The front panel      | ✅  | ✅    | Clock and time zone; brightness not tried       |
-| The serial pads      | ✅  | ✅    | `GND RX TX` as labelled, 1500000 baud           |
+| Check                | 6.1 | next2 | Evidence                                          |
+| -------------------- | --- | ----- | ------------------------------------------------- |
+| The IR remote        | ✅  | ✅    | All 12 keys canonical in `evtest`                 |
+| The BLE remote       | ➖  | ➖    | None comes with the box                           |
+| Bluetooth keyboard   | 🟡  | ❓    | LE scan finds 16, BR/EDR discovery works          |
+| Wi-Fi, owner's       | ✅  | ✅    | Joined on both                                    |
+| Sleep and wake       | ✅  | ❌    | Deep, woken by the remote, the DMC off            |
+| Power off and on     | ✅  | ❌    | On from the remote after `poweroff.target`        |
+| Reboots by hand      | ✅  | ✅    | 6.1 and 6.12, with the DMC off                    |
+| HDMI on a screen     | ✅  | ✅    | EDID, 23 modes; 6.1 sets 2256×1504 at 60 Hz       |
+| HDMI sound           | ✅  | ❓    | Heard on the screen's speakers                    |
+| The GPU on a screen  | ✅  | ❓    | glmark2 at 60 fps, no artifacts seen              |
+| A player on a screen | ✅  | ❓    | 4K24 HEVC with Dolby, H.264, in Fuseamp           |
+| HDR on an HDR TV     | ✅  | ❓    | 6.1, 6.12: 10-bit YCbCr 4:2:2, BT.2020, PQ        |
+| The AV jack          | ✅  | ❓    | PAL and NTSC bars seen; analog sound heard        |
+| S/PDIF               | ➖  | ➖    | No S/PDIF port                                    |
+| A monitor's DDC/CI   | ✅  | ❓    | Brightness, contrast, volume read; brightness set |
+| Ethernet             | ✅  | ❓    | 10 and 100 Mb/s full duplex at line rate          |
+| USB 3                | ✅  | ❓    | 5000M on `uas`, 360 read, 317 write MB/s          |
+| USB 2                | ✅  | ❓    | The Lexar at 480M, 34.9 read, 32.0 write MB/s     |
+| The OTG port         | ✅  | ❓    | The USB 2 port: a 12M keyboard; the Loader        |
+| The SD slot          | ✅  | ❓    | High speed, stock's mode, 23.9 MB/s; hotplug      |
+| The recovery button  | ✅  | ✅    | Factory Loader on OTG                             |
+| The recovery path    | ✅  | ✅    | Loader and Maskrom on OTG, the eMMC read whole    |
+| Buttons and LEDs     | ➖  | ➖    | No LEDs; the panel only                           |
+| The front panel      | ✅  | ✅    | Clock, time zone and brightness 1 to 8            |
+| The serial pads      | ✅  | ✅    | `GND RX TX` as labelled, 1500000 baud             |
 
 ## Known gaps
 
-| Advertised feature                  | TVBian test gap                        |
-| ----------------------------------- | -------------------------------------- |
-| Other RAM and eMMC sizes            | ❓ No other hardware variant tested    |
-| microSD sizes outside the test card | ❓                                     |
-| HDMI 4K60 at 10 bits and HDR Vivid  | ❓ Physical sink and format unverified |
-| MVC, AVS, AVS+ and AVS2             | ❓ Hardware decode on this board       |
+| Advertised feature                  | TVBian test gap                     |
+| ----------------------------------- | ----------------------------------- |
+| Other RAM and eMMC sizes            | ❓ No other hardware variant tested |
+| microSD sizes outside the test card | ❓                                  |
+| HDMI 4K60 at 10 bits                | ❌ Vendor sends RGB 8-bit, no 4:2:0 |
+| HDR Vivid                           | ❓                                  |
+| MVC, AVS, AVS+ and AVS2             | ❓ Hardware decode on this board    |
 
 ## Recovery
 

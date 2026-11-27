@@ -1,19 +1,4 @@
 # HK1 RBOX K8S
 
-- [ ] **The GPU's clocks on 6.1 with their measured reason**: both `ACLK_GPU_MALI`, where next2's
-      core runs on SCMI.
-- [ ] **USB Ethernet on the SuperSpeed hub** through every warm boot and under load.
-- [ ] **The FD650B-S's status icons**, if the panel has them.
-- [ ] **The SDIO power-off delay at its measured minimum**: 2 s is the only value tried.
-
-## 👤 By hand
-
-- [ ] The serial pads' voltage.
-- [ ] Pair a BLE remote and a Bluetooth keyboard; each survives a power cycle.
-- [ ] On a screen: HDMI sound, glmark2, a 4K60 player, HDR, DDC/CI.
-- [ ] Composite picture and analog sound from the AV jack.
-- [ ] Ethernet at 10 Mb/s.
-- [ ] A fast stick on USB 3 and USB 2; a low-speed keyboard; a keyboard on the OTG port.
-- [ ] A UHS card in the SD slot at its UHS mode; out and back in.
-- [ ] The factory image restored over OTG.
-- [ ] The front panel's brightness set.
+- [ ] **The DMC scales the DDR without hanging the SoC**: its rate changes hang this board, so its
+      tree disables it, the DDR held at 786 MHz; why the change fails is open.

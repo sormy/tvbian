@@ -474,3 +474,372 @@
 - The 6.1 codec's "3.02 s for a 2 s clip" was a misreading: `audio`'s clip is 3 s, and its `2` is
   the channel count. Every HK1 regression reads 3.01–3.03 s on all three kernels. On 6.1, by hand:
   3.03 s and 3.02 s for 3 s at 44.1 and 48 kHz, 2.02 s for 2 s.
+
+## 2026-11-24 — the GPU's clock on 6.1
+
+- The tree's "SCMI's 800 MHz, unthrottled here" was wrong on 6.1: `devfreq-ff700000.gpu` is bound to
+  `soc-thermal`'s 85 °C passive trip, `step_wise`, beside the CPU's.
+- On `ACLK_GPU_MALI` devfreq lists 300–800 MHz, but the clock stops at 498 MHz: 800 MHz asked, 800
+  in `cur_freq`, 498000000 in `aclk_gpu_mali`.
+- On SCMI, the factory's `core`, on 6.1: lima took 300 MHz at 875.7 mV; asking 500 MHz, which the
+  table holds at the same 875 mV, reset the box, two of two, nothing in pstore. The table is
+  `rockchip,pvtm-pvtpll`, set up by the vendor's OPP helpers, which lima does not call.
+- With the GPU held powered (`power/control` `on`), SCMI stepped 500, 600, 700 and 800 MHz, no
+  reset: the reset is the rate set with the GPU suspended, its clocks gated; `PD_GPU` is always-on.
+  Through Rockchip's OPP helper lima read `pvtm-volt-sel=3`; 800 MHz at 912 mV, the table's
+  default 950.
+- `drm-lima-devfreq-rockchip-opp.patch`: the table through the helper, and no rate set unless the
+  GPU is in use. With it, suspended: 500 and 800 MHz asked, 300 MHz kept, no reset.
+- The tree's `core` on SCMI: glmark2 93, 76 on `ACLK_GPU_MALI`. A 600 s soak: 75.5 °C at most, the
+  GPU 500 s at 800 MHz, no warning, the same boot.
+- 6.12 with the patch and the tree: suspended, 500 and 800 MHz asked, 300 kept, no reset; glmark2
+  105 at 800 MHz. Its first boot, warm from 6.1, did not come back, nor a power cut after; a later
+  power cut booted it. The console saw none of it. On 6.1, three warm reboots on the tree, all back
+  in 34–39 s.
+- `U_BOOT_DEFAULT="l2"` in `/etc/default/u-boot`: each kernel install had made next2 the default.
+
+## 2026-11-24 — the SDIO power-off delay
+
+- The test, on 6.1: the Wi-Fi modules unloaded, `ffc20000.mmc` unbound and bound, the modules
+  loaded, `wlan0` addressed. At 2 s: the unbind 3.7–3.9 s, `wlan0` back in 8.2 s, two of two. At 0
+  µs (`fdtput`): the unbind 12–26 ms, `wlan0` back in 4.5 s, three of three; three warm reboots back
+  in 35–37 s, both SDIO functions and `wlan0` addressed each time.
+- A driver reload alone, its unload re-probing the host (`97`): at 2 s the unload 3.9–4.3 s, `wlan0`
+  back in 8.2–8.6 s; at 0 µs 0.4 s and 4.7 s, three of three.
+- The stall on vendor kernels alone: a shutdown at 0 µs, then a boot without B2 in the power
+  sequence: B2 read high (`/sys/class/gpio`), no card. With the host unbound, B2 driven low by hand,
+  then the host bound, the module loaded and unloaded, which stalls it again:
+
+  | B2 low  | card back |
+  | ------- | --------- |
+  | none    | 0 of 14   |
+  | 0 ms    | 0 of 1    |
+  | 0.1 ms  | 2 of 3    |
+  | 0.3 ms  | 3 of 3    |
+  | 1 ms    | 4 of 4    |
+  | 10 ms   | 4 of 4    |
+  | 2000 ms | 1 of 1    |
+
+- The reboot into a 10 ms DTB did not come back: no ping, no ARP, the console silent after a power
+  cut, nothing captured of the boot. A serial capture started on the H313 after it.
+- With the driver loaded, the host's unbind and bind oopsed in `aicbsp_get_feature`
+  (`build/logs/hk1-rbox-k8s/vendor-sdio-rebind-oops.log`): processes blocked behind it ignored
+  SIGKILL, and the reboot took 5 minutes of systemd's stop timeouts. No decoder freeze after it.
+- The power cut booted 6.1 on the 10 ms DTB: both functions, `wlan0` addressed. The console capture
+  had U-Boot only: the FTDI adapter on the H313 had reattached at 9600 baud.
+- At 10 ms, the Wi-Fi driver unloaded and udev loading it back: unload 0.4 s, `wlan0` in 4.5–6.5 s
+  on 6.1, 7.2 s on 6.12, three of three each. A warm reboot 6.1 to 6.12 came back in 38 s; 6.12 to
+  6.1 did not, no ping after 6.5 minutes, the serial detached.
+- Warm boots into 6.1: four of four back at 0 µs, none of two at 10 ms, a cold one back. Each hang
+  followed SDIO power cycles; the decoder freeze hit on 2 s too. Which it is needs the console.
+- At 2 s, the driver reloaded three times then a warm reboot into 6.1, from 6.1 twice and from 6.12
+  once: three of three back in 36–37 s. Five reloads on 6.12 back in 9–29 s; one earlier missed a 60
+  s wait with both functions present.
+- The 2 s stays: it revives a stall and its warm boots come back; 10 ms hung both warm 6.1 boots,
+  and 0 µs at shutdown leaves the card stalled for a boot without B2's pulse.
+
+## 2026-11-24 — installed to eMMC
+
+- `tvb-install -y` from SD to the 29.1 GiB eMMC: 3.4 GB of rootfs, its own UUID, the eMMC's
+  idbloader, vendor storage (its MAC) and secure storage kept.
+- With the SD out: 6.1 from the eMMC, root `ffbf0000.mmc` with `boot0` and `boot1`, both SDIO
+  functions, `wlan0` addressed. With the SD in, the SD's menu boots: the SPL reads SD first.
+
+## 2026-11-24 — kexec on the vendor kernels
+
+- `CONFIG_KEXEC` and `CONFIG_KEXEC_FILE` in `kernel/rk35xx.fragment`: 6.1 and 6.12 had neither.
+  `kexec-tools` on the box, `LOAD_KEXEC=false`: a reboot stays a reboot.
+- 6.1 to 6.12, SCMI tree: up in 23 s; Wi-Fi, Bluetooth, the decoder and HDMI as a normal boot, but
+  lima failed, `gpmmu dte write test fail`, error -5, a module reload the same: the GPU keeps 6.1's
+  state without the firmware's reset.
+- 6.12 to 6.12, committed tree: no kernel came up, nothing in pstore or the journal; the box reset
+  by itself into the default 6.1.
+
+## 2026-11-24 — the DDR rate, vendor against next2
+
+- Vendor 6.12: `normal_rate = 786000000`, available 324 and 528 MHz, 528 for 17 minutes, no change.
+- The factory DMC table enables two rows, 920 and 1056 MHz. Rockchip's
+  `rockchip_dmcfreq_adjust_opp_table()`, 5.10 and 6.1 alike, writes BL31's trained rates over the
+  enabled rows in order: 324 and 528 fit, 786 has no row. Stock Android stops at 528 too.
+- next2's `rk3528_dmc_trained_opps()` adds every trained rate and runs 786 MHz: about half again the
+  bandwidth, and most of next2's glmark2 lead, 117–127 against 93 and 105 at the same 800 MHz GPU.
+
+## 2026-11-24 — the dark reboots are in the reset path
+
+- Kexec from 6.1 into 6.12, then a reboot back through U-Boot, ten cycles planned: the kexecs came
+  up 3 of 3 in 22–23 s, Wi-Fi and both SDIO functions each time; the third reboot into 6.1 went
+  dark.
+- Today's dark boots, all through the reset and U-Boot: two into 6.1 (10 ms tree), two into 6.12,
+  one out of 6.12. Kexec into 6.12, 4 of 4 up. The 2026-11-22 strand, the watchdog counting across a
+  soft reboot, fits; not proven.
+- systemd's watchdog off (`RuntimeWatchdogSec=off`, `RebootWatchdogSec=off` in
+  `/etc/systemd/system.conf.d/`, a test override): reboot 1 back in 32 s, reboot 2 dark. The
+  watchdog strand is ruled out.
+- The HK1's factory loader: DDR init V1.07 (2023-08-04), rkbin SPL v1.04 (2023-04-11). The R69-1,
+  the M2 Plus, the 3518 and the 3518D carry DDR init v1.11 (2025) and 2025 SPLs, the same mainline
+  U-Boot. rkbin's notes from V1.07 to v1.11: LPDDR3 ODT detection and Vref training (v1.09), Vref
+  training off below 600 MHz (v1.10), a tRFC minimum (v1.11); none names a reboot.
+- On the committed tree, the GPU on the CRU: warm reboots dark 2 of 7. Boots after a power cut fail
+  too. The eMMC's wear `0x01`, pre-EOL normal; 41 °C; no MMC, ext4 or I/O errors.
+- A candidate for the dark boots: mainline U-Boot's `rockchip_dnl_mode_check()` reads SARADC channel
+  1 at each boot and, at 0–30, writes the boot ROM's download flag and resets; the ROM then waits on
+  USB. The flag outlasts a warm reset. Channel 1 is every RK3528 box's recovery button, U-Boot's
+  SARADC set alike on all; the HK1's reads 1014 in Linux. Not shown: a dark box on USB would be the
+  proof.
+- Resets by the hardware watchdog (armed 10 s, unpinged), committed tree: 5 back in 34–39 s, the
+  sixth dark. The reset's path does not matter: PSCI's 2 of 7, the watchdog's 1 of 6.
+- A U-Boot without SARADC, so with no download-key check, in the eMMC's first copy: dark 3 of 9,
+  then a tenth; the download-key candidate is ruled out. The original back in both copies,
+  `bf227874`.
+
+## 2026-11-24 — dark reboots against the vendor build
+
+- Warm reboots on the committed tree, a dark one power-cycled from the strip:
+
+  | Vendor 6.1                          | kexec | Built        | Dark    |
+  | ----------------------------------- | ----- | ------------ | ------- |
+  | release `-7`, 17 Nov                | off   | CI           | 0 of 15 |
+  | release `-8`, 23 Nov                | off   | CI           | 0 of 15 |
+  | `-8`'s source, the `2026-11-23` tag | off   | here, cached | 0 of 16 |
+  | `-8` with kexec                     | on    | here, cached | 3 of 11 |
+  | the same, `TVB_BUILD_CACHE=0`       | on    | here, clean  | 3 of 15 |
+  | with the lima patch and AIC8800 94  | on    | here, cached | 5 of 16 |
+
+- The configs differ only by `KEXEC`, `KEXEC_FILE`, `KEXEC_CORE`, `CRASH_CORE` and `TRANS_TABLE`;
+  both `gcc 14.2.0-19`, KASLR on, the images 2 KB apart. A plain reboot runs no kexec code; how it
+  darkens a boot is not known. The 3518 on the same kexec build: 0 dark in 10.
+- The kexec build with `nokaslr` (KASLR's lines gone from the log): dark 3 of the first 6. The
+  virtual layout is not it. U-Boot's `booti` puts the Image at `kernel_addr_r` `0x02000000` either
+  way, `image_size` `0x25B0000` in both headers, clear of the DTB at `0x12000000`.
+- `memtester 2500M` at the DMC's 528 MHz, stopped after 7 tests: all `ok`.
+- Back on `-8`'s source built here, kexec off (`e35a1834`).
+- kexec out of `kernel/rk35xx.fragment` again: the vendor kernels build as the releases do.
+- Same source, built here, kexec the only difference: off 0 of 16, on 6 of 26. Equal rates would
+  give this split about 4 % of the time: not yet evidence.
+- A/B, `-8`'s source built here, kexec the only difference, blocks of 10 warm reboots alternated,
+  the first reboot after each switch not counted: off 1, 0, 0 (1 of 30); on 1, 2, 3 (6 of 30). Both
+  go dark: kexec is not the cause. On's excess would come by chance 5 % of the time one-sided, 10 %
+  two-sided.
+- The kexec build with the decoder's node `disabled` (the committed tree otherwise): dark 3 of the
+  first 12 counted. The decoder's probe is not it.
+- kexec back in `kernel/rk35xx.fragment`: the A/B shows it is not the cause.
+
+## 2026-11-25 — the hang is the DMC's DDR rate change
+
+- Serial's ground had come off the clip: the garbled console of the earlier power cycles was that,
+  not the board. Every not-ok reboot since then was a hang, none a booted box without Wi-Fi.
+- The kexec build, 20 warm reboots each, the console reading the last line:
+
+  | DTB                       | Hang | Last line                            |
+  | ------------------------- | ---- | ------------------------------------ |
+  | committed                 | 7    | `mpp_rkvdec2 ff740100.rkvd…`, 8.38 s |
+  | decoder and its IOMMU off | 5    | `mpp_jpgdec …`, 8.37 s               |
+  | `mpp-srv` off             | 5    | `rockchip-dmc dmc: avs=0`, 8.36 s    |
+  | `dmc` off                 | 0    |                                      |
+
+- The DMC finds 786 MHz from the loader, its table holds 324 and 528, and `dmc_ondemand` asks for
+  `normal_rate` 786: devfreq clamps it to 528 and BL31 changes the rate mid-probe. The M2 Plus's
+  table holds 786, so it never changes rate at boot.
+- At runtime, idle, the userspace governor stepping 528 and 324: one step by hand held; the scripted
+  stepping reset the box twice, the console going from the login prompt straight to the DDR init's
+  banner, nothing between (`build/logs/hk1-rbox-k8s/vendor-ddr-runtime-step-reset.log`). The rate
+  change itself fails on this board, not only at boot.
+- The DDR rates BL31 trained, from the DMC's `available_frequencies` with a third row enabled: 324,
+  528, 666 and 786 MHz. The M2 Plus's table holds all four; the HK1's factory table, two.
+- The HK1's own 1184 MHz row enabled (three rows, boot change 786 to 666 MHz): hang on reboot 3 of
+  3, at 8.38 s. A smaller rate step still hangs.
+- The DMC's `center-supply` is `vdd_logic`, a PWM rail that starts at 900 mV; the DMC rows ask 850.
+  On the HK1 the GPU's `mali-supply` is the same rail; on the M2 Plus the DMC is its only user. Test
+  waiting: `vdd_logic` held at 900 mV.
+- `vdd_logic` held at 900 mV: every boot hung, 12 of 12, at 8.28 s. The rail registers at 899 mV, so
+  the floor made the regulator core write the PWM, by 1 mV. Recovered by stopping U-Boot on the
+  serial console and booting 6.1 by hand with `board.dtb.committed`.
+- At runtime, lima raising the GPU to 800 MHz moved `vdd_logic` 851 to 875 mV (PWM duty 2450 to 2850
+  ns): the box stayed up. The scripted DMC steps, 528 and 324 MHz, both at 850 mV, reset it with no
+  voltage write.
+- So the DDR rate change fails on this board whatever the voltage, and a logic-rail write during
+  boot does too. The DMC does only harm here: `board.patch` disables it, the DDR staying at the 786
+  MHz its own loader trains, as on the M2 Plus, which never changes rate at boot.
+- next2 on this eMMC: every write fails after the card re-initialises at 4 s, root read-only; passed
+  to the next2 work.
+- With the DMC off in `board.patch` (`7f2b41e2`), the full build (lima, AIC8800 `94`, kexec): 20
+  warm reboots on 6.1 and 20 on 6.12, none hung; `vdd_logic` stays at 899 mV.
+- That is a workaround, not a fix: why the rate change fails here is open, on the HK1's todo page.
+- memtester at 786 MHz, the DMC off: one full pass over 3000 MB clean, a second stopped 10 minutes
+  in, clean.
+- Wall-clock decode, `ffmpeg9 -c:v <codec>_rkmpp` to null, synthetic clips, three runs each, the DDR
+  at 786 MHz: H.264 High 3840×2160 at 60, 600 pictures, 44.1 fps (42.3 at 528 MHz); HEVC Main10
+  7680×4320 at 25, 50 pictures, 20.4 fps (16.4).
+- `video.py run --engine rkmpp --suite decode` on vendor 6.1, the DDR at 786 MHz
+  (`build/validate/video/hk1-rbox-k8s-6.1-dmcoff.json`): every codec at or above the M2 Plus's 6.1
+  run; at 3840×2160 H.264 61.6 fps, HEVC 116.9, HEVC Main10 112.4. The 42.3 and 16.4 fps above were
+  wall clock, FFmpeg's start included, not the engine's.
+- H.264 4:2:2 and 4:0:0 came back broken: `h264_rkmpp` logs `Unsupported frame format 0x2` and
+  `0xc`, MPP's NV16 and YUV400. A family item, on `docs/todo/rk35xx.md`.
+- Composite writeback on vendor 6.1, `display.py composite`: PAL and NTSC set on CRTC 117, each
+  capture signalled done, the buffer unwritten: six equal bars, black or all-zero NV12 (0, 77, 0). A
+  frame-height capture (576, 480 lines) instead of a field's gave the same. Rockchip's
+  `vop2_wb_commit` enables writeback on the RK3528 without a check for the video port or interlace.
+  A family item, on `docs/todo/rk35xx.md`.
+- Vendor 6.12 entered by kexec, then `systemctl poweroff`: the box came back on its own, answering
+  SSH 113 s later. `watchdog-dw-wdt-stop-at-power-off.patch` added to `kernel/rk35xx-next.conf`.
+- 6.1 (the next2 work's build) and 6.12, each with `watchdog-dw-wdt-stop-at-power-off.patch`, each
+  installed with its own modules: after `systemctl poweroff` neither answered for 333 s; the strip
+  brought each back.
+- The install also took next2's 7.3.6, and `U_BOOT_DEFAULT="l2"` in `/etc/default/u-boot` then named
+  6.12: the default counts labels, not kernels. 7.3.6 was a debug build: removed and purged, with
+  the next2 metapackage the box never had; 6.1 is `l2` again.
+- The next2 work's 3518D soak on 6.1 logged
+  `devfreq ff700000.gpu: Couldn't update frequency transition information.` 201 and 257 times,
+  against 11–12 before: with the GPU suspended the lima patch reported `clk_get_rate()`, and the
+  3518D's CRU clock rounds below its OPP. The patch now reports the OPP the clock rounds to. On the
+  HK1 with it: 0 warnings under glmark2; `min_freq` written with the GPU suspended reports 800 MHz,
+  no reset.
+- With the fix, the next2 work's 120 s `box.py` soak on the 3518D, 6.1: 0 transition warnings,
+  temperature and CPU ops in line with earlier vendor runs. Its GPU offers 700 and 800 MHz, the
+  factory table's two rows.
+- 6.12 rebuilt with the fixed lima patch, booted from the menu: 0 transition warnings under glmark2,
+  800 MHz; `min_freq` written with the GPU suspended reports 800 MHz, no reset. Entered by kexec
+  from 6.1 instead, lima failed to probe: `gpmmu dte write test fail`, error -5. On
+  `docs/todo/rk35xx.md`.
+- For the next2 work, vendor 6.1 kexec'd into next2 7.3.5 with `keep_bootcon loglevel=8`: ramoops
+  registered at 0.077 s; the last line, at 1.23 s, `clk: Disabling unused clocks`, then nothing for
+  2.5 minutes and no watchdog reset; the strip brought it back to 6.1
+  (`build/logs/hk1-rbox-k8s/next2-kexec-from-6.1-hang.log`).
+- The same kexec plus `clk_ignore_unused`: past 1.24 s to `/init`, but the CRU never registered
+  (`of_clk_src_onecell_get: invalid clock index 511`,
+  `couldn't get clock 0 for /clock-controller@ff4a0000`); at 12.2 s every clock consumer deferred,
+  then the box reset into 6.1
+  (`build/logs/hk1-rbox-k8s/next2-kexec-from-6.1-clk-ignore-unused.log`). The box's 7.3.5 kernel
+  came from `build/out/debs` at 22:11, its `board-next2.dtb` from the commit: the pair may not
+  match.
+- The same 7.3.5 kernel and DTB picked once from U-Boot's menu: no clock errors, 0 deferred devices.
+  The pair matches; the unregistered CRU comes only from the kexec from 6.1.
+- Which tree a kexec'd next2 holds, read by an `/init` overlay printing to `/dev/kmsg`: after
+  `kexec -l --dtb=<next2>`, 104610 bytes, the vendor compatible order, and U-Boot's `/chosen`
+  (`u-boot,version`, `smbios3-entrypoint`): 6.1's own tree. kexec-tools 2.0.29 loads through
+  `kexec_file_load`, which on arm64 copies the running kernel's tree and ignores `--dtb`. With `-c`
+  (classic `kexec_load`), next2 got its own file and panicked at 0 s,
+  `Failed to allocate page table page`: `board-next2.dtb` has no `/memory`, U-Boot adds it at boot
+  (`build/logs/hk1-rbox-k8s/next2-kexec-c-own-tree-panic.log`). `tools/validate/kexec_once.py` as
+  written enters a test kernel on the running kernel's tree; passed to the next2 work.
+- `video.py run --engine rkmpp --suite encode` on vendor 6.1
+  (`build/validate/video/hk1-rbox-k8s-6.1-encode.json`): H.264 and HEVC pass to 8192×8192, 16384
+  broken; at 1920×1080 53.6 and 60.5 fps, beside the M2 Plus's 53 and 60. `board.md`'s other encode
+  rows ➖, VC-1 decode ❓ with no FFmpeg path, as on the M2 Plus.
+- 10-bit encode, vendor 6.1: `hevc_rkmpp` and `h264_rkmpp` list `nv12` and `yuv420p` only; a
+  `p010le` source with `-profile:v main10` came out `Main, yuv420p`, and `h264_rkmpp` has no
+  `high10`. The hardware's 10-bit encode is untested; `board.md`'s 10-bit encode rows ❓, not ➖.
+- 10-bit encode has no path in any software we have, by the next2 work's reading: next2's rkvenc
+  lists 23 source formats, all 8-bit; MPP's VEPU540C maps every `*_10BIT` format to
+  `VEPU5xx_FMT_BUTT` ("unsupport frame format"), and its H.265 and H.264 writers fix the bit depth
+  at 8. The datasheet says HEVC Main. The 10-bit encode rows ➖.
+- `h264_rkmpp` wrote Constrained Baseline: the wrapper never set a profile, and MPP's default is
+  Baseline. `patches/ffmpeg/0063` sets it, High for H.264 unless asked, and refuses one MPP does not
+  write; `0062` exports MPP's 4:2:2 and 4:0:0 frames as NV16 and R8. On the HK1, vendor 6.1:
+  - 4:2:2 and 4:0:0 at 1080p and 4K bit-exact against the software decode; `video.py` decode, its
+    rkmpp download now in the codec's format: 46.9 and 75.5 fps at 3840×2160.
+  - Encode High: 52.9 fps at 1920×1080 against Baseline's 53.6; at the same bitrate 46.44 dB against
+    45.42, 41.41 against 40.66 at 8192×8192 (`hk1-rbox-k8s-6.1-encode-high.json`).
+  - `-profile:v 77` and `66` give Main and Constrained Baseline; HEVC `main10` is refused.
+- stress-ng STREAM, 15 s, three runs each, the DDR at 786 MHz: 1252–1273 MB/s with one worker,
+  2794–2848 with four, against 983 and 1925 at 528 MHz.
+- The RTL8153 adapter in a USB 2 port, behind the box's `1d5c:5011` USB 2.0 hub, at 480 Mb/s on
+  EHCI; the xHCI SuperSpeed bus empty. Vendor 6.1, 15 warm reboots: `eth1` back at 1000 every time,
+  no xHCI errors. `iperf3 -c plex --bind-dev eth1`, 10 s: 309 Mb/s up, 321 down, the USB 2 limit.
+  The SuperSpeed port is still to test.
+- The owner: the front panel shows the time only, no status icons.
+- next2 7.3.6 with the next2 work's eMMC-taps patch, booted once from the menu, hung waiting for
+  root: every eMMC read failed (`I/O error, dev mmcblk1, sector 0 op 0x0:(READ)`, 132 lines), so the
+  boot-once hook never ran and every boot took it again
+  (`build/logs/hk1-rbox-k8s/next2-emmc-taps-boot-once.log`). The serial clips, knocked loose, were
+  reseated; the menu's 6.1 entry was picked over serial, then `default l3` and `U_BOOT_DEFAULT`
+  restored and `/var/lib/tvb-boot-once` removed.
+- The blue USB 3 port, vendor 6.1: a Lexar USB 2.10 stick on the xHCI bus at 480 Mb/s, 512 MiB
+  direct reads 36.1 MB/s twice. The SuperSpeed bus saw no device; the RTL8153 stayed on the USB 2
+  hub.
+- next2 7.3.6 on the next2 work's HS200-only tree, picked once from the menu over serial: root rw,
+  no eMMC errors, HS200 at 148.5 MHz (`build/logs/hk1-rbox-k8s/next2-hs200-boot.log`). Its fio, 512
+  MiB direct with crc32c verify: 66.1 MiB/s write, 114 read, a verify-only pass clean. The
+  `invalid driver type` lines come at HS200 too: harmless. next2 drives this card at HS200, not
+  HS400ES.
+- next2 regression, its first boot on the HS200 tree:
+  `mmc1: error -110 whilst initialising MMC card` at 2.84 s, no `mmcblk1`, initramfs waiting for
+  root two hours (`build/logs/hk1-rbox-k8s/next2-regression-hang.log`). The earlier HS200 boot came
+  up: next2's HS200 card init is flaky here. Recovered by a power cycle and 6.1 picked over serial.
+- The Lexar USB 2.10 stick, disposable by the owner, in the blue port, vendor 6.1: `usb-storage` at
+  480 Mb/s on xHCI; `fio` 256 MB read-only 33.2 MB/s, 128 MB write at 8 GiB 28.7 MB/s, crc32c verify
+  clean, `stress-ng` on four CPUs and a 256 MB VM worker beside it; no USB resets.
+- A SanDisk V30 `SH64G` in the SD slot, vendor 6.1: high speed, 49.8 MHz, 4 bits, 3.3 V. `fio`, the
+  fixed runs on a file on its ext4: 23.9 MB/s read, 20.8 write, 2133 and 311 IOPS 4K; no CRC error.
+  Stock's tree gives the slot no `vqmmc-supply` or UHS mode; its `vccio_sd` is a fixed 1.8 V nothing
+  uses, where the M2 Plus's is GPIO4 B6 switching 3.3 and 1.8 V. High speed is the most stock ran.
+- The Lexar USB 3.2 stick: high speed at boot (`usb 1-1` at 8.5 s); replugged, SuperSpeed on `uas`
+  (`usb 2-1` at 271 s, 5000 Mb/s). The port does SuperSpeed; the boot-time enumeration does not.
+- The Lexar at boot on three warm reboots and a power cycle: SuperSpeed at 8.7 s every time; the one
+  high-speed boot did not repeat. Under `fio` with `stress-ng`, 1 GB: 360 MB/s read, 317 write,
+  crc32c clean.
+- SD hotplug, vendor 6.1: a card in at 81.0 s, read at high speed; removed at 91.6 s.
+- Front panel: `display` brightness 1 to 8 written and read back; the owner saw no change.
+- Built-in Ethernet against Plex, negotiated: 10 Mb/s full 9.39 up, 9.30 down; 100 Mb/s full 93.65
+  up, 94.10 down; no retransmits. Forced 10 Mb/s with autoneg off left the switch at half duplex.
+- Deep sleep with the DMC off, woken by the remote's power key: 1 success, Wi-Fi and the Lexar back;
+  `xHC error in resume, USBSTS 0x401, Reinit` on resume, the stick back at 5000.
+- An LE scan, 12 s: 16 devices, no HCI errors. The box comes with no BLE remote.
+- The ports, from where each device enumerated: the USB 2 port on xHCI's high-speed side (`1-1`, the
+  OTG PHY); the blue port's high-speed lines on EHCI (`3-1`), its SuperSpeed on xHCI (`2-1`). The
+  `1d5c:5011` USB 2.0 hub was inside the Ethernet adapter, which sat in the blue port; the Lexar's
+  one high-speed boot was in the USB 2 port. Corrects the entries above.
+- The Lexar in the USB 2 port, `usb-storage` at 480 Mb/s, under `stress-ng`: 256 MB read-only 34.9
+  MB/s, 128 MB written at 8 GiB 32.0 MB/s, crc32c clean.
+- A Logitech receiver `046d:c52b` in the USB 2 port: full speed, 12 Mb/s, on xHCI; HID keyboard,
+  mouse and consumer control. `evtest`: the owner's keys arrived. The USB 2 port is the OTG port,
+  the one recovery's Loader uses: both modes now shown.
+- `systemctl poweroff` on 6.1, the DMC off and the watchdog patch in: off about 5 minutes on its
+  own, then on from the remote's power key, a new boot ID, 6.1 the default.
+- On a 2256×1504 HDMI screen, vendor 6.1: `speaker-test` to `hw:0,0` heard; glmark2-es2-drm build,
+  phong shading and texture at 60 fps, the owner seeing no artifact, the GPU at 800 MHz. No 4K mode
+  on it: the 4K60 player and HDR wait for a 4K TV.
+- DDC/CI: dw-hdmi's I2C master refused the request at 0x37 (`EOPNOTSUPP`, plain and combined
+  transfers alike). Every other RK3528 vendor tree carries the HDMI DDC as `i2c-gpio`, the HDMI pin
+  group keeping CEC; the HK1's patch now does too, its pins from its own `hdmi_pins` (`a8e11901`).
+  6.1: EDID read over it, 2256×1504; VCP 0x10 brightness 100/100, 0x12 contrast 50/100, 0x62 volume
+  20/100; brightness set to 80, read back, restored. 6.12: the bus up, VCP 0x10 read.
+- On a TV over the AV jack, vendor 6.1: `Composite-1` forced on, PAL and NTSC colour bars from
+  `modetest` seen. `speaker-test` on `hw:1,0`, the codec, ran on time but nothing was heard: during
+  playback `ACODEC_ANA09` and `ANA0D` stay 0, the line out muted, and `pa-ctl` on GPIO0 A0 stays
+  low. Rockchip's `rk3528_mute_stream` unmutes both, so it is never called for this card.
+- Correction: the silent playback went to HDMI. ALSA's card numbers changed between boots, the codec
+  card 0 and HDMI card 1, so `hw:1,0` was HDMI, unplugged. Played by name,
+  `plughw:CARD=rk3528acodec,DEV=0`: `rk3528_hw_params` and `rk3528_mute_stream` ran, the line out
+  unmuted (`ANA09`, `ANA0D` 0x31), `pa-ctl` high, and the owner heard it on the TV.
+- Front panel brightness again, levels 1 and 8 held 3 s each: the owner saw it change. The first
+  sweep's 1 s steps went unnoticed; brightness works.
+- The sweep 1 to 8 at 2 s each, two rounds: the owner saw eight distinct levels.
+- Fuseamp, the owner's player, on the 2256×1504 screen: 4K24 HEVC with Dolby audio and H.264 played.
+  No HDMI sound: it opened `pcmC0D0p`, card 0, the codec on this boot. ALSA's default now names
+  HDMI, `boards/common/alsa-hdmi-default.conf` to `/etc/alsa/conf.d/60-tvb-hdmi-default.conf`,
+  picked by every RK35xx board: `defaults.pcm.card rockchiphdmi` broke alsa-lib's configuration;
+  `pcm.!default` on `hw:CARD=rockchiphdmi,DEV=0` plays. The owner heard Fuseamp over HDMI. The next2
+  trees name the card `rockchip,hdmi` too.
+- HDR HEVC in Fuseamp on the owner's HDR monitor (EDID: EOTF SDR and PQ, BT.2020 YCC only, YCbCr
+  4:4:4 and 4:2:2, DC_30 and DC_Y444, TMDS 300 MHz). Fuseamp set `max bpc` 10 and `Colorspace`
+  `BT2020_YCC`; dw-hdmi's status read `RGB`, 8 bit, `ITU.BT601`, `EOTF: ST2084`. The vendor's
+  `dw_hdmi_rockchip_select_output` takes the depth from its own `color_depth`, 8, and never from
+  `max bpc`, so its BT.2020 path to 10-bit YCbCr 4:2:2 is skipped.
+  `drm-rockchip-dw-hdmi-max-bpc-deep-colour.patch` lets `max bpc` above 8 ask for 10 bits.
+- With the max-bpc patch, vendor 6.1: Fuseamp's HDR switch gave `YUV422`, 10 bit, `ITU.BT2020`,
+  `EOTF: ST2084` at the same 235.7 MHz TMDS; the video plane `Cluster0-win0` took the 3840×2160
+  `YU10` AFBC picture. One Dolby Vision HEVC stream froze in Fuseamp after the switch, its plane
+  left on one framebuffer, passed to the Fuseamp work; a 4K HDR10 film then played with no glitch.
+- 6.12 with the max-bpc patch, the same 4K 10-bit HEVC HDR10 film at 24 fps in Fuseamp: `YUV422`, 10
+  bit, `EOTF: ST2084`; AVI `FC_AVICONF1` (0x101A) 0xc8, colorimetry extended, and `FC_AVICONF2`
+  (0x101B) 0x60, extended colorimetry 6, BT.2020; the plane flipping. 6.12's `hdmi0/status` prints
+  `ITU.BT601` all the same: its debug print decodes the DRM colorimetry with the V4L2 enum.
+- The owner: 4K24 in a player is enough for the player check; 4K60 not asked.
+- `display.py --no-ladder` on vendor 6.1 with the max-bpc patch, the HDMI cable out
+  (`build/logs/hk1-rbox-k8s/vendor-61-display-max-bpc.log`): 43 passed, 13 failed. SDR, PQ, HLG at
+  max bpc 8 and 10 pass, PQ and HLG with EOTF 2 and 3, extended colorimetry 6; 1920-wide max bpc 10
+  gives `VP_PR_CD` 0x50. Failing: 3840-wide 60 Hz max bpc 10 stays RGB 8-bit, not YCbCr 4:2:0; AFBC
+  rotation by 90 and 270; 3D frame packing; BG24 writeback; composite writeback. A first run, the
+  cable pulled during it, also failed the PQ and HLG cases.
