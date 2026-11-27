@@ -3,3 +3,4 @@
 0755 common/tvb-install                 /usr/sbin/tvb-install
 0644 common/preserve-sectors.rk35xx      /usr/lib/tvb/preserve-sectors
 0644 common/powerkey.conf          /usr/lib/systemd/logind.conf.d/zz-tvb-powerkey.conf
+0644 common/alsa-hdmi-default.conf /etc/alsa/conf.d/60-tvb-hdmi-default.conf

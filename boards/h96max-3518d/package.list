@@ -19,3 +19,4 @@ link /usr/lib/firmware/updates/swt6621s/SWT6621S_NV_SDIO_SHARED_TDD.bin /usr/lib
 # tvb-install, and what it never writes on the eMMC: the family's preserve list
 0755 common/tvb-install                   /usr/sbin/tvb-install
 0644 common/preserve-sectors.rk35xx       /usr/lib/tvb/preserve-sectors
+0644 common/alsa-hdmi-default.conf        /etc/alsa/conf.d/60-tvb-hdmi-default.conf
