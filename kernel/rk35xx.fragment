@@ -18,6 +18,9 @@ CONFIG_FONT_TER16x32=y
 # every family: a panic reboots, and leaves its log in pstore
 CONFIG_PSTORE_RAM=y
 CONFIG_PANIC_TIMEOUT=10
+# a kernel under test entered by kexec, past the bootloader and the firmware's reset
+CONFIG_KEXEC=y
+CONFIG_KEXEC_FILE=y
 # every family: a kernel that preempts anywhere, at a tick 50 and 60 Hz frames both divide; the UI and
 # audio threads wait on no kernel loop
 CONFIG_PREEMPT=y
