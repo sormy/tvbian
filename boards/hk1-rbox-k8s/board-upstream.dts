@@ -26,6 +26,18 @@
 		status = "disabled";
 	};
 
+	/* the HDMI DDC lines as a full I2C bus: dw-hdmi's own master reads the EDID but refuses DDC/CI */
+	hdmi_ddc: i2c-hdmi-ddc {
+		compatible = "i2c-gpio";
+		sda-gpios = <&gpio0 RK_PA5 GPIO_OPEN_DRAIN>;
+		scl-gpios = <&gpio0 RK_PA4 GPIO_OPEN_DRAIN>;
+		i2c-gpio,delay-us = <5>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&hdmi_ddc_gpio>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+	};
+
 	leds: gpio-leds {
 		compatible = "gpio-leds";
 
@@ -129,7 +141,7 @@
 };
 
 &dmc {
-	system-status-level = <1 8>;
+	status = "disabled"; /* its DDR rate changes hang the SoC */
 };
 
 &dmc_opp_table {
@@ -145,13 +157,13 @@
 
 &gpu {
 	interrupt-names = "gp", "gpmmu", "pp", "pp0", "ppmmu0", "pp1", "ppmmu1"; /* Lima bindings */
-	clocks = <&cru ACLK_GPU_MALI>, <&cru ACLK_GPU_MALI>; /* SCMI's 800 MHz, unthrottled here */
-	clock-names = "bus", "core";
+	clocks = <&scmi_clk SCMI_CLK_GPU>, <&cru ACLK_GPU_MALI>;
+	clock-names = "core", "bus";
 	mali-supply = <&vdd_logic>;
 };
 
 &gpu_bus {
-	status = "disabled"; /* it sets vdd_logic for SCMI's GPU clock, which no longer drives the GPU */
+	status = "disabled"; /* lima's mali-supply sets vdd_logic; this one's probe fails */
 };
 
 &gpu_bus_opp_table {
@@ -176,7 +188,12 @@
 	/delete-property/ rockchip,cts-manual;
 	pinctrl-names = "default", "sleep";
 	pinctrl-1 = <&hdmi_pins>;
+	ddc-i2c-bus = <&hdmi_ddc>;
 	cec-enable;
+};
+
+&hdmi_pins {
+	rockchip,pins = <0 RK_PA3 1 &pcfg_pull_none>;
 };
 
 &i2c6 {
@@ -188,6 +205,13 @@
 };
 
 &pinctrl {
+	hdmi {
+		hdmi_ddc_gpio: hdmi-ddc-gpio {
+			rockchip,pins = <0 RK_PA4 RK_FUNC_GPIO &pcfg_pull_none>,
+			                <0 RK_PA5 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+
 	sdio-pwrseq {
 		/delete-node/ wifi-enable-h;
 
