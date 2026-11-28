@@ -37,6 +37,12 @@ below.
       installed. Wanted: expiry notices a package no run's plan names and retires it
       `TVB_APT_KEEP_DAYS` after its last publication, the policy older versions follow; the
       kernel-release rule (kept while what it serves stays) unchanged.
+- [ ] **U-Boot updatable on a running box, by an optional command**: an upgrade installs the board's
+      new `/usr/lib/tvb/u-boot.bin` but writes no sector, so the disk keeps its image's U-Boot, and
+      `tvb-install` copies the source disk's sectors on (issue #10: the H313's eMMC fix never
+      reached a box that upgraded). Wanted: `tvb-bootloader <disk>`, writing the installed
+      `u-boot.bin` with the family's layout, the one `image/build.sh` uses, run by hand and by
+      `tvb-install` on its target; upgrades stay sector-free.
 - [ ] **Our Mesa in the published repo**: `extras/mesa` is unreleased, so a box installing Mesa gets
       Debian's, a third of Panfrost's on-screen speed at 2256×1504. Ours outranks Debian's by
       version once published.

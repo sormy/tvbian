@@ -8,6 +8,10 @@
 - [ ] **Reboot into FEL from Linux, parked.** Stock writes "boot efex" to `misc` and its U-Boot
       jumps to the boot ROM's FEL; ours needs a flag Linux leaves and our U-Boot reads.
 
+- [ ] **H616 SRAM bindings.** `dt-validate` rejects the SRAM sections' compatibles
+      (`allwinner,sun50i-h616-ve-sram`, `sun50i-h616-sram-c`) on every H616 board; they need a
+      `dt-bindings:` patch.
+
 - [ ] **H616 analog audio on by default.** Line out and the DAC boot muted; the AV jack plays
       nothing until set by hand.
 

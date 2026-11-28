@@ -12,13 +12,13 @@ patch, targeting mainline's tree.
    decompiles the factory blobs with `tools/dtcx/dtcx.py` against the `_SOURCE` bases. Extend the
    base until only addresses and bitmasks stay hex: interrupts named, vendor quantities in decimal,
    vendor GPIO and reference properties declared.
-3. **Copy `factory_board.dts` to `board.dts`, edit it, and diff it into `board.patch`** (the same for
-   U-Boot). Never start from the generated `board.dts`: it has no explicit phandles, so a diff
+3. **Copy `factory_board.dts` to `board.dts`, edit it, and diff it into `board.patch`** (the same
+   for U-Boot). Never start from the generated `board.dts`: it has no explicit phandles, so a diff
    against the factory tree would delete hundreds of lines. The build regenerates `board.dts` and
    `board.dtb` (committed), drops the explicit phandles and proves the result equal with
    `tools/dtcx/canonical.py`.
-   - Where the `_SOURCE` base has a `.translate.conf`, the build first translates the factory tree to
-     the target dialect (`factory_board_translated.dts`), and the patch is against that.
+   - Where the `_SOURCE` base has a `.translate.conf`, the build first translates the factory tree
+     to the target dialect (`factory_board_translated.dts`), and the patch is against that.
    - A change every board on the base needs goes in the `.translate.conf` (`family.md`, step 7,
      checked by `conversion.md`), not in a board's patch.
    - The patch holds only the board's own decisions. Disable a block the board lacks; never delete
@@ -27,8 +27,8 @@ patch, targeting mainline's tree.
    value taken from a sibling's mainline tree against the dump, line by line. Change one thing per
    test boot, following the factory, never inventing a third value.
 5. **Known grafts.** The closest board's patch shows which nodes to touch, never their values: read
-   each value from this board's factory tree, or record it as a question. Never apply another board's
-   patch.
+   each value from this board's factory tree, or record it as a question. Never apply another
+   board's patch.
 
    | Graft                                       | Needed for                                     |
    | ------------------------------------------- | ---------------------------------------------- |
@@ -62,9 +62,9 @@ patch, targeting mainline's tree.
 - **Sizes come from the hardware, not the tree.** U-Boot writes the RAM it found into the memory
   node's `reg` and nothing else. A factory `linux,usable-memory` overrides it and caps every unit at
   its size: drop it (the M20 had one).
-- **Allwinner's legacy pin groups** (`allwinner,pins`, `function`, `drive`, `pull`) work in Linux but
-  U-Boot silently ignores them. Translate them to `pins`, `function`, `drive-strength`
-  ((n + 1) × 10 mA) and `bias-*`.
+- **Allwinner's legacy pin groups** (`allwinner,pins`, `function`, `drive`, `pull`) work in Linux
+  but U-Boot silently ignores them. Translate them to `pins`, `function`, `drive-strength` ((n + 1)
+  × 10 mA) and `bias-*`.
 - **Linux applies only the `default` pin state** (plus the few a driver asks for, like `sleep` or
   `clk-gate`). Vendors name states for their own drivers (Amlogic's `sdio_all_pins`), so none gets
   applied and only what the bootloader muxed works. Rename the state the driver selects at probe to
@@ -84,10 +84,13 @@ patch, targeting mainline's tree.
     board: its maintainer keeps editing it, and every edit leaks into our view. In practice no other
     vendor board beat the named template by more than a few lines.
 - **Stock is the source of truth, not upstream.** Measure on the box any fact stock lacks, and
-  override stock only where the box proves it wrong. An upstream tree describes the hardware revision
-  its author had: upstream's Tanix TX1 is the V1.0, with banks PC and PG at 1.8 V; our V2.0 runs both
-  at 3.3 V, and measuring that found the bug in stock's ALDO1 on the eMMC. On the H616, `PIO_POW_VAL`
-  (`0x0300b348`) reads each bank's voltage, one bit per bank, 1 for 1.8 V.
+  override stock only where the box proves it wrong. An upstream tree describes the hardware
+  revision its author had: upstream's Tanix TX1 is the V1.0, with banks PC and PG at 1.8 V; our V2.0
+  runs both at 3.3 V, and measuring that found the bug in stock's ALDO1 on the eMMC. On the H616,
+  `PIO_POW_VAL` (`0x0300b348`) reads each bank's voltage, one bit per bank, 1 for 1.8 V.
+- **Allwinner's 5.4 trees leave out `sys_config`.** The recovery key, the PMIC's boot voltages and
+  the DRAM tables are only in the image's `sys_config.fex`. Look there before calling something
+  absent.
 - **The watchdog cannot be disarmed once opened** and keeps counting across a soft reboot. Read its
   clock before trusting a timeout.
 

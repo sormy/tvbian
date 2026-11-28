@@ -8,6 +8,7 @@
 | SoC     | Allwinner H313, H616 family, `soc=00001823(H616)` over FEL             |
 | RAM     | 1.5 GiB LPDDR3 in the eMCP, two ranks, sold as 2 GB                    |
 | eMMC    | Samsung `Q316BB`, 30777344 sectors (14.7 GiB)                          |
+| Case    | mini box (owner)                                                       |
 | PMIC    | AXP1530, mainline's AXP313                                             |
 | Wi-Fi   | AltoBeam ATBM6031-X on SDIO, `007a:6011`, 2.4 GHz                      |
 | Ports   | HDMI, one USB-A (also FEL), DC 5 V, AV                                 |
