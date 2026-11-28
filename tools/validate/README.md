@@ -4,19 +4,22 @@ One script a component, each run from the host or on the box as its header says;
 `docs/bring-up/regression.md` runs them after a change. What a script cannot check, a hand, a
 screen, a speaker or a cable, is the list in the same doc.
 
-| Script          | Checks                                                                    |
-| --------------- | ------------------------------------------------------------------------- |
-| `regression.py` | deploy the suite to the boxes, collect their results, write the PR report |
-| `onbox.py`      | on the box, alone: each kernel, each step of the profile, across reboots  |
-| `box.py`        | on the box, a sub-suite a bring-up phase: system to soak                  |
-| `reboots.sh`    | warm reboots from the host, each proven by its `boot_id`                  |
-| `video.py`      | the hardware video matrix: decode, scale, encode                          |
-| `display.py`    | the display: planes, composition, pacing, colour stages, HDMI, composite  |
-| `gpu.py`        | GLES conformance: dEQP against Mesa CI's expectations, from the host      |
-| `screen.py`     | the GPU's frames at the display's mode, by writeback, against llvmpipe's  |
-| `va_driver.py`  | the VA driver's suite on a box: every clip, both clients, its speed       |
-| `desktop.py`    | a session on a box: its defaults and switch, and the session a user runs  |
-| `browser.py`    | each browser on a box: synthetic clips, frames presented, decoded where   |
+| Script          | Checks                                                                      |
+| --------------- | --------------------------------------------------------------------------- |
+| `regression.py` | deploy the suite to the boxes, collect their results, write the PR report   |
+| `onbox.py`      | on the box, alone: each kernel, each step of the profile, across reboots    |
+| `box.py`        | on the box, a sub-suite a bring-up phase: system to soak                    |
+| `reboots.sh`    | warm reboots from the host, each proven by its `boot_id`                    |
+| `kexec_once.py` | on the box: a test kernel entered by kexec, the menu untouched              |
+| `boot_once.py`  | on the box: a test kernel boots once, the menu back before root mounts      |
+| `video.py`      | the hardware video matrix: decode, scale, encode                            |
+| `display.py`    | the display: planes, composition, pacing, colour stages, HDMI, composite    |
+| `probe.py`      | each datasheet option, by the kernel's interfaces: works or not, no verdict |
+| `gpu.py`        | GLES conformance: dEQP against Mesa CI's expectations, from the host        |
+| `screen.py`     | the GPU's frames at the display's mode, by writeback, against llvmpipe's    |
+| `va_driver.py`  | the VA driver's suite on a box: every clip, both clients, its speed         |
+| `desktop.py`    | a session on a box: its defaults and switch, and the session a user runs    |
+| `browser.py`    | each browser on a box: synthetic clips, frames presented, decoded where     |
 
 ## Build the box tools
 
@@ -38,11 +41,11 @@ software decoder’s fields in playback order.
 
 Each run uses a private directory under the box's `/var/tmp` and removes it on exit.
 
-All from the host, in the repo checkout. The clips, 3 frames each, come from the host's FFmpeg,
-which has the software encoders the boxes' builds lack; `build/validate/video/clips/manifest.json`
-records its version, each clip's hash and its software decode's per-frame checksums: the reference a
-hardware decode must match, checked again with the box's own software decoder before a mismatch
-counts.
+All from the host, in the repo checkout. The clips, 3 frames each, come from the host's FFmpeg, and
+the JPEG samplings it cannot write from libjpeg's `cjpeg` (`libjpeg-turbo`), which has the software
+encoders the boxes' builds lack; `build/validate/video/clips/manifest.json` records its version,
+each clip's hash and its software decode's per-frame checksums: the reference a hardware decode must
+match, checked again with the box's own software decoder before a mismatch counts.
 
 ```sh
 python3 tools/validate/video.py clips
@@ -57,9 +60,13 @@ python3 tools/validate/video.py compare <before>.json <after>.json
 the same matrix through the box's `tvb-va-driver`, with `ffmpeg9` or with Debian's FFmpeg
 (`--ffmpeg ffmpeg`), `--suite decode,encode`: the package installed, and `vainfo` among its clients.
 `--only` takes a regex over `<codec>-<size>`, `--suite` any of
-`decode,scale,encode,afbc,deinterlace`. `--skip` takes a regex over `<suite>:<codec>-<size>` for the
-cases known to hang a box its watchdog does not reset: recorded as skipped, never run, so the pass
-finishes.
+`decode,scale,conceal,encode,input,afbc,deinterlace,refusal,convert`: `input` codes the test picture
+from each source layout FFmpeg hands a V4L2 encoder, against that picture through the same layout;
+`conceal` decodes each codec's 1080p clip with a span zeroed mid-stream, frames out against the
+software decoder's; `refusal` sends what a driver must refuse, a header that hangs the engine or an
+encode past its limits, and `convert` puts a frame through each mem2mem converter, a 1:1 copy exact
+and a scale near FFmpeg's. `--skip` takes a regex over `<suite>:<codec>-<size>` for the cases known
+to hang a box its watchdog does not reset: recorded as skipped, never run, so the pass finishes.
 
 `report` gives the largest passing size per codec, its frame rate, the largest that runs at 24 fps,
 and what failed past it; `matrix` the whole grid, the table a board's `board.md` publishes with its
@@ -93,6 +100,16 @@ kernel and date; `compare` lists every case that got worse and exits 1 if any di
   they are marked unmeasured. The verdicts: `RATING display: largest 4K60, fastest 1080p120`.
 - **Sinks:** each synthetic screen gets HDR for every EOTF it lists; what the box sends for the rest
   is recorded (Rockchip nothing, mainline everything), as are the mappings left to the GPU.
+
+## probe.py
+
+On the box, as root: `python3 probe.py`, or `--area` any of `system,video,display,audio,network`.
+One line an option: `PROBE <area>: <option>: works|does not work (<what showed it>)`. An option is
+asked of the kernel's own interfaces: V4L2 formats and selections, MPP's device list, DRM properties
+and test-only commits against a synthetic 4K screen, the rates each PCM takes, `/proc/crypto`,
+`ethtool`, the buses in sysfs. It never fails: a line not working may be the board's hardware, and
+the reader judges it against the SoC's datasheet and the board's `board.md`. The regression report
+lists every line under each kernel.
 
 ## pcm-rewind.c
 

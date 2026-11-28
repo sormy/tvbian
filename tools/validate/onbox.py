@@ -36,6 +36,7 @@ GUARD_UNIT = "tvb-regress-guard.service"
 WATCHDOG_WAIT_S = 300  # an unpinged watchdog resets within this, or never will
 PANIC_RESET_S = 10  # the kernels' CONFIG_PANIC_TIMEOUT
 BOOT_S = 120  # a reset's boot, past which the box waited on a power cycle
+CLOCK_SYNC_S = 90  # how long a boot's NTP may take to set the clock a reset's gap is timed by
 WDIOC_GETTIMEOUT = 0x80045707
 WDIOC_SETTIMEOUT = 0xC0045706
 WATCHDOG_TEST_S = 10  # the unpinged watchdog's timeout: systemd's 80 s proves nothing more
@@ -226,26 +227,48 @@ def run(step: Step, out: Path, engine: str = "") -> None:
     log(f"{out.name}: {step.name} exit {status}, {time.monotonic() - started:.0f} s")
 
 
+def clock_synced(seconds: float = CLOCK_SYNC_S) -> bool:
+    """Whether NTP has set the clock, waiting up to seconds for it."""
+    end = time.monotonic() + seconds
+    while True:
+        done = subprocess.run(
+            ["timedatectl", "show", "-p", "NTPSynchronized", "--value"],
+            capture_output=True,
+            text=True,
+        )
+        if done.stdout.strip() == "yes":
+            return True
+        if time.monotonic() >= end:
+            return False
+        time.sleep(2)
+
+
 def ended(state: State, out: Path) -> None:
     """How the step that rebooted the box ended, now that it is back."""
     pending, state.pending = state.pending, None
     if pending is None:
         return
-    gap = booted_at() - pending.at
+    # a box without an RTC boots on its last saved time: its gap means something only once NTP sets it
+    gap = booted_at() - pending.at if clock_synced() else None
+    shown = f"{gap:.0f} s" if gap is not None else "unknown, the clock not set by NTP"
     new_boot = boot_id() != pending.boot
     if pending.kind == "panic":
         records = len(list(PSTORE.rglob("dmesg*"))) if PSTORE.exists() else 0
-        lines = [f"recovery.panic back {gap:.0f} s after it, {records} pstore records"]
+        lines = [f"recovery.panic back {shown} after it, {records} pstore records"]
         if not new_boot:
             lines += ["FAIL recovery.panic: the same boot"]
+        elif gap is None:
+            lines += ["UNTESTED recovery.panic.timely: no set clock to time the reset by"]
         elif gap > PANIC_RESET_S + BOOT_S:
             # a box that needed a power cycle would only hang again in the watchdog's test
             state.recovery = 2
             lines += ["FAIL recovery.panic: no timely reset", "UNTESTED recovery.watchdog"]
     elif pending.kind == "watchdog":
-        lines = [f"recovery.watchdog {pending.detail}, reset {gap:.0f} s after it went unpinged"]
-        late = gap > WATCHDOG_WAIT_S + BOOT_S
+        lines = [f"recovery.watchdog {pending.detail}, reset {shown} after it went unpinged"]
+        late = gap is not None and gap > WATCHDOG_WAIT_S + BOOT_S
         lines += [] if new_boot and not late else ["FAIL recovery.watchdog: no timely reset"]
+        if gap is None and new_boot:
+            lines += ["UNTESTED recovery.watchdog.timely: no set clock to time the reset by"]
     elif pending.kind == "step":  # it never returned: its output stays, the step is not rerun
         state.steps_done.append(pending.detail)
         how = "the box reset during it" if new_boot else "the run stopped during it"
@@ -255,10 +278,10 @@ def ended(state: State, out: Path) -> None:
         return
     else:  # a reboot
         state.reboots_done += 1
-        lines = [f"reboot.{state.reboots_done} back, {gap:.0f} s to boot"]
+        lines = [f"reboot.{state.reboots_done} back, {shown} to boot"]
     record(out, "recovery" if pending.kind != "reboot" else "reboots", lines)
     state.save()
-    log(f"{out.name}: {pending.kind} ended, {gap:.0f} s")
+    log(f"{out.name}: {pending.kind} ended, {shown}")
 
 
 def step() -> int:

@@ -49,6 +49,7 @@ import argparse
 import datetime
 import fcntl
 import hashlib
+import io
 import json
 import os
 import re
@@ -57,16 +58,18 @@ import shutil
 import socket
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from box import PROFILES as SCOPES, TEST_TOOLS
+from box import PROFILES as SCOPES, TEST_TOOLS, crypto_default_fastest
 from onbox import Step
 from gpu import GLES2, SUITE, expectations, suite_toml
 from results import Verdicts
 from va_driver import slower
+from power_switch import PowerSwitch
 from video import worse
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -78,6 +81,7 @@ INVENTORY = "inventory."  # box.py's device-class lines, which parity compares
 # the VA suite, run against the installed driver, and the session's check, with their clips
 VA_SUITE = ROOT / "va-driver" / "tests"
 VA_FILES = ("vaapi_test.py", "headers.py")
+VA_PROBE = ROOT / "build" / "out" / "va-driver" / "driver" / "va_probe"
 VA_CLIPS = ROOT / "build" / "out" / "va-driver" / "clips"
 DRI_DIR = "/usr/lib/aarch64-linux-gnu/dri"
 # the box's clip folders a new run keeps: only changed clips are sent again
@@ -85,19 +89,44 @@ CLIP_DIRS = {"video": CLIPS, "va-clips": VA_CLIPS}
 BOX_DIR = "/var/lib/tvb-regress"
 IPERF_PORT = 5201
 COMMAND_S = 600
-# how long run waits for a box's run before collecting what there is; how often it asks
-RUN_LIMIT_S = {"short": 40 * 60, "default": 120 * 60, "extended": 10 * 3600}
+# how long run waits for each kernel a box's run boots before collecting what there is; how often
+# it asks
+KERNEL_LIMIT_S = {"short": 30 * 60, "default": 90 * 60, "extended": 5 * 3600}
 POLL_S = 15  # how often run looks at the boxes: a crash is said within this
-ON_BOX = ("onbox.py", "box.py", "display.py", "screen.py", "video.py", "results.py", "known.conf")
+ON_BOX = (
+    "onbox.py",
+    "box.py",
+    "probe.py",
+    "display.py",
+    "screen.py",
+    "video.py",
+    "v4l2_request.py",
+    "results.py",
+    "known.conf",
+    "boot_once.py",
+)
 # per kernel family: video.py's engine and the Mesa CI GPU nearest the box's
 ENGINE = {"sunxi64": "sunxi", "rk35xx": "rkmpp", "meson64": "meson"}
 # a series whose kernel reaches the video engines another way than its family's: mainline's V4L2
 SERIES_ENGINE = {"-next2": "rkvdec"}
 GPU = {"sunxi64": "g52", "rk35xx": "lima", "meson64": "lima"}
-PHASES = ("system", "cpu", "storage", "network", "throughput", "display", "audio", "gpu", "input")
+PHASES = (
+    "system",
+    "cpu",
+    "storage",
+    "network",
+    "throughput",
+    "display",
+    "audio",
+    "gpu",
+    "input",
+)
 PHASES += ("power",)
+# tcrypt times each driver of each algorithm an engine serves, a second a size
+CRYPTO_SECONDS = 1800
 # each phase's time on the box: its normal duration in the profile, about doubled
 PHASE_SECONDS = {"short": 120, "default": 300, "extended": 1200}
+COOLING_S = 300  # box.py's COOL_WAIT_S: the system step reads the idle temperature once cooled
 PROFILES = ("short", "default", "extended")
 # each profile's scope within a test: how long, how many, how much of a sample
 REBOOTS = {"short": 1, "default": 2, "extended": 5}
@@ -113,10 +142,18 @@ KERNELS = {
 }
 # display.py's synthetic screens: short, an SDR and an HDR10 one at their first mode; the rest,
 # every sink and the rating's ladder of modes
-DISPLAY_ARGS = {"short": ["--sinks", "SDR,HDR10", "--no-ladder"], "default": [], "extended": []}
+DISPLAY_ARGS = {
+    "short": ["--sinks", "SDR,HDR10", "--no-ladder"],
+    "default": [],
+    "extended": [],
+}
 # a box's whole run as it usually takes, boots in it; past it, the report flags the run
 BUDGET_MIN = {"short": 12, "default": 40, "extended": 75}  # a kernel's minutes
-STEP_SECONDS = {"short": 600, "default": 7200, "extended": 7200}  # display, screen, video, dEQP
+STEP_SECONDS = {
+    "short": 600,
+    "default": 7200,
+    "extended": 7200,
+}  # display, screen, video, dEQP
 DEQP_FRACTION = {"short": 2000, "default": 500, "extended": 500}  # every N'th case
 # the video sizes short decodes; the others walk the whole ladder
 VIDEO_SIZES = {"short": ("3840x2160",)}
@@ -270,10 +307,16 @@ def engine(family: str, release: str) -> str:
 
 def steps(profile: str, family: str, iperf: str, board_family_name: str) -> list[Step]:
     """The plan's steps for each kernel, in order: a name, a command run in BOX_DIR, its time.
-    Every profile runs every step but short, which skips conformance; it sets how much of each."""
+    Every profile runs every step but short, which skips conformance; it sets how much of each.
+    """
     soak = SCOPES[profile].soak_s
     phase = ["python3", "box.py", "--profile", profile, "--iperf", iperf, "--suite"]
-    out = [Step(name, [*phase, name], PHASE_SECONDS[profile]) for name in PHASES]
+    out = [
+        Step(name, [*phase, name], PHASE_SECONDS[profile] + (COOLING_S if name == "system" else 0))
+        for name in PHASES
+    ]
+    out.append(Step("probe", ["python3", "probe.py"], PHASE_SECONDS[profile]))
+    out.append(Step("crypto", [*phase, "crypto"], CRYPTO_SECONDS))
     video_box = [
         "python3",
         "video.py",
@@ -295,13 +338,36 @@ def steps(profile: str, family: str, iperf: str, board_family_name: str) -> list
     out.append(Step("video", video, long))
     if profile != "short":
         out.append(Step("conformance", [*video_box, "--suite", "conformance"], long))
-    va = ["python3", "vaapi_test.py", "box", "--driver-dir", DRI_DIR]
+    va = [
+        "python3",
+        "vaapi_test.py",
+        "box",
+        "--driver-dir",
+        DRI_DIR,
+        "--probe",
+        f"{BOX_DIR}/va_probe",
+    ]
     va += ["--clips", f"{BOX_DIR}/va-clips", "--family", board_family_name]
     out.append(Step("va", va, long))
     out.append(Step("deqp", ["sh", "deqp/run.sh"], long))
     out.append(Step("recovery", [], 0))
     out.append(Step("reboots", [], 0))
     return out
+
+
+# experimental suites, run only when enabled by name
+OFF_BY_DEFAULT = ("va",)
+
+
+def scope_of(profile: str, enable: list[str], disable: list[str]) -> frozenset[str]:
+    """The steps a run runs: the profile's, less those off by default, plus those enabled, less
+    those disabled. A name no step has is a ValueError."""
+    names = [step.name for step in steps(profile, "", "", "")]
+    unknown = sorted(set(enable + disable) - set(names))
+    if unknown:
+        raise ValueError(f"no step {', '.join(unknown)}; the steps: {', '.join(names)}")
+    on = (set(names) - set(OFF_BY_DEFAULT)) | set(enable)
+    return frozenset(on - set(disable))
 
 
 SSH_FAILED = 255  # ssh's own exit status, as opposed to the command's
@@ -314,13 +380,22 @@ class Box:
         self.target = target
         self.options = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]
         # the boxes trade addresses and are reflashed: a changed key is expected, not an attack
-        self.options += ["-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null"]
+        self.options += [
+            "-o",
+            "StrictHostKeyChecking=no",
+            "-o",
+            "UserKnownHostsFile=/dev/null",
+        ]
         self.options += ["-o", "LogLevel=ERROR"]
         self.options += ["-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=3"]
         self.options += shlex.split(os.environ.get("SSH_OPTIONS", ""))
 
     def raw(
-        self, command: str, stdin: bytes = b"", seconds: float = COMMAND_S, check: bool = False
+        self,
+        command: str,
+        stdin: bytes = b"",
+        seconds: float = COMMAND_S,
+        check: bool = False,
     ) -> bytes:
         """command's output as bytes. ssh failing itself, the box unreachable or refusing, is a
         ConnectionError; with check, so is command failing or not answering in time. Without it,
@@ -365,6 +440,66 @@ class NotStarted(Exception):
     """What the host lacks to start a box's run."""
 
 
+# every command a step runs, the Debian package that has it, and the steps that run it: a box
+# lacking one a run's steps need is refused before the run, not reported untested at its end
+BOX_COMMANDS = {
+    "aplay": ("alsa-utils", ("audio", "probe", "display-full")),
+    "btmgmt": ("bluez", ("network",)),
+    "cec-ctl": ("v4l-utils", ("display",)),
+    "drm_info": ("drm-info", ("display",)),
+    "ethtool": ("ethtool", ("probe",)),
+    "fio": ("fio", ("storage",)),
+    "glmark2-es2-drm": ("glmark2-es2-drm", ("gpu", "soak")),
+    "gst-launch-1.0": ("gstreamer1.0-tools", ("va",)),
+    "iperf3": ("iperf3", ("throughput",)),
+    "ir-keytable": ("ir-keytable", ("input",)),
+    "mpv": ("mpv", ("va",)),
+    "ping": ("iputils-ping", ("soak",)),
+    "rtcwake": ("util-linux", ("power",)),
+    "stress-ng": ("stress-ng", ("system", "cpu", "soak")),
+    "v4l2-ctl": ("v4l-utils", ("video", "conformance")),
+    "vainfo": ("vainfo", ("va",)),
+}
+
+
+def needed_commands(scope: set[str]) -> list[str]:
+    """The BOX_COMMANDS a run of these steps runs."""
+    return [command for command, (_, used) in BOX_COMMANDS.items() if scope & set(used)]
+
+
+def missing_commands(needed: list[str], found: str) -> list[str]:
+    """The needed commands a box lacks, from `command -v` over them: those it printed no path for."""
+    have = {Path(line.strip()).name for line in found.splitlines() if line.strip()}
+    return [command for command in needed if command not in have]
+
+
+BOARD_ID_FILE = "/usr/lib/tvb/board-id"
+# what a run writes on the box, results and clips: a box with less free is refused
+MIN_FREE_MB = 2048
+
+
+def preflight(target: str, iperf: str, scope: set[str], board: str = "") -> None:
+    """Refuse the run at once where it could not finish: a command its steps run missing, the
+    iperf3 server out of the box's reach, too little room for its results."""
+    box = Box(target)
+    found_id = box.raw(f"cat {BOARD_ID_FILE}", check=False).decode().strip()
+    if board and found_id != board:
+        # a name a box answered to before a reboot can lead to another box after it
+        raise NotStarted(f"{target} answers as {found_id or 'no board'}, not {board}")
+    needed = needed_commands(scope)
+    found = box.raw(f"command -v {' '.join(needed)}", check=False).decode()
+    missing = missing_commands(needed, found)
+    if missing:
+        packages = sorted({BOX_COMMANDS[command][0] for command in missing})
+        raise NotStarted(f"the box lacks {', '.join(missing)}: apt install {' '.join(packages)}")
+    reach = f"timeout 3 bash -c '</dev/tcp/{iperf}/{IPERF_PORT}' && echo open"
+    if b"open" not in box.raw(reach, check=False):
+        raise NotStarted(f"the box cannot reach the iperf3 server at {iperf}:{IPERF_PORT}")
+    free = box.raw("df --output=avail -m /var/lib | tail -1", check=False).decode().strip()
+    if not free.isdigit() or int(free) < MIN_FREE_MB:
+        raise NotStarted(f"the box has {free or '?'} MB free under /var/lib, under {MIN_FREE_MB}")
+
+
 @dataclass
 class Deployment:
     """One box's run: what it is checked against on the host, and what it is given."""
@@ -373,6 +508,7 @@ class Deployment:
     box: Box
     profile: str
     iperf: str  # the iperf3 server, as the box reaches it
+    scope: frozenset[str]  # the steps it runs
     inputs: list[str] = field(default_factory=list)  # "<what> <sha256>" of each thing installed
 
     def host_checks(self) -> list[str]:
@@ -384,7 +520,11 @@ class Deployment:
         lines += [] if same else ["FAIL tree.repo"]
         board = ROOT / "boards" / self.board
         prove = [sys.executable, str(ROOT / "tools/dtcx/upstream.py"), "--prove"]
-        prove += [str(board / "board.dtb"), *upstream_args(self.board), str(board / "board.dts")]
+        prove += [
+            str(board / "board.dtb"),
+            *upstream_args(self.board),
+            str(board / "board.dts"),
+        ]
         proof = subprocess.run(prove, capture_output=True, text=True, cwd=ROOT).stderr.strip()
         verdict = proof.splitlines()[-1].strip() if proof else "no output"
         lines.append(f"tree.upstream {verdict}")
@@ -393,7 +533,8 @@ class Deployment:
 
     def install(self, releases: list[str]) -> str:
         """The kernels' packages, the board's own package built fresh from this tree, and the
-        suite's tools: each sent and installed only when the box lacks that very file."""
+        suite's tools: each sent and installed only when the box lacks that very file.
+        """
         board = max(DEBS.glob(f"tvb-{self.board}_*.deb"), key=lambda d: d.stat().st_mtime)
         names = [d.name for d in DEBS.glob("*.deb")]
         families = self.box.run("dpkg-query -W -f '${Package}\\n' 'tvb-*-modules-*'").split()
@@ -408,7 +549,12 @@ class Deployment:
             r for r in releases if not any(n.startswith(f"linux-image-{r}_") for n in wanted)
         ]:
             raise NotStarted(f"no linux-image package for {', '.join(missing)} in {DEBS}")
-        wanted += [board.name, *[d.name for d in sorted(DEBS.glob("ffmpeg9_*_arm64.deb"))[-1:]]]
+        if "va" in self.scope and not VA_PROBE.exists():
+            raise NotStarted(f"no {VA_PROBE.relative_to(ROOT)}: ./build.sh va-driver")
+        wanted += [
+            board.name,
+            *[d.name for d in sorted(DEBS.glob("ffmpeg9_*_arm64.deb"))[-1:]],
+        ]
         # what every box gets, from this tree as the board's package is
         wanted += [d.name for d in sorted(DEBS.glob("tvb-base_*.deb"))[-1:]]
         wanted += [d.name for d in sorted(DEBS.glob("deqp_*_arm64.deb"))[-1:]]
@@ -425,7 +571,27 @@ class Deployment:
         changed = [n for n in wanted if held.get(n) != full_sha(DEBS / n)]
         for name in changed:
             self.box.run(f"cat > {PACKAGES}/{name}", (DEBS / name).read_bytes(), 1800, True)
-        todo = [n for n in wanted if n in changed or f"{n}.installed" not in held]
+        package = {n: n.split("_")[0] for n in wanted}
+        listed = self.box.run(
+            "cd /var/lib/dpkg/info && sha256sum "
+            + " ".join(
+                f"{shlex.quote(p)}.md5sums {shlex.quote(p)}:arm64.md5sums" for p in package.values()
+            )
+            + " 2>/dev/null || true"
+        )
+        installed = {
+            f.split(":")[0].removesuffix(".md5sums"): h
+            for h, f in (line.split() for line in listed.splitlines())
+        }
+        # a package installed over by hand is not the deb its marker names
+        todo = [
+            n
+            for n in wanted
+            if n in changed
+            or f"{n}.installed" not in held
+            or (sums := deb_md5sums(DEBS / n))
+            and installed.get(package[n]) != sums
+        ]
         tools = sorted(TEST_TOOLS - {"ffmpeg9"})
         said = self.box.root(INSTALL, " ".join(tools), *[f"{PACKAGES}/{n}" for n in todo])
         if todo:
@@ -436,7 +602,8 @@ class Deployment:
 
     def install_released(self, which: str) -> list[str]:
         """The family's kernels, the board's package and the suite's tools from the box's own apt,
-        where it lacks them; the kernels as uname names them, from their metapackages."""
+        where it lacks them; the kernels as uname names them, from their metapackages.
+        """
         family = board_family(self.board)
         metas = [f"linux-image-tvb-{family}{SERIES[s][0]}" for s in KERNELS[which]]
         self.box.root(INSTALL, " ".join([*metas, f"tvb-{self.board}", *TEST_TOOLS, *RELEASED]))
@@ -453,15 +620,19 @@ class Deployment:
         self.box.run(f"sudo -n mkdir -p {BOX_DIR}/video && {keep}", check=True)
         for name in ON_BOX:
             self.box.put(f"{BOX_DIR}/{name}", (HERE / name).read_bytes())
-        for name in VA_FILES:
+        for name in VA_FILES if "va" in self.scope else ():
             self.box.put(f"{BOX_DIR}/{name}", (VA_SUITE / name).read_bytes())
-        self.sync_clips("va-clips")
+        if "va" in self.scope:
+            self.box.put(f"{BOX_DIR}/va_probe", VA_PROBE.read_bytes())
+            self.box.run(f"sudo -n chmod +x {BOX_DIR}/va_probe", check=True)
+            self.sync_clips("va-clips")
         plan = {
             "board": self.board,
             "kernels": releases,
             "steps": [
                 asdict(s)
                 for s in steps(self.profile, family, self.iperf, board_family_name(self.board))
+                if s.name in self.scope
             ],
             "reboots": REBOOTS[self.profile],
             "engines": {release: engine(family, release) for release in releases},
@@ -525,14 +696,21 @@ def address_towards(host: str) -> str:
         return probe.getsockname()[0]
 
 
-def start(profile: str, spec: str, iperf: str | None, which: str, released: bool) -> None:
+def start(
+    profile: str,
+    spec: str,
+    iperf: str | None,
+    which: str,
+    released: bool,
+    scope: frozenset[str],
+) -> None:
     """One box: its packages installed fresh, the suite bundled, the run started. Without an
     iperf3 server named, this machine serves, at its address on the route to the box. A released
     box runs no tree of this checkout's: the checks against it are left out."""
     board, _, target = spec.partition("=")
     box = Box(target)
     iperf = iperf or address_towards(target.rpartition("@")[2])
-    deployment = Deployment(board, box, profile, iperf)
+    deployment = Deployment(board, box, profile, iperf, scope)
     default = box.run(DEFAULT_RELEASE).strip()
     if released:
         releases = deployment.install_released(which)
@@ -566,7 +744,13 @@ def prepare(board: str, released: bool) -> None:
             stamp.write_text(made_of)
         subprocess.run([sys.executable, str(HERE / "video.py"), "clips"], cwd=ROOT, check=True)
         subprocess.run(
-            [sys.executable, str(VA_SUITE / "vaapi_test.py"), "clips", "--out", str(VA_CLIPS)],
+            [
+                sys.executable,
+                str(VA_SUITE / "vaapi_test.py"),
+                "clips",
+                "--out",
+                str(VA_CLIPS),
+            ],
             cwd=ROOT,
             check=True,
         )
@@ -583,21 +767,31 @@ def board_inputs(board: str) -> str:
     return digest.hexdigest()
 
 
-def started(profile: str, spec: str, iperf: str | None, which: str, released: bool) -> bool:
+def started(args: argparse.Namespace) -> bool:
     """The box's run started; when it could not build, install or start, it says why."""
+    profile, spec, iperf = args.profile, args.box, args.iperf
     try:
+        scope = scope_of(profile, args.enable, args.disable)
         if iperf is None:
             serve_iperf()
-        prepare(spec.partition("=")[0], released)
-        start(profile, spec, iperf, which, released)
+        target = spec.partition("=")[2]
+        address = iperf or address_towards(target.rpartition("@")[2])
+        preflight(target, address, set(scope), spec.partition("=")[0])
+        prepare(spec.partition("=")[0], args.released)
+        start(profile, spec, iperf, args.kernels, args.released, scope)
         return True
-    except (ConnectionError, subprocess.CalledProcessError, NotStarted) as error:
+    except (
+        ConnectionError,
+        subprocess.CalledProcessError,
+        NotStarted,
+        ValueError,
+    ) as error:
         print(f"{spec.partition('=')[0]}: not started: {error}", flush=True)
         return False
 
 
 def deploy(args: argparse.Namespace) -> int:
-    return 0 if started(args.profile, args.box, args.iperf, args.kernels, args.released) else 1
+    return 0 if started(args) else 1
 
 
 def collect(args: argparse.Namespace) -> int:
@@ -613,7 +807,8 @@ def ending(folder: Path) -> str:
 
 def fetch(boxes: list[str]) -> Path:
     """Each box's results, done or not, into one folder: today's, or a new one when a board
-    already has another run there today. A box that does not answer is said and skipped."""
+    already has another run there today. A box that does not answer is said and skipped.
+    """
     with tempfile.TemporaryDirectory() as tmp:
         fetched: list[str] = []
         for spec in boxes:
@@ -626,7 +821,9 @@ def fetch(boxes: list[str]) -> Path:
                 continue
             (Path(tmp) / board).mkdir()
             subprocess.run(
-                ["tar", "-C", str(Path(tmp) / board), "-xf", "-"], input=archive, check=True
+                ["tar", "-C", str(Path(tmp) / board), "-xf", "-"],
+                input=archive,
+                check=True,
             )
             fetched.append(board)
         into = RESULTS / datetime.date.today().isoformat()
@@ -686,15 +883,58 @@ def run(args: argparse.Namespace) -> int:
     """One box: deployed, watched until its run ends, collected and reported. Several boxes are
     several runs at once, one process each: the iperf3 server takes one at a time, the others wait
     their turn, so no box measures another's traffic."""
-    if not started(args.profile, args.box, args.iperf, args.kernels, args.released):
+    if not started(args):
         return 1
-    ended = watch(args.box, RUN_LIMIT_S[args.profile])
+    board, _, target = args.box.partition("=")
+    box = Box(target)
+    kernels = json.loads(box.run(f"cat {BOX_DIR}/plan.json"))["kernels"]
+    ended = watch(args.box, KERNEL_LIMIT_S[args.profile] * len(kernels))
+    if ended == "done" and args.power_switch:
+        switch = PowerSwitch(board, box, args.power_switch)
+        switch.record(switch.run(kernels))
     report(argparse.Namespace(dir=str(fetch([args.box]))))
     return 0 if ended == "done" else 1
 
 
 def full_sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+AR_MAGIC = b"!<arch>\n"
+
+
+def deb_members(path: Path) -> dict[str, bytes]:
+    """A deb's ar members by name: debian-binary, control.tar.*, data.tar.*."""
+    data, at, members = path.read_bytes(), len(AR_MAGIC), {}
+    if not data.startswith(AR_MAGIC):
+        return members
+    while at < len(data):
+        name, size = data[at : at + 16].decode().strip().rstrip("/"), int(data[at + 48 : at + 58])
+        members[name] = data[at + 60 : at + 60 + size]
+        at += 60 + size + size % 2
+    return members
+
+
+def deb_md5sums(path: Path) -> str:
+    """The sha256 of the md5sums dpkg keeps once this deb is installed: the deb's own, or, where it
+    ships none, the one dpkg writes, each regular file's MD5 in the data archive's order."""
+    members = deb_members(path)
+    control = next((b for name, b in members.items() if name.startswith("control.tar")), b"")
+    payload = next((b for name, b in members.items() if name.startswith("data.tar")), b"")
+    if not control or not payload:
+        return ""
+    with tarfile.open(fileobj=io.BytesIO(control)) as tar:
+        for info in tar.getmembers():
+            if info.name.removeprefix("./") == "md5sums" and (f := tar.extractfile(info)):
+                return hashlib.sha256(f.read()).hexdigest()
+    lines = []
+    with tarfile.open(fileobj=io.BytesIO(payload)) as tar:
+        for info in tar.getmembers():
+            if info.isfile() and (f := tar.extractfile(info)):
+                lines.append(
+                    f"{hashlib.md5(f.read()).hexdigest()}  {info.name.removeprefix('./')}\n"
+                )
+    return hashlib.sha256("".join(lines).encode()).hexdigest()
 
 
 def sha(path: Path) -> str:
@@ -747,20 +987,251 @@ def step_seconds(log: Path, kernel: str) -> list[tuple[str, int]]:
     return [(step, int(seconds)) for step, seconds in found]
 
 
+# a box's own lines from its system step, for the report's opening: what ran, and how warm
+BOX_LINES = {
+    "identity.name": "Board",
+    "kernel": "Kernel",
+    "tree": "Tree",
+    "boot.seconds": "Boot, s",
+    "temp.idle.c": "Idle, C",
+}
+STEP_LINE = r"^(\d\d:\d\d:\d\d) {kernel}: (\S+) exit \S+, (\d+) s$"
+
+
+# the numbers a run is judged by beside its verdicts: step, key, and the way that is better
+MEASURES = (
+    ("system", "temp.idle.c", "down"),
+    ("system", "settled.after.s", "down"),
+    ("system", "ram.mib", "up"),
+    ("system", "dmesg.warnings", "down"),
+    ("system", "iommu.faults", "down"),
+    ("cpu", "cpu.load.slowest.khz", "up"),
+    ("cpu", "cpu.load.c", "down"),
+    ("cpu", "ddr.rate", ""),
+    ("cpu", "pvtm.cpu", ""),
+    ("cpu", "pvtm.gpu", ""),
+    ("storage", "fio.seq.read", "up"),
+    ("storage", "fio.seq.write", "up"),
+    ("storage", "fio.rand.read", "up"),
+    ("storage", "fio.rand.write", "up"),
+    ("throughput", "wifi.down.mbits", "up"),
+    ("throughput", "wifi.up.mbits", "up"),
+    ("throughput", "wifi.loaded.down.mbits", "up"),
+    ("throughput", "wifi.loaded.up.mbits", "up"),
+    ("gpu", "glmark2.score", "up"),
+    ("soak", "soak.c", "down"),
+    ("soak", "soak.cpu.ops", "up"),
+)
+MOVED_PCT = 10  # a measure this far the worse way from what it is held against is marked
+NUMBER = re.compile(r"-?\d+(?:\.\d+)?")
+
+
+def measured(folder: Path | None, step: str, key: str) -> float | None:
+    """A measure's first number in a kernel's results; None where it was not taken."""
+    path = folder / f"{step}.txt" if folder else None
+    if path is None or not path.exists():
+        return None
+    for line in path.read_text(errors="replace").splitlines():
+        if line.startswith(f"{key} "):
+            found = NUMBER.search(line[len(key) :])
+            return float(found.group()) if found else None
+    return None
+
+
+def shown(value: float) -> str:
+    """A measure as a person reads it: whole where it is, one decimal where not."""
+    return f"{value:.0f}" if value.is_integer() else f"{value:.1f}"
+
+
+def against(now: float | None, then: float | None, better: str) -> str:
+    """now beside then: the change in percent, marked WORSE past MOVED_PCT the worse way."""
+    if now is None or then is None:
+        return "-"
+    if not then:
+        return shown(then)
+    change = (now - then) / abs(then) * 100
+    worse = (change < -MOVED_PCT) if better == "up" else (change > MOVED_PCT) if better else False
+    return f"{shown(then)} ({change:+.0f}%{' WORSE' if worse else ''})"
+
+
+def identity_of(kernel_dir: Path) -> str:
+    """The board id the box itself recorded in its system step; empty where it did not."""
+    path = kernel_dir / "system.txt"
+    lines = path.read_text(errors="replace").splitlines() if path.exists() else []
+    return next((l.split(" ", 1)[1] for l in lines if l.startswith("identity.id ")), "")
+
+
+def addresses(kernel_dir: Path | None) -> dict[str, str]:
+    """Each interface's address as the network step read it: the unit's own, the same every boot."""
+    path = kernel_dir / "network.txt" if kernel_dir else None
+    lines = path.read_text(errors="replace").splitlines() if path and path.exists() else []
+    return {
+        key: value.split()[0]
+        for key, _, value in (l.partition(" ") for l in lines)
+        if key.startswith("addr.") and value
+    }
+
+
+def moved_addresses(now: Path, before: dict[str, Path | None]) -> list[str]:
+    """An address unlike the same interface's in another run of the board: a router then sees a
+    new box, with a new lease, after a reboot or a kernel change."""
+    found = addresses(now)
+    out = []
+    for label, other in before.items():
+        for key, value in addresses(other).items():
+            if key in found and found[key] != value:
+                out.append(f"network: {key} {found[key]}, {value} in {label}")
+    return out
+
+
+def pvtm_moved(now: Path, own: Path | None) -> list[str]:
+    """A block whose PVTM selects another OPP level than on the board's own kernel: its every rate
+    runs at another voltage."""
+    out = []
+    for key in ("pvtm.cpu", "pvtm.gpu"):
+        level = lambda folder: next(
+            (l.split()[-1] for l in lines_of(folder, "cpu") if l.startswith(f"{key} ")),
+            None,
+        )
+        mine, theirs = level(now), level(own)
+        if mine and theirs and mine != theirs:
+            out.append(f"cpu: {key} {mine}, {theirs} on the own kernel")
+    return out
+
+
+def lines_of(folder: Path | None, step: str) -> list[str]:
+    path = folder / f"{step}.txt" if folder else None
+    return path.read_text(errors="replace").splitlines() if path and path.exists() else []
+
+
+def own_kernel(board: str, run: Path, kernel: str) -> Path | None:
+    """The board's own kernel's newest results up to this run: its oldest release, the vendor's."""
+    found = [
+        p.parent
+        for p in RESULTS.glob(f"*/{board}/*/system.txt")
+        if p.parents[2].name <= run.name and p.parent.name != kernel
+    ]
+    if not found:
+        return None
+    oldest = min(release_order(p) for p in found)
+    return max(
+        (p for p in found if release_order(p) == oldest),
+        key=lambda p: p.parents[1].name,
+    )
+
+
+def measures_section(kernel_dir: Path, last: Path | None, own: Path | None) -> str:
+    """Each measure now, at the board's last run of this kernel, and on its own kernel."""
+    rows = []
+    for step, key, better in MEASURES:
+        now = measured(kernel_dir, step, key)
+        if now is None:
+            continue
+        before = against(now, measured(last, step, key), better)
+        vendor = against(now, measured(own, step, key), better)
+        rows.append(f"| {key} | {shown(now)} | {before} | {vendor} |")
+    if not rows:
+        return ""
+    last_name = last.parents[1].name if last else "none"
+    own_name = f"{own.name}, {own.parents[1].name}" if own else "none"
+    head = (
+        f"| Measure | Now | Last run ({last_name}) | Own kernel ({own_name}) |\n"
+        "| --- | ---: | ---: | ---: |"
+    )
+    return head + "\n" + "\n".join(rows) + "\n"
+
+
+def step_runs(log: Path, kernel: str) -> list[tuple[str, int, str]]:
+    """Each step's name, seconds and the clock time it ended, in run order."""
+    text = log.read_text() if log.exists() else ""
+    found = re.findall(STEP_LINE.format(kernel=re.escape(kernel)), text, re.M)
+    return [(step, int(seconds), end) for end, step, seconds in found]
+
+
+def clock_before(hms: str, seconds: int) -> str:
+    """The clock time seconds before hms, as HH:MM:SS, over midnight too."""
+    h, m, s = (int(x) for x in hms.split(":"))
+    t = (h * 3600 + m * 60 + s - seconds) % 86400
+    return f"{t // 3600:02}:{t // 60 % 60:02}:{t % 60:02}"
+
+
+def verdict_mark(found: Verdicts) -> str:
+    if found.fails:
+        return f"FAIL {len(found.fails)}"
+    if found.untested:
+        return f"UNTESTED {len(found.untested)}"
+    return "PASS"
+
+
+def steps_section(log: Path, kernel: str, kernel_dir: Path) -> str:
+    """Each step as a row: its result, checks, minutes, and when it ran."""
+    runs = step_runs(log, kernel)
+    if not runs:
+        return ""
+    rows = []
+    for step, seconds, end in runs:
+        found = Verdicts.of(kernel_dir / f"{step}.txt")
+        start = clock_before(end, seconds)
+        rows.append(
+            f"| {step} | {verdict_mark(found)} | {found.checks} | {seconds / 60:.1f} "
+            f"| {start} | {end} |"
+        )
+    head = (
+        "| Step | Result | Checks | Minutes | From | To |\n| --- | --- | ---: | ---: | --- | --- |"
+    )
+    return head + "\n" + "\n".join(rows)
+
+
+def box_section(system_txt: Path) -> str:
+    """The box the run ran on, from its system step's own lines."""
+    lines = system_txt.read_text(errors="replace").splitlines() if system_txt.exists() else []
+    values = dict(line.split(" ", 1) for line in lines if " " in line)
+    found = [(label, values[key]) for key, label in BOX_LINES.items() if key in values]
+    return "; ".join(f"{label} {value}" for label, value in found)
+
+
+def grouped(lines: list[str]) -> list[str]:
+    """step: what: reason lines, those sharing a step and a reason's first clause in one line."""
+    groups: dict[tuple[str, str], list[tuple[str, str]]] = {}
+    for line in lines:
+        parts = line.split(": ")
+        if len(parts) < 3:
+            groups.setdefault((line, ""), []).append((line, line))
+            continue
+        step, what, reason = parts[0], ": ".join(parts[1:-1]), parts[-1].split(",")[0]
+        groups.setdefault((step, reason), []).append((what.removeprefix(f"{step} "), line))
+    out = []
+    for (step, reason), cases in groups.items():
+        if len(cases) == 1:
+            out.append(cases[0][1])
+        else:
+            whats = ", ".join(what for what, _ in cases)
+            out.append(f"{step}: {reason}, {len(cases)} cases: {whats}")
+    return out
+
+
+def on_off_section(probe_txt: Path) -> str:
+    """probe.py's options, working and not, as two lists: what the kernel offers this box."""
+    if not probe_txt.exists():
+        return ""
+    lines = [
+        line.removeprefix("PROBE ")
+        for line in probe_txt.read_text(errors="replace").splitlines()
+        if line.startswith("PROBE ")
+    ]
+    off = [l for l in lines if ": does not work" in l]
+    on = [l for l in lines if ": works" in l]
+    name = lambda l: l.split(": works")[0].split(": does not work")[0]
+    return (
+        f"**On, {len(on)}:** {', '.join(map(name, on)) or 'none'}\n\n"
+        f"**Off, {len(off)}:** {', '.join(map(name, off)) or 'none'}"
+    )
+
+
 def duration(log: Path, kernel: str) -> str:
     """A kernel's minutes of steps."""
     steps = step_seconds(log, kernel)
     return f"{sum(s for _, s in steps) // 60} min" if steps else "?"
-
-
-def step_table(log: Path, kernel: str) -> str:
-    """The kernel's steps and their seconds, folded: where its minutes went."""
-    steps = step_seconds(log, kernel)
-    if not steps:
-        return ""
-    rows = "\n".join(f"| {step} | {seconds} |" for step, seconds in steps)
-    table = f"| Step | s |\n| --- | ---: |\n{rows}"
-    return f"\n<details><summary>steps, {duration(log, kernel)}</summary>\n\n{table}\n</details>"
 
 
 def wall_minutes(log: Path) -> int | None:
@@ -776,7 +1247,10 @@ def over_budget(board_dir: Path) -> str:
     """A run far past its profile's usual time is a finding in itself: say so."""
     host = board_dir / "host.txt"
     profile = (
-        next((l.split()[1] for l in host.read_text().splitlines() if l.startswith("profile ")), "")
+        next(
+            (l.split()[1] for l in host.read_text().splitlines() if l.startswith("profile ")),
+            "",
+        )
         if host.exists()
         else ""
     )
@@ -786,7 +1260,7 @@ def over_budget(board_dir: Path) -> str:
     budget = BUDGET_MIN[profile] * booted if profile in BUDGET_MIN else None
     if not (took and budget and took > budget):
         return ""
-    return f" ⚠ {took} min, {profile}'s usual {budget}"
+    return f" (slow: {took} min, {profile}'s usual {budget})"
 
 
 def profiles(run: Path) -> str:
@@ -833,10 +1307,70 @@ def phase_text(folder: Path) -> str:
     return "".join(p.read_text() for p in sorted(folder.glob("*.txt")) if p.stem in PHASES)
 
 
+def probe_table(folder: Path) -> str:
+    """probe.py's lines: each datasheet option working or not, for the reader to judge."""
+    path = folder / "probe.txt"
+    if not path.exists():
+        return ""
+    lines = [
+        line.removeprefix("PROBE ")
+        for line in path.read_text(errors="replace").splitlines()
+        if line.startswith("PROBE ")
+    ]
+    missing = sum(": does not work" in line for line in lines)
+    summary = f"probe: {len(lines) - missing} options work, {missing} do not"
+    body = "\n".join(f"    {line}" for line in lines)
+    return f"\n<details><summary>{summary}</summary>\n\n{body}\n</details>"
+
+
+def crypto_table(folder: Path) -> str:
+    """box.py's crypto lines: each driver's MB/s, the one the kernel uses and the fastest, and
+    the engine's recovery from a failed job."""
+    path = folder / "crypto.txt"
+    if not path.exists():
+        return ""
+    lines = [
+        line.removeprefix("crypto.bench.")
+        for line in path.read_text(errors="replace").splitlines()
+        if line.startswith(("crypto.bench.", "crypto.recovery."))
+    ]
+    benched = [line for line in lines if " MB/s; " in line]
+    slower = sum(not crypto_default_fastest(line) for line in benched)
+    summary = f"crypto: {len(benched)} algorithms, {slower} defaults not the fastest"
+    body = "\n".join(f"    {line}" for line in lines)
+    return f"\n<details><summary>{summary}</summary>\n\n{body}\n</details>"
+
+
+# the report is plain ASCII: what video.py's table and a box's lines carry, said in words
+ASCII_FOR = {
+    "✅": "pass",
+    "❌": "fail",
+    "❓": "untested",
+    "⚠": "warn",
+    "≥": ">=",
+    "≤": "<=",
+    "—": "-",
+    "–": "-",
+    "·": ";",
+    "°": "",
+    "×": "x",
+    "…": "...",
+}
+
+
+def ascii_only(text: str) -> str:
+    """text with each known glyph in words, and any other non-ASCII character as '?'."""
+    for glyph, words in ASCII_FOR.items():
+        text = text.replace(glyph, words)
+    return text.encode("ascii", "replace").decode()
+
+
 def report(args: argparse.Namespace) -> int:
     run = Path(args.dir).resolve()
     commit = subprocess.run(
-        ["git", "-C", str(ROOT), "describe", "--always", "--dirty"], capture_output=True, text=True
+        ["git", "-C", str(ROOT), "describe", "--always", "--dirty"],
+        capture_output=True,
+        text=True,
     ).stdout.strip()
     rows, details = [], []
     for board_dir in sorted(p for p in run.iterdir() if p.is_dir()):
@@ -870,11 +1404,38 @@ def report(args: argparse.Namespace) -> int:
             counts = f"{total.checks} | {len(total.fails)} | {len(total.untested)}"
             minutes = duration(board_dir / "run.log", kernel)
             rows.append(f"| {board} | {kernel} | {end}, {minutes} | {counts} |")
-            details += [f"### {board}, {kernel}\n", moved_inputs]
-            details += [f"- ❌ {x}" for x in total.fails]
-            details += [f"- ❓ {x}" for x in total.untested]
-            details.append(step_table(board_dir / "run.log", kernel))
+            runs = step_runs(board_dir / "run.log", kernel)
+            span = f", {clock_before(runs[0][2], runs[0][1])} to {runs[-1][2]}" if runs else ""
+            details += [
+                f"### {board}, {kernel}\n",
+                f"**{len(total.fails)} failed, {len(total.untested)} untested, of {total.checks} "
+                f"checks; {minutes}{span}.**\n",
+                box_section(kernel_dir / "system.txt") + "\n",
+                moved_inputs,
+                steps_section(board_dir / "run.log", kernel, kernel_dir) + "\n",
+            ]
+            own_dir = own_kernel(board, run, kernel)
+            details.append(measures_section(kernel_dir, last, own_dir))
+            others = {"the last run": last, "the own kernel": own_dir}
+            total.fails += moved_addresses(kernel_dir, others)
+            total.fails += pvtm_moved(kernel_dir, own_dir)
+            recorded = identity_of(kernel_dir)
+            if recorded and recorded != board:
+                total.fails.append(
+                    f"system: identity.id: {recorded}, filed as {board}: another box"
+                )
+            if total.fails:
+                details += ["**Failed**\n", *[f"- FAIL {x}" for x in total.fails], ""]
+            if total.untested:
+                details += [
+                    "**Untested**\n",
+                    *[f"- UNTESTED {x}" for x in grouped(total.untested)],
+                    "",
+                ]
+            details.append(on_off_section(kernel_dir / "probe.txt"))
             details.append(video_table(kernel_dir))
+            details.append(probe_table(kernel_dir))
+            details.append(crypto_table(kernel_dir))
             if last is not None:
                 moved = [
                     m
@@ -889,14 +1450,29 @@ def report(args: argparse.Namespace) -> int:
         f"## Regression {run.name}",
         "",
         f"Commit `{commit}`; profile {profiles(run)}; results in `{run.relative_to(ROOT)}`.",
-        "❌ failed and ❓ untested are both not a pass.",
+        "FAIL and UNTESTED are both not a pass.",
         "",
-        "| Board | Kernel | Run | Checks | ❌ | ❓ |",
+        "| Board | Kernel | Run | Checks | Failed | Untested |",
         "| --- | --- | --- | ---: | ---: | ---: |",
     ]
-    (run / "report.md").write_text("\n".join([*header, *rows, "", *details]) + "\n")
+    text = "\n".join([*header, *rows, "", *details]) + "\n"
+    (run / "report.md").write_text(ascii_only(text))
     print(run / "report.md")
     return 0
+
+
+def add_scope(parser: argparse.ArgumentParser) -> None:
+    off = ", ".join(OFF_BY_DEFAULT)
+    parser.add_argument(
+        "--enable",
+        action="append",
+        default=[],
+        metavar="STEP",
+        help=f"run a step; off: {off}",
+    )
+    parser.add_argument(
+        "--disable", action="append", default=[], metavar="STEP", help="skip a step"
+    )
 
 
 def main() -> int:
@@ -908,9 +1484,13 @@ def main() -> int:
     begin.add_argument("--profile", choices=PROFILES, default="default")
     begin.add_argument("--iperf", metavar="HOST", help="the iperf3 server; default: this machine")
     begin.add_argument(
-        "--kernels", choices=KERNELS, default="both", help="the family's own, -next, -next2"
+        "--kernels",
+        choices=KERNELS,
+        default="both",
+        help="the family's own, -next, -next2",
     )
     begin.add_argument("--released", action="store_true", help=RELEASED_HELP)
+    add_scope(begin)
     begin.add_argument("box", metavar="BOARD=USER@HOST")
     gather = sub.add_parser("collect")
     gather.add_argument("boxes", nargs="+", metavar="BOARD=USER@HOST")
@@ -920,9 +1500,18 @@ def main() -> int:
     whole.add_argument("--profile", choices=PROFILES, default="default")
     whole.add_argument("--iperf", metavar="HOST", help="the iperf3 server; default: this machine")
     whole.add_argument(
-        "--kernels", choices=KERNELS, default="both", help="the family's own, -next, -next2"
+        "--kernels",
+        choices=KERNELS,
+        default="both",
+        help="the family's own, -next, -next2",
     )
     whole.add_argument("--released", action="store_true", help=RELEASED_HELP)
+    add_scope(whole)
+    whole.add_argument(
+        "--power-switch",
+        metavar="CMD",
+        help="switches the box's outlet, {state} on or off: then asleep and off are held",
+    )
     whole.add_argument("box", metavar="BOARD=USER@HOST")
     args = parser.parse_args()
     commands = {"deploy": deploy, "collect": collect, "report": report, "run": run}

@@ -13,16 +13,20 @@ back after.
 
 Checks, each skipped where the box lacks what it needs:
   - planes: every plane the CRTC offers, listed (type, zpos, alpha, modifiers, formats), a YUV
-    video plane with an interface plane that can sit above it, and no Esmart sub-window;
+    video plane with an interface plane that can sit above it;
   - compose: the interface over the scaled video plane, opaque and transparent, by writeback;
   - planes-all: every plane at once, each in its own cell and zpos, the YUV ones scaled, then a YUV
     plane over another, by writeback;
+  - rotation: each transform a plane offers puts a quadrant pattern's colours where it should,
+    by writeback, or is refused;
   - lut: a plane's SUNXI_CDC_LUT3D refuses malformed blobs, and tables (identity, a channel mix,
     an inversion switched while active, held across flips, then the tone mappings HDR10 to SDR,
     HLG to SDR, SDR to PQ and HLG to PQ on 64 YUV patches) come back by writeback within two 8-bit
     codes of the same table interpolated trilinearly;
   - sdr2hdr: the CRTC's HDR_EXT_DATA refuses a short blob, then Rockchip's SDR to HDR stage takes
     seven colours to PQ and to HLG within two 8-bit codes of BT.2408's mapping, by writeback;
+  - colorop: a plane's SDR-to-PQ and SDR-to-HLG color pipeline against BT.2408's SDR in HDR by
+    writeback, and its refusals: part bypassed, a negative coefficient, two planes' pipelines apart;
   - scope: each stage under the interface, the planes it maps: its own alone, or the whole output;
   - pacing: a minute of nonblocking commits, each after the last flip event, the video plane
     scaled and an idle plane in every commit, as a player makes them: none refused;
@@ -44,6 +48,7 @@ Exit 0 all passed, 1 a failure, 77 nothing to check.
 import argparse
 import contextlib
 import ctypes
+import errno
 import fcntl
 import glob
 import math
@@ -245,7 +250,82 @@ PAGE_FLIP_EVENT, TEST_ONLY, NONBLOCK, ALLOW_MODESET = 0x1, 0x100, 0x200, 0x400
 PROP_IMMUTABLE = 0x4
 # set where a plane has them, as a YUV plane without COLOR_ENCODING takes BT.709
 OPTIONAL_PLANE_PROPS = {"COLOR_ENCODING", "COLOR_RANGE", "EOTF", "zpos"}
+# dw-hdmi's input video mapping and colour depth registers
+TX_INVID0, VP_PR_CD = 0x0200, 0x0801
+# max bpc 10 on a 4:2:0-capable screen: 10-bit RGB where it fits HDMI 2.0, 10-bit YCbCr 4:2:0 at
+# 4K60 where 10-bit RGB would need 742.5 MHz; (AVI format, TX_INVID0, VP_PR_CD)
+DEEP_COLOUR_CASES = [(1920, ("RGB", 0x03, 0x50)), (3840, ("YCbCr 4:2:0", 0x0B, 0x50))]
+# a colour away from both ends, and the CRTC gamma curves it goes through
+GAMMA_SIGNAL = (105, 174, 49)
+GAMMA_TABLES = (
+    ("identity", lambda v: v),
+    ("inversion", lambda v: 1 - v),
+    ("square", lambda v: v * v),
+)
+# a window's region plane, by the vendor's name: Esmart0-win1 is Esmart0-win0's region 1
+REGION_NAME = re.compile(r"^(.*-win)([1-9])$")
+REGION_RGBS = [(200, 40, 40), (40, 200, 40), (40, 40, 200), (200, 200, 40)]
+# DRM's 3D frame packing mode flag; dw-hdmi's vendor InfoFrame payload, active lines and the
+# payload frame packing sends: HDMI_Video_Format 3D, 3D_Structure 0
+MODE_FLAG_3D_MASK, MODE_FLAG_3D_FRAME_PACKING = 0x1F << 14, 1 << 14
+CAP_STEREO_3D = 1
+# DRM's plane color pipelines: their client cap, the colorop object, PQ 125's 1.0 in nits, and
+# S31.32's one and sign
+CAP_COLOR_PIPELINE, OBJ_COLOROP = 7, 0xFAFAFAFA
+PQ_125_UNIT_NITS = 80
+S31_32_ONE, S31_32_SIGN = 1 << 32, 1 << 63
+# a plane's SDR-to-HDR pipeline, then its last curve by target
+SDR_TO_HDR = ("Gamma 2.2", "3x4 Matrix", "Multiplier")
+HDR_CURVES = {"PQ": "PQ 125 Inverse EOTF", "HLG": "HLG Inverse EOTF"}
+FC_VSDPAYLOAD0, FC_VSDPAYLOAD1, FC_INVACTV0, FC_INVACTV1 = 0x1032, 0x1033, 0x1005, 0x1006
+FRAME_PACKING_PAYLOAD = (0x40, 0x00)
+# dw-hdmi's packetizer: the 4:2:2 packing, 16, 20 or 24 bits
+VP_REMAP = 0x0803
+# (width at 60 Hz, "color format" asked, max bpc) -> (AVI format, VP_PR_CD depth, VP_REMAP): 4:4:4
+# at 10 bits where its TMDS rate fits, 8 at 4K60; 4:2:2 20-bit at the pixel clock, 4K60 included
+COLOR_FORMAT_CASES = [
+    ((1920, "YUV 4:4:4", 10), ("YCbCr 4:4:4", 5, 0)),
+    ((1920, "YUV 4:4:4", 8), ("YCbCr 4:4:4", 4, 0)),
+    ((1920, "YUV 4:2:2", 10), ("YCbCr 4:2:2", 0, 1)),
+    ((3840, "YUV 4:2:2", 10), ("YCbCr 4:2:2", 0, 1)),
+    ((3840, "YUV 4:4:4", 10), ("YCbCr 4:4:4", 4, 0)),
+    ((3840, "RGB", 10), ("RGB", 4, 0)),
+]
+# dw-hdmi's audio: I2S lanes enabled, AVI-style channel count, sample packet layout
+AUD_CONF0, FC_AUDICONF0, FC_AUDSCONF = 0x3100, 0x1025, 0x1063
+# (channels, Hz) to a screen taking 8-channel LPCM: stereo, 5.1, 7.1, and 7.1 at the top rate
+HDMI_AUDIO_CASES = [(2, 48000), (6, 48000), (8, 48000), (8, 192000)]
+PLAY_SECONDS = 3
+PLAY_SLACK = 0.3
+# where the driver picks the bus format itself, the check is judged; elsewhere recorded
+DEEP_COLOUR_HDMI = b"rockchip,rk3528-dw-hdmi"
+# what an atomic check answers for a state the driver cannot show
+REFUSED = {errno.EINVAL, errno.ERANGE}
+# the pattern's quadrants, (column, row)
+QUADRANT_RGB = {
+    (0, 0): (200, 40, 40),
+    (1, 0): (40, 200, 40),
+    (0, 1): (40, 40, 200),
+    (1, 1): (200, 200, 40),
+}
+# a transform: whether it swaps the source's sides, and where each source quadrant lands on screen;
+# DRM's rotations turn counter-clockwise
+ROTATIONS = {
+    "rotate-0": (False, {(0, 0): (0, 0), (1, 0): (1, 0), (0, 1): (0, 1), (1, 1): (1, 1)}),
+    "rotate-180": (False, {(0, 0): (1, 1), (1, 0): (0, 1), (0, 1): (1, 0), (1, 1): (0, 0)}),
+    "reflect-x": (False, {(0, 0): (1, 0), (1, 0): (0, 0), (0, 1): (1, 1), (1, 1): (0, 1)}),
+    "reflect-y": (False, {(0, 0): (0, 1), (1, 0): (1, 1), (0, 1): (0, 0), (1, 1): (1, 0)}),
+    "rotate-90": (True, {(0, 0): (0, 1), (1, 0): (0, 0), (0, 1): (1, 1), (1, 1): (1, 0)}),
+    "rotate-270": (True, {(0, 0): (1, 0), (1, 0): (1, 1), (0, 1): (0, 0), (1, 1): (0, 1)}),
+}
 PLANE_TYPES = {0: "overlay", 1: "primary", 2: "cursor"}
+# AFBC: Arm's 16x16 superblock layout, no YTR or split; a 16-byte header a superblock, then its 16
+# 4x4 sub-blocks, size code 1 for one stored uncompressed
+AFBC_16X16 = 0x08 << 56 | 1
+AFBC_SIDE, AFBC_BLOCK, AFBC_HEADER_BYTES, AFBC_UNCOMPRESSED = 256, 16, 16, 1
+# lines of it shown, as a player crops 1080 from 1088: not a whole number of superblocks
+AFBC_CROPPED_LINES = 240
+FB_MODIFIERS = 1 << 1
 PACING_SECONDS = 60
 # a session's units, in the order they let the display go: the display manager, then the seat
 # daemon, which keeps DRM master on the card with no session
@@ -256,11 +336,16 @@ NO_SCREEN_NOISE = re.compile(r"scdc|ddc|i2c|edid|hpd|hot.?plug|phy", re.I)
 # Kernel log lines from buses and radios off the display path: a rung falls on its own lines only.
 OFF_PATH_NOISE = re.compile(r"usb\d*-port|\bSKW|wlan\d|\bmmc\d|Bluetooth", re.I)
 PLANE_STATE_LINE = re.compile(r"^plane\[(\d+)\]: (\S+)", re.M)
-ESMART_SUB_WINDOW = re.compile(r"Esmart\d-win[1-3]")
 EBUSY = 16
 XRGB8888, ARGB8888, NV12, P010 = 0x34325258, 0x34325241, 0x3231564E, 0x30313050
+RGB888, RGB565 = 0x34324752, 0x36314752
+PACKED_BPP = {RGB888: 24, RGB565: 16}
+# the writeback's YCbCr of an RGB output, measured: no property says it
+WRITEBACK_RGB_TO_YUV = 601
 LUT_POINTS = 17
 TOLERANCE = 2
+# a 5-bit channel read back: half a step of the 8-bit code it stands for
+RGB565_TOLERANCE = TOLERANCE + 255 // 31 // 2
 
 
 def display_card():
@@ -300,7 +385,8 @@ class Drm:
             result[prop.name.decode()] = (ids[i], values[i], prop)
         return result
 
-    def enum_value(self, prop, name):
+    def enums(self, prop):
+        """An enum or bitmask property's names, each to its value or, for a bitmask, its bit."""
         enums = (PropEnum * prop.count_enum_blobs)()
         self.call(
             "property",
@@ -310,7 +396,10 @@ class Drm:
                 count_enum_blobs=prop.count_enum_blobs,
             ),
         )
-        return next(e.value for e in enums if e.name.decode() == name)
+        return {e.name.decode(): e.value for e in enums}
+
+    def enum_value(self, prop, name):
+        return self.enums(prop)[name]
 
     def blob(self, data):
         buffer = ctypes.create_string_buffer(data, len(data))
@@ -373,7 +462,7 @@ class Buffer:
         inside the dumb buffer, whose rows are at least as long."""
         self.drm = drm
         yuv = fourcc in (NV12, P010)
-        bpp = 16 if fourcc == P010 else 8 if fourcc == NV12 else 32
+        bpp = 16 if fourcc == P010 else 8 if fourcc == NV12 else PACKED_BPP.get(fourcc, 32)
         d = drm.call(
             "dumb", CreateDumb(height=height * 3 // 2 if yuv else height, width=width, bpp=bpp)
         )
@@ -410,6 +499,15 @@ class Buffer:
         for y in rows or range(self.height):
             self.map[y * self.pitch : y * self.pitch + len(row)] = row
 
+    def fill_quadrants(self, rgbs):
+        """XRGB8888, each quadrant one colour: rgbs[(column, row)]."""
+        pixel = lambda rgb: struct.pack("<I", 0xFF << 24 | rgb[0] << 16 | rgb[1] << 8 | rgb[2])
+        half = self.width // 2
+        for qy in (0, 1):
+            row = pixel(rgbs[(0, qy)]) * half + pixel(rgbs[(1, qy)]) * (self.width - half)
+            for y in range(qy * self.height // 2, (qy + 1) * self.height // 2):
+                self.map[y * self.pitch : y * self.pitch + len(row)] = row
+
     def fill_yuv(self, code):
         """The whole NV12 picture one 8-bit Y'CbCr code."""
         for y in range(self.height):
@@ -435,18 +533,31 @@ class Buffer:
                 row = self.height + py * side // 2 + y
                 self.map[row * self.pitch : row * self.pitch + len(chroma)] = chroma
 
-    def pixel(self, x, y):
-        """R'G'B' 8-bit; an NV12 capture, from a YCbCr output, read as BT.709 limited range."""
+    def pixel(self, x, y, matrix=709):
+        """R'G'B' 8-bit; an NV12 capture read as limited range by matrix, BT.709 for a YCbCr output."""
         if self.format == NV12:
             luma = self.map[y * self.pitch + x]
             chroma = (self.height + y // 2) * self.pitch + x // 2 * 2
             codes = (luma, self.map[chroma], self.map[chroma + 1])
-            return to8(yuv_to_rgb([c * 4 / 1023 for c in codes], 709))
+            return to8(yuv_to_rgb([c * 4 / 1023 for c in codes], matrix))
+        if self.format == RGB888:  # memory order B, G, R
+            b, g, r = self.map[y * self.pitch + x * 3 : y * self.pitch + x * 3 + 3]
+            return r, g, b
+        if self.format == RGB565:
+            (value,) = struct.unpack_from("<H", self.map, y * self.pitch + x * 2)
+            r, g, b = value >> 11, value >> 5 & 63, value & 31
+            return r << 3 | r >> 2, g << 2 | g >> 4, b << 3 | b >> 2
         (value,) = struct.unpack_from("<I", self.map, y * self.pitch + x * 4)
         return value >> 16 & 255, value >> 8 & 255, value & 255
 
 
 # ---- colour, enough to build tone-mapping tables a display engine applies
+def rotation_value(bits, name):
+    """A rotation property's value: DRM takes exactly one rotate- bit, a reflection beside it."""
+    value = 1 << bits[name]
+    return value | 1 << bits["rotate-0"] if name.startswith("reflect-") else value
+
+
 def pq_eotf(e):
     m1, m2, c1, c2, c3 = 0.1593017578125, 78.84375, 0.8359375, 18.8515625, 18.6875
     p = min(max(e, 0.0), 1.0) ** (1 / m2)
@@ -484,7 +595,17 @@ BT709_TO_2020 = (
     (0.016391, 0.088013, 0.895595),
 )
 SDR_WHITE = 0.203  # of 1000 nits
-KR_KB = {709: (0.2126, 0.0722), 2020: (0.2627, 0.0593)}
+# greys, primaries and a mid green: an SDR to HDR stage's checks
+SDR2HDR_SIGNALS = (
+    (64, 64, 64),
+    (128, 128, 128),
+    (255, 255, 255),
+    (255, 0, 0),
+    (0, 255, 0),
+    (0, 0, 255),
+    (105, 174, 49),
+)
+KR_KB = {601: (0.299, 0.114), 709: (0.2126, 0.0722), 2020: (0.2627, 0.0593)}
 
 
 def matrix(m, v):
@@ -861,10 +982,14 @@ def dtd(clock, ha, hb, hso, hsw, va, vb, vso, vsw):
     )
 
 
-def hdr_edid(eotfs=SINKS["HDR10 and HLG"], ladder=False):
+def hdr_edid(
+    eotfs=SINKS["HDR10 and HLG"], ladder=False, y420=False, surround=False, ycc=False, stereo=False
+):
     """1080p60, or with ladder 4K60 first and every LADDER mode, as an HDMI 2.0 screen; RGB only so a
     writeback can follow the output, BT.2020; HDR static metadata for the EOTF bits beyond SDR, none
-    for an SDR screen."""
+    for an SDR screen. With y420 it also takes every mode as YCbCr 4:2:0, 10 bits deep; with ycc,
+    YCbCr 4:4:4 and 4:2:2; with surround, 8-channel LPCM to 192 kHz on 7.1 speakers; with stereo,
+    HDMI 1.4's 3D_present, its mandatory 3D formats of the modes it lists."""
     base = b"\x00\xff\xff\xff\xff\xff\xff\x00" + struct.pack(">H", 20 << 10 | 22 << 5 | 2)  # TVB
     base += struct.pack("<HIBB", 1, 1, 1, 34) + bytes([1, 3, 0x80, 0x50, 0x2D, 0x78, 0x0A])
     base += (
@@ -881,33 +1006,71 @@ def hdr_edid(eotfs=SINKS["HDR10 and HLG"], ladder=False):
     base += b"\x00\x00\x00\x10\x00" + b"\x00" * 13 + b"\x01"
     vics = [m[0] for m in LADDER.values()] if ladder else [16, 4]
     blocks = bytes([0x40 | len(vics)] + vics)
-    blocks += bytes(
-        [0x68, 0x03, 0x0C, 0x00, 0x10, 0x00, 0x30, 68 if ladder else 0x2D, 0x00]
-    )  # HDMI, 10/12-bit
+    vsdb = [0x03, 0x0C, 0x00, 0x10, 0x00, 0x30, 68 if ladder else 0x2D]  # HDMI, 10/12-bit
+    vsdb += [0x20, 0x80, 0x00] if stereo else [0x00]  # HDMI_Video_present, 3D_present
+    blocks += bytes([0x60 | len(vsdb)] + vsdb)
     if ladder:
-        blocks += bytes([0x67, 0xD8, 0x5D, 0xC4, 0x01, 120, 0x80, 0x00])  # HDMI 2.0: 600 MHz, SCDC
+        # HDMI 2.0: 600 MHz, SCDC, and 10-bit 4:2:0 where asked
+        blocks += bytes([0x67, 0xD8, 0x5D, 0xC4, 0x01, 120, 0x80, 0x01 if y420 else 0x00])
+    if surround:
+        blocks += bytes([0x23, 0x0F, 0x7F, 0x07])  # LPCM, 8 channels, 32-192 kHz, 16/20/24-bit
+        blocks += bytes([0x83, 0x4F, 0x00, 0x00])  # speakers: 7.1
+    if y420:
+        blocks += bytes([0xE1, 0x0F])  # YCbCr 4:2:0 capability map, no bitmap: every mode
     blocks += bytes([0xE3, 0x05, 0xC0, 0x00])  # BT.2020 RGB and YCC
     if eotfs & ~(1 << EOTF_SDR):
         blocks += bytes([0xE6, 0x06, eotfs, 0x01, 0x78, 0x50, 0x00])  # HDR static, type 1
-    ext = bytes([0x02, 0x03, 4 + len(blocks), 0x40]) + blocks
+    # basic audio, and YCbCr 4:4:4 and 4:2:2 where asked
+    ext = bytes([0x02, 0x03, 4 + len(blocks), 0x70 if ycc else 0x40]) + blocks
     return edid_block(base) + edid_block(ext + bytes(127 - len(ext)))
+
+
+def hdmi_sound_card():
+    for card in sorted(glob.glob("/proc/asound/card[0-9]*")):
+        if "hdmi" in Path(f"{card}/id").read_text().lower():
+            return card.removeprefix("/proc/asound/card")
+    return None
+
+
+def play_reading(card, channels, rate, read, timeout=5.0):
+    """PLAY_SECONDS of silence, read() once the stream runs: (seconds, aplay's error, read())."""
+    started = time.monotonic()
+    play = subprocess.Popen(
+        ["aplay", "-q", "-D", f"hw:{card},0", "-c", str(channels), "-r", str(rate)]
+        + ["-f", "S32_LE", "-d", str(PLAY_SECONDS), "/dev/zero"],
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    status = Path(f"/proc/asound/card{card}/pcm0p/sub0/status")
+    while play.poll() is None and time.monotonic() - started < timeout:
+        if "RUNNING" in status.read_text():
+            break
+        time.sleep(0.05)
+    seen = read() or {}
+    error = play.communicate(timeout=timeout + PLAY_SECONDS)[1].strip().split("\n")[0]
+    return time.monotonic() - started, error, seen
+
+
+def unit_state(unit):
+    """systemctl's word for unit: active, activating, inactive, failed and the rest."""
+    done = subprocess.run(["systemctl", "is-active", unit], capture_output=True, text=True)
+    return done.stdout.strip()
 
 
 @contextlib.contextmanager
 def display_free():
     """The display to ourselves: a running session's compositor holds DRM master, which every
     modeset here needs; the session is back when the run ends."""
-    running = [
-        unit
-        for unit in SESSION_UNITS
-        if subprocess.run(["systemctl", "is-active", "--quiet", unit]).returncode == 0
-    ]
-    for unit in running:
+    states = {unit: unit_state(unit) for unit in SESSION_UNITS}
+    # each stopped whatever it reads: a greeter between its restarts reads inactive with its restart
+    # queued, then switches the console's VT mid-run, and the console's client turns every output off
+    for unit in SESSION_UNITS:
         subprocess.run(["systemctl", "stop", unit], check=False)
     try:
         yield
     finally:
-        for unit in reversed(running):
+        # only what ran steadily comes back: a unit caught restarting would loop on through the next run
+        for unit in reversed([u for u, s in states.items() if s == "active"]):
             subprocess.run(["systemctl", "start", unit], check=False)
 
 
@@ -999,6 +1162,41 @@ def underrun_count():
 
 
 # ---- the box
+
+
+class AfbcQuadrants(Buffer):
+    """An AFBC XRGB8888 square, each quadrant one colour, written as uncompressed sub-blocks: what a
+    plane shows of it needs no AFBC encoder to check."""
+
+    def __init__(self, drm, rgbs, modifier=AFBC_16X16):
+        self.drm, self.handle, self.fb = drm, 0, 0
+        size, blocks = AFBC_SIDE, AFBC_SIDE // AFBC_BLOCK
+        header = blocks * blocks * AFBC_HEADER_BYTES
+        body = AFBC_BLOCK * AFBC_BLOCK * 4
+        d = drm.call("dumb", CreateDumb(height=size * 2, width=size, bpp=32))
+        self.handle = d.handle
+        offset = drm.call("map", MapDumb(handle=d.handle)).offset
+        self.map = mmap.mmap(
+            drm.fd, d.size, mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE, offset=offset
+        )
+        sizes = sum(AFBC_UNCOMPRESSED << (6 * i) for i in range(16)).to_bytes(12, "little")
+        for n in range(blocks * blocks):
+            bx, by = n % blocks, n // blocks
+            rgb = rgbs[(2 * bx // blocks, 2 * by // blocks)]
+            start = header + n * body
+            self.map[n * AFBC_HEADER_BYTES : (n + 1) * AFBC_HEADER_BYTES] = (
+                struct.pack("<I", start) + sizes
+            )
+            self.map[start : start + body] = struct.pack("<4B", rgb[2], rgb[1], rgb[0], 255) * (
+                body // 4
+            )
+        self.width = self.height = size
+        self.pitch, self.format = size * 4, XRGB8888
+        cmd = FbCmd2(width=size, height=size, pixel_format=XRGB8888, flags=FB_MODIFIERS)
+        cmd.handles[0], cmd.pitches[0], cmd.modifier[0] = d.handle, self.pitch, modifier
+        self.fb = drm.call("addfb2", cmd).fb_id
+
+
 class Box:
     def __init__(self):
         self.drm = Drm(display_card())
@@ -1049,14 +1247,18 @@ class Box:
         self.drm.call(
             "planes", PlaneRes(planes=ctypes.addressof(ids), count_planes=pr.count_planes)
         )
-        self.planes = []
+        names = plane_names()
+        self.planes, self.region_planes = [], []
         for i in range(pr.count_planes):
             p = self.drm.call("plane", Plane(plane_id=ids[i]))
             if self.crtc is not None and p.possible_crtcs & 1 << self.index:
-                self.planes.append(p.plane_id)
+                # a region shows only with its window: the regions check alone composes it
+                region = REGION_NAME.match(names.get(p.plane_id, ""))
+                (self.region_planes if region else self.planes).append(p.plane_id)
         self.lut_planes = [
             p for p in self.planes if "SUNXI_CDC_LUT3D" in self.drm.props(p, OBJ_PLANE)
         ]
+        self.bypass_color_pipelines()
         self.failures = self.passes = 0
         self.maps = set()
         self.synthetic_sink = False
@@ -1064,6 +1266,23 @@ class Box:
 
     def prop(self, obj, kind, name):
         return self.drm.props(obj, kind)[name][0]
+
+    def bypass_color_pipelines(self):
+        """Every plane's color pipeline to bypass, as a program before may have left one set: a
+        commit from a client that cannot see it is refused. The capability goes again after, as
+        it hides the planes' legacy color properties."""
+        try:
+            self.drm.call("cap", ClientCap(capability=CAP_COLOR_PIPELINE, value=1))
+        except OSError:
+            return
+        changes = {}
+        for plane in self.planes + self.region_planes:
+            prop = self.drm.props(plane, OBJ_PLANE).get("COLOR_PIPELINE")
+            if prop and prop[1]:
+                changes[plane] = {prop[0]: 0}
+        if changes:
+            self.drm.commit(changes, ALLOW_MODESET)
+        self.drm.call("cap", ClientCap(capability=CAP_COLOR_PIPELINE, value=0))
 
     def check(self, name, ok, detail=""):
         print(f"{'PASS' if ok else 'FAIL'} {name} {detail}".rstrip())
@@ -1080,12 +1299,13 @@ class Box:
         rect = (0, 0, width if buffer.format == XRGB8888 else height, height)
         return self.compose([(plane, buffer, rect, extra)], capture, crtc)
 
-    def compose(self, layers, capture=None, crtc=None, flags=ALLOW_MODESET):
+    def compose(self, layers, capture=None, crtc=None, flags=ALLOW_MODESET, objects=None):
         """layers: (plane, buffer, (x, y, w, h), {property: value or enum name}); every other plane off.
-        A plane's EOTF goes back to SDR unless a layer sets it."""
+        A plane's EOTF goes back to SDR, its rotation to none, its color pipeline to bypass, unless
+        a layer sets it; objects: other objects' {property id: value}, as colorops'."""
         changes = {
             p: {self.prop(p, OBJ_PLANE, "FB_ID"): 0, self.prop(p, OBJ_PLANE, "CRTC_ID"): 0}
-            for p in self.planes
+            for p in self.planes + self.region_planes
             if p not in [layer[0] for layer in layers]
         }
         for plane, buffer, (x, y, w, h), extra in layers:
@@ -1104,6 +1324,12 @@ class Box:
             }
             if "EOTF" in props:
                 values["EOTF"] = 0
+            if "rotation" in props:
+                values["rotation"] = rotation_value(
+                    self.drm.enums(props["rotation"][2]), "rotate-0"
+                )
+            if "COLOR_PIPELINE" in props:
+                values["COLOR_PIPELINE"] = 0
             values.update(extra)
             for name in OPTIONAL_PLANE_PROPS - set(props):
                 values.pop(name, None)
@@ -1111,8 +1337,12 @@ class Box:
                 props[k][0]: self.drm.enum_value(props[k][2], v) if isinstance(v, str) else v
                 for k, v in values.items()
             }
+        mode_blob = self.crtc_back_on(changes)
         if crtc:
-            changes[self.crtc] = {self.prop(self.crtc, OBJ_CRTC, k): v for k, v in crtc.items()}
+            changes.setdefault(self.crtc, {}).update(
+                {self.prop(self.crtc, OBJ_CRTC, k): v for k, v in crtc.items()}
+            )
+        changes.update(objects or {})
         fence = ctypes.c_int32(-1)
         if capture:
             changes[self.writeback] = {
@@ -1123,11 +1353,36 @@ class Box:
                 ): ctypes.addressof(fence),
             }
         error = self.drm.commit(changes, flags)
+        if mode_blob:
+            self.drm.unblob(mode_blob)
         if not error and capture:
             ready, _, _ = select.select([fence.value], [], [], 2)
             os.close(fence.value)
             error = 0 if ready else 110
         return error
+
+    def output_state(self):
+        """The CRTC and HDMI as the kernel holds them, for a failure to say what it met."""
+        active = self.drm.props(self.crtc, OBJ_CRTC)["ACTIVE"][1]
+        bound = self.drm.props(self.hdmi_connector, OBJ_CONNECTOR)["CRTC_ID"][1]
+        status = next(iter(glob.glob("/sys/class/drm/card*-HDMI-A-1/status")), None)
+        seen = Path(status).read_text().strip() if status else "?"
+        return f"CRTC {self.crtc} active {active}, HDMI on CRTC {bound}, HDMI {seen}"
+
+    def crtc_back_on(self, changes):
+        """The CRTC on again in changes, with the run's mode, where DRM turned it off: freeing the
+        framebuffer its primary plane shows does. The mode's blob, to free after the commit; None
+        where the CRTC is on."""
+        if self.drm.props(self.crtc, OBJ_CRTC)["ACTIVE"][1]:
+            return None
+        blob = self.drm.blob(bytes(self.mode))
+        changes[self.crtc] = {
+            self.prop(self.crtc, OBJ_CRTC, "MODE_ID"): blob,
+            self.prop(self.crtc, OBJ_CRTC, "ACTIVE"): 1,
+        }
+        connector = self.prop(self.hdmi_connector, OBJ_CONNECTOR, "CRTC_ID")
+        changes[self.hdmi_connector] = {connector: self.crtc}
+        return blob
 
     def plane_info(self, plane):
         p = self.drm.call("plane", Plane(plane_id=plane))
@@ -1144,7 +1399,7 @@ class Box:
         modifiers = 0
         if "IN_FORMATS" in props and props["IN_FORMATS"][1]:
             blob = self.drm.getblob(props["IN_FORMATS"][1])
-            modifiers = struct.unpack_from("<5I", blob)[3]
+            modifiers = struct.unpack_from("<5I", blob)[4]
         zpos = self.drm.prop_range(props["zpos"][2]) if "zpos" in props else (0, 0)
         return {
             "type": PLANE_TYPES.get(props["type"][1], "?"),
@@ -1181,16 +1436,6 @@ class Box:
             "planes: a YUV video plane and an interface plane above it",
             bool(self.video_plane and self.ui_plane),
             f"(video {self.video_plane}, interface {self.ui_plane})",
-        )
-        sub_windows = [
-            n
-            for p, n in plane_names().items()
-            if p in self.planes and ESMART_SUB_WINDOW.fullmatch(n)
-        ]
-        self.check(
-            "planes: no Esmart sub-window, which reaches writeback but never HDMI",
-            not sub_windows,
-            f"({' '.join(sub_windows)})" if sub_windows else "",
         )
 
     def layer_zpos(self, plane, level):
@@ -1270,6 +1515,168 @@ class Box:
             not error and diff(ui, (40, 200, 40)) <= TOLERANCE and diff(video, want) <= TOLERANCE,
             f"(errno {error}, interface {ui}, video {video} want {want})",
         )
+
+    def modifiers(self, props):
+        """The format modifiers a plane's IN_FORMATS lists."""
+        if "IN_FORMATS" not in props or not props["IN_FORMATS"][1]:
+            return []
+        blob = self.drm.getblob(props["IN_FORMATS"][1])
+        count, offset = struct.unpack_from("<2I", blob, 16)
+        return [struct.unpack_from("<Q", blob, offset + 16 + 24 * i)[0] for i in range(count)]
+
+    def regions(self):
+        """Each window with region planes by writeback: the window and its regions in turn, each a
+        strip below the one before; refused alone, after a gap, beside or above the one before, or
+        at another zpos."""
+        names = plane_names()
+        by_name = {n: p for p, n in names.items() if p in self.planes + self.region_planes}
+        windows = {}
+        for name, plane in by_name.items():
+            m = REGION_NAME.match(name)
+            if m and m.group(1) + "0" in by_name:
+                windows.setdefault(m.group(1) + "0", {})[int(m.group(2))] = plane
+        capture = self.capture_buffer() if self.writeback else None
+        if not windows or not capture:
+            print("SKIP regions: no region plane, or no writeback capture")
+            return
+        width, height = self.mode.hdisplay, self.mode.vdisplay
+        for window_name, regions in windows.items():
+            chain = [by_name[window_name]] + [regions[n] for n in sorted(regions)]
+            zpos = self.drm.props(chain[0], OBJ_PLANE)["zpos"][1]
+            strip = height // len(chain)
+            buffers = []
+            for colour in REGION_RGBS[: len(chain)]:
+                buffers.append(Buffer(self.drm, width, strip, XRGB8888))
+                buffers[-1].fill_rgb(colour)
+            layer = lambda n, row, z=zpos, x=0, w=width: (
+                chain[n],
+                buffers[n],
+                (x, row * strip, w, strip),
+                {"zpos": z},
+            )
+            error = self.compose([layer(n, n) for n in range(len(chain))], capture)
+            got = [
+                capture.pixel(capture.width // 2, (2 * n + 1) * capture.height // (2 * len(chain)))
+                for n in range(len(chain))
+            ]
+            self.check(
+                f"regions: {window_name} and its {len(chain) - 1} regions in turn",
+                not error and got == REGION_RGBS[: len(chain)],
+                f"(errno {error}, strips {got})",
+            )
+            refusals = {
+                "a region alone": [layer(1, 1)],
+                "a region after a gap": [layer(0, 0), layer(2, 2)],
+                "a region beside its window": [
+                    layer(0, 0, w=width // 2),
+                    layer(1, 0, x=width // 2, w=width // 2),
+                ],
+                "a region above its window": [layer(0, 1), layer(1, 0)],
+                "a region at another zpos": [layer(0, 0), layer(1, 1, z=zpos + 1)],
+            }
+            for case, layers in refusals.items():
+                error = self.compose(layers, flags=TEST_ONLY | ALLOW_MODESET)
+                self.check(
+                    f"regions: {window_name} {case} refused", error in REFUSED, f"(errno {error})"
+                )
+
+    def writeback_formats(self):
+        """Each format the writeback connector lists: a quadrant pattern full screen, captured
+        through it, at full size or half where the engine scales its writeback, each quadrant read
+        back."""
+        if not self.writeback:
+            print("SKIP writeback: no writeback connector")
+            return
+        blob = self.drm.props(self.writeback, OBJ_CONNECTOR)["WRITEBACK_PIXEL_FORMATS"][1]
+        data = self.drm.getblob(blob)
+        width, height = self.mode.hdisplay, self.mode.vdisplay
+        pattern = Buffer(self.drm, width, height, XRGB8888)
+        pattern.fill_quadrants(QUADRANT_RGB)
+        diff = lambda a, b: max(abs(x - y) for x, y in zip(a, b))
+        for (fourcc,) in struct.iter_unpack("<I", data):
+            name = fourcc.to_bytes(4, "little").decode()
+            tolerance = RGB565_TOLERANCE if fourcc == RGB565 else TOLERANCE
+            for scale in (1, 2):
+                capture = Buffer(self.drm, width // scale, height // scale, fourcc, unpadded=True)
+                error = self.compose(
+                    [(self.planes[0], pattern, (0, 0, width, height), {})], capture
+                )
+                if not error:
+                    break
+            wrong = [
+                (quadrant, seen)
+                for quadrant, rgb in QUADRANT_RGB.items()
+                if diff(
+                    seen := capture.pixel(
+                        (2 * quadrant[0] + 1) * capture.width // 4,
+                        (2 * quadrant[1] + 1) * capture.height // 4,
+                        WRITEBACK_RGB_TO_YUV,
+                    ),
+                    rgb,
+                )
+                > tolerance
+            ]
+            self.check(
+                f"writeback: {name}",
+                not error and not wrong,
+                f"({capture.width}x{capture.height}, errno {error}, wrong {wrong})",
+            )
+
+    def rotation(self):
+        """Every plane offering rotation, each single transform it lists, a quadrant pattern full
+        screen, by writeback: each quadrant's colour where the transform puts it, or refused."""
+        capture = self.capture_buffer() if self.writeback else None
+        if not capture:
+            print("SKIP rotation: no writeback capture at this mode")
+            return
+        width, height = self.mode.hdisplay, self.mode.vdisplay
+        diff = lambda a, b: max(abs(x - y) for x, y in zip(a, b))
+        seen = lambda qx, qy: capture.pixel(
+            (2 * qx + 1) * capture.width // 4, (2 * qy + 1) * capture.height // 4
+        )
+        for plane in self.planes:
+            props = self.drm.props(plane, OBJ_PLANE)
+            if "rotation" not in props:
+                continue
+            bits = self.drm.enums(props["rotation"][2])
+            afbc = AFBC_16X16 in self.modifiers(props)
+            kinds = ["linear"] + (["AFBC", "AFBC cropped"] if afbc else [])
+            for kind, (name, (turned, moved)) in ((k, r) for k in kinds for r in ROTATIONS.items()):
+                if name not in bits:
+                    continue
+                w, h = (height, width) if turned else (width, height)
+                if kind.startswith("AFBC"):
+                    pattern = AfbcQuadrants(self.drm, QUADRANT_RGB)
+                    if kind == "AFBC cropped":
+                        pattern.height = AFBC_CROPPED_LINES
+                else:
+                    pattern = Buffer(self.drm, w, h, XRGB8888)
+                    pattern.fill_quadrants(QUADRANT_RGB)
+                label = f"plane {plane} {name}" + ("" if kind == "linear" else f" {kind}")
+                error = self.compose(
+                    [
+                        (
+                            plane,
+                            pattern,
+                            (0, 0, width, height),
+                            {"rotation": rotation_value(bits, name)},
+                        )
+                    ],
+                    capture,
+                )
+                if error in REFUSED:
+                    print(f"rotation: {label} refused")
+                    continue
+                misplaced = [
+                    (src, seen(*dst))
+                    for src, dst in moved.items()
+                    if diff(seen(*dst), QUADRANT_RGB[src]) > TOLERANCE
+                ]
+                self.check(
+                    f"rotation: {label}",
+                    not error and not misplaced,
+                    f"(errno {error}, misplaced {misplaced})",
+                )
 
     def planes_all(self):
         """H16: every plane on the CRTC at once, each in its own cell at its own zpos, the YUV ones
@@ -1397,6 +1804,10 @@ class Box:
                 refused += 1
                 time.sleep(0.004)
             elif result:
+                if not failed:
+                    print(
+                        f"RECORD pacing: commit {commits} failed, errno {result}: {self.output_state()}"
+                    )
                 failed += 1
             elif not self.drm.wait_flip():
                 late += 1
@@ -1603,6 +2014,46 @@ class Box:
             f"to the GPU: {', '.join(m for m in mappings if m not in engine) or 'none'}"
         )
 
+    def gamma(self):
+        """The CRTC's gamma LUT, by writeback: each GAMMA_TABLES curve maps a colour as it says,
+        and no table restores it."""
+        props = self.drm.props(self.crtc, OBJ_CRTC) if self.crtc is not None else {}
+        planes = [p for p in self.planes if XRGB8888 in self.plane_info(p)["formats"]]
+        if "GAMMA_LUT" not in props or not self.writeback or not planes:
+            print("SKIP gamma: no CRTC GAMMA_LUT, writeback connector or XRGB8888 plane")
+            return
+        capture = self.capture_buffer()
+        if capture is None:
+            print("SKIP gamma: the writeback takes no capture")
+            return
+        rgb = Buffer(self.drm, 256, 256, XRGB8888)
+        rgb.fill_rgb(GAMMA_SIGNAL)
+        size = props["GAMMA_LUT_SIZE"][1]
+        centre = (capture.width // 2, capture.height // 2)
+        results = []
+        for name, curve in (*GAMMA_TABLES, ("none", None)):
+            blob = 0
+            if curve is not None:
+                entries = [round(curve(i / (size - 1)) * 0xFFFF) for i in range(size)]
+                blob = self.drm.blob(b"".join(struct.pack("<4H", e, e, e, 0) for e in entries))
+            error = self.drm.commit({self.crtc: {props["GAMMA_LUT"][0]: blob}})
+            error = error or self.show(planes[0], rgb, None, capture=capture)
+            curve = curve or (lambda v: v)
+            want = tuple(round(curve(c / 255) * 255) for c in GAMMA_SIGNAL)
+            got = capture.pixel(*centre) if not error else None
+            results.append((name, error, got, want))
+            if blob:
+                self.drm.unblob(blob)
+        if all(not error and got == GAMMA_SIGNAL for _, error, got, _ in results):
+            print("UNTESTED gamma: tables taken, none in the writeback: it is taken before gamma")
+            return
+        for name, error, got, want in results:
+            self.check(
+                f"gamma: {name}",
+                not error and max(abs(a - b) for a, b in zip(got, want)) <= TOLERANCE,
+                f"got {got} want {want} (errno {error})",
+            )
+
     def lut(self):
         if not self.lut_planes or not self.writeback:
             print("SKIP lut: no plane with SUNXI_CDC_LUT3D, or no writeback connector")
@@ -1716,6 +2167,122 @@ class Box:
                 self.drm.unblob(blob)
             self.show(plane, rgb, 0)
 
+    def color_pipelines(self):
+        """Each plane offering SDR to PQ as a color pipeline: its first colorop, and the chain's ids;
+        none where the kernel predates the client cap."""
+        try:
+            self.drm.call("cap", ClientCap(capability=CAP_COLOR_PIPELINE, value=1))
+        except OSError as error:
+            if error.errno != errno.EINVAL:
+                raise
+            return {}
+        found = {}
+        for plane in self.planes:
+            prop = self.drm.props(plane, OBJ_PLANE).get("COLOR_PIPELINE")
+            for first in (
+                (v for n, v in self.drm.enums(prop[2]).items() if n != "Bypass") if prop else ()
+            ):
+                chain, op = [], first
+                while op:
+                    chain.append(op)
+                    op = self.drm.props(op, OBJ_COLOROP)["NEXT"][1]
+                ops = SDR_TO_HDR + (HDR_CURVES["PQ"],)
+                if len(chain) == len(ops) and all(map(self.colorop_offers, chain, ops)):
+                    found[plane] = chain
+        return found
+
+    def colorop_offers(self, op, name):
+        """Whether a colorop offers name: a curve among its curves, or its type."""
+        props = self.drm.props(op, OBJ_COLOROP)
+        if "CURVE_1D_TYPE" in props:
+            return name in self.drm.enums(props["CURVE_1D_TYPE"][2])
+        _, value, prop = props["TYPE"]
+        return self.drm.enums(prop).get(name) == value
+
+    def sdr_to_hdr(self, chain, target="PQ", matrix=BT709_TO_2020, white=SDR_WHITE, bypass=()):
+        """The colorops' {property id: value} for SDR to the target: white in thousands of nits,
+        each op of bypass left out."""
+        ctm = []
+        for row in matrix:
+            for c in list(row) + [0]:
+                ctm.append(round(abs(c) * S31_32_ONE) | (S31_32_SIGN if c < 0 else 0))
+        blob = self.drm.blob(struct.pack("<12Q", *ctm))
+        # HLG's 1.0 is its 1000-nit peak
+        unit = PQ_125_UNIT_NITS / 1000 if target == "PQ" else 1
+        mult = round(white / unit * S31_32_ONE)
+        settings = [{}, {"DATA": blob}, {"MULTIPLIER": mult}, {}]
+        objects = {}
+        for i, (op, extra) in enumerate(zip(chain, settings)):
+            props = self.drm.props(op, OBJ_COLOROP)
+            values = dict(extra, BYPASS=int(i in bypass))
+            if "CURVE_1D_TYPE" in props:
+                values["CURVE_1D_TYPE"] = self.drm.enum_value(
+                    props["CURVE_1D_TYPE"][2], (SDR_TO_HDR + (HDR_CURVES[target],))[i]
+                )
+            objects[op] = {props[k][0]: v for k, v in values.items()}
+        return objects
+
+    def colorop(self):
+        """SDR to PQ and to HLG by a plane's color pipeline, against BT.2408's SDR in HDR by
+        writeback; part of it bypassed, a negative coefficient or two planes' whites apart
+        refused."""
+        pipelines = self.color_pipelines() if self.writeback else {}
+        if not pipelines:
+            print("SKIP colorop: no plane offers SDR to PQ, or no writeback connector")
+            return
+        width, height = self.mode.hdisplay, self.mode.vdisplay
+        capture = Buffer(self.drm, width, height, ARGB8888, unpadded=True)
+        rgb = Buffer(self.drm, 256, 256, XRGB8888)
+        plane, chain = next(iter(pipelines.items()))
+        on = {"COLOR_PIPELINE": chain[0]}
+        layer = lambda p, x: (p, rgb, (x, 0, width // 2, height), on)
+        for target, curve in HDR_CURVES.items():
+            if not self.colorop_offers(chain[-1], curve):
+                print(f"SKIP colorop: the pipeline's last curve lacks {curve}")
+                continue
+            worst, error = 0, 0
+            for signal in SDR2HDR_SIGNALS:
+                rgb.fill_rgb(signal)
+                objects = self.sdr_to_hdr(chain, target)
+                error = error or self.compose(
+                    [(plane, rgb, (0, 0, width, height), on)], capture, objects=objects
+                )
+                want = to8(sdr_to_hdr([c / 255 for c in signal], target))
+                got = capture.pixel(width // 2, height // 2)
+                worst = max([worst] + [abs(a - b) for a, b in zip(got, want)])
+            self.check(
+                f"colorop: SDR to {target} at 203 nits, 7 colours",
+                not error and worst <= TOLERANCE,
+                f"max {worst}" if not error else f"(errno {error})",
+            )
+        negative = [list(BT709_TO_2020[0]), list(BT709_TO_2020[1]), list(BT709_TO_2020[2])]
+        negative[0][1] = -negative[0][1]
+        refusals = {
+            "part bypassed": [self.sdr_to_hdr(chain, bypass=(3,))],
+            "a negative coefficient": [self.sdr_to_hdr(chain, matrix=negative)],
+        }
+        for case, objects in refusals.items():
+            error = self.compose(
+                [layer(plane, 0)], objects=objects[0], flags=TEST_ONLY | ALLOW_MODESET
+            )
+            self.check(f"colorop: {case} refused", error in REFUSED, f"(errno {error})")
+        if len(pipelines) < 2:
+            print("SKIP colorop: one plane offers SDR to PQ, none to share it")
+            return
+        (first, a), (second, b) = list(pipelines.items())[:2]
+        for case, b_white, refused in (("alike", SDR_WHITE, False), ("whites apart", 0.1, True)):
+            objects = {**self.sdr_to_hdr(a), **self.sdr_to_hdr(b, white=b_white)}
+            layers = [
+                layer(first, 0),
+                (second, rgb, (width // 2, 0, width // 2, height), {"COLOR_PIPELINE": b[0]}),
+            ]
+            error = self.compose(layers, objects=objects, flags=TEST_ONLY | ALLOW_MODESET)
+            self.check(
+                f"colorop: two planes {case} {'refused' if refused else 'taken'}",
+                (error in REFUSED) if refused else not error,
+                f"(errno {error})",
+            )
+
     def sdr2hdr(self):
         props = self.drm.props(self.crtc, OBJ_CRTC)
         if "HDR_EXT_DATA" not in props or not self.writeback:
@@ -1736,15 +2303,7 @@ class Box:
         for target in RK_TARGETS:
             blob = self.drm.blob(rk_sdr2hdr(target))
             worst, error = 0, 0
-            for signal in (
-                (64, 64, 64),
-                (128, 128, 128),
-                (255, 255, 255),
-                (255, 0, 0),
-                (0, 255, 0),
-                (0, 0, 255),
-                (105, 174, 49),
-            ):
+            for signal in SDR2HDR_SIGNALS:
                 rgb.fill_rgb(signal)
                 error = error or self.show(
                     plane, rgb, None, capture=capture, crtc={"HDR_EXT_DATA": blob}
@@ -1867,6 +2426,108 @@ class Box:
                     f"(errno {error}) DRM InfoFrame {'off' if sent is None else 'EOTF %d' % sent}, {fmt}, EC {ec}",
                 )
         self.hdmi_sdr(props, bpc_before)
+
+    def deep_colour(self):
+        """Max bpc 10 at 1080p60 and 4K60, by dw-hdmi's registers: the format DEEP_COLOUR_CASES
+        names, judged where the driver picks it, recorded elsewhere."""
+        props = self.hdmi_props("deep colour")
+        if not props or self.hdmi_registers() is None:
+            print("SKIP deep colour: no HDMI connector, or no dw-hdmi register map in debugfs")
+            return
+        judged = dt_compatible(DEEP_COLOUR_HDMI) and "hdmi_output_format" not in props
+        mode = self.mode
+        for width, want in DEEP_COLOUR_CASES:
+            modes = [m for m in self.connector_modes() if m.hdisplay == width and m.vrefresh == 60]
+            if not modes:
+                print(f"SKIP deep colour: no {width}-wide 60 Hz mode offered")
+                continue
+            self.set_mode(modes[0])
+            error, _, fmt, _ = self.hdmi_signal(props, None, 10)
+            regs = self.hdmi_registers() or {}
+            got = (fmt, regs.get(TX_INVID0, 0), regs.get(VP_PR_CD, 0))
+            line = f"{width}-wide 60 Hz, max bpc 10: AVI {fmt}, TX_INVID0 {got[1]:#04x}, "
+            line += f"VP_PR_CD {got[2]:#04x}"
+            if judged:
+                self.check(f"deep colour: {line}", not error and got == want, f"(errno {error})")
+            else:
+                print(f"RECORD deep colour: {line}")
+        self.set_mode(mode)
+        self.hdmi_sdr(props, 8)
+
+    def color_format(self):
+        """Each COLOR_FORMAT_CASES format asked of a screen taking them all, by dw-hdmi's
+        registers; "AUTO" after."""
+        props = self.hdmi_props("color format")
+        if not props or "color format" not in props:
+            print("SKIP color format: the connector lacks the color format property")
+            return
+        prop, _, enum = props["color format"]
+        mode = self.mode
+        for (width, asked, bpc), want in COLOR_FORMAT_CASES:
+            modes = [m for m in self.connector_modes() if m.hdisplay == width and m.vrefresh == 60]
+            if not modes:
+                print(f"SKIP color format: no {width}-wide 60 Hz mode offered")
+                continue
+            self.set_mode(modes[0])
+            self.drm.commit({self.hdmi_connector: {prop: self.drm.enum_value(enum, asked)}})
+            error, _, fmt, _ = self.hdmi_signal(props, None, bpc)
+            regs = self.hdmi_registers() or {}
+            got = (fmt, regs.get(VP_PR_CD, 0) >> 4, regs.get(VP_REMAP, 0) & 3)
+            self.check(
+                f"color format: {asked} at {width}-wide 60 Hz, max bpc {bpc}",
+                not error and got == want,
+                f"(AVI {got[0]}, depth {got[1]}, 4:2:2 remap {got[2]}, errno {error})",
+            )
+        self.drm.commit({self.hdmi_connector: {prop: self.drm.enum_value(enum, "AUTO")}})
+        self.set_mode(mode)
+        self.hdmi_sdr(props, 8)
+
+    def stereo(self):
+        """Each frame-packed mode a 3D screen offers: both views and the space between them as one
+        frame, and the vendor InfoFrame saying frame packing, by dw-hdmi's registers."""
+        if self.hdmi_registers() is None or not self.hdmi_connector:
+            print("SKIP stereo: no HDMI connector or dw-hdmi register map")
+            return
+        self.drm.call("cap", ClientCap(capability=CAP_STEREO_3D, value=1))
+        packed = [
+            m
+            for m in self.connector_modes()
+            if m.flags & MODE_FLAG_3D_MASK == MODE_FLAG_3D_FRAME_PACKING
+        ]
+        if not packed:
+            print("SKIP stereo: the driver offers no frame-packed mode")
+            return
+        mode = self.mode
+        for m in packed:
+            error = self.set_mode(m)
+            regs = self.hdmi_registers() or {}
+            lines = regs.get(FC_INVACTV1, 0) << 8 | regs.get(FC_INVACTV0, 0)
+            payload = (regs.get(FC_VSDPAYLOAD0), regs.get(FC_VSDPAYLOAD1))
+            want = 2 * m.vdisplay + m.vtotal - m.vdisplay
+            self.check(
+                f"stereo: {m.hdisplay}x{m.vdisplay}@{m.vrefresh} frame packing",
+                not error and lines == want and payload == FRAME_PACKING_PAYLOAD,
+                f"(errno {error}, {lines} active lines of {want}, payload {payload})",
+            )
+        self.set_mode(mode)
+
+    def hdmi_audio(self):
+        """Against a screen taking 8-channel LPCM: each case plays in real time, and the controller
+        takes a lane per channel pair, the channel count, and the multichannel layout past two."""
+        card = hdmi_sound_card()
+        if card is None or self.crtc is None or self.hdmi_registers() is None:
+            print("SKIP hdmi audio: no HDMI sound card, mode, or dw-hdmi register map")
+            return
+        for channels, rate in HDMI_AUDIO_CASES:
+            took, error, regs = play_reading(card, channels, rate, self.hdmi_registers)
+            got = (regs.get(AUD_CONF0, 0) & 0xF, regs.get(FC_AUDICONF0, 0) >> 4 & 7)
+            got += (regs.get(FC_AUDSCONF, 0) & 1,)
+            want = ((1 << math.ceil(channels / 2)) - 1, channels - 1, int(channels > 2))
+            self.check(
+                f"hdmi audio: {channels} channels at {rate} Hz",
+                not error and abs(took - PLAY_SECONDS) <= PLAY_SLACK and got == want,
+                f"({took:.2f} s, lanes {got[0]:#x}, CC {got[1]}, layout {got[2]}) {error}",
+            )
 
     def sinks(self, name, eotfs):
         """Against a synthetic screen: HDR sent for each EOTF it lists; what the box does with the rest."""
@@ -2229,6 +2890,14 @@ class Composite:
                 Path(status).write_text("off")
 
 
+def dt_compatible(name):
+    """Whether a device tree node is compatible with name."""
+    return any(
+        name in Path(c).read_bytes().split(b"\0")
+        for c in glob.glob("/proc/device-tree/**/compatible", recursive=True)
+    )
+
+
 def encoder_registers():
     """The TV encoder's vendor and first registers, as the tree places it; None without one. Read
     only while the output is on: a block whose power domain is off can stall the bus."""
@@ -2283,26 +2952,21 @@ def main(sinks, ladder):
         composite = run_composite()
         print(f"{composite.passes} passed, {composite.failures} failed")
         return 1 if composite.failures else 0 if composite.passes else 77
-    with hdr_sink(hdr_edid(ladder=True)) as synthetic:
-        if synthetic and ladder:
-            rating_box = Box()
-            rating_box.synthetic_sink = True
-            rating_box.video_plane, rating_box.ui_plane = box.video_plane, box.ui_plane
-            rating_box.rating()
-            os.close(rating_box.drm.fd)
-            box.passes += rating_box.passes
-            box.failures += rating_box.failures
+
+    def rating(sink_box):
+        sink_box.video_plane, sink_box.ui_plane = box.video_plane, box.ui_plane
+        sink_box.rating()
+
+    if ladder:
+        against(box, hdr_edid(ladder=True), rating)
     for name in sinks:
         eotfs = SINKS[name]
-        with hdr_sink(hdr_edid(eotfs)) as synthetic:
-            if not synthetic:
-                break
-            sink_box = Box()
-            sink_box.synthetic_sink = True
-            sink_box.sinks(name, eotfs)
-            os.close(sink_box.drm.fd)
-            box.passes += sink_box.passes
-            box.failures += sink_box.failures
+        if not against(box, hdr_edid(eotfs), lambda b: b.sinks(name, eotfs)):
+            break
+    against(box, hdr_edid(SINKS["SDR"], surround=True), Box.hdmi_audio)
+    against(box, hdr_edid(ladder=True, y420=True), Box.deep_colour)
+    against(box, hdr_edid(SINKS["SDR"], ladder=True, y420=True, ycc=True), Box.color_format)
+    against(box, hdr_edid(SINKS["SDR"], ladder=True, stereo=True), Box.stereo)
     hdmi_before = hdmi_writeback_available()
     composite = run_composite()
     box.passes += composite.passes
@@ -2315,6 +2979,23 @@ def main(sinks, ladder):
     return 1 if box.failures else 0 if box.passes else 77
 
 
+def against(box, edid, check):
+    """check(a Box) against the synthetic screen edid, its results added to box's; False where the
+    kernel takes no EDID override."""
+    with hdr_sink(edid) as synthetic:
+        if not synthetic:
+            return False
+        sink_box = Box()
+        sink_box.synthetic_sink = True
+        try:
+            check(sink_box)
+        finally:
+            os.close(sink_box.drm.fd)
+        box.passes += sink_box.passes
+        box.failures += sink_box.failures
+        return True
+
+
 def run(synthetic_sink):
     box = Box()
     box.synthetic_sink = synthetic_sink
@@ -2325,10 +3006,15 @@ def run(synthetic_sink):
         f"CRTC {box.crtc} {box.mode.hdisplay}x{box.mode.vdisplay}, LUT planes {box.lut_planes}, writeback {box.writeback}"
     )
     box.planes_record()
+    box.gamma()  # first: a gamma table set must leave every plane check after it passing
     box.compose_check()
     box.planes_all()
+    box.writeback_formats()
+    box.rotation()
+    box.regions()
     box.lut()
     box.sdr2hdr()
+    box.colorop()
     box.scope()
     box.pacing()
     box.hdmi()

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import datetime
+import hashlib
+import argparse
 import io
 import json
 import subprocess
@@ -14,6 +16,7 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools/validate"))
+import box  # noqa: E402
 import regression  # noqa: E402
 import results  # noqa: E402
 from results import Known  # noqa: E402
@@ -101,6 +104,51 @@ class KernelsTest(unittest.TestCase):
 
 
 class StepsTest(unittest.TestCase):
+    @staticmethod
+    def deb(control: dict[str, bytes], data: dict[str, bytes]) -> bytes:
+        def tar(files: dict[str, bytes]) -> bytes:
+            out = io.BytesIO()
+            with tarfile.open(fileobj=out, mode="w:gz") as t:
+                for name, body in files.items():
+                    info = tarfile.TarInfo(f"./{name}")
+                    info.size = len(body)
+                    t.addfile(info, io.BytesIO(body))
+            return out.getvalue()
+
+        def member(name: str, body: bytes) -> bytes:
+            head = f"{name:<16}{0:<12}{0:<6}{0:<6}{100644:<8}{len(body):<10}`\n".encode()
+            return head + body + (b"\n" if len(body) % 2 else b"")
+
+        return b"!<arch>\n" + b"".join(
+            member(n, b)
+            for n, b in (
+                ("debian-binary", b"2.0\n"),
+                ("control.tar.gz", tar(control)),
+                ("data.tar.gz", tar(data)),
+            )
+        )
+
+    def test_a_deb_s_md5sums_are_its_own_or_those_dpkg_writes(self) -> None:
+        sums = b"d41d8cd98f00b204e9800998ecf8427e  usr/bin/x\n"
+        written = f"{hashlib.md5(b'hi').hexdigest()}  usr/bin/x\n".encode()
+        for control, expected in (
+            ({"control": b"Package: x\n", "md5sums": sums}, sums),
+            ({"control": b"Package: x\n"}, written),
+        ):
+            with self.subTest(own="md5sums" in control), tempfile.TemporaryDirectory() as d:
+                path = Path(d) / "x_1_all.deb"
+                path.write_bytes(self.deb(control, {"usr/bin/x": b"hi"}))
+                self.assertEqual(regression.deb_md5sums(path), hashlib.sha256(expected).hexdigest())
+
+    def test_the_system_step_outlasts_its_cooling_wait(self) -> None:
+        self.assertEqual(regression.COOLING_S, box.COOL_WAIT_S)
+        for profile in PROFILES:
+            with self.subTest(profile=profile):
+                system = next(
+                    s for s in steps(profile, "rk35xx", "plex", "r69-1") if s.name == "system"
+                )
+                self.assertGreater(system.seconds, box.COOL_WAIT_S)
+
     def test_every_profile_runs_every_step_but_short_conformance(self) -> None:
         names = {p: [s.name for s in steps(p, "sunxi64", "plex", "sunxi-h616")] for p in PROFILES}
         self.assertEqual(names["short"], [n for n in names["default"] if n != "conformance"])
@@ -166,6 +214,101 @@ class ParityTest(unittest.TestCase):
         self.assertEqual(ordered[0].name, "6.1.172-tvb-rk35xx")
 
 
+class ReportTest(unittest.TestCase):
+    def test_a_measure_against_another_marks_a_move_the_worse_way(self) -> None:
+        for now, then, better, shown in [
+            (100.0, 120.0, "up", "120 (-17% WORSE)"),
+            (100.0, 95.0, "up", "95 (+5%)"),
+            (70.0, 60.0, "down", "60 (+17% WORSE)"),
+            (70.0, 60.0, "", "60 (+17%)"),
+            (70.0, None, "up", "-"),
+        ]:
+            with self.subTest(better=better, then=then):
+                self.assertEqual(regression.against(now, then, better), shown)
+
+    def test_a_measure_is_its_line_s_first_number_and_absent_where_not_taken(self) -> None:
+        folder = Path(tempfile.mkdtemp())
+        (folder / "cpu.txt").write_text(
+            "cpu.load.c 59.4 max over 60 s\ncpu.load.slowest.khz 1416000\n"
+        )
+        self.assertEqual(regression.measured(folder, "cpu", "cpu.load.c"), 59.4)
+        self.assertIsNone(regression.measured(folder, "cpu", "ddr.rate"))
+        self.assertIsNone(regression.measured(folder, "gpu", "glmark2.score"))
+        self.assertEqual(regression.shown(1416000.0), "1416000")
+
+    def test_lines_sharing_a_reason_are_one_and_a_line_alone_stays_whole(self) -> None:
+        lines = [
+            "video: video decode h264 16384x8640: past this box's memory, needs 2430 MB",
+            "video: video decode hevc 8192x8192: past this box's memory, needs 1152 MB",
+            "display-full: lut: no plane with SUNXI_CDC_LUT3D, or no writeback connector",
+            "power: suspend",
+        ]
+        self.assertEqual(
+            regression.grouped(lines),
+            [
+                "video: past this box's memory, 2 cases: decode h264 16384x8640, decode hevc 8192x8192",
+                "display-full: lut: no plane with SUNXI_CDC_LUT3D, or no writeback connector",
+                "power: suspend",
+            ],
+        )
+
+    def test_a_step_s_start_is_its_end_less_its_seconds_over_midnight_too(self) -> None:
+        for end, seconds, start in [("18:52:50", 50, "18:52:00"), ("00:00:30", 90, "23:59:00")]:
+            with self.subTest(end=end):
+                self.assertEqual(regression.clock_before(end, seconds), start)
+
+    def test_steps_come_from_the_run_log_in_order(self) -> None:
+        log = Path(tempfile.mkdtemp()) / "run.log"
+        log.write_text(
+            "18:51:32 7.3.6-k: booting l0\n18:52:50 7.3.6-k: system exit 1, 50 s\n"
+            "18:53:56 7.3.6-k: cpu exit 0, 67 s\n18:54:00 6.1-k: cpu exit 0, 9 s\n"
+        )
+        self.assertEqual(
+            regression.step_runs(log, "7.3.6-k"),
+            [("system", 50, "18:52:50"), ("cpu", 67, "18:53:56")],
+        )
+
+    def test_a_step_s_mark_is_its_worst_verdict(self) -> None:
+        for found, mark in [
+            (Verdicts(5, ["a"], ["b"]), "FAIL 1"),
+            (Verdicts(5, [], ["b", "c"]), "UNTESTED 2"),
+            (Verdicts(5, [], []), "PASS"),
+        ]:
+            with self.subTest(mark=mark):
+                self.assertEqual(regression.verdict_mark(found), mark)
+
+    def test_the_report_is_ascii_its_glyphs_in_words(self) -> None:
+        self.assertEqual(
+            regression.ascii_only("✅ ≥ 1920x1080 — 47 °C ·x"), "pass >= 1920x1080 - 47 C ;x"
+        )
+        self.assertEqual(regression.ascii_only("é"), "?")
+
+    def test_a_command_the_box_prints_no_path_for_is_missing(self) -> None:
+        needed = ["fio", "mpv", "vainfo"]
+        self.assertEqual(regression.missing_commands(needed, "/usr/bin/vainfo\n"), ["fio", "mpv"])
+        self.assertEqual(regression.missing_commands(needed, "/a/fio\n/b/mpv\n/c/vainfo"), [])
+
+    def test_only_the_commands_of_the_steps_in_scope_are_needed(self) -> None:
+        self.assertEqual(regression.needed_commands({"storage"}), ["fio"])
+        self.assertEqual(regression.needed_commands({"video"}), ["v4l2-ctl"])
+        self.assertEqual(regression.needed_commands(set()), [])
+
+    def test_every_command_s_steps_are_regression_steps(self) -> None:
+        names = {step.name for step in regression.steps("extended", "", "", "")}
+        for command, (_, used) in regression.BOX_COMMANDS.items():
+            with self.subTest(command=command):
+                self.assertLessEqual(set(used), names)
+
+    def test_probe_options_split_into_on_and_off(self) -> None:
+        probe = Path(tempfile.mkdtemp()) / "probe.txt"
+        probe.write_text(
+            "PROBE system: RNG: works (rng)\nPROBE system: PCIe: does not work (none)\nexit 0\n"
+        )
+        self.assertEqual(
+            regression.on_off_section(probe), "**On, 1:** system: RNG\n\n**Off, 1:** system: PCIe"
+        )
+
+
 class ResultsTest(unittest.TestCase):
     def setUp(self) -> None:
         self.dir = Path(tempfile.mkdtemp())
@@ -179,6 +322,29 @@ class ResultsTest(unittest.TestCase):
         found = self.verdicts("composite.mode 720x576\nSKIP compose: no writeback\nexit 0\n")
         self.assertEqual(
             (found.checks, found.fails, found.untested), (1, [], ["compose: no writeback"])
+        )
+
+    def test_a_case_past_the_box_s_memory_says_so_and_is_no_fail(self) -> None:
+        case = {"suite": "decode", "codec": "hevc10", "size": "8192x8192", "verdict": "memory"}
+        found = self.verdicts(json.dumps(dict(case, why="needs 1440 MB, 900 MB free")) + "\n")
+        self.assertEqual(
+            (found.checks, found.fails, found.untested),
+            (
+                0,
+                [],
+                [
+                    "video decode hevc10 8192x8192: past this box's memory, "
+                    "needs 1440 MB, 900 MB free"
+                ],
+            ),
+        )
+
+    def test_a_failure_case_without_its_knob_is_untested_and_no_fail(self) -> None:
+        case = {"suite": "failure", "codec": "h264", "size": "1920x1080", "verdict": "untested"}
+        found = self.verdicts(json.dumps(dict(case, why="no fail_next_job")) + "\n")
+        self.assertEqual(
+            (found.checks, found.fails, found.untested),
+            (0, [], ["video failure h264 1920x1080: untested, no fail_next_job"]),
         )
 
     def test_the_codec_table_keeps_video_py_s_header(self) -> None:
@@ -213,7 +379,10 @@ class ResultsTest(unittest.TestCase):
         self.assertEqual(
             regression.step_seconds(log, "6.1.172-tvb-rk35xx"), [("system", 49), ("video", 1145)]
         )
-        self.assertIn("| video | 1145 |", regression.step_table(log, "6.1.172-tvb-rk35xx"))
+        self.assertIn(
+            "| video | PASS | 0 | 19.1 | 09:01:55 | 09:21:00 |",
+            regression.steps_section(log, "6.1.172-tvb-rk35xx", self.dir),
+        )
         self.assertEqual(duration(log, "6.12.69-tvb-rk35xx"), "1 min")
         self.assertEqual(duration(log, "7.3.4-tvb-sunxi64"), "?")
 
@@ -259,7 +428,7 @@ class ResultsTest(unittest.TestCase):
         (self.dir / "run.log").write_text(
             "23:55:00 6.1: booting l1\n00:15:00 done: the default back\n"
         )
-        self.assertEqual(regression.over_budget(self.dir), " ⚠ 20 min, short's usual 12")
+        self.assertEqual(regression.over_budget(self.dir), " (slow: 20 min, short's usual 12)")
         (self.dir / "run.log").write_text(
             "10:00:00 6.1: booting l1\n10:08:00 done: the default back\n"
         )
@@ -370,7 +539,7 @@ class InstallTest(unittest.TestCase):
         box = mock.MagicMock()
         box.run.side_effect = lambda command, *a, **k: held if "sha256sum" in command else ""
         box.root.return_value = "done"
-        deployment = regression.Deployment("h96max-m2-plus", box, "short", "plex")
+        deployment = regression.Deployment("h96max-m2-plus", box, "short", "plex", frozenset())
         with mock.patch.object(regression, "DEBS", debs):
             said = deployment.install(["6.1.172-tvb-rk35xx"])
         sent = [c.args[0] for c in box.run.call_args_list if c.args[0].startswith("cat > ")]
@@ -397,7 +566,9 @@ class InstallReleasedTest(unittest.TestCase):
             with self.subTest(which=which):
                 box = mock.MagicMock()
                 box.run.return_value = "\n".join(depends[m] for m in metas)
-                deployment = regression.Deployment("h96max-rk3528", box, "short", "plex")
+                deployment = regression.Deployment(
+                    "h96max-rk3528", box, "short", "plex", frozenset()
+                )
                 releases = deployment.install_released(which)
                 wanted = box.root.call_args.args[1].split()
                 self.assertEqual(wanted[: len(metas)], metas)
@@ -417,24 +588,110 @@ class PrepareTest(unittest.TestCase):
         self.assertEqual(run.call_count, 2)  # video.py's clips and the VA suite's
 
 
+START = argparse.Namespace(
+    profile="short",
+    box="a=root@a",
+    iperf="plex",
+    kernels="both",
+    released=False,
+    enable=[],
+    disable=[],
+)
+
+
 class StartedTest(unittest.TestCase):
+    def test_a_run_s_steps_are_the_profile_s_less_the_experimental_ones(self) -> None:
+        every = {step.name for step in regression.steps("default", "", "", "")}
+        self.assertEqual(regression.scope_of("default", [], []), every - {"va"})
+        self.assertIn("va", regression.scope_of("default", ["va"], []))
+        self.assertNotIn("video", regression.scope_of("default", [], ["video"]))
+        self.assertNotIn("conformance", regression.scope_of("short", [], []))
+
+    def test_a_step_no_run_has_is_refused_by_name(self) -> None:
+        with self.assertRaisesRegex(ValueError, "no step vidoe"):
+            regression.scope_of("default", [], ["vidoe"])
+
     def test_a_box_whose_build_fails_is_not_started_and_says_why(self) -> None:
         failed = subprocess.CalledProcessError(1, ["build.sh", "board", "a"])
         out = io.StringIO()
         with (
+            mock.patch.object(regression, "preflight"),
             mock.patch.object(regression, "prepare", side_effect=failed),
             mock.patch.object(regression, "start") as start,
             mock.patch("sys.stdout", out),
         ):
-            self.assertFalse(regression.started("short", "a=root@a", "plex", "both", False))
+            self.assertFalse(regression.started(START))
         start.assert_not_called()
         self.assertTrue(out.getvalue().startswith("a: not started:"))
+
+    def test_a_box_lacking_a_tool_is_refused_before_anything_is_built(self) -> None:
+        lacking = regression.NotStarted("the box lacks fio: apt install fio")
+        out = io.StringIO()
+        with (
+            mock.patch.object(regression, "preflight", side_effect=lacking),
+            mock.patch.object(regression, "prepare") as prepare,
+            mock.patch("sys.stdout", out),
+        ):
+            self.assertFalse(regression.started(START))
+        prepare.assert_not_called()
+        self.assertIn("apt install fio", out.getvalue())
+
+    def test_a_box_answering_as_another_board_is_refused(self) -> None:
+        box = mock.Mock()
+        box.raw.return_value = b"h96max-m20\n"
+        with mock.patch.object(regression, "Box", return_value=box):
+            with self.assertRaisesRegex(regression.NotStarted, "answers as h96max-m20, not r69-1"):
+                regression.preflight("root@cnc", "plex", set(), "r69-1")
+
+    def test_an_address_unlike_another_run_s_is_a_failure(self) -> None:
+        now, last = Path(tempfile.mkdtemp()), Path(tempfile.mkdtemp())
+        (now / "network.txt").write_text(
+            "addr.wlan0 8a:00:33:d3:75:46 type 0\naddr.eth0 c4:2a type 0\n"
+        )
+        (last / "network.txt").write_text(
+            "addr.wlan0 8a:00:33:65:64:b6 type 0\naddr.eth0 c4:2a type 0\n"
+        )
+        self.assertEqual(
+            regression.moved_addresses(now, {"the last run": last, "the own kernel": None}),
+            ["network: addr.wlan0 8a:00:33:d3:75:46, 8a:00:33:65:64:b6 in the last run"],
+        )
+
+    def test_another_pvtm_level_than_the_own_kernel_s_is_a_failure(self) -> None:
+        now, own = Path(tempfile.mkdtemp()), Path(tempfile.mkdtemp())
+        (now / "cpu.txt").write_text("pvtm.cpu 1543 L5\npvtm.gpu 812 L2\n")
+        (own / "cpu.txt").write_text("pvtm.cpu 1543 L4\npvtm.gpu 812 L2\n")
+        self.assertEqual(
+            regression.pvtm_moved(now, own), ["cpu: pvtm.cpu L5, L4 on the own kernel"]
+        )
+        self.assertEqual(regression.pvtm_moved(now, None), [])
+
+    def test_a_kernel_s_recorded_board_is_its_system_step_s(self) -> None:
+        folder = Path(tempfile.mkdtemp())
+        self.assertEqual(regression.identity_of(folder), "")
+        (folder / "system.txt").write_text("kernel 7.3.6\nidentity.id r69-1\n")
+        self.assertEqual(regression.identity_of(folder), "r69-1")
 
     def test_a_fresh_folder_never_reuses_one(self) -> None:
         base = Path(tempfile.mkdtemp()) / "2026-11-14-1904"
         self.assertEqual(regression.fresh(base), base)
         base.mkdir()
         self.assertEqual(regression.fresh(base).name, "2026-11-14-1904-2")
+
+
+class ProbeTableTest(unittest.TestCase):
+    def test_every_probe_line_is_shown_and_the_ones_not_working_counted(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            lines = ["PROBE video: codec VC-1: does not work (none)"]
+            lines += ["PROBE system: RNG: works (rk)"]
+            (Path(root) / "probe.txt").write_text("\n".join(lines + ["exit 0"]))
+            table = regression.probe_table(Path(root))
+        self.assertIn("probe: 1 options work, 1 do not", table)
+        self.assertIn("    video: codec VC-1: does not work (none)", table)
+        self.assertNotIn("exit 0", table)
+
+    def test_no_probe_output_is_no_table(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            self.assertEqual(regression.probe_table(Path(root)), "")
 
 
 if __name__ == "__main__":

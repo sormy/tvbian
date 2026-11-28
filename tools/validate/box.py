@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import ctypes
 import glob
 import hashlib
 import os
@@ -34,11 +35,14 @@ import random
 import re
 import shutil
 import signal
+import socket
+import struct
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -71,6 +75,34 @@ INVENTORY = {
     "watchdog": "/sys/class/watchdog/watchdog*",
     "hwmon": "/sys/class/hwmon/hwmon*",
 }
+# each sample format played at this rate, which every card here takes
+FORMAT_RATE = 48000
+# the rates a datasheet's audio interfaces quote; a play this short only asks whether one is taken
+AUDIO_RATES = (
+    8000,
+    11025,
+    12000,
+    16000,
+    22050,
+    24000,
+    32000,
+    44100,
+    48000,
+    64000,
+    88200,
+    96000,
+)
+AUDIO_RATES += (176400, 192000)
+RATE_PROBE_SAMPLES = 64
+# a display manager starting at boot takes the screen from the checks mid-run: none may
+DISPLAY_MANAGERS = ("greetd.service", "gdm.service", "lightdm.service", "sddm.service")
+STARTUP_WAIT_S = 300  # how long the system step waits for systemd's startup to finish
+COOL_SAMPLE_S = 10  # how often the idle temperature is read while the box cools
+COOL_STEADY_S = 60  # the idle temperature counts once this long passes with no lower reading
+COOL_WAIT_S = 300  # the longest the box is given to cool from the step before
+LOAD_SAMPLE_S = 5  # how often the load check reads the clock and the heat
+# the DDR controller's devfreq, as each kernel names it
+DDR_DEVFREQ = ("dmc", "memory-controller")
 # IR receivers, by compatible: a board whose tree enables one must give it a node
 IR_RECEIVERS = ("sun6i-a31-ir", "meson-ir", "meson-gxbb-ir", "remotectl")
 # the tools this suite installs, which the image itself does not ship
@@ -96,7 +128,38 @@ TEST_TOOLS = {
 # tree nodes that never get a driver of their own: register banks, buses' QoS, the arch timer
 DRIVERLESS = ("syscon", "qos", "timer", "opp-", "psci", "shmem", "debug")
 # a SoC's crypto engine, not the CPU's instructions (the -ce drivers alone)
-CRYPTO_ENGINE = r"sun8i-ce|^rk|meson|gxl-crypto"
+CRYPTO_ENGINE = r"sun8i-ce|^rk|-rk2$|meson|gxl-crypto"
+# RSA through an engine: fresh keys a size, each one's PKCS#1 SHA-256 signature verified by
+# OpenSSL, then signs timed at one size beside the CPU's; routed by priority, generic's being 100
+RSA_BITS = (1024, 2048, 4096)
+RSA_KEYS = 4
+RSA_TIMED_BITS = 2048
+RSA_SIGNS = 10
+RSA_ROUTE_PRIORITY, RSA_AWAY_PRIORITY = 300, 10
+RSA_SIGN_INFO = b"enc=pkcs1 hash=sha256"
+RSA_DIGEST_BYTES = 32
+# NETLINK_CRYPTO's messages and attribute, and the arm64 keyring syscalls
+NETLINK_CRYPTO, CRYPTO_MSG_DELALG, CRYPTO_MSG_UPDATEALG, CRYPTOCFGA_PRIORITY_VAL = 21, 0x11, 0x12, 1
+NLM_F_REQUEST, NLM_F_ACK = 1, 4
+SYS_ADD_KEY, SYS_KEYCTL = 217, 219
+KEYCTL_UNLINK, KEYCTL_PKEY_SIGN = 9, 27
+# struct keyctl_pkey_params: key, input length, output length, seven spare words that must be 0
+KEYCTL_PKEY_PARAMS = "iII7I"
+KEYCTL_PKEY_SPARE = 7
+KEY_SPEC_PROCESS_KEYRING = -2
+# tcrypt's speed test for each /proc/crypto type the engines serve: in the kernel, as the
+# userspace socket refuses an async driver
+TCRYPT_MODES = {"skcipher": 600, "ahash": 400, "shash": 400}
+# a packet's request and a page, among the sizes tcrypt times; a page is what bulk users ask
+BENCH_BYTES = (256, 4096)
+JUDGED_BYTES = 4096
+TCRYPT_MARK = "box.py tcrypt"
+HMAC_KEY_BYTES = 32
+# a debug build's knob: the next hash times out (1) or wedges the engine (2)
+FAIL_NEXT_HASH = Path("/sys/module/rk_crypto2/parameters/fail_next_job")
+HASH_FAILURES = {"timeout": "1", "wedge": "2"}
+# a default this close to the fastest is as good: the runs' noise
+FASTEST_SLACK = 0.9
 # family.md's baseline: what every kernel config must set
 CONFIG = (
     "CONFIG_FONT_TER16x32=y",
@@ -117,13 +180,14 @@ SUITES = (
     "gpu",
     "input",
     "power",
+    "crypto",
     "soak",
 )
 # what passes, by key: a line no rule names is a measurement, compared run to run
 EMPTY = ("none", "0")
 RULES: list[tuple[str, Callable[[str], bool]]] = [
     (
-        r"units\.failed|dmesg\.deferred|modules\.missing|drivers\.unbound|firmware\.failed"
+        r"units\.failed|units\.autostart|dmesg\.deferred|modules\.missing|drivers\.unbound|firmware\.failed"
         r"|memory\.usable_memory|config\.missing|addresses\.assigned|input\.unnamed"
         r"|usb\.controllers\.unbound|audio\..*\.disabled|glmark2\.unsupported",
         lambda v: v == "none",
@@ -138,20 +202,35 @@ RULES: list[tuple[str, Callable[[str], bool]]] = [
     (r"pstore\.backend|cpu\.supply|planes\.formats|ir\.node", lambda v: v != "none"),
     (r"ram\.verify", lambda v: "verified" in v),
     (r"crypto\.selftests", lambda v: v == "none" or v.endswith("failed: none")),
+    (r"crypto\.bench\..*", lambda v: crypto_default_fastest(v)),
+    (r"crypto\.recovery\..*", lambda v: crypto_recovered(v)),
+    (r"crypto\.rsa\..*", lambda v: rsa_all_verified(v)),
     (r"hwrng", lambda v: v == "none" or int(v.split(": ")[1].split()[0]) >= 200),
     (r"emmc\..*\.wear", lambda v: v.endswith("pre-eol 0x01")),
     (r"eth\..*\.phy", lambda v: "Generic" not in v),
+    (r"eth\..*\.hot", lambda v: v.startswith("not run") or "never" not in v),
     (r".*\.reload|wifi\.restored", lambda v: v.endswith(" s")),
     (r"wifi\.reloads", lambda v: v.split("/")[0] == v.split("/")[1].split()[0]),
-    (r".*\.region\.\w+", lambda v: not v.endswith("not taken")),  # N10: iw reg get shows it
+    (
+        r".*\.region\.\w+",
+        lambda v: not v.endswith("not taken"),
+    ),  # N10: iw reg get shows it
     (r".*\.scan\.unset", lambda v: not v.startswith("0 ")),
     (r".*\.mbits", lambda v: v[:1].isdigit()),
     (r"fio\..*", lambda v: v[:1].isdigit()),
     (r"cpu\.load|soak\.server", lambda v: not v.startswith("failed")),
-    (r"bt.*\.hci\d+", lambda v: "UP RUNNING" in v and set(v.split("errors ")[1]) <= {"0", "+"}),
+    (
+        r"bt.*\.hci\d+",
+        lambda v: "UP RUNNING" in v and set(v.split("errors ")[1]) <= {"0", "+"},
+    ),
     (r"bt.*\.find", lambda v: v != "0"),
     (r"audio\..*\.3s", lambda v: v != "refused" and 2.9 <= float(v) <= 3.3),
+    # a rate off by more than 1.5% plays audibly sharp or flat
+    (r"audio\..*\.2s", lambda v: v != "refused" and 1.97 <= float(v) <= 2.03),
     (r"glmark2\.score", lambda v: v.isdigit()),
+    (r"wake\.remote", lambda v: not re.match(r"0 of [1-9]", v)),
+    (r"boot\.startup", lambda v: v == "running"),
+    (r"boot\.seconds", lambda v: bool(re.fullmatch(r"[\d.]+", v))),
     (r"hdmi\.edid", lambda v: "BAD" not in v),
     (
         r"leds\.driven",
@@ -163,6 +242,10 @@ RULES: list[tuple[str, Callable[[str], bool]]] = [
     (r"rtc\.drift\.s", lambda v: abs(int(v)) <= 2),
     (r"soak\.jobs", lambda v: set(v.split()) <= {"0"}),
     (r"soak\.ping\.loss", lambda v: v != "failed" and float(v.split()[0]) < 1),
+    # changes close together hang the RK3528's DDR: load scaling polls them that close
+    (r"ddr\.governor", lambda v: v != "simple_ondemand"),
+    (r"audio\..*\.hdmi-jack", lambda v: v in ("on connected", "off disconnected")),
+    (r"audio\..*\.hdmi-jack\.follows", lambda v: v == "on with a screen, off without"),
 ]
 TAINT_STAGING, TAINT_OOT, TAINT_UNSIGNED = 1 << 10, 1 << 12, 1 << 13
 SETTLE_PERCENT = 8
@@ -171,12 +254,15 @@ SOAK_SETTLE_S = 30  # how long the soak waits for the server: a radio rejoining 
 SOAK_GRACE_S = 15  # past the soak's end, how long a job may take to finish on its own
 FIO_LAYOUT_S = 120  # fio writes its file first: 512 MB on a slow SD card takes most of this
 BUSY_WAIT_S = 900  # how long a box waits for the iperf3 server other boxes are using
+JACK_WAIT_S = 15  # a forced status reaches the output by DRM's 10 s connector poll at worst
+JACK_POLL_S = 0.2
 
 
 @dataclass(frozen=True)
 class Profile:
     """How long each check runs: short while working, minutes; default for every change, under
-    30 minutes for both kernels; extended for a release, as long as bring-up's own checks."""
+    30 minutes for both kernels; extended for a release, as long as bring-up's own checks.
+    """
 
     ram_verify_s: int
     stream_s: int
@@ -279,6 +365,19 @@ def hottest() -> float:
     return max(temps, default=0) / 1000
 
 
+def cooled(read_temp: Callable[[], float], wait: Callable[[float], None]) -> tuple[float, int]:
+    """The idle temperature once it stops falling, and the seconds that took: read at once, it is
+    the heat of whatever ran before, a kernel's tests or the build."""
+    low, since, waited = read_temp(), 0, 0
+    while since < COOL_STEADY_S and waited < COOL_WAIT_S:
+        wait(COOL_SAMPLE_S)
+        waited += COOL_SAMPLE_S
+        now = read_temp()
+        since = 0 if now < low else since + COOL_SAMPLE_S
+        low = min(low, now)
+    return low, waited
+
+
 def busy() -> tuple[int, int]:
     fields = [int(x) for x in read("/proc/stat").splitlines()[0].split()[1:]]
     return sum(fields) - fields[3] - fields[4], fields[3] + fields[4]
@@ -296,6 +395,33 @@ def settle() -> int:
     return 120
 
 
+def pvtm_levels(log: list[str]) -> dict[str, str]:
+    """Each block's PVTM count and the OPP voltage level it selects, from the kernel's log, as the
+    vendor's (`pvtm=N`, then `pvtm-volt-sel=L`) or next2's (`pvtm N: bin LL`) prints it.
+    """
+    out: dict[str, str] = {}
+    for block, ours in (
+        ("cpu", lambda l: "gpu" not in l.lower()),
+        ("gpu", lambda l: "gpu" in l.lower()),
+    ):
+        lines = [l for l in log if "pvtm" in l and ours(l)]
+        count = next((m.group(1) for l in lines if (m := re.search(r"pvtm[= ](\d+)", l))), None)
+        level = next(
+            (m.group(1) for l in lines if (m := re.search(r"(?:pvtm-volt-sel=|bin L)(\d+)", l))),
+            None,
+        )
+        if count or level:
+            out[block] = f"{count or '?'} L{level if level is not None else '?'}"
+    return out
+
+
+def boot_seconds() -> str:
+    """From the kernel's start to systemd's startup finished, as systemd counts it: a boot past a
+    minute prints as minutes and seconds, which systemd-analyze's line spells."""
+    finished = sh("systemctl show --value -p FinishTimestampMonotonic")
+    return f"{int(finished) / 1e6:.1f}" if finished.isdigit() and int(finished) else NONE
+
+
 def dmesg(levels: str = "") -> list[str]:
     flag = f"-l {levels}" if levels else ""
     return [re.sub(r"^\[ *[\d.]+\] ", "", line) for line in sh(f"dmesg {flag}").splitlines()]
@@ -310,11 +436,17 @@ def system() -> Iterator[Line]:
     yield "tree", f"{sha('/usr/lib/tvb/board.dtb')[:8]} {read('/proc/device-tree/model')}"
     for name in ("id", "name", "pcb"):
         yield f"identity.{name}", read(f"/usr/lib/tvb/board-{name}") or NONE
-    yield "temp.idle.c", f"{hottest():.1f}"
-    yield "boot.seconds", sh("systemd-analyze | grep -oE '= [0-9.]+s' | tr -d '= s'") or NONE
+    temp, waited = cooled(hottest, time.sleep)
+    yield "temp.idle.c", f"{temp:.1f}"
+    yield "temp.idle.cooled.s", str(waited)
+    # systemd-analyze answers only once startup has finished, which a check run at boot can precede
+    yield "boot.startup", sh("systemctl is-system-running --wait", timeout=STARTUP_WAIT_S) or NONE
+    yield "boot.seconds", boot_seconds()
     blame = sh("systemd-analyze blame").splitlines()
     yield "boot.slowest", " ".join(blame[0].split()) if blame else NONE
     yield "units.failed", sh("systemctl --failed --no-legend --plain | awk '{print $1}' | xargs")
+    starting = [u for u in DISPLAY_MANAGERS if sh(f"systemctl is-enabled {u}") == "enabled"]
+    yield "units.autostart", " ".join(starting) or NONE
     warnings = dmesg("err,warn")
     sources = [w.split(":")[0].split(" ")[0] for w in warnings]
     top = max(set(sources), key=sources.count) if sources else NONE
@@ -370,7 +502,8 @@ def sha(path: str, offset: int = 0, size: int = -1) -> str:
 
 def tainted() -> str:
     """The kernel's taint, less what we ship by design: out-of-tree (O), staging (C) and
-    unsigned (E) modules. Anything left, a warning or an oops among them, is a failure."""
+    unsigned (E) modules. Anything left, a warning or an oops among them, is a failure.
+    """
     value = int(read("/proc/sys/kernel/tainted") or 0)
     return str(value & ~(TAINT_OOT | TAINT_STAGING | TAINT_UNSIGNED))
 
@@ -433,6 +566,298 @@ def crypto() -> str:
     return f"{engine} algorithms, failed: {' '.join(failed) or NONE}" if engine else NONE
 
 
+@dataclass(frozen=True)
+class CryptoAlg:
+    name: str
+    driver: str
+    kind: str
+    priority: int
+    keysize: int
+    ivsize: int
+    digestsize: int
+
+
+def crypto_algs(proc: str) -> list[CryptoAlg]:
+    """/proc/crypto's self-tested, callable algorithms, in its order: newest registered first."""
+    algs = []
+    for block in proc.split("\n\n"):
+        f = dict(
+            (k.strip(), v.strip()) for k, _, v in (ln.partition(":") for ln in block.splitlines())
+        )
+        if f.get("selftest") != "passed" or f.get("internal") == "yes" or "driver" not in f:
+            continue
+        algs.append(
+            CryptoAlg(
+                f["name"],
+                f["driver"],
+                f.get("type", ""),
+                int(f.get("priority", "0")),
+                int(f.get("min keysize", "0")),
+                int(f.get("ivsize", "0")),
+                int(f.get("digestsize", "0")),
+            )
+        )
+    return algs
+
+
+def is_engine(driver: str) -> bool:
+    return bool(re.search(CRYPTO_ENGINE, driver))
+
+
+def socket_drivers(algs: list[CryptoAlg], name: str) -> list[CryptoAlg]:
+    """An algorithm's drivers of the types the userspace socket serves."""
+    return [a for a in algs if a.name == name and a.kind in TCRYPT_MODES]
+
+
+def default_driver(algs: list[CryptoAlg], name: str) -> str:
+    """The driver a lookup by name gets: the highest priority, a tie to the newest."""
+    named = socket_drivers(algs, name)
+    top = max(a.priority for a in named)
+    return next(a.driver for a in named if a.priority == top)
+
+
+def contenders(algs: list[CryptoAlg], name: str) -> list[CryptoAlg]:
+    """Each driver of an algorithm, and where none is the CPU's, its mode on the CPU's best
+    cipher: a template nobody asked for is not in /proc/crypto yet."""
+    named = socket_drivers(algs, name)
+    mode, _, inner = name.partition("(")
+    cpu = [a for a in algs if a.name == inner[:-1] and not is_engine(a.driver)]
+    if inner and cpu and all(is_engine(a.driver) for a in named):
+        best = max(cpu, key=lambda a: a.priority)
+        named.append(replace(named[0], driver=f"{mode}({best.driver})", priority=0))
+    return named
+
+
+def tcrypt_rates(log: list[str], kind: str) -> dict[int, float]:
+    """MB/s by request size from a tcrypt speed run's lines: encryption's, or a hash's in one
+    update; a size that failed is absent."""
+    rates: dict[int, float] = {}
+    for line in log:
+        if "decryption" in line:
+            break
+        cipher = re.search(
+            r"(\d+) byte blocks\): \d+ operations in (\d+) seconds \((\d+) bytes", line
+        )
+        digest = re.search(
+            r"(\d+) byte blocks, +(\d+) bytes per update.*opers/sec, +(\d+) bytes/sec", line
+        )
+        if kind == "skcipher" and cipher:
+            rates[int(cipher[1])] = int(cipher[3]) / int(cipher[2]) / 1e6
+        elif kind != "skcipher" and digest and digest[1] == digest[2]:
+            rates[int(digest[1])] = int(digest[3]) / 1e6
+    return rates
+
+
+def tcrypt_log(alg: CryptoAlg, driver: str) -> list[str]:
+    """One driver's tcrypt speed run, its kernel lines; tcrypt always refuses to load once run."""
+    keylen = HMAC_KEY_BYTES if alg.name.startswith("hmac(") else alg.keysize
+    marker = f"{TCRYPT_MARK} {driver} {time.monotonic_ns()}"
+    Path("/dev/kmsg").write_text(marker + "\n")
+    sh(f"modprobe tcrypt mode={TCRYPT_MODES[alg.kind]} alg='{driver}' klen={keylen} sec=1")
+    return after_marker(dmesg(), marker)
+
+
+def tcrypt(alg: CryptoAlg, driver: str) -> dict[int, float]:
+    return tcrypt_rates(tcrypt_log(alg, driver), alg.kind)
+
+
+def tcrypt_failure(log: list[str]) -> str:
+    """The run's first line that is not a timing: why a size has no rate."""
+    found = [l for l in log if re.search(r"fail|error|timed out", l, re.IGNORECASE)]
+    return found[0].split("] ", 1)[-1] if found else "no failure logged"
+
+
+def after_marker(log: list[str], marker: str) -> list[str]:
+    """The lines after a run's marker: a full log buffer drops old lines, so no count holds."""
+    found = [i for i, line in enumerate(log) if line.endswith(marker)]
+    return log[found[-1] + 1 :] if found else []
+
+
+def bench_line(algs: list[CryptoAlg], name: str) -> str:
+    """Each driver's MB/s at each size, the default's, and the fastest at a page."""
+    logs = {a.driver: (a, tcrypt_log(a, a.driver)) for a in contenders(algs, name)}
+    rates = {d: tcrypt_rates(log, a.kind) for d, (a, log) in logs.items()}
+    shown = ", ".join(
+        f"{d} {'/'.join(f'{rs[s]:.0f}' if s in rs else '-' for s in BENCH_BYTES)}"
+        for d, rs in rates.items()
+    )
+    default = default_driver(algs, name)
+    page = {d: rs[JUDGED_BYTES] for d, rs in rates.items() if JUDGED_BYTES in rs}
+    if len(page) < 2:
+        why = "; ".join(f"{d}: {tcrypt_failure(logs[d][1])}" for d in rates if d not in page)
+        return (
+            f"not run: {len(page)} of {len(rates)} drivers timed at {JUDGED_BYTES} B; {shown} MB/s"
+            f"; {why}"
+        )
+    fastest = max(page, key=lambda d: page[d])
+    if default in page and page[default] >= FASTEST_SLACK * page[fastest]:
+        fastest = default
+    return f"{shown} MB/s; default {default}, fastest {fastest}"
+
+
+def crypto_default_fastest(value: str) -> bool:
+    default, _, fastest = value.rpartition("; default ")[2].partition(", fastest ")
+    return default == fastest
+
+
+def crypto_recovered(value: str) -> bool:
+    return value.startswith("provoked: failed, next: ") and value[-1].isdigit()
+
+
+def crypto_recovery(algs: list[CryptoAlg]) -> Iterator[Line]:
+    """A hash made to time out or wedge the engine, then the next one, which must run."""
+    plain = [a for a in algs if is_engine(a.driver) and a.kind == "ahash" and "(" not in a.name]
+    for failure, value in HASH_FAILURES.items():
+        if not plain or not FAIL_NEXT_HASH.exists():
+            yield f"crypto.recovery.{failure}", "not run: no debug build's knob"
+            continue
+        FAIL_NEXT_HASH.write_text(value)
+        provoked = tcrypt(plain[0], plain[0].driver)
+        FAIL_NEXT_HASH.write_text("0")
+        after = tcrypt(plain[0], plain[0].driver).get(BENCH_BYTES[1])
+        verdict = "not failed" if BENCH_BYTES[1] in provoked else "failed"
+        yield f"crypto.recovery.{failure}", (
+            f"provoked: {verdict}, next: {f'{after:.0f}' if after else 'failed'}"
+        )
+
+
+def crypto_msg(driver: str, priority: int | None) -> bytes:
+    """A NETLINK_CRYPTO message: an algorithm's new priority, or None to delete an idle one."""
+    alg = struct.pack("64s64s64sIIII", b"", driver.encode(), b"", 0, 0, 0, 0)
+    attr = b"" if priority is None else struct.pack("HHI", 8, CRYPTOCFGA_PRIORITY_VAL, priority)
+    kind = CRYPTO_MSG_DELALG if priority is None else CRYPTO_MSG_UPDATEALG
+    header = struct.pack("IHHII", 16 + len(alg) + len(attr), kind, NLM_F_REQUEST | NLM_F_ACK, 1, 0)
+    return header + alg + attr
+
+
+def crypto_update(driver: str, priority: int | None) -> int:
+    """The kernel's answer to crypto_msg: 0, or a negative errno."""
+    with socket.socket(socket.AF_NETLINK, socket.SOCK_RAW, NETLINK_CRYPTO) as s:
+        s.bind((0, 0))
+        s.send(crypto_msg(driver, priority))
+        return struct.unpack_from("i", s.recv(4096), 16)[0]
+
+
+@contextlib.contextmanager
+def rsa_routed(engine: CryptoAlg, priority: int, away: str) -> Iterator[None]:
+    """RSA signs through the engine or away from it: its priority set, the other PKCS#1
+    instance deleted so the next lookup builds one over the preferred RSA."""
+    crypto_update(engine.driver, priority)
+    crypto_update(f"pkcs1({away},sha256)", None)
+    try:
+        yield
+    finally:
+        crypto_update(engine.driver, engine.priority)
+
+
+def keyring_sign(der: bytes, digest: bytes, bits: int) -> bytes:
+    """A PKCS#8 private key into the process keyring, a digest signed by it, the key dropped:
+    the signature is the key's size, and the kernel takes no other."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.syscall.restype = ctypes.c_long
+    key = libc.syscall(
+        SYS_ADD_KEY, b"asymmetric", b"tvb-rsa", der, len(der), KEY_SPEC_PROCESS_KEYRING
+    )
+    if key < 0:
+        return b""
+    out = ctypes.create_string_buffer(bits // 8)
+    params = struct.pack(KEYCTL_PKEY_PARAMS, key, len(digest), len(out), *(0,) * KEYCTL_PKEY_SPARE)
+    size = libc.syscall(SYS_KEYCTL, KEYCTL_PKEY_SIGN, params, RSA_SIGN_INFO, digest, out)
+    libc.syscall(SYS_KEYCTL, KEYCTL_UNLINK, key, KEY_SPEC_PROCESS_KEYRING)
+    return out.raw[:size] if size > 0 else b""
+
+
+def rsa_key(bits: int, root: Path) -> tuple[bytes, Path]:
+    """A fresh RSA key: its PKCS#8 DER, and its public key's PEM."""
+    pem, der, pub = root / "k.pem", root / "k.der", root / "p.pem"
+    sh(f"openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:{bits} -out {pem}")
+    sh(f"openssl pkcs8 -topk8 -nocrypt -outform DER -in {pem} -out {der}")
+    sh(f"openssl pkey -in {pem} -pubout -out {pub}")
+    return (der.read_bytes() if der.exists() else b""), pub
+
+
+def rsa_verified(digest: bytes, sig: bytes, pub: Path, root: Path) -> bool:
+    (root / "dig").write_bytes(digest)
+    (root / "sig").write_bytes(sig)
+    out = sh(
+        f"openssl pkeyutl -verify -pubin -inkey {pub} -in {root / 'dig'} -sigfile {root / 'sig'}"
+        " -pkeyopt digest:sha256"
+    )
+    return bool(sig) and "Verified Successfully" in out
+
+
+def rsa_rate(bits: int, digest: bytes, root: Path) -> float:
+    der, _ = rsa_key(bits, root)
+    start = time.monotonic()
+    signed = sum(bool(keyring_sign(der, digest, bits)) for _ in range(RSA_SIGNS))
+    return signed / (time.monotonic() - start)
+
+
+def rsa_through() -> str:
+    return " ".join(
+        a.driver for a in crypto_algs(read("/proc/crypto")) if a.driver.startswith("pkcs1(rsa")
+    )
+
+
+def rsa_line(verified: dict[int, int], rate: float, cpu_rate: float, through: str) -> str:
+    shown = ", ".join(f"{n}/{RSA_KEYS} at {b}" for b, n in verified.items())
+    return (
+        f"verified {shown}; {RSA_TIMED_BITS} bits {rate:.1f}/s, the CPU's {cpu_rate:.1f}/s;"
+        f" through {through}"
+    )
+
+
+def rsa_all_verified(value: str) -> bool:
+    pairs = re.findall(r"(\d+)/(\d+) at", value)
+    return bool(pairs) and all(a == b for a, b in pairs)
+
+
+def crypto_rsa() -> Iterator[Line]:
+    """Each engine's RSA with fresh keys, about half carrying DER's leading zero byte in a
+    number, each signature verified, then its rate beside the CPU's."""
+    engines = [
+        a for a in crypto_algs(read("/proc/crypto")) if a.name == "rsa" and is_engine(a.driver)
+    ]
+    if not engines:
+        yield "crypto.rsa", NONE
+        return
+    if not have("openssl"):
+        yield "crypto.rsa", "not run: no openssl"
+        return
+    sh("modprobe pkcs8_key_parser")
+    digest = os.urandom(RSA_DIGEST_BYTES)
+    for engine in engines:
+        with tempfile.TemporaryDirectory(dir="/var/tmp") as tmp:
+            root = Path(tmp)
+            with rsa_routed(engine, RSA_ROUTE_PRIORITY, "rsa-generic"):
+                verified = {}
+                for bits in RSA_BITS:
+                    keys = (rsa_key(bits, root) for _ in range(RSA_KEYS))
+                    verified[bits] = sum(
+                        rsa_verified(digest, keyring_sign(der, digest, bits), pub, root)
+                        for der, pub in keys
+                    )
+                rate = rsa_rate(RSA_TIMED_BITS, digest, root)
+                through = rsa_through()
+            with rsa_routed(engine, RSA_AWAY_PRIORITY, engine.driver):
+                cpu_rate = rsa_rate(RSA_TIMED_BITS, digest, root)
+        yield f"crypto.rsa.{engine.driver}", rsa_line(verified, rate, cpu_rate, through)
+
+
+def crypto_bench() -> Iterator[Line]:
+    """Every algorithm an engine serves: each driver against the CPU's, which one is used, and
+    the engine recovering from a failed job."""
+    algs = crypto_algs(read("/proc/crypto"))
+    served = sorted({a.name for a in algs if is_engine(a.driver) and a.kind in TCRYPT_MODES})
+    if not served:
+        yield "crypto.bench", NONE
+        return
+    for name in served:
+        yield f"crypto.bench.{name}", bench_line(algs, name)
+    yield from crypto_recovery(algs)
+    yield from crypto_rsa()
+
+
 def hwrng() -> str:
     current = read("/sys/class/misc/hw_random/rng_current")
     if not current or current == "none":
@@ -445,7 +870,8 @@ def hwrng() -> str:
 
 def iommu_lines(interrupts: str) -> list[str]:
     """The /proc/interrupts lines an IOMMU alone serves: one it shares with its master (VOP2's)
-    counts the master's own interrupts, and that IOMMU's faults show in iommu.faults instead."""
+    counts the master's own interrupts, and that IOMMU's faults show in iommu.faults instead.
+    """
     out = []
     for line in interrupts.splitlines():
         actions = re.split(r"\s(?:Level|Edge)\s", line, maxsplit=1)[-1].split(",")
@@ -578,7 +1004,10 @@ def ram_verify() -> str:
 def stream(workers: int) -> str:
     if not have("stress-ng"):
         return "no stress-ng"
-    out = sh(f"stress-ng --stream {workers} -t {PROFILE.stream_s}s --metrics 2>&1", timeout=60)
+    out = sh(
+        f"stress-ng --stream {workers} -t {PROFILE.stream_s}s --metrics 2>&1",
+        timeout=60,
+    )
     rate = re.findall(r"memory rate: ([\d.]+) MB read", out)
     return f"{sum(float(r) for r in rate):.0f} MB/s read" if rate else NONE
 
@@ -602,6 +1031,9 @@ def cpu() -> Iterator[Line]:
                 steps.append(f"{int(khz) // 1000}@{volts}")
         Path(f"{policy}/scaling_governor").write_text(governor)
     yield "cpu.ladder", " ".join(steps) or ",".join(ladder) or NONE
+    for block, line in pvtm_levels(dmesg()).items():
+        yield f"pvtm.{block}", line
+    yield from ddr()
     if Path("/proc/device-tree/cpus/cpu@0/cpu-supply").exists():
         yield "cpu.supply", read(f"{supply}/name") if supply else NONE
     trips = sorted(
@@ -613,8 +1045,10 @@ def cpu() -> Iterator[Line]:
         return
     load = subprocess.Popen(["stress-ng", "--cpu", "0", "-t", f"{PROFILE.load_s}s", "-q"])
     hot, slowest, cooling = 0.0, 10**9, 0
-    while load.poll() is None:
-        time.sleep(5)
+    while True:
+        time.sleep(LOAD_SAMPLE_S)
+        if load.poll() is not None:  # sampled after the load, the governor is already stepping down
+            break
         hot = max(hot, hottest())
         slowest = min(slowest, int(read(f"{policy}/scaling_cur_freq") or 0))
         states = [
@@ -700,6 +1134,53 @@ def board_nets(leaf: str) -> list[str]:
     return sorted(n.name for n in found if not on_usb(os.path.realpath(f"{n}/device")))
 
 
+# a PHY's hot receive-detect switch, by a debug build's threshold: under the SoC's temperature,
+# then over any it reaches; each switch's log line awaited
+PHY_HOT_KNOB = "/sys/module/*/parameters/hot_mc"
+PHY_HOT_BELOW_MC = 5000
+PHY_HOT_NEVER_MC = 200000
+PHY_HOT_WAIT_S = 5
+
+
+def soc_temp_mc() -> int:
+    for zone in glob.glob("/sys/class/thermal/thermal_zone*"):
+        if read(f"{zone}/type") == "soc-thermal":
+            return int(read(f"{zone}/temp") or 0)
+    return 0
+
+
+def awaited(pattern: str, seen: int) -> float | None:
+    """Seconds until a log line past the first seen matches, None at PHY_HOT_WAIT_S."""
+    start = time.monotonic()
+    while time.monotonic() - start < PHY_HOT_WAIT_S:
+        if any(re.search(pattern, line) for line in dmesg()[seen:]):
+            return time.monotonic() - start
+        time.sleep(0.1)
+    return None
+
+
+def phy_hot(name: str) -> str:
+    knobs = glob.glob(PHY_HOT_KNOB)
+    if not knobs:
+        return "not run: no debug build's knob"
+    knob, temp = Path(knobs[0]), soc_temp_mc()
+    if not temp:
+        return "not run: no soc-thermal zone"
+    sh(f"ip link set {name} up")
+    saved = knob.read_text().strip()
+    try:
+        seen = len(dmesg())
+        knob.write_text(str(temp - PHY_HOT_BELOW_MC))
+        hot = awaited(r"receive detect at 160 mV", seen)
+        seen = len(dmesg())
+        knob.write_text(str(PHY_HOT_NEVER_MC))
+        cool = awaited(r"receive detect at 260 mV", seen)
+    finally:
+        knob.write_text(saved)
+    shown = lambda s: f"{s:.1f} s" if s is not None else "never"
+    return f"160 mV at {temp / 1000:.1f} C in {shown(hot)}, back to 260 mV in {shown(cool)}"
+
+
 def network() -> Iterator[Line]:
     for name in board_nets("device"):
         path = f"/sys/class/net/{name}"
@@ -708,6 +1189,7 @@ def network() -> Iterator[Line]:
     for name in board_nets("phydev"):
         driver = Path(os.path.realpath(f"/sys/class/net/{name}/phydev/driver")).name
         yield f"eth.{name}.phy", driver
+        yield f"eth.{name}.hot", phy_hot(name)
         carrier = read(f"/sys/class/net/{name}/carrier") == "1"
         yield f"eth.{name}.link", (
             f"{read(f'/sys/class/net/{name}/speed')} Mb/s" if carrier else "no cable"
@@ -738,6 +1220,8 @@ def throughputs(iperf: str) -> Iterator[Line]:
     for name in board_nets("phydev"):
         if read(f"/sys/class/net/{name}/carrier") == "1":
             yield from loaded(f"eth.{name}", iperf, name)
+        else:
+            yield f"eth.{name}.mbits", "not run: no cable"
     for wifi in board_nets("wireless"):
         driver = Path(os.path.realpath(f"/sys/class/net/{wifi}/device/driver/module")).name
         for mode, _ in MODES.get(driver, [("", True)]):
@@ -754,7 +1238,16 @@ def loaded(tag: str, iperf: str, interface: str) -> Iterator[Line]:
     yield from throughput(tag, iperf, interface)
     if have("stress-ng"):
         load = subprocess.Popen(
-            ["stress-ng", "--cpu", "0", "--hdd", "1", "-t", f"{PROFILE.loaded_s}s", "-q"],
+            [
+                "stress-ng",
+                "--cpu",
+                "0",
+                "--hdd",
+                "1",
+                "-t",
+                f"{PROFILE.loaded_s}s",
+                "-q",
+            ],
             cwd="/var/tmp",
         )
         yield from throughput(f"{tag}.loaded", iperf, interface)
@@ -830,7 +1323,7 @@ def radio(tag: str, wifi: str) -> Iterator[Line]:
         time.sleep(2)
         got = re.search(r"country (\w+)", sh("iw reg get"))
         country = got.group(1) if got else NONE
-        yield f"{tag}.region.{region}", country if country == region else f"{country}, not taken"
+        yield f"{tag}.region.{region}", (country if country == region else f"{country}, not taken")
     sh("iw reg set 00")
 
 
@@ -869,7 +1362,9 @@ def throughput(tag: str, server: str, interface: str) -> Iterator[Line]:
             got = re.search(r"tx bitrate: ([\d.]+ MBit/s)", sh(f"iw dev {interface} link"))
             rate = f", tx {got.group(1)}" if got else ""
         median = sorted(runs)[len(runs) // 2] if runs else None
-        yield f"{tag}.{way}.mbits", f"{median:.0f}{rate}" if median is not None else f"failed{rate}"
+        yield f"{tag}.{way}.mbits", (
+            f"{median:.0f}{rate}" if median is not None else f"failed{rate}"
+        )
 
 
 def bluetooth(tag: str) -> Iterator[Line]:
@@ -934,8 +1429,13 @@ def display() -> Iterator[Line]:
 def audio() -> Iterator[Line]:
     for card in sorted(glob.glob("/proc/asound/card[0-9]*")):
         number, name = card.removeprefix("/proc/asound/card"), read(f"{card}/id")
-        for rate in (44100, 48000):
-            yield f"audio.{name}.{rate}.3s", timed_play(number, rate, 2)
+        rates = offered_rates(number)
+        yield f"audio.{name}.rates", " ".join(map(str, rates)) or NONE
+        for rate in rates:
+            yield f"audio.{name}.{rate}.2s", rate_seconds(number, rate)
+        if FORMAT_RATE in rates:
+            for sample in offered_samples(number):
+                yield f"audio.{name}.{sample}.2s", rate_seconds(number, FORMAT_RATE, sample)
         most = max_channels(number)
         if "hdmi" in name.lower() and not hdmi_connected():
             yield f"audio.{name}.multichannel", "not run: no HDMI sink to offer channels"
@@ -947,6 +1447,30 @@ def audio() -> Iterator[Line]:
             sh(f"amixer -c {number} contents"),
         )
         yield f"audio.{name}.jacks", " ".join(f"{j}={v}" for j, v in jacks) or NONE
+        if "hdmi" in name.lower():
+            yield f"audio.{name}.hdmi-jack", hdmi_jack(jacks)
+            yield f"audio.{name}.hdmi-jack.follows", hdmi_jack_follows(number)
+
+
+def hdmi_jack(jacks: list[tuple[str, str]]) -> str:
+    """An HDMI card's jack beside its connector: on with a sink, off without."""
+    if not jacks:
+        return "no jack"
+    return f"{jacks[0][1]} {'connected' if hdmi_connected() else 'disconnected'}"
+
+
+def ddr() -> Iterator[Line]:
+    """The DDR rate's governor, rate and transitions since boot."""
+    found = [
+        f"/sys/class/devfreq/{n}" for n in DDR_DEVFREQ if os.path.isdir(f"/sys/class/devfreq/{n}")
+    ]
+    if not found:
+        yield "ddr.governor", "no DDR devfreq"
+        return
+    yield "ddr.governor", read(f"{found[0]}/governor")
+    yield "ddr.rate", read(f"{found[0]}/cur_freq")
+    total = re.search(r"Total transition : (\d+)", read(f"{found[0]}/trans_stat"))
+    yield "ddr.transitions", total.group(1) if total else NONE
 
 
 def max_channels(card: str) -> int:
@@ -976,13 +1500,92 @@ def screen() -> Iterator[None]:
                 Path(status).write_text("detect")
 
 
+def jack_value(card: str) -> str:
+    """The card's first jack's state, on or off."""
+    found = re.search(
+        r"name='[^']*Jack[^']*'.*?\n.*?\n\s*: values=(\w+)",
+        sh(f"amixer -c {card} contents"),
+    )
+    return found.group(1) if found else NONE
+
+
+def jack_settled(card: str, state: str) -> str:
+    """The jack's state once it reads state, or as it reads at JACK_WAIT_S."""
+    end = time.monotonic() + JACK_WAIT_S
+    while (value := jack_value(card)) != state and time.monotonic() < end:
+        time.sleep(JACK_POLL_S)
+    return value
+
+
+def hdmi_jack_follows(card: str) -> str:
+    """With no screen attached, the HDMI jack under a synthetic screen, then after it."""
+    if hdmi_connected():
+        return "not run: a screen is attached"
+    with hdr_sink(hdr_edid(SINKS["SDR"])) as stood_in:
+        if not stood_in:
+            return "not run: no EDID override"
+        plugged = jack_settled(card, "on")
+    return f"{plugged} with a screen, {jack_settled(card, 'off')} without"
+
+
 def hdmi_connected() -> bool:
     return any(
         read(f"{c}/status") == "connected" for c in glob.glob("/sys/class/drm/card*-HDMI-A-*")
     )
 
 
-def timed_play(card: str, rate: int, channels: int) -> str:
+def offered_samples(card: str) -> list[str]:
+    """The PCM sample formats the card's PCM offers, its IEC 958 subframes aside: the datasheet's
+    16 to 32 bits."""
+    out = subprocess.run(
+        ["aplay", "-D", f"hw:{card},0", "--dump-hw-params", "-s", "1", "/dev/zero"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    found = re.search(r"^FORMAT:\s*(.*)$", out.stderr + out.stdout, re.M)
+    return [f for f in found.group(1).split() if f.startswith(("S", "U"))] if found else []
+
+
+def offered_rates(card: str) -> list[int]:
+    """The AUDIO_RATES the card's PCM plays as asked: hw: plays one it lacks at the nearest, with
+    only a warning."""
+    offered = []
+    for rate in AUDIO_RATES:
+        cmd = [
+            "aplay",
+            "-D",
+            f"hw:{card},0",
+            "-r",
+            str(rate),
+            "-c",
+            "2",
+            "-f",
+            "S16_LE",
+        ]
+        out = subprocess.run(
+            cmd + ["-s", str(RATE_PROBE_SAMPLES), "/dev/zero"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if not out.returncode and "not accurate" not in out.stderr:
+            offered.append(rate)
+    return offered
+
+
+def rate_seconds(card: str, rate: int, sample: str = "S16_LE") -> str:
+    """How long 2 s of audio at rate takes to play: a 3 s play less a 1 s one, so the silence that
+    pads the last period, constant, cancels out."""
+    short, long = timed_play(card, rate, 2, 1, sample), timed_play(card, rate, 2, 3, sample)
+    if "refused" in (short, long):
+        return "refused"
+    return f"{float(long) - float(short):.3f}"
+
+
+def timed_play(
+    card: str, rate: int, channels: int, seconds: int = 3, sample: str = "S16_LE"
+) -> str:
     start = time.monotonic()
     out = subprocess.run(
         [
@@ -993,11 +1596,11 @@ def timed_play(card: str, rate: int, channels: int) -> str:
             "-r",
             str(rate),
             "-f",
-            "S16_LE",
+            sample,
             "-c",
             str(channels),
             "-d",
-            "3",
+            str(seconds),
             "/dev/zero",
         ],
         capture_output=True,
@@ -1027,7 +1630,34 @@ def disabled_routes(card: str) -> str:
 # display.md H13
 
 
+def gpu_ladder() -> str:
+    """The GPU's devfreq rates, each with its rail's voltage where a regulator supplies the GPU
+    alone to scale: system.md S25, read against stock's ladder."""
+    found = [d for d in sorted(glob.glob("/sys/class/devfreq/*")) if "gpu" in Path(d).name]
+    if not found:
+        return "no GPU devfreq"
+    dev = found[0]
+    rates = read(f"{dev}/available_frequencies").split()
+    name = Path(dev).name
+    rails = [r for r in glob.glob("/sys/class/regulator/regulator.*") if glob.glob(f"{r}/{name}-*")]
+    governor = read(f"{dev}/governor")
+    if not rails or "userspace" not in read(f"{dev}/available_governors"):
+        return f"{' '.join(str(int(r) // 1000000) for r in rates)} MHz, the rail fixed"
+    steps = []
+    with contextlib.suppress(OSError):
+        Path(f"{dev}/governor").write_text("userspace")
+        for rate in rates:
+            Path(f"{dev}/userspace/set_freq").write_text(rate)
+            time.sleep(0.5)
+            steps.append(
+                f"{int(rate) // 1000000}@{int(read(f'{rails[0]}/microvolts') or 0) // 1000}"
+            )
+    Path(f"{dev}/governor").write_text(governor)
+    return " ".join(steps) or NONE
+
+
 def gpu() -> Iterator[Line]:
+    yield "gpu.ladder", gpu_ladder()
     if not have("glmark2-es2-drm"):
         yield "glmark2", "no glmark2"
         return
@@ -1076,7 +1706,7 @@ def input_() -> Iterator[Line]:
         wake = read(f"{rc}/device/power/wakeup") or "?"
         yield f"ir.{Path(rc).name}.protocols", f"{' '.join(protocols) or NONE}, wake {wake}"
     if enabled(*IR_RECEIVERS):
-        yield "ir.node", "/dev/input/ir-remote" if Path("/dev/input/ir-remote").exists() else NONE
+        yield "ir.node", ("/dev/input/ir-remote" if Path("/dev/input/ir-remote").exists() else NONE)
     yield "ir.tables", remotectl_tables()
     yield "usb.devices", str(len(sh("lsusb").splitlines()))
     controllers = [
@@ -1104,7 +1734,7 @@ def input_() -> Iterator[Line]:
         )
         vendor = 0x168  # KEY_VENDOR
         bits = int("".join(f"{int(w, 16):016x}" for w in caps.split()), 16) if caps else 0
-        yield "button.recovery", "KEY_VENDOR" if bits >> vendor & 1 else "lacks KEY_VENDOR"
+        yield "button.recovery", ("KEY_VENDOR" if bits >> vendor & 1 else "lacks KEY_VENDOR")
     else:
         yield "button.recovery", NONE
     yield "leds", " ".join(map(led, sorted(glob.glob("/sys/class/leds/*")))) or NONE
@@ -1165,7 +1795,8 @@ def buttons_idle() -> str:
         compatible = read(node)
         if "adc-keys" in compatible:
             idle = int.from_bytes(
-                Path(Path(node).parent / "keyup-threshold-microvolt").read_bytes(), "big"
+                Path(Path(node).parent / "keyup-threshold-microvolt").read_bytes(),
+                "big",
             )
             raw = [read(f) for f in glob.glob("/sys/bus/iio/devices/iio:device*/in_voltage*_raw")]
             out.append(f"adc-keys keyup {idle // 1000} mV, channels {' '.join(raw) or '?'}")
@@ -1186,6 +1817,21 @@ def led(path: str) -> str:
 # power.md
 
 
+def remote_wake() -> str:
+    """How many of the box's IR receivers may wake it from sleep, by name: a remote that cannot
+    wake a sleeping box strands it, its power key the only way to sleep."""
+    receivers = [
+        r for r in sorted(glob.glob("/sys/class/rc/rc*")) if "[cec]" not in read(f"{r}/protocols")
+    ]
+    if not receivers:
+        return "no IR receiver"
+    armed = [r for r in receivers if read(f"{r}/device/power/wakeup") == "enabled"]
+    names = " ".join(
+        f"{Path(r).name}:{read(f'{r}/device/power/wakeup') or 'none'}" for r in receivers
+    )
+    return f"{len(armed)} of {len(receivers)} armed: {names}"
+
+
 def power(sleep: int) -> Iterator[Line]:
     wakers = [
         Path(root).parent.name
@@ -1194,6 +1840,7 @@ def power(sleep: int) -> Iterator[Line]:
     ]
     yield "wake.sources", " ".join(sorted(set(wakers))) or NONE
     yield "sleep.states", read("/sys/power/mem_sleep") or NONE
+    yield "wake.remote", remote_wake()
     rtc = read("/sys/class/rtc/rtc0/name")
     yield "rtc", rtc or NONE
     if rtc:
@@ -1242,7 +1889,7 @@ def soak(seconds: int, iperf: str) -> Iterator[Line]:
             "1",
             "-t",
             f"{seconds}s",
-            "-q",
+            "--metrics-brief",
         ]
     ]
     if have("glmark2-es2-drm"):
@@ -1280,8 +1927,15 @@ def soak(seconds: int, iperf: str) -> Iterator[Line]:
     yield "soak.c", f"{hot:.1f} max over {seconds} s"
     yield "soak.warnings", f"{len(new)}: {'; '.join(new[:3])}" if new else "0"
     yield "soak.jobs", " ".join(str(code) for code in codes)
+    yield "soak.cpu.ops", stressor_ops(outputs[0], "cpu")
     if iperf:
         yield "soak.ping.loss", f"{loss.group(1)} %" if loss else "failed"
+
+
+def stressor_ops(metrics: str, stressor: str) -> str:
+    """A stressor's bogo ops from stress-ng's --metrics-brief: the work done, beside its heat."""
+    found = re.search(rf"metrc: \[\d+\] {stressor} +(\d+)", metrics)
+    return found.group(1) if found else NONE
 
 
 def reachable(host: str, seconds: int) -> bool:
@@ -1344,6 +1998,7 @@ def main() -> int:
         "gpu": gpu,
         "input": input_,
         "power": lambda: power(sleep_s),
+        "crypto": crypto_bench,
         "soak": lambda: soak(soak_s, args.iperf),
     }
     failed = False

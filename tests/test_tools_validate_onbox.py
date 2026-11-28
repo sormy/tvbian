@@ -113,7 +113,10 @@ class OnboxTest(unittest.TestCase):
         state = onbox.State(pending=onbox.Pending("step", "boot-a", 0.0, "soak"))
         soak = onbox.Step("soak", ["sh", "-c", "touch ran"], 30)
         plan = onbox.Plan("tanix-tx1-v2", ["6.18.63-tvb-sunxi64"], [soak], 0)
-        with mock.patch.object(onbox, "boot_id", return_value="boot-b"):
+        with (
+            mock.patch.object(onbox, "boot_id", return_value="boot-b"),
+            mock.patch.object(onbox, "clock_synced", return_value=True),
+        ):
             onbox.ended(state, out)
             self.assertTrue(onbox.carry_on(plan, state, out))
         self.assertFalse((self.dir / "ran").exists())
@@ -134,10 +137,27 @@ class OnboxTest(unittest.TestCase):
                 with (
                     mock.patch.object(onbox, "boot_id", return_value="boot-b"),
                     mock.patch.object(onbox, "booted_at", return_value=back_s),
+                    mock.patch.object(onbox, "clock_synced", return_value=True),
                 ):
                     onbox.ended(state, out)
                 self.assertEqual(state.recovery, recovery)
                 self.assertEqual((out / "recovery.txt").read_text().splitlines()[1:], tail)
+
+    def test_a_reset_on_an_unset_clock_is_not_timed(self) -> None:
+        onbox.RESULTS, onbox.PSTORE = self.dir / "results", self.dir / "pstore"
+        out = self.dir / "unset"
+        out.mkdir()
+        state = onbox.State(pending=onbox.Pending("panic", "boot-a", 1000.0), recovery=1)
+        with (
+            mock.patch.object(onbox, "boot_id", return_value="boot-b"),
+            mock.patch.object(onbox, "booted_at", return_value=950.0),
+            mock.patch.object(onbox, "clock_synced", return_value=False),
+        ):
+            onbox.ended(state, out)
+        lines = (out / "recovery.txt").read_text().splitlines()
+        self.assertIn("unknown, the clock not set by NTP", lines[0])
+        self.assertIn("UNTESTED recovery.panic.timely: no set clock to time the reset by", lines)
+        self.assertEqual(state.recovery, 1)
 
     def test_a_crashed_step_is_its_failure_and_the_run_goes_on(self) -> None:
         onbox.HERE, onbox.RESULTS = self.dir, self.dir / "results"

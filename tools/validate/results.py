@@ -9,7 +9,9 @@ from dataclasses import dataclass
 from fnmatch import fnmatch
 from pathlib import Path
 
-from video import FAILING
+from video import FAILING, NOT_RUN
+
+NOT_RUN_REASON = {"skipped": "skipped", "memory": "past this box's memory", "untested": "untested"}
 
 SKIPPED = "77"  # a step's exit status for nothing to test on this box
 TRACEBACK = "Traceback (most recent call last):"
@@ -45,11 +47,10 @@ class Verdicts:
             if line.startswith("{") and '"verdict"' in line:  # video.py's records
                 record = json.loads(line)
                 case = f"{record.get('suite')} {record.get('codec')} {record.get('size')}"
-                if (
-                    record["verdict"] == "skipped"
-                ):  # a --skip hazard, or past the box: recorded, never run
+                if record["verdict"] in NOT_RUN:  # recorded, never run
+                    reason = NOT_RUN_REASON[record["verdict"]]
                     why = f", {record['why']}" if "why" in record else ""
-                    found.untested.append(f"video {case}: skipped{why}")
+                    found.untested.append(f"video {case}: {reason}{why}")
                     continue
                 found.checks += 1
                 if record["verdict"] in FAILING:  # refused or unoffered: the engine's limit
@@ -61,7 +62,7 @@ class Verdicts:
                 key = rest.split(":")[0].split()[0] if rest else ""
                 shown = f"{rest}: {values[key]}" if key in values else rest
                 (found.fails if word == "FAIL" else found.untested).append(shown)
-            elif " " in line and not line.startswith(("exit ", "#", "NOTE", "RECORD")):
+            elif " " in line and not line.startswith(("exit ", "#", "NOTE", "RECORD", "PROBE")):
                 found.checks += 1
         if why := crash(path):  # the suite's own bug: no check after it ran
             found.fails.insert(0, f"CRASHED: {why}")
