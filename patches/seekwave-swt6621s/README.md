@@ -34,7 +34,8 @@ apply.
   It is asked for with `firmware_request_nowarn()`. Not submitted upstream.
 - `0016` — the firmware answers `SKW_CMD_GET_STA` with 172 bytes of the driver's 385, everything to
   the receive rate. The driver warned on each poll and reported the missing airtime and inactive
-  time as zero; it now fills only what the reply carries and reports a short reply once. Not
+  time as zero; it now fills only what the reply carries and reports a short reply once. The reply's
+  length comes back while the command lock is still held, so a later command cannot change it. Not
   submitted upstream.
 
 ## Mainline

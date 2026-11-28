@@ -7,10 +7,61 @@ airtime percentages and the station info after it. The driver warned
 on every poll, and read the missing fields as zeros it reported, the
 station's inactive time among them. Record each reply's length; report
 a shorter one once per command, warn only on a longer one, and fill
-the fields the reply carries.
+the fields the reply carries. The length is handed back while the
+command lock is still held, so a later command cannot change it.
 
 Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
+diff --git a/drivers/swt6621s_wifi/skw_cfg80211.c b/drivers/swt6621s_wifi/skw_cfg80211.c
+--- a/drivers/swt6621s_wifi/skw_cfg80211.c
++++ b/drivers/swt6621s_wifi/skw_cfg80211.c
+@@ -2269,6 +2269,7 @@
+ 	struct skw_station_params params = {0};
+ 	struct skw_get_sta_resp get_sta_resp;
+ 	struct skw_iface *iface = netdev_priv(dev);
++	u16 reply_len;
+ 
+ 	// skw_dev_dbg(dev, "mac: %pM\n", mac);
+ 
+@@ -2286,9 +2287,9 @@
+ 	params.timestamp = ts;
+ 	skw_ether_copy(params.mac, mac);
+ 
+-	ret = skw_send_msg(wiphy, dev, SKW_CMD_GET_STA, &params,
+-			   sizeof(params), &get_sta_resp,
+-			   sizeof(struct skw_get_sta_resp));
++	ret = skw_send_msg_reply(wiphy, dev, SKW_CMD_GET_STA, &params,
++				 sizeof(params), &get_sta_resp,
++				 sizeof(struct skw_get_sta_resp), &reply_len);
+ 	if (ret) {
+ 		skw_dev_warn(dev, "failed, ret: %d\n", ret);
+ 		return ret;
+@@ -2348,8 +2349,10 @@
+ 			get_sta_resp.filter_drop_offload_cnt,
+ 			sizeof(get_sta_resp.filter_drop_offload_cnt));
+ 
+-		ctx->peer->tx.percent = get_sta_resp.tx_percent;
+-		ctx->peer->rx.percent = get_sta_resp.rx_percent;
++		if (reply_len >= offsetofend(struct skw_get_sta_resp, rx_percent)) {
++			ctx->peer->tx.percent = get_sta_resp.tx_percent;
++			ctx->peer->rx.percent = get_sta_resp.rx_percent;
++		}
+ 
+ 		if (is_skw_ap_mode(iface)) {
+ 			sinfo->tx_packets = ctx->peer->tx.pkts;
+@@ -2368,8 +2371,10 @@
+ 	skw_hex_dump("get_sta_resp.sinfo:", &get_sta_resp.sinfo,
+ 		sizeof(get_sta_resp.sinfo), false);
+ 
+-	sinfo->inactive_time = get_sta_resp.sinfo.inactive_time;
+-	sinfo->filled |= SKW_BIT_ULL(NL80211_STA_INFO_INACTIVE_TIME);
++	if (reply_len >= offsetofend(struct skw_get_sta_resp, sinfo.inactive_time)) {
++		sinfo->inactive_time = get_sta_resp.sinfo.inactive_time;
++		sinfo->filled |= SKW_BIT_ULL(NL80211_STA_INFO_INACTIVE_TIME);
++	}
+ 
+ //	skw_dev_dbg(dev, "tx packets:%u tx_bytes:%llu rx_packets:%u rx_bytes:%llu\n",
+ //		sinfo->tx_packets, sinfo->tx_bytes,
 diff --git a/drivers/swt6621s_wifi/skw_core.h b/drivers/swt6621s_wifi/skw_core.h
 --- a/drivers/swt6621s_wifi/skw_core.h
 +++ b/drivers/swt6621s_wifi/skw_core.h
@@ -26,17 +77,56 @@ diff --git a/drivers/swt6621s_wifi/skw_core.h b/drivers/swt6621s_wifi/skw_core.h
 diff --git a/drivers/swt6621s_wifi/skw_msg.c b/drivers/swt6621s_wifi/skw_msg.c
 --- a/drivers/swt6621s_wifi/skw_msg.c
 +++ b/drivers/swt6621s_wifi/skw_msg.c
-@@ -28,6 +28,9 @@
- #include "skw_timer.h"
- #include "skw_rx.h"
- #include "skw_work.h"
-+
-+/* commands whose firmware replies shorter than the driver's struct, reported once */
-+static DECLARE_BITMAP(skw_short_reply_seen, SKW_CMD_NUM);
- #include "skw_calib.h"
+@@ -32,6 +32,9 @@
  #include "trace.h"
  #include "skw_dfs.h"
-@@ -2127,10 +2130,14 @@
+ 
++/* commands whose firmware replies shorter than the driver's struct, reported once */
++static DECLARE_BITMAP(skw_short_reply_seen, SKW_CMD_NUM);
++
+ static int skw_event_scan_complete(struct skw_core *skw,
+ 			struct skw_iface *iface, void *buf, int len,
+ 			struct skw_skb_rxcb *cb)
+@@ -2065,10 +2068,10 @@
+ 	return ret > 0 ? 0 - skw->cmd.status : ret;
+ }
+ 
+-int skw_msg_xmit_timeout(struct wiphy *wiphy, int dev_id, int cmd,
+-			 void *buf, int buf_len, void *arg, int arg_size,
+-			 char *name, unsigned long timeout,
+-			 unsigned long extra_flags)
++int skw_msg_xmit_reply(struct wiphy *wiphy, int dev_id, int cmd,
++		       void *buf, int buf_len, void *arg, int arg_size,
++		       char *name, unsigned long timeout,
++		       unsigned long extra_flags, u16 *reply_len)
+ {
+ 	int ret;
+ 	struct skw_core *skw = wiphy_priv(wiphy);
+@@ -2083,12 +2086,23 @@
+ 	ret = skw_cmd_xmit_timeout(wiphy, dev_id, cmd, buf, buf_len,
+ 				arg, arg_size, name, timeout,
+ 				skw_local_clock(), extra_flags);
++	if (reply_len)
++		*reply_len = ret ? 0 : skw->cmd.arg_len;
+ 
+ 	skw_cmd_unlock(skw, extra_flags);
+ 
+ 	return ret;
+ }
+ 
++int skw_msg_xmit_timeout(struct wiphy *wiphy, int dev_id, int cmd,
++			 void *buf, int buf_len, void *arg, int arg_size,
++			 char *name, unsigned long timeout,
++			 unsigned long extra_flags)
++{
++	return skw_msg_xmit_reply(wiphy, dev_id, cmd, buf, buf_len, arg,
++				  arg_size, name, timeout, extra_flags, NULL);
++}
++
+ /*
+  *        +--------------+-----------------+------------------+
+  *        |   msg_hdr    |  status_code    |     payload      |
+@@ -2127,10 +2141,14 @@
  		u16 hdr_len = sizeof(struct skw_msg) + sizeof(u16);
  		u16 len = msg_ack->total_len - hdr_len;
  
@@ -53,40 +143,24 @@ diff --git a/drivers/swt6621s_wifi/skw_msg.c b/drivers/swt6621s_wifi/skw_msg.c
  
  		memcpy(skw->cmd.arg, data + hdr_len,
  		       min(data_len - hdr_len, (int)skw->cmd.arg_size));
-diff --git a/drivers/swt6621s_wifi/skw_cfg80211.c b/drivers/swt6621s_wifi/skw_cfg80211.c
---- a/drivers/swt6621s_wifi/skw_cfg80211.c
-+++ b/drivers/swt6621s_wifi/skw_cfg80211.c
-@@ -2269,6 +2269,7 @@
- 	struct skw_station_params params = {0};
- 	struct skw_get_sta_resp get_sta_resp;
- 	struct skw_iface *iface = netdev_priv(dev);
-+	struct skw_core *skw = wiphy_priv(wiphy);
+diff --git a/drivers/swt6621s_wifi/skw_msg.h b/drivers/swt6621s_wifi/skw_msg.h
+--- a/drivers/swt6621s_wifi/skw_msg.h
++++ b/drivers/swt6621s_wifi/skw_msg.h
+@@ -472,6 +472,17 @@
+ 			cmd, buf, len, arg, size, #cmd,                         \
+ 			msecs_to_jiffies(SKW_CMD_TIMEOUT), 0)
  
- 	// skw_dev_dbg(dev, "mac: %pM\n", mac);
++int skw_msg_xmit_reply(struct wiphy *wiphy, int dev_id, int cmd,
++		       void *buf, int buf_len, void *arg, int arg_size,
++		       char *name, unsigned long timeout,
++		       unsigned long extra_flags, u16 *reply_len);
++
++/* as skw_send_msg, the reply's own length in reply_len */
++#define skw_send_msg_reply(wiphy, dev, cmd, buf, len, arg, size, reply_len)     \
++	skw_msg_xmit_reply(wiphy, dev ? SKW_NDEV_ID(dev) : -1,                  \
++			cmd, buf, len, arg, size, #cmd,                         \
++			msecs_to_jiffies(SKW_CMD_TIMEOUT), 0, reply_len)
++
  
-@@ -2348,8 +2349,10 @@
- 			get_sta_resp.filter_drop_offload_cnt,
- 			sizeof(get_sta_resp.filter_drop_offload_cnt));
- 
--		ctx->peer->tx.percent = get_sta_resp.tx_percent;
--		ctx->peer->rx.percent = get_sta_resp.rx_percent;
-+		if (skw->cmd.arg_len > offsetof(struct skw_get_sta_resp, rx_percent)) {
-+			ctx->peer->tx.percent = get_sta_resp.tx_percent;
-+			ctx->peer->rx.percent = get_sta_resp.rx_percent;
-+		}
- 
- 		if (is_skw_ap_mode(iface)) {
- 			sinfo->tx_packets = ctx->peer->tx.pkts;
-@@ -2368,8 +2371,10 @@
- 	skw_hex_dump("get_sta_resp.sinfo:", &get_sta_resp.sinfo,
- 		sizeof(get_sta_resp.sinfo), false);
- 
--	sinfo->inactive_time = get_sta_resp.sinfo.inactive_time;
--	sinfo->filled |= SKW_BIT_ULL(NL80211_STA_INFO_INACTIVE_TIME);
-+	if (skw->cmd.arg_len >= offsetofend(struct skw_get_sta_resp, sinfo.inactive_time)) {
-+		sinfo->inactive_time = get_sta_resp.sinfo.inactive_time;
-+		sinfo->filled |= SKW_BIT_ULL(NL80211_STA_INFO_INACTIVE_TIME);
-+	}
- 
- //	skw_dev_dbg(dev, "tx packets:%u tx_bytes:%llu rx_packets:%u rx_bytes:%llu\n",
- //		sinfo->tx_packets, sinfo->tx_bytes,
+ int skw_msg_try_send(struct skw_core *skw, int dev_id,
+ 		     int cmd, void *data, int data_len,

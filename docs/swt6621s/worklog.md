@@ -67,3 +67,17 @@
   a short reply once. The 3518 on next2: 20 polls, no warning, one "replies 172 of 385 bytes";
   `iw dev wlan0 link` −27 dBm. `iw station dump` is empty on every kernel: the driver has no
   `dump_station`.
+
+## 2026-11-28 — `0016`'s reply length under the command lock
+
+- `0016` read the station reply's length from `skw->cmd` after `skw_msg_xmit_timeout` had released
+  the command lock, so a command in between could change it. `skw_msg_xmit_reply()` now hands the
+  length back before the unlock, `skw_msg_xmit_timeout` a wrapper passing none, and GET_STA asks
+  through `skw_send_msg_reply`. Both bounds are `offsetofend`; the once-only bitmap moved below the
+  includes.
+- The H96 Max 3518, each kernel with its own build's module packages, 20 `iw station get` polls:
+  next2 7.3.6 by kexec from 6.1, vendor 6.1 by reboot, vendor 6.12 by kexec from 6.1. On each: no
+  "expect len" warning, one "GET_STA replies 172 of 385 bytes", no inactive time reported, no
+  firmware load failure, no kernel warning; a scan (29 to 36 networks) and a reconnect clean.
+- Before the fix, the 6.1 module built for the watchdog test already carried `0015` and the first
+  `0016`: the same counts, the first run of either on a vendor kernel.
