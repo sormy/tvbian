@@ -203,9 +203,11 @@ before `mmc_auto`, so a USB disk with a boot entry boots before the eMMC.
 
 All H616 boards share one U-Boot, `uboot/sunxi-h616.conf`: the same source, patches, defconfig and
 recovery button. Only two things differ per board: the DRAM settings, read from its
-`factory_boot0.bin`, and the control tree, its own. The recovery button is PH9, the factory trees'
-`recovery_key`; held at power-on; a board with another pin needs its own conf. Booted from the eMMC,
-U-Boot always finds it as `mmc1`, whatever the board's tree calls it.
+`factory_boot0.bin` with the DRAM voltage its RAM type needs, and the control tree, its own. The
+recovery button is PH9 on every board so far, held at power-on. Stock names it `recovery_key`, in
+the tree or, on 5.4 images, in `sys_config`. A board with another pin sets `BOARD_FEL_KEY_GPIO`
+(bank × 32 + pin) in its `board.conf`. Booted from the eMMC, U-Boot always finds it as `mmc1`,
+whatever the board's tree calls it.
 
 It builds in the container like every other step, from a defconfig made on the spot out of
 `generic-rk3528_defconfig` with the board's tree named in it, and aborts if a `CONFIGS` symbol does

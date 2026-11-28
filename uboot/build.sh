@@ -30,7 +30,8 @@ if [ -f "$BOOT0" ]; then
   # ca_dri, odt_en, para1, para2, 14 mode registers, tpr0-3, tpr6, tpr10-14
   dram() { echo "0x$(od -An -tx4 -j $((56 + $1 * 4)) -N 4 "$BOOT0" | tr -d ' ')"; }
   case $(($(dram 1))) in
-    3) type=DDR3_1333 ;;
+    # DDR3's rail, as mainline's DDR3 boards on the AXP313 hold it; the defconfig's 1.2 V is LPDDR3's
+    3) type=DDR3_1333 configs="$configs AXP_DCDC3_VOLT=1360" ;;
     7) type=LPDDR3 ;;
     8) type=LPDDR4 ;;
     *) echo "✗ $BOARD: boot0 DRAM type $(($(dram 1))) has no mainline driver" >&2; exit 1 ;;
