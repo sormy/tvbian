@@ -16,8 +16,10 @@ boxes are in [README_ROCKCHIP.md](README_ROCKCHIP.md), Amlogic ones in
 | ---------------------------------------------------- | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
 | <img src="docs/tanix-tx1-v2/image1.jpg" width="260"> | **[Tanix TX1 V2.0][doc]**<br>`QHZIW_H313_TX1_EMCP_V2.0`<br>`2024-03-21` | SoC H313 · 1.5 GB RAM LPDDR3 (sold as 2 GB) · 16 GB eMMC DDR52 · **no SD** · USB-A 2.0 (OTG) · **no LAN** · ATBM6031-X Wi-Fi + BLE · HDMI · AV · IR | [2](#2-otg-cable): OTG cable                             |
 | <img src="docs/h96max-h313/image1.jpeg" width="260"> | **[H96 Max H313][h313]**<br>`BA979_627_V1.0`                            | SoC H313 · 2 GB RAM LPDDR3 · 16 GB eMMC HS200 · SD HS · USB-A 2.0 (OTG) + USB-A 2.0 · LAN 100M · AIC8800D40L Wi-Fi + BLE · HDMI · AV · IR           | [1](#1-sd-card): SD card<br>[2](#2-otg-cable): OTG cable |
+| <img src="docs/x98h/image1.webp" width="260">        | **[X98H][x98h]** ❓<br>`YB927_141_V1.1`                                 | SoC H618 · 4 GB RAM DDR3 · 32 GB eMMC HS200 · SD · 3 × USB-A 2.0 · LAN 100M · AIC8800D80 Wi-Fi + BT · HDMI · AV · S/PDIF · IR · LED display         | [1](#1-sd-card): SD card<br>[2](#2-otg-cable): OTG cable |
 
 [doc]: docs/tanix-tx1-v2/board.md
+[x98h]: docs/x98h/board.md
 [h313]: docs/h96max-h313/board.md
 
 ## Memory
@@ -44,51 +46,51 @@ display's FIFO and break up, 10-bit worst.
 |  ❌  | broken                                                               |
 |  ➖  | not on this board                                                    |
 
-| Hardware                                        | Tanix<br>TX1 V2.0 | H96 Max<br>H313 |
-| ----------------------------------------------- | :---------------: | :-------------: |
-| **Storage**                                     |                   |                 |
-| eMMC — boot and rootfs                          |        ✅         |       ❓        |
-| USB stick — boot and rootfs                     |        ✅         |       ❓        |
-| SD — boot and rootfs                            |        ➖         |       ✅        |
-| SD SDR104 (UHS)                                 |        ➖         |       ❓        |
-| USB 2.0                                         |        ✅         |       ✅        |
-| **Network**                                     |                   |                 |
-| LAN 100M                                        |        ➖         |       ✅        |
-| Wi-Fi 2.4 GHz                                   |        ✅         |       🟡        |
-| Wi-Fi 5 GHz                                     |        ➖         |       ✅        |
-| Bluetooth LE                                    |        ✅         |       ✅        |
-| Wi-Fi with BLE on                               |        🟠         |       ✅        |
-| **Display and video**                           |                   |                 |
-| HDMI video                                      |        ✅         |       ✅        |
-| HDMI audio                                      |        ✅         |       ✅        |
-| HDMI-CEC                                        |        ✅         |       ✅        |
-| HDMI HDR10                                      |        ✅         |       ✅        |
-| HDMI 10-bit, as 4:2:0 at 4K only                |        🟠         |       ❓        |
-| AV jack — composite video                       |        🟡         |       ✅        |
-| AV jack — audio                                 |        🟡         |       ✅        |
-| GPU — Mali-G31 under Panfrost                   |        ✅         |       ✅        |
-| Hardware decode — H.264, VP8 to 4K              |        ✅         |       ✅        |
-| Hardware decode — HEVC, VP9 to 8K, 10-bit to 6K |        ✅         |       ✅        |
-| Hardware decode — MPEG-2                        |        ✅         |       ✅        |
-| Hardware decode — MPEG-1                        |        ❌         |       ❌        |
-| Hardware decode — VC-1, Main profile refused    |        🟠         |       ❓        |
-| Hardware decode — JPEG, Motion JPEG             |        ✅         |       ✅        |
-| Hardware decode — MPEG-4 ASP, Xvid, H.263       |        🟠         |       🟠        |
-| Hardware encode — H.264, JPEG to 4K             |        ✅         |       ✅        |
-| Deinterlace                                     |        ✅         |       ✅        |
-| **Input and indicators**                        |                   |                 |
-| Bundled remote over IR                          |        ✅         |       ❓        |
-| BLE remote, with BLE on                         |        ✅         |       ❓        |
-| Recovery button: FEL from our U-Boot            |        🟡         |       ✅        |
-| Power and standby LEDs                          |        ✅         |       ✅        |
-| **Power and recovery**                          |                   |                 |
-| CPU frequency scaling                           |        ✅         |       ✅        |
-| Hardware watchdog                               |        ✅         |       ✅        |
-| Sleep and wake from the remote                  |        ✅         |       ❓        |
-| Deep suspend                                    |        ❌         |       ❌        |
-| Serial console                                  |        ✅         |       ❓        |
-| eMMC backup over FEL                            |        ✅         |       ✅        |
-| eMMC install over FEL                           |        ✅         |       ✅        |
+| Hardware                                        | Tanix<br>TX1 V2.0 | H96 Max<br>H313 | X98H |
+| ----------------------------------------------- | :---------------: | :-------------: | :--: |
+| **Storage**                                     |                   |                 |      |
+| eMMC — boot and rootfs                          |        ✅         |       ❓        |  ❓  |
+| USB stick — boot and rootfs                     |        ✅         |       ❓        |  ❓  |
+| SD — boot and rootfs                            |        ➖         |       ✅        |  ❓  |
+| SD SDR104 (UHS)                                 |        ➖         |       ❓        |  ❓  |
+| USB 2.0                                         |        ✅         |       ✅        |  ❓  |
+| **Network**                                     |                   |                 |      |
+| LAN 100M                                        |        ➖         |       ✅        |  🟡  |
+| Wi-Fi 2.4 GHz                                   |        ✅         |       🟡        |  ❓  |
+| Wi-Fi 5 GHz                                     |        ➖         |       ✅        |  🟡  |
+| Bluetooth LE                                    |        ✅         |       ✅        |  🟡  |
+| Wi-Fi with BLE on                               |        🟠         |       ✅        |  🟡  |
+| **Display and video**                           |                   |                 |      |
+| HDMI video                                      |        ✅         |       ✅        |  🟡  |
+| HDMI audio                                      |        ✅         |       ✅        |  🟡  |
+| HDMI-CEC                                        |        ✅         |       ✅        |  🟡  |
+| HDMI HDR10                                      |        ✅         |       ✅        |  🟡  |
+| HDMI 10-bit, as 4:2:0 at 4K only                |        🟠         |       ❓        |  ❓  |
+| AV jack — composite video                       |        🟡         |       ✅        |  🟡  |
+| AV jack — audio                                 |        🟡         |       ✅        |  🟡  |
+| GPU — Mali-G31 under Panfrost                   |        ✅         |       ✅        |  🟡  |
+| Hardware decode — H.264, VP8 to 4K              |        ✅         |       ✅        |  🟡  |
+| Hardware decode — HEVC, VP9 to 8K, 10-bit to 6K |        ✅         |       ✅        |  🟡  |
+| Hardware decode — MPEG-2                        |        ✅         |       ✅        |  🟡  |
+| Hardware decode — MPEG-1                        |        ❌         |       ❌        |  ❓  |
+| Hardware decode — VC-1, Main profile refused    |        🟠         |       ❓        |  ❓  |
+| Hardware decode — JPEG, Motion JPEG             |        ✅         |       ✅        |  🟡  |
+| Hardware decode — MPEG-4 ASP, Xvid, H.263       |        🟠         |       🟠        |  ❓  |
+| Hardware encode — H.264, JPEG to 4K             |        ✅         |       ✅        |  🟡  |
+| Deinterlace                                     |        ✅         |       ✅        |  🟡  |
+| **Input and indicators**                        |                   |                 |      |
+| Bundled remote over IR                          |        ✅         |       ❓        |  ❓  |
+| BLE remote, with BLE on                         |        ✅         |       ❓        |  ❓  |
+| Recovery button: FEL from our U-Boot            |        🟡         |       ✅        |  ❓  |
+| Power and standby LEDs                          |        ✅         |       ✅        |  ❓  |
+| **Power and recovery**                          |                   |                 |      |
+| CPU frequency scaling                           |        ✅         |       ✅        |  🟡  |
+| Hardware watchdog                               |        ✅         |       ✅        |  🟡  |
+| Sleep and wake from the remote                  |        ✅         |       ❓        |  ❓  |
+| Deep suspend                                    |        ❌         |       ❌        |  ❓  |
+| Serial console                                  |        ✅         |       ❓        |  ❓  |
+| eMMC backup over FEL                            |        ✅         |       ✅        |  ❓  |
+| eMMC install over FEL                           |        ✅         |       ✅        |  ❓  |
 
 ## Get an image
 
@@ -103,10 +105,10 @@ The Tanix TX1 V2.0 has no microSD slot, so FEL is its only way in.
 
 ## Install
 
-| Route                                  | The box needs | Tanix TX1 V2.0 | H96 Max H313 |
-| -------------------------------------- | ------------- | :------------: | :----------: |
-| 1. SD card, then `tvb-install`         | an SD slot    |    ➖ no SD    |      ✅      |
-| 2. OTG cable: the image written in FEL | a button      |       ✅       |      ✅      |
+| Route                                  | The box needs | Tanix TX1 V2.0 | H96 Max H313 | X98H |
+| -------------------------------------- | ------------- | :------------: | :----------: | :--: |
+| 1. SD card, then `tvb-install`         | an SD slot    |    ➖ no SD    |      ✅      |  🟡  |
+| 2. OTG cable: the image written in FEL | a button      |       ✅       |      ✅      |  🟡  |
 
 Route 1 runs TVBian from the card before anything touches the eMMC, so it is the safer one. Route 2
 writes the image straight to the eMMC.
@@ -148,10 +150,11 @@ sudo apt update && sudo apt upgrade
 
 For debugging. **3.3 V, 115200 baud** — any 3.3 V USB-TTL adapter does it.
 
-| Board          | Pads, in order |
-| -------------- | -------------- |
-| Tanix TX1 V2.0 | VCC RX TX GND  |
-| H96 Max H313   | RX TX GND      |
+| Board          | Pads, in order             |
+| -------------- | -------------------------- |
+| Tanix TX1 V2.0 | VCC RX TX GND              |
+| H96 Max H313   | RX TX GND                  |
+| X98H           | GND TX RX, from the corner |
 
 GND, TX and RX only, crossed (box TX → adapter RX). **Never connect 3V3/VCC.**
 

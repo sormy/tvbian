@@ -1,0 +1,5 @@
+# The board package adds the tree and U-Boot through package/board.sh.
+0755 common/led-shutdown /usr/lib/systemd/system-shutdown/tvb-led
+0755 common/led-sleep /usr/lib/systemd/system-sleep/tvb-led
+0755 common/tvb-install /usr/sbin/tvb-install
+0644 common/preserve-sectors.sunxi-h616 /usr/lib/tvb/preserve-sectors

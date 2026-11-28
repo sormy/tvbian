@@ -1,0 +1,181 @@
+--- factory_board_translated.dts
++++ board.dts
+@@ -20,7 +20,9 @@
+ 	interrupt-parent = <&gic>;
+ 	#address-cells = <2>;
+ 	#size-cells = <2>;
+-	model = "sun50iw9";
++	model = "X98H (YB927_141_V1.1)";
++	/* board first; the SoC last, which sun50i-cpufreq-nvmem keys on */
++	compatible = "x98h,h618-tvbox", "allwinner,sun50i-h618";
+ 
+ 	aliases {
+ 		serial0 = &uart0;
+@@ -32,6 +34,10 @@
+ 		mmc0 = &mmc0;
+ 		mmc2 = &mmc2;
+ 		spi0 = &spi0;
++		/* U-Boot's stable MACs for EMAC1 and the Wi-Fi; its Bluetooth address */
++		ethernet0 = &emac1;
++		ethernet1 = &sdio_wifi;
++		bluetooth0 = &bt;
+ 		spi1 = &spi1;
+ 	};
+ 
+@@ -49,6 +55,18 @@
+ 			reg = <0x0 0x40000000 0x0 0x40000>;
+ 			no-map;
+ 		};
++
++		ramoops@7e000000 {
++			compatible = "ramoops";
++			reg = <0x0 0x7e000000 0x0 0x100000>;
++			record-size = <0x8000>;
++			console-size = <0x8000>;
++			ftrace-size = <0x40000>;
++		};
++	};
++
++	chosen {
++		stdout-path = "serial0:115200n8";
+ 	};
+ 
+ 	cpus {
+@@ -563,6 +581,8 @@
+ 			#gpio-cells = <3>;
+ 			interrupt-controller;
+ 			#interrupt-cells = <3>;
++			/* the eMMC's pads, at its 1.8 V vqmmc rail */
++			vcc-pc-supply = <&reg_aldo1>;
+ 			vcc-pg-supply = <&reg_pio1_8>;
+ 
+ 			uart0_ph_pins: uart0-ph-pins {
+@@ -928,7 +948,8 @@
+ 			max-frequency = <100000000>;
+ 			no-sdio;
+ 			no-sd;
+-			status = "disabled";
++			/* the eMMC, which the vendor's U-Boot enables at boot */
++			status = "okay";
+ 			mmc-ddr-1_8v;
+ 			mmc-hs200-1_8v;
+ 			vmmc-supply = <&reg_dldo1>;
+@@ -1024,7 +1045,10 @@
+ 			pinctrl-names = "default";
+ 			pinctrl-0 = <&uart1_ph_pins>;
+ 
++			/* the AIC8800D80's Bluetooth, on the serdev bus */
+ 			bt: bluetooth {
++				compatible = "aicsemi,aic8800-bt";
++				max-speed = <1500000>;
+ 				reset-gpios = <&pio 6 19 GPIO_ACTIVE_LOW>;
+ 				device-wakeup-gpios = <&pio 6 17 GPIO_ACTIVE_HIGH>;
+ 			};
+@@ -1223,6 +1247,9 @@
+ 			pmu0: pmic@36 {
+ 				compatible = "x-powers,axp313a";
+ 				reg = <0x36>;
++				/* the pair the AXP313A binding requires */
++				#interrupt-cells = <1>;
++				interrupt-controller;
+ 
+ 				regulators {
+ 					reg_dcdc1: dcdc1 {
+@@ -1249,15 +1276,17 @@
+ 
+ 					reg_aldo1: aldo1 {
+ 						regulator-name = "axp1530-aldo1";
+-						regulator-min-microvolt = <500000>;
+-						regulator-max-microvolt = <3500000>;
++						/* sys_config's power_sply, which the vendor's U-Boot sets */
++						regulator-min-microvolt = <1800000>;
++						regulator-max-microvolt = <1800000>;
+ 						regulator-always-on;
+ 					};
+ 
+ 					reg_dldo1: dldo1 {
+ 						regulator-name = "axp1530-dldo1";
+-						regulator-min-microvolt = <500000>;
+-						regulator-max-microvolt = <3500000>;
++						/* sys_config's power_sply, which the vendor's U-Boot sets */
++						regulator-min-microvolt = <3300000>;
++						regulator-max-microvolt = <3300000>;
+ 						regulator-always-on;
+ 					};
+ 				};
+@@ -1401,6 +1430,8 @@
+ 			clocks = <&ccu CLK_BUS_EMAC1>;
+ 			clock-names = "stmmaceth";
+ 			phy-mode = "rmii";
++			/* the AC300 EPHY, at MDIO address 0 by the owner's bus scan */
++			phy-handle = <&ac300_ephy>;
+ 			status = "okay";
+ 			pinctrl-names = "default";
+ 			pinctrl-0 = <&gmac1_pins_a>;
+@@ -1423,9 +1454,10 @@
+ 					#address-cells = <1>;
+ 					#size-cells = <0>;
+ 					clocks = <&ac200_pwm_clk>;
++					/* the board's 3.3 V rail */
++					vcc-supply = <&reg_dldo1>;
+ 					nvmem-cells = <&ephy_config>;
+ 					nvmem-cell-names = "configuration";
+-					status = "disabled";
+ 
+ 					ac300_ephy: ethernet-phy@0 {
+ 						compatible = "ethernet-phy-id0044.1400";
+@@ -1578,6 +1610,8 @@
+ 			reset-names = "ctrl", "hdcp";
+ 			phys = <&hdmi_phy>;
+ 			phy-names = "phy";
++			/* stock's hdmi_power0, ALDO1 at 1.8 V */
++			hvcc-supply = <&reg_aldo1>;
+ 			status = "okay";
+ 
+ 			ports {
+@@ -1621,6 +1655,8 @@
+ 			clock-names = "apb", "ir";
+ 			resets = <&r_ccu RST_R_APB1_IR>;
+ 			status = "okay";
++			/* the stock remote, NEC address 0x01, its layout in the stock firmware */
++			linux,rc-map-name = "rc-x98h";
+ 			pinctrl-names = "default";
+ 			pinctrl-0 = <&s_cir0_pins_a>;
+ 		};
+@@ -2086,7 +2122,8 @@
+ 			assigned-clock-rates = <216000000>;
+ 			nvmem-cells = <&tve_calibration>;
+ 			nvmem-cell-names = "calibration";
+-			status = "disabled";
++			/* the AV jack's composite output */
++			status = "okay";
+ 
+ 			port {
+ 				tve_in_tcon_tv1: endpoint {
+@@ -2260,7 +2297,7 @@
+ 		pinctrl-names = "default";
+ 		pinctrl-0 = <&pwm5_pin>;
+ 		pwms = <&pwm 5 42 0>;
+-		status = "disabled";
++		/* the EPHY's 24 MHz clock: the factory tree's tv_pwm_ch, PWM5 */
+ 	};
+ 
+ 	gpu_opp_table: opp-table-gpu {
+@@ -2350,6 +2387,17 @@
+ 		};
+ 	};
+ 
++	/* stock's recovery_key, PH9, which its sys_config names and its tree does not */
++	gpio-keys {
++		compatible = "gpio-keys";
++
++		key {
++			label = "recovery";
++			linux,code = <KEY_VENDOR>;
++			gpios = <&pio 7 9 GPIO_ACTIVE_LOW>;
++		};
++	};
++
+ 	wifi_pwrseq: pwrseq {
+ 		compatible = "mmc-pwrseq-simple";
+ 		clocks = <&rtc CLK_OSC32K_FANOUT>;
