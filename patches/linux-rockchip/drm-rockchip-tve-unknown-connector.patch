@@ -3,10 +3,10 @@ From: Artem Butusov <art.sormy@gmail.com>
 Date: Fri, 6 Nov 2026 00:00:00 +0000
 Subject: [PATCH] drm/rockchip: tve: report an unsensed connector as unknown
 
-The TV encoder cannot sense a load, yet reported its connector connected
-with nothing plugged. The fbdev console then sized itself to 720x576 on
-every screen, HDMI's too. Unknown is the status for a connector that cannot
-tell: clients use it when nothing else is connected.
+The driver senses no load, the VDAC's cable detection unused, yet reported
+its connector connected with nothing plugged. The fbdev console then sized
+itself to 720x576 on every screen, HDMI's too. Unknown is the status for a
+connector that does not tell: clients use it when nothing else is connected.
 
 Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---

@@ -271,6 +271,7 @@ class Setup:
     """Where the driver is and how a client reaches it."""
 
     driver_dir: Path
+    probe: Path
     driver_name: str
     family: str
     device: str
@@ -795,7 +796,14 @@ def mpv_case(setup: Setup, offers: set[str]) -> Iterator[Line]:
             return
         # an odd size: Cedrus pads its rows to a pitch the GPU may not import
         rc, log = run(
-            ["mpv", "--no-config", "--hwdec=vaapi", "--vo=gpu", "--gpu-context=wayland", "--ao=null"]
+            [
+                "mpv",
+                "--no-config",
+                "--hwdec=vaapi",
+                "--vo=gpu",
+                "--gpu-context=wayland",
+                "--ao=null",
+            ]
             + ["-v", str(setup.clips / "h264-odd.mp4")],
             env=dict(setup.env(), **wayland),
         )
@@ -803,7 +811,9 @@ def mpv_case(setup: Setup, offers: set[str]) -> Iterator[Line]:
     if rc != 0 or MPV_ZERO_COPY not in log:
         yield "mpv.vaapi", f"failed: {last_line(log)}"
     else:
-        yield "mpv.vaapi", "pass" if not rejected else f"failed: the GPU refused {rejected} pictures"
+        yield "mpv.vaapi", (
+            "pass" if not rejected else f"failed: the GPU refused {rejected} pictures"
+        )
 
 
 def gst_element(setup: Setup, element: str) -> bool:
@@ -1004,11 +1014,10 @@ def speed_case(setup: Setup, name: str, clip: Clip, offers: set[str]) -> Iterato
 
 
 def probe_case(setup: Setup) -> Iterator[Line]:
-    probe = setup.driver_dir / "va_probe"
-    if not probe.exists():
-        yield "probe.initialize", "no va_probe beside the driver"
+    if not setup.probe.exists():
+        yield "probe.initialize", f"no {setup.probe}"
         return
-    rc, log = run([str(probe), setup.device], env=setup.env())
+    rc, log = run([str(setup.probe), setup.device], env=setup.env())
     for line in log.splitlines():
         key, _, value = line.partition(" ")
         if key.startswith("probe."):
@@ -1604,6 +1613,7 @@ def main() -> int:
     parser.add_argument("--driver-dir", type=Path, help="where tvb_drv_video.so is")
     parser.add_argument("--clips", type=Path, default=Path("/work/va-driver/clips"))
     parser.add_argument("--driver-name", default="tvb", help="the driver's libva name")
+    parser.add_argument("--probe", type=Path, help="va_probe, if not beside the driver")
     parser.add_argument("--out", type=Path, help="clips: where to make them")
     parser.add_argument("--device", default="/dev/dri/renderD128", help="box: the render node")
     parser.add_argument("--family", default="", help="box: the board family, for its refusals")
@@ -1621,6 +1631,7 @@ def main() -> int:
                 return NOTHING_TO_TEST
             setup = Setup(
                 args.driver_dir,
+                args.probe or args.driver_dir / "va_probe",
                 args.driver_name,
                 args.family,
                 args.device,
@@ -1633,6 +1644,7 @@ def main() -> int:
             sys.exit("the host suite needs Xvfb: libva's DRM display needs a render node")
         setup = Setup(
             args.driver_dir,
+            args.probe or args.driver_dir / "va_probe",
             args.driver_name,
             "",
             HOST_DISPLAY,

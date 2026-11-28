@@ -8,6 +8,12 @@ below.
 - [ ] **DDC/CI on every board, from one mechanism**: each board's own patch carries its DDC bus, and
       the HK1's lacked it unnoticed; a `display.py` check reaching the monitor at 0x37, no
       `ddcutil`.
+- [ ] **A regression's kernel under test cannot strand a box**: a kernel that boots but cannot write
+      its root, or never reaches the network, comes back to the box's default unattended.
+- [ ] **A box's default kernel survives a kernel install**: the default the regression restores
+      holds after `u-boot-update` runs, which today makes the newest kernel the default.
+- [ ] **One remote's IR power suspends only its box**: every RK35xx tree takes 9–11 remotes' codes,
+      most shared, so one press suspends every box in sight. A per-box setting, off by default.
 - [ ] **Our patches upstream before new ones**: what we carry we rebuild, keep warm and bump.
       WebKit's (`docs/todo/falkon-wpe.md`) first, its builds the dearest; then Falkon's, FFmpeg's
       request decoders and the kernels' codec patches, each as its upstream takes them.

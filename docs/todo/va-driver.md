@@ -6,6 +6,8 @@ settings.
 
 ## Open
 
+- [ ] **A desktop suite in the regression, off by default**: composited punch-hole video rendering,
+      and Chromium playing 4K60 through `tvb-va-driver`.
 - [ ] **Survey, one box a family**: what Debian's GStreamer and FFmpeg 7.1 already decode; whether
       Debian's arm64 Chromium is built with VA-API; whether Firefox and Chromium list modifiers at
       surface creation.
@@ -56,8 +58,6 @@ settings.
 - [ ] **`mpv --hwdec=vaapi` on `rk35xx` and `meson-gxl`**: through Wayland, as on `sunxi-h616`. On
       `meson-gxl`, with the system heap, VP9 and HEVC play with no copy; H.264 stops after about 11
       pictures, mpv waiting on one meson holds, and the drain losing its references.
-- [ ] **`va_probe` in `tvb-va-driver`**: the suite's initialize check is UNTESTED on a box without
-      it.
 - [ ] **GStreamer in the host check**: its `va` plugin opens only a DRM render node, which the build
       container lacks; a Linux host or CI could pass `vgem`'s node in.
 - [ ] **HEVC 1080p60 in WebKit on `rk35xx-next2` now and then decodes nothing**: one Falkon file run

@@ -843,3 +843,33 @@
   gives `VP_PR_CD` 0x50. Failing: 3840-wide 60 Hz max bpc 10 stays RGB 8-bit, not YCbCr 4:2:0; AFBC
   rotation by 90 and 270; 3D frame packing; BG24 writeback; composite writeback. A first run, the
   cable pulled during it, also failed the PQ and HLG cases.
+- glmark2-es2-drm `--off-screen -b build:duration=8`, the EDID override forced on, no screen: vendor
+  6.1 108 fps, 117 with `vblank_mode=0`, `scmi_clk_gpu` at 800 MHz as the GPU's `core`; vendor 6.12
+  128 and 135. The build scene by the next2 work: the 3518D on vendor 6.1, its GPU at 300 MHz, 86;
+  next2 177 on the 3518D, 192 on the M2 Plus. The 57 reported above was a faulty run.
+- The DDR at 786 MHz and thermals: the factory tree's 75 and 85 °C trips cool the CPU and GPU only,
+  no DMC map; the DMC's one temperature rule raises its voltage to 900 mV below 10 °C, which the
+  loader's 899 mV `vdd_logic` already holds. Combined load, `stress-ng` four CPUs and two 512 MB VM
+  workers with glmark2 on the GPU, 120 s: 48 °C idle, 68.9 °C peak, no cooling state engaged.
+- The next2 work's corrected RK3528 eMMC taps patch: three kexec boots each at HS200 and HS400ES
+  clean, no -110, HS400ES reading 102 MiB/s, boot0 writes verified; the next2 tree's HS200 hunk
+  dropped.
+- Vendor 6.12 on the M2 Plus, by the next2 work: `vdd_gpu` at full PWM duty, 1148 mV, its maximum,
+  while the GPU idles, 873 mV while it renders; 6.1 holds 873 mV. The lima patch's 6.12 path is the
+  suspect; open.
+- The next2 work's HK1 regression, vendor 6.1: the video step died on a 16384x8640 H.264 encode, the
+  box off the network until a power cut; the same case had failed cleanly twice the day before.
+  `patches/ffmpeg/0067` refuses a frame past 8192x8192 at the encoder's open. With it, 16384x8640 is
+  refused in 1 s ("16384x8640 is larger than the hardware's 8192x8192"), 8192x8192 still encodes,
+  the box up.
+- Vendor 6.12's PWM rails at their maximum from boot (vdd_logic 1006 mV on the HK1, by the next2
+  work) is the regulator, not lima: upstream's `pwm_regulator_init_boot_on` sets a disabled
+  inverse-polarity boot-on PWM to full duty, and Rockchip's enable then skips
+  `regulator-init-microvolt`, which it applies only at duty 0.
+  `6.12/regulator-pwm-init-voltage-over-boot-on-duty.patch` leaves the duty alone where an init
+  voltage is given.
+- 6.12 with the regulator patch, booted from the menu once (U-Boot leaves the PWM disabled; after a
+  kexec 6.1 leaves it enabled, and `init_boot_on` returns early either way): `vdd_logic` at 899 mV,
+  duty 3250 of 5000 ns, the GPU bound and suspended, never used. Before the patch, 5000 of 5000,
+  1006 mV. Entered by kexec from 6.1, lima again failed `gpmmu dte write test fail`, the box's own
+  tree loaded.

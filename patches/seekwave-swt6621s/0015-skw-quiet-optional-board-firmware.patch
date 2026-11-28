@@ -1,0 +1,44 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] skw: ask for a board's own firmware without a failure logged
+
+A board-named firmware file is optional: the driver falls back to the
+generic one when it is absent. Requested as any other, its absence logs
+"Direct firmware load ... failed" though the radio loads. Ask for it with
+firmware_request_nowarn(), the generic file as before.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/include/linux/skw_firmware_helper.h b/include/linux/skw_firmware_helper.h
+--- a/include/linux/skw_firmware_helper.h
++++ b/include/linux/skw_firmware_helper.h
+@@ -53,6 +53,21 @@
+ }
+ 
+ /*
++ * A file the caller falls back from: absent, it is no failure worth a log line.
++ */
++static inline int skw_firmware_request_optional(const struct firmware **fw,
++						const char *name,
++						struct device *dev,
++						int direct)
++{
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 17, 0)
++	return firmware_request_nowarn(fw, name, dev);
++#else
++	return skw_firmware_request_one(fw, name, dev, direct);
++#endif
++}
++
++/*
+  * Request a firmware file with optional subdirectory and board-specific
+  * fallback.  If @firmware_dir is set, look under that subdirectory.  If
+  * @board_id is set, first try name.<board_id>.ext, then name.ext.
+@@ -113,7 +128,7 @@
+ 
+ 	if (board_name) {
+ 		pr_info("skw firmware: request board firmware %s\n", board_name);
+-		ret = skw_firmware_request_one(fw, board_name, dev, direct);
++		ret = skw_firmware_request_optional(fw, board_name, dev, direct);
+ 		if (!ret) {
+ 			pr_info("skw firmware: loaded board firmware %s\n", board_name);
+ 			kfree(full_name);

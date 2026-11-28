@@ -1,0 +1,69 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] watchdog: dw_wdt: Stop the counter at power-off
+
+The DesignWare watchdog cannot be stopped once started. Where power-off
+cuts the power that does not matter, but some firmware sleeps in its
+place, keeping the SoC powered for a wake source to start it again:
+Rockchip's RK3528 boxes power off so. There the running counter resets
+the board a timeout after power-off, an RK3528 box answering again
+about 80 s after it was turned off.
+
+At power-off prepare, before such a firmware's handler, gate the
+counter's clock as suspend does. The bus clock stays on: the watchdog
+core may still ping a running watchdog until the CPUs stop, and a
+register access without it can fault. A watchdog with no bus clock of
+its own is left as it was.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ drivers/watchdog/dw_wdt.c | 24 ++++++++++++++++++++++++
+ 1 file changed, 24 insertions(+)
+
+diff --git a/drivers/watchdog/dw_wdt.c b/drivers/watchdog/dw_wdt.c
+--- a/drivers/watchdog/dw_wdt.c
++++ b/drivers/watchdog/dw_wdt.c
+@@ -26,6 +26,7 @@
+ #include <linux/of.h>
+ #include <linux/platform_device.h>
+ #include <linux/pm.h>
++#include <linux/reboot.h>
+ #include <linux/reset.h>
+ #include <linux/watchdog.h>
+ 
+@@ -552,6 +553,20 @@
+ 
+ #endif /* !CONFIG_DEBUG_FS */
+ 
++/*
++ * A power-off that leaves the SoC powered, a firmware's sleep in its place,
++ * would have the counter reset the board a timeout later. Stop the counter
++ * as suspend does, keeping the bus clock for a ping still on its way.
++ */
++static int dw_wdt_power_off_prepare(struct sys_off_data *data)
++{
++	struct dw_wdt *dw_wdt = data->cb_data;
++
++	clk_disable_unprepare(dw_wdt->clk);
++
++	return NOTIFY_DONE;
++}
++
+ static int dw_wdt_drv_probe(struct platform_device *pdev)
+ {
+ 	struct device *dev = &pdev->dev;
+@@ -673,6 +688,15 @@
+ 
+ 	watchdog_set_restart_priority(wdd, 128);
+ 
++	/* without its own bus clock, the counter's stops register access too */
++	if (dw_wdt->pclk) {
++		ret = devm_register_sys_off_handler(dev, SYS_OFF_MODE_POWER_OFF_PREPARE,
++						    SYS_OFF_PRIO_HIGH,
++						    dw_wdt_power_off_prepare, dw_wdt);
++		if (ret)
++			goto out_assert_rst;
++	}
++
+ 	ret = watchdog_register_device(wdd);
+ 	if (ret)
+ 		goto out_assert_rst;

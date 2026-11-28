@@ -21,5 +21,20 @@ class BoxTest(unittest.TestCase):
         self.assertIn("tvb_drv_video.so: the driver is not installed", out.getvalue())
 
 
+class ProbeTest(unittest.TestCase):
+    def test_a_missing_probe_reports_its_path(self) -> None:
+        probe = Path("/usr/lib/tvb/vaapi-probe")
+        setup = vaapi_test.Setup(Path("/usr/lib"), probe, "tvb", "", "", Path("."), Path("."), True)
+        with (
+            mock.patch.object(Path, "exists", return_value=False),
+            mock.patch.object(vaapi_test, "run") as run,
+        ):
+            self.assertEqual(
+                list(vaapi_test.probe_case(setup)),
+                [("probe.initialize", f"no {probe}")],
+            )
+        run.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

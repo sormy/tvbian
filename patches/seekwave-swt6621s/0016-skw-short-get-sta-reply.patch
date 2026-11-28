@@ -1,0 +1,92 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] skw: take the firmware's shorter station reply for what it is
+
+The firmware here answers SKW_CMD_GET_STA with 172 bytes where the
+driver's struct is 385: everything up to the receive rate, without the
+airtime percentages and the station info after it. The driver warned
+on every poll, and read the missing fields as zeros it reported, the
+station's inactive time among them. Record each reply's length; report
+a shorter one once per command, warn only on a longer one, and fill
+the fields the reply carries.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/drivers/swt6621s_wifi/skw_core.h b/drivers/swt6621s_wifi/skw_core.h
+--- a/drivers/swt6621s_wifi/skw_core.h
++++ b/drivers/swt6621s_wifi/skw_core.h
+@@ -478,6 +478,8 @@
+ 
+ 		u16 data_len;
+ 		u16 arg_size;
++		/* the reply's own length, at most arg_size: the rest of arg stays as set */
++		u16 arg_len;
+ 
+ 		u16 seq;
+ 		u16 status;
+diff --git a/drivers/swt6621s_wifi/skw_msg.c b/drivers/swt6621s_wifi/skw_msg.c
+--- a/drivers/swt6621s_wifi/skw_msg.c
++++ b/drivers/swt6621s_wifi/skw_msg.c
+@@ -28,6 +28,9 @@
+ #include "skw_timer.h"
+ #include "skw_rx.h"
+ #include "skw_work.h"
++
++/* commands whose firmware replies shorter than the driver's struct, reported once */
++static DECLARE_BITMAP(skw_short_reply_seen, SKW_CMD_NUM);
+ #include "skw_calib.h"
+ #include "trace.h"
+ #include "skw_dfs.h"
+@@ -2127,10 +2130,14 @@
+ 		u16 hdr_len = sizeof(struct skw_msg) + sizeof(u16);
+ 		u16 len = msg_ack->total_len - hdr_len;
+ 
+-		// WARN_ON(msg_ack->total_len - hdr_len != skw->cmd.arg_size);
+-		if (len != skw->cmd.arg_size)
++		skw->cmd.arg_len = min_t(u16, len, skw->cmd.arg_size);
++		if (len > skw->cmd.arg_size)
+ 			skw_warn("%s expect len: %d, recv len: %d\n",
+ 				 skw->cmd.name, skw->cmd.arg_size, len);
++		else if (len < skw->cmd.arg_size &&
++			 !test_and_set_bit(skw->cmd.id, skw_short_reply_seen))
++			skw_info("%s replies %d of %d bytes, the rest unset\n",
++				 skw->cmd.name, len, skw->cmd.arg_size);
+ 
+ 		memcpy(skw->cmd.arg, data + hdr_len,
+ 		       min(data_len - hdr_len, (int)skw->cmd.arg_size));
+diff --git a/drivers/swt6621s_wifi/skw_cfg80211.c b/drivers/swt6621s_wifi/skw_cfg80211.c
+--- a/drivers/swt6621s_wifi/skw_cfg80211.c
++++ b/drivers/swt6621s_wifi/skw_cfg80211.c
+@@ -2269,6 +2269,7 @@
+ 	struct skw_station_params params = {0};
+ 	struct skw_get_sta_resp get_sta_resp;
+ 	struct skw_iface *iface = netdev_priv(dev);
++	struct skw_core *skw = wiphy_priv(wiphy);
+ 
+ 	// skw_dev_dbg(dev, "mac: %pM\n", mac);
+ 
+@@ -2348,8 +2349,10 @@
+ 			get_sta_resp.filter_drop_offload_cnt,
+ 			sizeof(get_sta_resp.filter_drop_offload_cnt));
+ 
+-		ctx->peer->tx.percent = get_sta_resp.tx_percent;
+-		ctx->peer->rx.percent = get_sta_resp.rx_percent;
++		if (skw->cmd.arg_len > offsetof(struct skw_get_sta_resp, rx_percent)) {
++			ctx->peer->tx.percent = get_sta_resp.tx_percent;
++			ctx->peer->rx.percent = get_sta_resp.rx_percent;
++		}
+ 
+ 		if (is_skw_ap_mode(iface)) {
+ 			sinfo->tx_packets = ctx->peer->tx.pkts;
+@@ -2368,8 +2371,10 @@
+ 	skw_hex_dump("get_sta_resp.sinfo:", &get_sta_resp.sinfo,
+ 		sizeof(get_sta_resp.sinfo), false);
+ 
+-	sinfo->inactive_time = get_sta_resp.sinfo.inactive_time;
+-	sinfo->filled |= SKW_BIT_ULL(NL80211_STA_INFO_INACTIVE_TIME);
++	if (skw->cmd.arg_len >= offsetofend(struct skw_get_sta_resp, sinfo.inactive_time)) {
++		sinfo->inactive_time = get_sta_resp.sinfo.inactive_time;
++		sinfo->filled |= SKW_BIT_ULL(NL80211_STA_INFO_INACTIVE_TIME);
++	}
+ 
+ //	skw_dev_dbg(dev, "tx packets:%u tx_bytes:%llu rx_packets:%u rx_bytes:%llu\n",
+ //		sinfo->tx_packets, sinfo->tx_bytes,

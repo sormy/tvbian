@@ -29,6 +29,13 @@ apply.
 - `0014` — with no address passed and none in the chip's eFUSE, the driver drew a random one each
   probe: a new host on every boot. It takes the SoC serial's low bytes under its own `fe:fd:fc`
   instead, random only without a serial. Not submitted upstream.
+- `0015` — the board-named firmware the driver tries first is optional, the generic file its
+  fallback; asked for as any other, each absent one logged a load failure though the radio came up.
+  It is asked for with `firmware_request_nowarn()`. Not submitted upstream.
+- `0016` — the firmware answers `SKW_CMD_GET_STA` with 172 bytes of the driver's 385, everything to
+  the receive rate. The driver warned on each poll and reported the missing airtime and inactive
+  time as zero; it now fills only what the reply carries and reports a short reply once. Not
+  submitted upstream.
 
 ## Mainline
 

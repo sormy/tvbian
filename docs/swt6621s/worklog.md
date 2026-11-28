@@ -55,3 +55,15 @@
 - `0014` replaces the random draw with the SoC serial's low bytes. The fallback itself is not
   exercised on these boxes.
 - The retired `tvb-swt6621s-mainline-modules` debs were still in `build/out/debs/`: deleted.
+
+## 2026-11-24 — the board firmware's misses and `GET_STA`'s short reply
+
+- `0015`: the board-named firmware the helper tries first is optional; asked with
+  `firmware_request_nowarn()`, three boots of the H96 Max 3518 on next2 7.3.6 log no "Direct
+  firmware load", where each boot logged four, and the radio comes up as before.
+- `0016`: the firmware answers `SKW_CMD_GET_STA` with 172 bytes of the driver's 385, the struct
+  without `tx_percent`, `rx_percent` and `sinfo`; the driver warned on each poll (11–22 in a soak)
+  and reported those as zero. It records the reply's length, fills only what it carries and reports
+  a short reply once. The 3518 on next2: 20 polls, no warning, one "replies 172 of 385 bytes";
+  `iw dev wlan0 link` −27 dBm. `iw station dump` is empty on every kernel: the driver has no
+  `dump_station`.

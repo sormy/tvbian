@@ -35,7 +35,6 @@ FFmpeg's, and what no chip has measured yet.
 - [ ] MJPEG encode: an `mjpeg_rkmpp` encoder.
 - [ ] AVS, AVS+: a sample, then an `rkmpp` decoder for each.
 - [ ] VC-1 and RealVideo: whether MPP decodes them on this chip.
-- [ ] 10-bit encode input.
 - [ ] AFBC and the ½ picture together: MPP stalls asked for both.
 - [ ] The ½ picture against RGA2 scaling a full decode, at 4K HEVC.
 - [ ] RGA in FFmpeg: `jellyfin-ffmpeg`'s `scale_rkrga`, `vpp_rkrga` and `overlay_rkrga` scale and

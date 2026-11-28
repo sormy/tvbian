@@ -17,3 +17,8 @@ fi
 if [ "$1" = configure ] && getent group video >/dev/null && id _greetd >/dev/null 2>&1; then
   usermod -a -G video _greetd
 fi
+# the desktop is started by hand while it is experimental: greetd, which Debian enables, starts at
+# boot only where someone enables it again; an upgrade leaves that choice alone
+if [ "$1" = configure ] && [ -z "$2" ]; then
+  systemctl disable greetd.service >/dev/null 2>&1 || true
+fi

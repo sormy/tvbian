@@ -1,0 +1,26 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] regulator: pwm: an init voltage wins over the boot-on duty
+
+Rockchip's regulator-init-microvolt sets a rail's voltage at enable,
+but only while its PWM duty is still 0. pwm_regulator_init_boot_on
+runs first and, for a boot-on rail on an inverse-polarity PWM, sets
+the duty to the whole period: the init voltage is skipped and the rail
+comes up at its maximum, 1006 mV on the HK1's vdd_logic and 1148 mV on
+the M2 Plus's vdd_gpu, until a consumer asks for less. Leave the duty
+alone where an init voltage is given.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/drivers/regulator/pwm-regulator.c b/drivers/regulator/pwm-regulator.c
+--- a/drivers/regulator/pwm-regulator.c
++++ b/drivers/regulator/pwm-regulator.c
+@@ -338,7 +338,8 @@
+ {
+ 	struct pwm_state pstate;
+ 
+-	if (!init_data->constraints.boot_on || drvdata->enb_gpio)
++	/* an init voltage is set at enable, but only while the duty is still 0 */
++	if (!init_data->constraints.boot_on || drvdata->enb_gpio || drvdata->init_uv)
+ 		return 0;
+ 
+ 	pwm_get_state(drvdata->pwm, &pstate);
