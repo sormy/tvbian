@@ -58,6 +58,7 @@ for its API, and rewrites of top-level ones it takes in their place (`0103`, `02
 | `0289`        | dw-hdmi: HDR in 10 bits, RGB or 4:2:2                  |
 | `0290`        | dw-hdmi: HDMI or DVI from the connector, its override  |
 | `0291`        | dw-hdmi: HDR10+ at a mode with no HDMI VIC             |
+| `0292`–`0293` | the X98H's remote keymap, `rc-x98h`                    |
 | `0800`–`0804` | Cedrus: VP8 to 4096 wide, JPEG both ways               |
 | `0805`–`0806` | Cedrus: MPEG-4 Part 2 and H.263 decode                 |
 | `0807`        | Cedrus: a coded format sized by its own engine         |
@@ -136,7 +137,8 @@ to memory. On top: the stop command ffmpeg and GStreamer drain with, escaped hea
 and cropping, references kept out of the picture buffers, and frame rate control. `0083` lets
 `sunxi-cir` wake the system; `0085` keeps P010 the 10-bit default over `0066`'s AFBC, which a
 software consumer cannot read; `0088` is the TX1 V2's remote keymap, `rc-tanix-tx1-v2`, and `0050`
-the H96 Max H313's, `rc-h96max-h313`, both on the canonical keys. Not yet submitted.
+the H96 Max H313's, `rc-h96max-h313`, both on the canonical keys. `0293` is the X98H's, `rc-x98h`,
+from the stock firmware's key layout. Not yet submitted.
 
 ## `next/`: `sunxi64-next`
 

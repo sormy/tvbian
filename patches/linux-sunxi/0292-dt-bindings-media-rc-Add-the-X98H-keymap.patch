@@ -1,0 +1,19 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Thu, 26 Nov 2026 19:00:00 -0500
+Subject: [PATCH] dt-bindings: media: rc: Add the X98H's keymap
+
+The X98H's stock remote; list its keymap, rc-x98h.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+--- a/Documentation/devicetree/bindings/media/rc.yaml
++++ b/Documentation/devicetree/bindings/media/rc.yaml
+@@ -159,6 +159,7 @@
+       - rc-winfast
+       - rc-winfast-usbii-deluxe
+       - rc-x96max
++      - rc-x98h
+       - rc-xbox-360
+       - rc-xbox-dvd
+       - rc-zx-irdec

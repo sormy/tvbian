@@ -1,0 +1,101 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Thu, 26 Nov 2026 19:00:00 -0500
+Subject: [PATCH] media: rc: keymaps: Add the X98H remote
+
+The X98H's stock remote, NEC, address 0x01. Map each button as its label
+reads, from the stock firmware's key layout for that address: the digits as
+KEY_0 to KEY_9, the mouse button as KEY_TOUCHPAD_TOGGLE, and "@" as
+KEY_EMAIL, Android's key for it.
+The three app buttons wait on their codes.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+--- a/drivers/media/rc/keymaps/Makefile
++++ b/drivers/media/rc/keymaps/Makefile
+@@ -140,6 +140,7 @@
+ 			rc-winfast.o \
+ 			rc-winfast-usbii-deluxe.o \
+ 			rc-x96max.o \
++			rc-x98h.o \
+ 			rc-xbox-360.o \
+ 			rc-xbox-dvd.o \
+ 			rc-zx-irdec.o
+--- a/include/media/rc-map.h
++++ b/include/media/rc-map.h
+@@ -345,6 +345,7 @@
+ #define RC_MAP_WINFAST                   "rc-winfast"
+ #define RC_MAP_WINFAST_USBII_DELUXE      "rc-winfast-usbii-deluxe"
+ #define RC_MAP_X96MAX                    "rc-x96max"
++#define RC_MAP_X98H                      "rc-x98h"
+ #define RC_MAP_XBOX_360                  "rc-xbox-360"
+ #define RC_MAP_XBOX_DVD                  "rc-xbox-dvd"
+ #define RC_MAP_ZX_IRDEC                  "rc-zx-irdec"
+--- /dev/null
++++ b/drivers/media/rc/keymaps/rc-x98h.c
+@@ -0,0 +1,65 @@
++// SPDX-License-Identifier: GPL-2.0+
++
++#include <media/rc-map.h>
++#include <linux/module.h>
++
++/*
++ * Keymap for the X98H's stock remote, from the stock firmware's layout for
++ * its NEC address. The mouse button toggles a pointer mode, as the vendor's
++ * software does with it.
++ */
++
++static struct rc_map_table x98h[] = {
++	{ 0x0140, KEY_POWER },
++	{ 0x0141, KEY_MUTE },
++	{ 0x0100, KEY_TOUCHPAD_TOGGLE },
++	{ 0x0118, KEY_VOLUMEUP },
++	{ 0x0110, KEY_VOLUMEDOWN },
++	{ 0x0159, KEY_PREVIOUSSONG },
++	{ 0x0158, KEY_NEXTSONG },
++	{ 0x0116, KEY_UP },
++	{ 0x011a, KEY_DOWN },
++	{ 0x0151, KEY_LEFT },
++	{ 0x0150, KEY_RIGHT },
++	{ 0x0113, KEY_OK },
++	{ 0x014c, KEY_MENU },
++	{ 0x0111, KEY_HOMEPAGE },
++	{ 0x0119, KEY_BACK },
++	{ 0x0101, KEY_0 },
++	{ 0x014e, KEY_1 },
++	{ 0x010d, KEY_2 },
++	{ 0x010c, KEY_3 },
++	{ 0x014a, KEY_4 },
++	{ 0x0109, KEY_5 },
++	{ 0x0108, KEY_6 },
++	{ 0x0146, KEY_7 },
++	{ 0x0105, KEY_8 },
++	{ 0x0104, KEY_9 },
++	{ 0x0147, KEY_EMAIL },
++	{ 0x0142, KEY_BACKSPACE },
++};
++
++static struct rc_map_list x98h_map = {
++	.map = {
++		.scan     = x98h,
++		.size     = ARRAY_SIZE(x98h),
++		.rc_proto = RC_PROTO_NEC,
++		.name     = RC_MAP_X98H,
++	}
++};
++
++static int __init init_rc_map_x98h(void)
++{
++	return rc_map_register(&x98h_map);
++}
++
++static void __exit exit_rc_map_x98h(void)
++{
++	rc_map_unregister(&x98h_map);
++}
++
++module_init(init_rc_map_x98h)
++module_exit(exit_rc_map_x98h)
++
++MODULE_LICENSE("GPL");
++MODULE_DESCRIPTION("X98H remote controller keytable");
