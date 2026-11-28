@@ -1,0 +1,64 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Wed, 25 Nov 2026 18:00:00 -0500
+Subject: [PATCH] fftools/ffmpeg: -sw_fallback to refuse a software decode
+
+Where a requested hwaccel cannot be set up, for a size or a profile its
+hardware does not take, the decoder goes on in software and says so
+only in the log. A test timing the hardware then times the CPU.
+
+Add -sw_fallback, on by default: off (-nosw_fallback), a stream whose
+hwaccel cannot be set up fails to decode instead.
+---
+diff --git a/fftools/ffmpeg.h b/fftools/ffmpeg.h
+index 6e25929..742568e 100644
+--- a/fftools/ffmpeg.h
++++ b/fftools/ffmpeg.h
+@@ -745,6 +745,7 @@ extern int start_at_zero;
+ extern int copy_tb;
+ extern int debug_ts;
+ extern int exit_on_error;
++extern int sw_fallback;
+ extern int abort_on_flags;
+ extern int print_stats;
+ extern int64_t stats_period;
+diff --git a/fftools/ffmpeg_dec.c b/fftools/ffmpeg_dec.c
+index 87dfe80..4b8a3b6 100644
+--- a/fftools/ffmpeg_dec.c
++++ b/fftools/ffmpeg_dec.c
+@@ -1413,6 +1413,13 @@ static enum AVPixelFormat get_format(AVCodecContext *s, const enum AVPixelFormat
+         }
+     }
+ 
++    if (!sw_fallback && dp->hwaccel_id != HWACCEL_NONE && *p != AV_PIX_FMT_NONE &&
++        !(av_pix_fmt_desc_get(*p)->flags & AV_PIX_FMT_FLAG_HWACCEL)) {
++        av_log(dp, AV_LOG_ERROR, "The hwaccel could not be set up, and "
++               "-sw_fallback is off\n");
++        return AV_PIX_FMT_NONE;
++    }
++
+     return *p;
+ }
+ 
+diff --git a/fftools/ffmpeg_opt.c b/fftools/ffmpeg_opt.c
+index 60e2ca1..9196fab 100644
+--- a/fftools/ffmpeg_opt.c
++++ b/fftools/ffmpeg_opt.c
+@@ -66,6 +66,7 @@ int start_at_zero     = 0;
+ int copy_tb           = -1;
+ int debug_ts          = 0;
+ int exit_on_error     = 0;
++int sw_fallback       = 1;
+ int abort_on_flags    = 0;
+ int print_stats       = -1;
+ int stdin_interaction = 1;
+@@ -1708,6 +1709,9 @@ const OptionDef options[] = {
+     { "xerror",                 OPT_TYPE_BOOL, OPT_EXPERT,
+         { &exit_on_error },
+         "exit on error", "error" },
++    { "sw_fallback",            OPT_TYPE_BOOL, OPT_EXPERT,
++        { &sw_fallback },
++        "decode in software where a requested hwaccel cannot be set up" },
+     { "abort_on",               OPT_TYPE_FUNC, OPT_FUNC_ARG | OPT_EXPERT,
+         { .func_arg = opt_abort_on },
+         "abort on the specified condition flags", "flags" },

@@ -1,0 +1,169 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Fri, 27 Nov 2026 16:44:04 -0500
+Subject: [PATCH] avfilter/deinterlace_v4l2m2m: a frame a frame, by a rate
+ option
+
+A player showing at the source's rate wants a frame for each input
+frame, not one for each field. Add rate=frame, beside the default
+rate=field: it sets the deinterlacer's "Frame per Frame" control, takes
+one frame a job, the first field's, and keeps the input's time base and
+frame rate. A driver without the control is refused at configuration.
+---
+ libavfilter/vf_deinterlace_v4l2m2m.c | 64 ++++++++++++++++++++++++----
+ 1 file changed, 55 insertions(+), 9 deletions(-)
+
+diff --git a/libavfilter/vf_deinterlace_v4l2m2m.c b/libavfilter/vf_deinterlace_v4l2m2m.c
+index 7367bf8..d7fad54 100644
+--- a/libavfilter/vf_deinterlace_v4l2m2m.c
++++ b/libavfilter/vf_deinterlace_v4l2m2m.c
+@@ -53,6 +53,14 @@
+ #include "formats.h"
+ #include "video.h"
+ 
++/* the deinterlacer's control for one frame out per frame in, by its name */
++#define FRAME_PER_FRAME_CTRL "Frame per Frame"
++
++enum DeintRate {
++    RATE_FIELD,
++    RATE_FRAME,
++};
++
+ typedef struct V4L2Queue V4L2Queue;
+ typedef struct DeintV4L2M2MContextShared DeintV4L2M2MContextShared;
+ 
+@@ -104,6 +112,8 @@ typedef struct DeintV4L2M2MContextShared {
+     AVFifo *pending;
+     int64_t prev_pts;
+     unsigned int field_order;
++    /* the frames each input frame gives: one a field, or one */
++    int frames;
+ 
+     V4L2Queue output;
+     V4L2Queue capture;
+@@ -113,6 +123,7 @@ typedef struct DeintV4L2M2MContext {
+     const AVClass *class;
+ 
+     DeintV4L2M2MContextShared *shared;
++    int rate;
+ } DeintV4L2M2MContext;
+ 
+ static inline uint32_t v4l2_pix_fmt_from_drm_format(uint64_t drm_format)
+@@ -778,8 +789,24 @@ static int deint_v4l2m2m_dequeue_frame(V4L2Queue *queue, AVFrame* frame, int tim
+     return 0;
+ }
+ 
++/* The driver's one-frame-a-frame control set; ENOSYS where it has none */
++static int deint_v4l2m2m_frame_per_frame(DeintV4L2M2MContextShared *ctx)
++{
++    struct v4l2_query_ext_ctrl query = { .id = V4L2_CTRL_FLAG_NEXT_CTRL };
++    struct v4l2_control ctrl = { .value = 1 };
++
++    while (!ioctl(ctx->fd, VIDIOC_QUERY_EXT_CTRL, &query)) {
++        if (!strcmp(query.name, FRAME_PER_FRAME_CTRL)) {
++            ctrl.id = query.id;
++            return ioctl(ctx->fd, VIDIOC_S_CTRL, &ctrl) < 0 ? AVERROR(errno) : 0;
++        }
++        query.id |= V4L2_CTRL_FLAG_NEXT_CTRL;
++    }
++    return AVERROR(ENOSYS);
++}
++
+ /*
+- * The oldest pending frame's two fields, once the deinterlacer has them, which
++ * The oldest pending frame's frames, once the deinterlacer has them, which
+  * may be a frame later: it reads the frames either side. 0 when none is ready
+  * within timeout, AVERROR_EOF after the last before a stop.
+  */
+@@ -791,13 +818,13 @@ static int deint_v4l2m2m_output(AVFilterContext *avctx, int timeout)
+     AVFrame *out[2] = { NULL }, *in = NULL;
+     int last = 0, i, err;
+ 
+-    for (i = 0; i < 2; i++) {
++    for (i = 0; i < ctx->frames; i++) {
+         out[i] = av_frame_alloc();
+         if (!out[i]) {
+             err = AVERROR(ENOMEM);
+             goto fail;
+         }
+-        /* a job gives both fields' frames at once */
++        /* a job gives all its frames at once */
+         err = deint_v4l2m2m_dequeue_frame(&ctx->capture, out[i], i ? 500 : timeout, &last);
+         if (err < 0)
+             goto fail;
+@@ -807,15 +834,15 @@ static int deint_v4l2m2m_output(AVFilterContext *avctx, int timeout)
+         goto fail;
+     }
+ 
+-    for (i = 0; i < 2; i++) {
++    for (i = 0; i < ctx->frames; i++) {
+         err = av_frame_copy_props(out[i], in);
+         if (err < 0)
+             goto fail;
+         out[i]->flags &= ~AV_FRAME_FLAG_INTERLACED;
+     }
+ 
+-    /* the output time base is half the input's: a frame per field */
+-    if (in->pts != AV_NOPTS_VALUE) {
++    /* a frame per field: the output time base is half the input's */
++    if (ctx->frames == 2 && in->pts != AV_NOPTS_VALUE) {
+         out[1]->pts = in->pts * 2;
+         out[0]->pts = ctx->prev_pts != AV_NOPTS_VALUE ? ctx->prev_pts + in->pts :
+                       out[1]->pts - FFMAX(in->duration, 1);
+@@ -823,7 +850,7 @@ static int deint_v4l2m2m_output(AVFilterContext *avctx, int timeout)
+     ctx->prev_pts = in->pts;
+     av_frame_free(&in);
+ 
+-    for (i = 0; i < 2; i++) {
++    for (i = 0; i < ctx->frames; i++) {
+         err = ff_filter_frame(outlink, out[i]);
+         out[i] = NULL;
+         if (err < 0)
+@@ -871,15 +898,25 @@ static int deint_v4l2m2m_config_props(AVFilterLink *outlink)
+     ctx->height = avctx->inputs[0]->h;
+     ctx->width = avctx->inputs[0]->w;
+ 
++    ctx->frames = priv->rate == RATE_FRAME ? 1 : 2;
+     fl_outlink->frame_rate = av_mul_q(fl_inlink->frame_rate,
+-                                      (AVRational){ 2, 1 });
++                                      (AVRational){ ctx->frames, 1 });
+     outlink->time_base  = av_mul_q(inlink->time_base,
+-                                   (AVRational){ 1, 2 });
++                                   (AVRational){ 1, ctx->frames });
+ 
+     ret = deint_v4l2m2m_find_device(ctx);
+     if (ret)
+         return ret;
+ 
++    if (priv->rate == RATE_FRAME) {
++        ret = deint_v4l2m2m_frame_per_frame(ctx);
++        if (ret) {
++            av_log(priv, AV_LOG_ERROR, "the deinterlacer gives no frame per frame: %s\n",
++                   av_err2str(ret));
++            return ret;
++        }
++    }
++
+     if (!fl_inlink->hw_frames_ctx) {
+         av_log(priv, AV_LOG_ERROR, "No hw context provided on input\n");
+         return AVERROR(EINVAL);
+@@ -1034,7 +1071,16 @@ static void deint_v4l2m2m_uninit(AVFilterContext *avctx)
+     deint_v4l2m2m_destroy_context(ctx);
+ }
+ 
++#define OFFSET(x) offsetof(DeintV4L2M2MContext, x)
++#define FLAGS (AV_OPT_FLAG_FILTERING_PARAM | AV_OPT_FLAG_VIDEO_PARAM)
++
+ static const AVOption deinterlace_v4l2m2m_options[] = {
++    { "rate", "the output rate", OFFSET(rate), AV_OPT_TYPE_INT,
++      { .i64 = RATE_FIELD }, RATE_FIELD, RATE_FRAME, FLAGS, .unit = "rate" },
++    { "field", "a frame per field", 0, AV_OPT_TYPE_CONST,
++      { .i64 = RATE_FIELD }, 0, 0, FLAGS, .unit = "rate" },
++    { "frame", "a frame per frame, from its first field", 0, AV_OPT_TYPE_CONST,
++      { .i64 = RATE_FRAME }, 0, 0, FLAGS, .unit = "rate" },
+     { NULL },
+ };
+ 
+-- 
+2.56.1
+

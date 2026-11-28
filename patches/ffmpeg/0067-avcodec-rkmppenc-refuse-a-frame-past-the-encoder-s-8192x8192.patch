@@ -1,0 +1,51 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] avcodec/rkmppenc: refuse a frame past the encoder's 8192x8192
+
+The RK3528's encoder takes frames up to 8192x8192: video.py's encode
+ladder passes H.264 and HEVC at 8192x8192 and fails both at 16384x8640,
+where MPP on some runs wedges the encoder until a power cut instead of
+failing the frame. Refuse a size past 8192 in either dimension at open,
+on the RK3528 family alone, the chips it was measured on; another chip's
+encoder keeps whatever MPP gives it.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ libavcodec/rkmppenc.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/libavcodec/rkmppenc.c b/libavcodec/rkmppenc.c
+--- a/libavcodec/rkmppenc.c
++++ b/libavcodec/rkmppenc.c
+@@ -41,6 +41,7 @@
+ #include "codec_internal.h"
+ #include "encode.h"
+ #include "hwconfig.h"
++#include "rkmpp_soc.h"
+ 
+ #define RKMPP_TIME_BASE AV_TIME_BASE_Q
+ #define RKMPP_ALIGN_SIZE 16
+@@ -64,6 +65,9 @@ typedef struct RKMPPEncoderContext {
+     bool eof_sent;
+ } RKMPPEncoderContext;
+ 
++/* the RK3528 family's encoder, measured */
++#define RKMPP_ENC_MAX_SIZE 8192
++
+ static const enum AVPixelFormat rkmpp_pix_fmts[] = {
+     AV_PIX_FMT_DRM_PRIME,
+     AV_PIX_FMT_NV12,
+@@ -224,6 +228,14 @@ static av_cold int rkmpp_init_encoder(AVCodecContext *avctx)
+         av_unreachable("Invalid codec_id");
+     }
+ 
++    /* past this the RK3528's VEPU540C wedges at times rather than failing the frame */
++    if (ff_rkmpp_is_rk3528() &&
++        (avctx->width > RKMPP_ENC_MAX_SIZE || avctx->height > RKMPP_ENC_MAX_SIZE)) {
++        av_log(avctx, AV_LOG_ERROR, "%dx%d is larger than the hardware's %dx%d\n",
++               avctx->width, avctx->height, RKMPP_ENC_MAX_SIZE, RKMPP_ENC_MAX_SIZE);
++        return AVERROR(EINVAL);
++    }
++
+     ret = mpp_check_support_format(MPP_CTX_ENC, codectype);
+     if (ret != MPP_OK) {
+         av_log(avctx, AV_LOG_ERROR, "The device doesn't support %s\n",

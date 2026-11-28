@@ -1,0 +1,79 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Tue, 24 Nov 2026 12:00:00 -0500
+Subject: [PATCH] avcodec/v4l2: NV16 and NV24 frames in one plane
+
+A JPEG decoder hands a 4:2:2 or 4:4:4 picture out as it is, NV16 or NV24,
+in one V4L2 plane. FFmpeg mapped only the two-plane NV16M, so the
+decoder's format had no pixel format, and a single plane was split for
+NV12 and YUV420P alone. Map both, and find their chroma after the luma:
+a row as wide as the luma's for NV16, twice as wide for NV24.
+---
+diff --git a/libavcodec/v4l2_fmt.c b/libavcodec/v4l2_fmt.c
+--- a/libavcodec/v4l2_fmt.c
++++ b/libavcodec/v4l2_fmt.c
+@@ -51,6 +51,8 @@
+     { AV_FMT(YUV410P),     AV_CODEC(RAWVIDEO),    V4L2_FMT(YUV410) },
+     { AV_FMT(YUV410P),     AV_CODEC(RAWVIDEO),    V4L2_FMT(YVU410) },
+     { AV_FMT(NV12),        AV_CODEC(RAWVIDEO),    V4L2_FMT(NV12) },
++    { AV_FMT(NV16),        AV_CODEC(RAWVIDEO),    V4L2_FMT(NV16) },
++    { AV_FMT(NV24),        AV_CODEC(RAWVIDEO),    V4L2_FMT(NV24) },
+     { AV_FMT(NONE),        AV_CODEC(MJPEG),       V4L2_FMT(MJPEG) },
+     { AV_FMT(NONE),        AV_CODEC(MJPEG),       V4L2_FMT(JPEG) },
+ #ifdef V4L2_PIX_FMT_SRGGB8
+diff --git a/libavcodec/v4l2_buffers.c b/libavcodec/v4l2_buffers.c
+--- a/libavcodec/v4l2_buffers.c
++++ b/libavcodec/v4l2_buffers.c
+@@ -237,6 +237,13 @@
+     }
+ }
+ 
++/* NV24 interleaves full-width chroma: twice the luma's row */
++static int v4l2_chroma_pitch(const V4L2Buffer *avbuf)
++{
++    return avbuf->plane_info[0].bytesperline *
++           (avbuf->context->av_pix_fmt == AV_PIX_FMT_NV24 ? 2 : 1);
++}
++
+ static uint8_t * v4l2_get_drm_frame(V4L2Buffer *avbuf)
+ {
+     AVDRMFrameDescriptor *drm_desc = &avbuf->drm_frame;
+@@ -288,6 +295,23 @@
+         layer->planes[1].pitch = avbuf->plane_info[0].bytesperline;
+         break;
+ 
++    case AV_PIX_FMT_NV16:
++    case AV_PIX_FMT_NV24:
++
++        layer->format = avbuf->context->av_pix_fmt == AV_PIX_FMT_NV16 ?
++            DRM_FORMAT_NV16 : DRM_FORMAT_NV24;
++
++        if (avbuf->num_planes > 1)
++            break;
++
++        layer->nb_planes = 2;
++
++        layer->planes[1].object_index = 0;
++        layer->planes[1].offset = avbuf->plane_info[0].bytesperline *
++            avbuf->context->format.fmt.pix.height;
++        layer->planes[1].pitch = v4l2_chroma_pitch(avbuf);
++        break;
++
+     case AV_PIX_FMT_YUV420P:
+ 
+         layer->format = DRM_FORMAT_YUV420;
+@@ -520,6 +544,14 @@
+         frame->data[1] = frame->buf[0]->data + avbuf->plane_info[0].bytesperline * avbuf->context->format.fmt.pix_mp.height;
+         break;
+ 
++    case AV_PIX_FMT_NV16:
++    case AV_PIX_FMT_NV24:
++        if (avbuf->num_planes > 1)
++            break;
++        frame->linesize[1] = v4l2_chroma_pitch(avbuf);
++        frame->data[1] = frame->buf[0]->data + avbuf->plane_info[0].bytesperline * avbuf->context->format.fmt.pix_mp.height;
++        break;
++
+     case AV_PIX_FMT_YUV420P:
+         if (avbuf->num_planes > 1)
+             break;

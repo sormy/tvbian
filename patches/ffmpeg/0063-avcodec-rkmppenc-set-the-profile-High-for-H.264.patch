@@ -1,0 +1,62 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] avcodec/rkmppenc: set the profile, High for H.264
+
+MPP writes its default profile unless told one, Constrained Baseline for
+H.264: no CABAC or 8x8 transform, though the encoder offers High. Set the
+profile from avctx->profile, High for H.264 when none is asked, and refuse
+one MPP does not write, such as HEVC Main 10, instead of encoding another.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ libavcodec/rkmppenc.c | 31 +++++++++++++++++++++++++++++++
+ 1 file changed, 31 insertions(+)
+
+diff --git a/libavcodec/rkmppenc.c b/libavcodec/rkmppenc.c
+index f88f7f1..b37e09f 100644
+--- a/libavcodec/rkmppenc.c
++++ b/libavcodec/rkmppenc.c
+@@ -179,6 +179,34 @@ out:
+     return ret;
+ }
+ 
++// MPP writes its own default, Constrained Baseline for H.264, unless told a profile
++static int rkmpp_set_profile(AVCodecContext *avctx, MppEncCfg cfg)
++{
++    int profile = avctx->profile;
++
++    if (avctx->codec_id == AV_CODEC_ID_HEVC) {
++        if (profile != AV_PROFILE_UNKNOWN && profile != AV_PROFILE_HEVC_MAIN)
++            goto refuse;
++        return 0;
++    }
++
++    if (profile == AV_PROFILE_UNKNOWN)
++        profile = AV_PROFILE_H264_HIGH;
++    if (profile != AV_PROFILE_H264_BASELINE && profile != AV_PROFILE_H264_MAIN &&
++        profile != AV_PROFILE_H264_HIGH)
++        goto refuse;
++
++    mpp_enc_cfg_set_s32(cfg, "h264:profile", profile);
++    mpp_enc_cfg_set_s32(cfg, "h264:cabac_en", profile != AV_PROFILE_H264_BASELINE);
++    mpp_enc_cfg_set_s32(cfg, "h264:cabac_idc", 0);
++    mpp_enc_cfg_set_s32(cfg, "h264:trans8x8", profile == AV_PROFILE_H264_HIGH);
++    return 0;
++
++refuse:
++    av_log(avctx, AV_LOG_ERROR, "Profile %d is not one MPP encodes\n", profile);
++    return AVERROR(ENOSYS);
++}
++
+ static av_cold int rkmpp_init_encoder(AVCodecContext *avctx)
+ {
+     RKMPPEncoderContext *ctx = avctx->priv_data;
+@@ -294,6 +322,9 @@ static av_cold int rkmpp_init_encoder(AVCodecContext *avctx)
+ 
+     mpp_enc_cfg_set_u32(cfg, "rc:drop_mode", MPP_ENC_RC_DROP_FRM_DISABLED);
+ 
++    if ((ret = rkmpp_set_profile(avctx, cfg)) < 0)
++        return ret;
++
+     ret = ctx->mpi->control(ctx->enc, MPP_ENC_SET_CFG, cfg);
+     if (ret != MPP_OK) {
+         av_log(avctx, AV_LOG_ERROR, "Failed to set config: %d\n", ret);

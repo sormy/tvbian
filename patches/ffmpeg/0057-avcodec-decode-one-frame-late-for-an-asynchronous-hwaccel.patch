@@ -1,0 +1,253 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Wed, 25 Nov 2026 14:30:00 -0500
+Subject: [PATCH] avcodec/decode: one frame late for an asynchronous hwaccel
+
+avcodec_send_packet() decodes into its one-frame buffer, and a V4L2
+request hwaccel's post_process waits there on the frame's hardware
+decode. Where a stream hands its frames out as it decodes them, the
+caller is held until frame N is decoded and sends N+1 only after: the
+hardware idles while N+1 is parsed and submitted. On an RK3528 decoding
+HEVC at 3840x2160 that is 1.4 ms in every third frame, 4.6% of the time
+the decoder could run; Rockchip's MPP decoder parses ahead and leaves no
+such gap.
+
+Let a hwaccel whose post_process waits on the hardware say so with
+HWACCEL_CAP_DELAY_OUTPUT, and hand out its frames one late: frame N
+leaves once N+1 has been submitted, so the wait falls on a frame the
+hardware has most often finished. Once the caller drains, a frame
+is not held back first, as the caller may not be asked for more input;
+the held frame leaves when the decoder has no more, and a flush drops
+it. The V4L2 request hwaccels
+set it.
+---
+diff --git a/libavcodec/decode.c b/libavcodec/decode.c
+index 29ded4c..2588709 100644
+--- a/libavcodec/decode.c
++++ b/libavcodec/decode.c
+@@ -85,6 +85,13 @@ typedef struct DecodeContext {
+      */
+     int draining_started;
+ 
++    /**
++     * A frame held back by one for an HWACCEL_CAP_DELAY_OUTPUT hwaccel, and
++     * the frame it is swapped through.
++     */
++    AVFrame *delayed;
++    AVFrame *delayed_swap;
++
+     int64_t pts_correction_num_faulty_pts; /// Number of incorrect PTS values so far
+     int64_t pts_correction_num_faulty_dts; /// Number of incorrect DTS values so far
+     int64_t pts_correction_last_pts;       /// PTS of the last frame
+@@ -658,6 +665,44 @@ int ff_decode_receive_frame_internal(AVCodecContext *avctx, AVFrame *frame)
+     return ret;
+ }
+ 
++static int delays_output(const AVCodecContext *avctx)
++{
++    return avctx->hwaccel && !(avctx->active_thread_type & FF_THREAD_FRAME) &&
++           ffhwaccel(avctx->hwaccel)->caps_internal & HWACCEL_CAP_DELAY_OUTPUT;
++}
++
++/**
++ * Hand out the frame held back and hold the new one in its place, so that the
++ * new frame's hardware decode runs while the caller waits on the older one.
++ * Draining, a frame is never held back first: the caller may not be told to
++ * send more. The held frame leaves when the decoder has no more.
++ */
++static int delay_output(DecodeContext *dc, AVFrame *frame, int ret)
++{
++    if (!dc->delayed && !(dc->delayed = av_frame_alloc()))
++        return AVERROR(ENOMEM);
++    if (!dc->delayed_swap && !(dc->delayed_swap = av_frame_alloc()))
++        return AVERROR(ENOMEM);
++
++    if (!ret) {
++        if (dc->draining_started && !dc->delayed->buf[0])
++            return 0;
++        if (!dc->delayed->buf[0]) {
++            av_frame_move_ref(dc->delayed, frame);
++            return AVERROR(EAGAIN);
++        }
++        av_frame_move_ref(dc->delayed_swap, dc->delayed);
++        av_frame_move_ref(dc->delayed, frame);
++        av_frame_move_ref(frame, dc->delayed_swap);
++        return 0;
++    }
++    if (ret == AVERROR_EOF && dc->delayed->buf[0]) {
++        av_frame_move_ref(frame, dc->delayed);
++        return 0;
++    }
++    return ret;
++}
++
+ static int decode_receive_frame_internal(AVCodecContext *avctx, AVFrame *frame,
+                                          unsigned flags)
+ {
+@@ -670,6 +715,9 @@ static int decode_receive_frame_internal(AVCodecContext *avctx, AVFrame *frame,
+     else
+         ret = ff_decode_receive_frame_internal(avctx, frame);
+ 
++    if (delays_output(avctx) || (dc->delayed && dc->delayed->buf[0]))
++        ret = delay_output(dc, frame, ret);
++
+     /* preserve ret */
+     ok = detect_colorspace(avctx, frame);
+     if (ok < 0) {
+@@ -2388,6 +2436,9 @@ av_cold void ff_decode_flush_buffers(AVCodecContext *avctx)
+ 
+     dc->nb_draining_errors = 0;
+     dc->draining_started   = 0;
++
++    if (dc->delayed)
++        av_frame_unref(dc->delayed);
+ }
+ 
+ av_cold AVCodecInternal *ff_decode_internal_alloc(void)
+@@ -2413,10 +2464,12 @@ av_cold void ff_decode_internal_sync(AVCodecContext *dst, const AVCodecContext *
+ 
+ av_cold void ff_decode_internal_uninit(AVCodecContext *avctx)
+ {
+-#if CONFIG_LIBLCEVC_DEC
+     AVCodecInternal *avci = avctx->internal;
+     DecodeContext *dc = decode_ctx(avci);
+ 
++    av_frame_free(&dc->delayed);
++    av_frame_free(&dc->delayed_swap);
++#if CONFIG_LIBLCEVC_DEC
+     av_refstruct_unref(&dc->lcevc.ctx);
+ #endif
+ }
+diff --git a/libavcodec/hwaccel_internal.h b/libavcodec/hwaccel_internal.h
+index 7224406..7c86e7e 100644
+--- a/libavcodec/hwaccel_internal.h
++++ b/libavcodec/hwaccel_internal.h
+@@ -30,6 +30,12 @@
+ 
+ #define HWACCEL_CAP_ASYNC_SAFE      (1 << 0)
+ #define HWACCEL_CAP_THREAD_SAFE     (1 << 1)
++/**
++ * The hwaccel's post_process waits on the hardware: the decoder hands out each
++ * frame one late, once the next has been submitted, so the hardware is fed
++ * while the caller waits.
++ */
++#define HWACCEL_CAP_DELAY_OUTPUT    (1 << 2)
+ 
+ typedef struct FFHWAccel {
+     /**
+diff --git a/libavcodec/v4l2_request_av1.c b/libavcodec/v4l2_request_av1.c
+index 4eabdbf..2b03ac7 100644
+--- a/libavcodec/v4l2_request_av1.c
++++ b/libavcodec/v4l2_request_av1.c
+@@ -632,5 +632,5 @@ const FFHWAccel ff_av1_v4l2request_hwaccel = {
+     .uninit             = ff_v4l2_request_uninit,
+     .priv_data_size     = sizeof(V4L2RequestContextAV1),
+     .frame_params       = v4l2_request_av1_frame_params,
+-    .caps_internal      = HWACCEL_CAP_ASYNC_SAFE,
++    .caps_internal      = HWACCEL_CAP_ASYNC_SAFE | HWACCEL_CAP_DELAY_OUTPUT,
+ };
+diff --git a/libavcodec/v4l2_request_h264.c b/libavcodec/v4l2_request_h264.c
+index 5abf631..5ffa691 100644
+--- a/libavcodec/v4l2_request_h264.c
++++ b/libavcodec/v4l2_request_h264.c
+@@ -528,5 +528,5 @@ const FFHWAccel ff_h264_v4l2request_hwaccel = {
+     .uninit             = ff_v4l2_request_uninit,
+     .priv_data_size     = sizeof(V4L2RequestContextH264),
+     .frame_params       = v4l2_request_h264_frame_params,
+-    .caps_internal      = HWACCEL_CAP_ASYNC_SAFE,
++    .caps_internal      = HWACCEL_CAP_ASYNC_SAFE | HWACCEL_CAP_DELAY_OUTPUT,
+ };
+diff --git a/libavcodec/v4l2_request_hevc.c b/libavcodec/v4l2_request_hevc.c
+index 26cba2c..b2f08eb 100644
+--- a/libavcodec/v4l2_request_hevc.c
++++ b/libavcodec/v4l2_request_hevc.c
+@@ -748,5 +748,5 @@ const FFHWAccel ff_hevc_v4l2request_hwaccel = {
+     .uninit             = ff_v4l2_request_uninit,
+     .priv_data_size     = sizeof(V4L2RequestContextHEVC),
+     .frame_params       = v4l2_request_hevc_frame_params,
+-    .caps_internal      = HWACCEL_CAP_ASYNC_SAFE,
++    .caps_internal      = HWACCEL_CAP_ASYNC_SAFE | HWACCEL_CAP_DELAY_OUTPUT,
+ };
+diff --git a/libavcodec/v4l2_request_mpeg2.c b/libavcodec/v4l2_request_mpeg2.c
+index 104b4c0..90a0881 100644
+--- a/libavcodec/v4l2_request_mpeg2.c
++++ b/libavcodec/v4l2_request_mpeg2.c
+@@ -193,7 +193,7 @@ const FFHWAccel ff_mpeg2_v4l2request_hwaccel = {
+     .uninit             = ff_v4l2_request_uninit,
+     .priv_data_size     = sizeof(V4L2RequestContext),
+     .frame_params       = v4l2_request_mpeg2_frame_params,
+-    .caps_internal      = HWACCEL_CAP_ASYNC_SAFE,
++    .caps_internal      = HWACCEL_CAP_ASYNC_SAFE | HWACCEL_CAP_DELAY_OUTPUT,
+ };
+ 
+ const FFHWAccel ff_mpeg1_v4l2request_hwaccel = {
+@@ -210,5 +210,5 @@ const FFHWAccel ff_mpeg1_v4l2request_hwaccel = {
+     .uninit             = ff_v4l2_request_uninit,
+     .priv_data_size     = sizeof(V4L2RequestContext),
+     .frame_params       = v4l2_request_mpeg2_frame_params,
+-    .caps_internal      = HWACCEL_CAP_ASYNC_SAFE,
++    .caps_internal      = HWACCEL_CAP_ASYNC_SAFE | HWACCEL_CAP_DELAY_OUTPUT,
+ };
+diff --git a/libavcodec/v4l2_request_mpeg4.c b/libavcodec/v4l2_request_mpeg4.c
+index 902e142..daeb092 100644
+--- a/libavcodec/v4l2_request_mpeg4.c
++++ b/libavcodec/v4l2_request_mpeg4.c
+@@ -473,7 +473,7 @@ const FFHWAccel ff_mpeg4_v4l2request_hwaccel = {
+     .uninit             = ff_v4l2_request_uninit,
+     .priv_data_size     = sizeof(V4L2RequestContext),
+     .frame_params       = v4l2_request_mpeg4_frame_params,
+-    .caps_internal      = HWACCEL_CAP_ASYNC_SAFE,
++    .caps_internal      = HWACCEL_CAP_ASYNC_SAFE | HWACCEL_CAP_DELAY_OUTPUT,
+ };
+ #endif
+ 
+@@ -492,6 +492,6 @@ const FFHWAccel ff_h263_v4l2request_hwaccel = {
+     .uninit             = ff_v4l2_request_uninit,
+     .priv_data_size     = sizeof(V4L2RequestContext),
+     .frame_params       = v4l2_request_mpeg4_frame_params,
+-    .caps_internal      = HWACCEL_CAP_ASYNC_SAFE,
++    .caps_internal      = HWACCEL_CAP_ASYNC_SAFE | HWACCEL_CAP_DELAY_OUTPUT,
+ };
+ #endif
+diff --git a/libavcodec/v4l2_request_vc1.c b/libavcodec/v4l2_request_vc1.c
+index 915b7b7..5511d99 100644
+--- a/libavcodec/v4l2_request_vc1.c
++++ b/libavcodec/v4l2_request_vc1.c
+@@ -670,7 +670,7 @@ const FFHWAccel ff_wmv3_v4l2request_hwaccel = {
+     .uninit             = ff_v4l2_request_uninit,
+     .priv_data_size     = sizeof(V4L2RequestContext),
+     .frame_params       = v4l2_request_vc1_frame_params,
+-    .caps_internal      = HWACCEL_CAP_ASYNC_SAFE,
++    .caps_internal      = HWACCEL_CAP_ASYNC_SAFE | HWACCEL_CAP_DELAY_OUTPUT,
+ };
+ #endif
+ 
+@@ -688,5 +688,5 @@ const FFHWAccel ff_vc1_v4l2request_hwaccel = {
+     .uninit             = ff_v4l2_request_uninit,
+     .priv_data_size     = sizeof(V4L2RequestContext),
+     .frame_params       = v4l2_request_vc1_frame_params,
+-    .caps_internal      = HWACCEL_CAP_ASYNC_SAFE,
++    .caps_internal      = HWACCEL_CAP_ASYNC_SAFE | HWACCEL_CAP_DELAY_OUTPUT,
+ };
+diff --git a/libavcodec/v4l2_request_vp8.c b/libavcodec/v4l2_request_vp8.c
+index 3fb2395..582e9a5 100644
+--- a/libavcodec/v4l2_request_vp8.c
++++ b/libavcodec/v4l2_request_vp8.c
+@@ -238,5 +238,5 @@ const FFHWAccel ff_vp8_v4l2request_hwaccel = {
+     .uninit             = ff_v4l2_request_uninit,
+     .priv_data_size     = sizeof(V4L2RequestContext),
+     .frame_params       = v4l2_request_vp8_frame_params,
+-    .caps_internal      = HWACCEL_CAP_ASYNC_SAFE,
++    .caps_internal      = HWACCEL_CAP_ASYNC_SAFE | HWACCEL_CAP_DELAY_OUTPUT,
+ };
+diff --git a/libavcodec/v4l2_request_vp9.c b/libavcodec/v4l2_request_vp9.c
+index e93937d..3650774 100644
+--- a/libavcodec/v4l2_request_vp9.c
++++ b/libavcodec/v4l2_request_vp9.c
+@@ -526,5 +526,5 @@ const FFHWAccel ff_vp9_v4l2request_hwaccel = {
+     .uninit             = ff_v4l2_request_uninit,
+     .priv_data_size     = sizeof(V4L2RequestContextVP9),
+     .frame_params       = v4l2_request_vp9_frame_params,
+-    .caps_internal      = HWACCEL_CAP_ASYNC_SAFE,
++    .caps_internal      = HWACCEL_CAP_ASYNC_SAFE | HWACCEL_CAP_DELAY_OUTPUT,
+ };

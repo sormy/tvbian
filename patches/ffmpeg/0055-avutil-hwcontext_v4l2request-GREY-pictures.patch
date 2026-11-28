@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Tue, 24 Nov 2026 16:00:00 -0500
+Subject: [PATCH] avutil/hwcontext_v4l2request: GREY pictures
+
+A decoder handing out a 4:0:0 picture as it is, GREY, had no pixel
+format here. Map it to GRAY8 over DRM's R8, one plane.
+---
+diff --git a/libavutil/hwcontext_v4l2request.c b/libavutil/hwcontext_v4l2request.c
+--- a/libavutil/hwcontext_v4l2request.c
++++ b/libavutil/hwcontext_v4l2request.c
+@@ -104,6 +104,7 @@
+     uint32_t bit_depth;
+ } v4l2request_capture_pixelformats[] = {
+     { V4L2_PIX_FMT_NV12, AV_PIX_FMT_NV12, DRM_FORMAT_NV12, DRM_FORMAT_MOD_LINEAR, 8 },
++    { V4L2_PIX_FMT_GREY, AV_PIX_FMT_GRAY8, DRM_FORMAT_R8, DRM_FORMAT_MOD_LINEAR, 8 },
+ #if defined(V4L2_PIX_FMT_NV12_32L32)
+     { V4L2_PIX_FMT_NV12_32L32, AV_PIX_FMT_YUV420P, DRM_FORMAT_NV12, DRM_FORMAT_MOD_ALLWINNER_TILED, 8 },
+ #endif
+@@ -205,8 +206,9 @@
+                              format->fmt.pix_mp.plane_fmt[0].bytesperline :
+                              format->fmt.pix.bytesperline;
+ 
+-    // AFBC formats only use 1 plane, remaining use 2 planes
+-    if ((desc->objects[0].format_modifier >> 56) != DRM_FORMAT_MOD_VENDOR_ARM) {
++    // AFBC formats and grey only use 1 plane, remaining use 2 planes
++    if ((desc->objects[0].format_modifier >> 56) != DRM_FORMAT_MOD_VENDOR_ARM &&
++        layer->format != DRM_FORMAT_R8) {
+         layer->nb_planes = 2;
+         layer->planes[1].object_index = 0;
+         layer->planes[1].offset = layer->planes[0].pitch *

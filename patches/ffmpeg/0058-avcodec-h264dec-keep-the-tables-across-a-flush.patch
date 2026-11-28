@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Wed, 25 Nov 2026 15:00:00 -0500
+Subject: [PATCH] avcodec/h264dec: keep the tables across a flush
+
+A flush freed every table and marked the context uninitialised, so the
+first slice after a seek rebuilt all of them, the per-picture pools
+included: at 3840x2160 about 5 MB a picture, zeroed again. A stream that
+goes on with the same SPS needs none of it, and one that changes it is
+reinitialised by h264_init_ps(), whose h264_slice_header_init() frees
+the old tables first.
+
+On an RK3528 decoding 4K H.264 through V4L2 requests, a three-frame clip
+looped 200 times took 12.2 s and 3.5 s of CPU; the same 600 frames with
+no flush took 10.3 s and 1.0 s.
+---
+diff --git a/libavcodec/h264dec.c b/libavcodec/h264dec.c
+index a88ce95..a735b3e 100644
+--- a/libavcodec/h264dec.c
++++ b/libavcodec/h264dec.c
+@@ -491,9 +491,6 @@ static av_cold void h264_decode_flush(AVCodecContext *avctx)
+     h->mb_y = 0;
+     h->non_gray = 0;
+ 
+-    ff_h264_free_tables(h);
+-    h->context_initialized = 0;
+-
+     if (FF_HW_HAS_CB(avctx, flush))
+         FF_HW_SIMPLE_CALL(avctx, flush);
+ }

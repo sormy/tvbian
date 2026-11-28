@@ -1,0 +1,335 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Thu, 26 Nov 2026 12:00:00 -0500
+Subject: [PATCH] avfilter/deinterlace_v4l2m2m: a deinterlacer that reads ahead
+
+A deinterlacer reading the frames either side of the one it outputs,
+as the RK3528 IEP2 does in its motion-adaptive mode, gives a frame's
+fields only once the next frame is queued, and the last frame's only
+after a stop. The filter waited for both fields after each input and
+failed on the first.
+
+Keep the input frames whose fields are still to come, push a frame's
+two fields whenever the deinterlacer has them, and at the input's end
+send V4L2_DEC_CMD_STOP and take every frame up to the one marked
+V4L2_BUF_FLAG_LAST, through an activate callback. Each field keeps its
+time: the first between the previous frame and its own, the second at
+its own.
+---
+  libavfilter/vf_deinterlace_v4l2m2m.c | 202 ++++++++++++++++++++---------------
+  1 file changed, 115 insertions(+), 87 deletions(-)
+
+diff --git a/libavfilter/vf_deinterlace_v4l2m2m.c b/libavfilter/vf_deinterlace_v4l2m2m.c
+index 07a9cb6..7367bf8 100644
+--- a/libavfilter/vf_deinterlace_v4l2m2m.c
++++ b/libavfilter/vf_deinterlace_v4l2m2m.c
+@@ -38,6 +38,7 @@
+ #include "libavutil/avassert.h"
+ #include "libavutil/avstring.h"
+ #include "libavutil/common.h"
++#include "libavutil/fifo.h"
+ #include "libavutil/hwcontext.h"
+ #include "libavutil/hwcontext_drm.h"
+ #include "libavutil/internal.h"
+@@ -48,6 +49,7 @@
+ #include "libavutil/time.h"
+ 
+ #include "avfilter.h"
++#include "filters.h"
+ #include "formats.h"
+ #include "video.h"
+ 
+@@ -98,13 +100,9 @@ typedef struct DeintV4L2M2MContextShared {
+ 
+     AVBufferRef *hw_frames_ctx;
+ 
+-    /*
+-     * TODO: check if its really neccessary to hold this
+-     * ref, it's only used for freeing av_frame on decoding
+-     * end/abort
+-     */
+-    AVFrame *cur_in_frame;
+-    AVFrame *prev_in_frame;
++    /* input frames whose fields are still to come, oldest first */
++    AVFifo *pending;
++    int64_t prev_pts;
+     unsigned int field_order;
+ 
+     V4L2Queue output;
+@@ -677,11 +675,13 @@ static void deint_v4l2m2m_destroy_context(DeintV4L2M2MContextShared *ctx)
+             for (i = 0; i < output->num_buffers; i++)
+                 av_frame_free(&output->buffers[i].frame);
+ 
+-	if (ctx->cur_in_frame)
+-		av_frame_free(&ctx->cur_in_frame);
++        if (ctx->pending) {
++            AVFrame *in;
+ 
+-	if (ctx->prev_in_frame)
+-		av_frame_free(&ctx->prev_in_frame);
++            while (av_fifo_read(ctx->pending, &in, 1) >= 0)
++                av_frame_free(&in);
++            av_fifo_freep2(&ctx->pending);
++        }
+ 
+         av_buffer_unref(&ctx->hw_frames_ctx);
+ 
+@@ -742,16 +742,19 @@ static uint8_t *v4l2_get_drm_frame(V4L2Buffer *avbuf, int height, uint64_t drm_f
+     return (uint8_t *)drm_desc;
+ }
+ 
+-static int deint_v4l2m2m_dequeue_frame(V4L2Queue *queue, AVFrame* frame, int timeout)
++static int deint_v4l2m2m_dequeue_frame(V4L2Queue *queue, AVFrame* frame, int timeout,
++                                       int *last)
+ {
+     DeintV4L2M2MContextShared *ctx = queue->ctx;
+     V4L2Buffer* avbuf;
+ 
+     avbuf = deint_v4l2m2m_dequeue_buffer(queue, timeout);
+     if (!avbuf) {
+-        av_log(NULL, AV_LOG_ERROR, "dequeueing failed\n");
+-        return AVERROR(EINVAL);
++        if (timeout)
++            av_log(NULL, AV_LOG_ERROR, "dequeueing failed\n");
++        return AVERROR(EAGAIN);
+     }
++    *last = !!(avbuf->buffer.flags & V4L2_BUF_FLAG_LAST);
+ 
+     frame->buf[0] = av_buffer_create((uint8_t *) &avbuf->drm_frame,
+                             sizeof(avbuf->drm_frame), v4l2_free_buffer,
+@@ -775,84 +778,84 @@ static int deint_v4l2m2m_dequeue_frame(V4L2Queue *queue, AVFrame* frame, int tim
+     return 0;
+ }
+ 
+-static int deint_v4l2m2m_dequeue(AVFilterContext *avctx, AVFrame *input_frame)
++/*
++ * The oldest pending frame's two fields, once the deinterlacer has them, which
++ * may be a frame later: it reads the frames either side. 0 when none is ready
++ * within timeout, AVERROR_EOF after the last before a stop.
++ */
++static int deint_v4l2m2m_output(AVFilterContext *avctx, int timeout)
+ {
+     DeintV4L2M2MContext *priv      = avctx->priv;
+     DeintV4L2M2MContextShared *ctx = priv->shared;
+     AVFilterLink *outlink          = avctx->outputs[0];
+-    AVFrame *output_frame_1, *output_frame_2;
+-    int64_t first_pts = AV_NOPTS_VALUE;
+-    int err;
+-
+-    av_log(priv, AV_LOG_DEBUG, "input pts: %"PRId64" (field %d)\n",
+-          input_frame->pts, ctx->field_order);
++    AVFrame *out[2] = { NULL }, *in = NULL;
++    int last = 0, i, err;
+ 
+-    output_frame_1 = av_frame_alloc();
+-    if (!output_frame_1)
+-        return AVERROR(ENOMEM);
+-
+-    err = deint_v4l2m2m_dequeue_frame(&ctx->capture, output_frame_1, 500);
+-    if (err < 0) {
+-        av_log(priv, AV_LOG_ERROR, "no 1st frame (field %d)\n", ctx->field_order);
+-        goto fail_out1;
++    for (i = 0; i < 2; i++) {
++        out[i] = av_frame_alloc();
++        if (!out[i]) {
++            err = AVERROR(ENOMEM);
++            goto fail;
++        }
++        /* a job gives both fields' frames at once */
++        err = deint_v4l2m2m_dequeue_frame(&ctx->capture, out[i], i ? 500 : timeout, &last);
++        if (err < 0)
++            goto fail;
+     }
+-
+-    err = av_frame_copy_props(output_frame_1, input_frame);
+-    if (err < 0)
+-        goto fail_out1;
+-
+-    output_frame_1->flags &= ~AV_FRAME_FLAG_INTERLACED;
+-
+-    output_frame_2 = av_frame_alloc();
+-    if (!output_frame_2) {
+-        err = AVERROR(ENOMEM);
+-        goto fail_out1;
++    if (av_fifo_read(ctx->pending, &in, 1) < 0) {
++        err = AVERROR_BUG;
++        goto fail;
+     }
+ 
+-    err = deint_v4l2m2m_dequeue_frame(&ctx->capture, output_frame_2, 500);
+-    if (err < 0) {
+-        av_log(priv, AV_LOG_ERROR, "no 2nd frame (field %d)\n", ctx->field_order);
+-        goto fail_out2;
++    for (i = 0; i < 2; i++) {
++        err = av_frame_copy_props(out[i], in);
++        if (err < 0)
++            goto fail;
++        out[i]->flags &= ~AV_FRAME_FLAG_INTERLACED;
+     }
+ 
+-    err = av_frame_copy_props(output_frame_2, input_frame);
+-    if (err < 0)
+-        goto fail_out2;
+-
+-    output_frame_2->flags &= ~AV_FRAME_FLAG_INTERLACED;
+-
+     /* the output time base is half the input's: a frame per field */
+-    if (input_frame->pts != AV_NOPTS_VALUE) {
+-        output_frame_2->pts = input_frame->pts * 2;
+-        if (ctx->prev_in_frame && ctx->prev_in_frame->pts != AV_NOPTS_VALUE)
+-            first_pts = ctx->prev_in_frame->pts + input_frame->pts;
+-        else
+-            first_pts = output_frame_2->pts - FFMAX(input_frame->duration, 1);
+-        av_log(priv, AV_LOG_DEBUG, "calculated first pts %"PRId64"\n", first_pts);
++    if (in->pts != AV_NOPTS_VALUE) {
++        out[1]->pts = in->pts * 2;
++        out[0]->pts = ctx->prev_pts != AV_NOPTS_VALUE ? ctx->prev_pts + in->pts :
++                      out[1]->pts - FFMAX(in->duration, 1);
+     }
++    ctx->prev_pts = in->pts;
++    av_frame_free(&in);
+ 
+-    output_frame_1->pts = first_pts;
+-
+-    err = ff_filter_frame(outlink, output_frame_1);
+-    if (err < 0) {
+-        av_frame_free(&output_frame_2);
+-        return err;
++    for (i = 0; i < 2; i++) {
++        err = ff_filter_frame(outlink, out[i]);
++        out[i] = NULL;
++        if (err < 0)
++            goto fail;
+     }
+-    err = ff_filter_frame(outlink, output_frame_2);
++    return last ? AVERROR_EOF : 1;
+ 
+-    if (err < 0)
+-        return err;
++fail:
++    av_frame_free(&in);
++    av_frame_free(&out[0]);
++    av_frame_free(&out[1]);
++    return err == AVERROR(EAGAIN) && !i ? 0 : err;
++}
+ 
+-    av_log(priv, AV_LOG_DEBUG, "1st frame pts: %"PRId64" 2nd frame pts: %"PRId64" first pts: %"PRId64" (field %d)\n",
+-           output_frame_1->pts, output_frame_2->pts, first_pts, ctx->field_order);
++/* At the input's end: the deinterlacer stopped, and every frame it still owes */
++static int deint_v4l2m2m_drain(AVFilterContext *avctx)
++{
++    DeintV4L2M2MContext *priv      = avctx->priv;
++    DeintV4L2M2MContextShared *ctx = priv->shared;
++    struct v4l2_decoder_cmd stop   = { .cmd = V4L2_DEC_CMD_STOP };
++    int ret;
+ 
++    if (ioctl(ctx->fd, VIDIOC_DECODER_CMD, &stop) < 0)
++        return AVERROR(errno);
++    while (av_fifo_can_read(ctx->pending)) {
++        ret = deint_v4l2m2m_output(avctx, 500);
++        if (ret == AVERROR_EOF)
++            return 0;
++        if (ret <= 0)
++            return ret ? ret : AVERROR(ETIMEDOUT);
++    }
+     return 0;
+-
+-fail_out2:
+-    av_frame_free(&output_frame_2);
+-fail_out1:
+-    av_frame_free(&output_frame_1);
+-    return err;
+ }
+ 
+ static int deint_v4l2m2m_config_props(AVFilterLink *outlink)
+@@ -911,7 +914,6 @@ static int deint_v4l2m2m_filter_frame(AVFilterLink *link, AVFrame *in)
+     av_log(priv, AV_LOG_DEBUG, "input pts: %"PRId64" field :%d interlaced: %d\n",
+           in->pts, !!(in->flags & AV_FRAME_FLAG_TOP_FIELD_FIRST), !!(in->flags & AV_FRAME_FLAG_INTERLACED));
+ 
+-    ctx->cur_in_frame = in;
+ 
+     if (ctx->field_order == V4L2_FIELD_ANY) {
+         AVDRMFrameDescriptor *drm_desc = (AVDRMFrameDescriptor *)in->data[0];
+@@ -955,20 +957,44 @@ static int deint_v4l2m2m_filter_frame(AVFilterLink *link, AVFrame *in)
+     }
+ 
+     ret = deint_v4l2m2m_enqueue(output, in);
+-    if (ret)
++    if (!ret)
++        ret = av_fifo_write(ctx->pending, &in, 1);
++    if (ret < 0) {
++        av_frame_free(&in);
+         return ret;
++    }
+ 
+-    ret = deint_v4l2m2m_dequeue(avctx, in);
+-    if (ret)
+-        return ret;
++    while ((ret = deint_v4l2m2m_output(avctx, 0)) > 0)
++        ;
++    return ret == AVERROR_EOF ? 0 : ret;
++}
+ 
+-    if (ctx->prev_in_frame)
+-	av_frame_free(&ctx->prev_in_frame);
++static int deint_v4l2m2m_activate(AVFilterContext *avctx)
++{
++    AVFilterLink *inlink           = avctx->inputs[0];
++    AVFilterLink *outlink          = avctx->outputs[0];
++    DeintV4L2M2MContext *priv      = avctx->priv;
++    DeintV4L2M2MContextShared *ctx = priv->shared;
++    AVFrame *in;
++    int64_t pts;
++    int status, ret;
+ 
+-    ctx->prev_in_frame = in;
+-    ctx->cur_in_frame = NULL;
++    FF_FILTER_FORWARD_STATUS_BACK(outlink, inlink);
+ 
+-    return 0;
++    ret = ff_inlink_consume_frame(inlink, &in);
++    if (ret < 0)
++        return ret;
++    if (ret > 0)
++        return deint_v4l2m2m_filter_frame(inlink, in);
++
++    if (ff_inlink_acknowledge_status(inlink, &status, &pts)) {
++        ret = ctx->field_order == V4L2_FIELD_ANY ? 0 : deint_v4l2m2m_drain(avctx);
++        ff_outlink_set_status(outlink, status, pts);
++        return ret;
++    }
++
++    FF_FILTER_FORWARD_WANTED(outlink, inlink);
++    return FFERROR_NOT_READY;
+ }
+ 
+ static av_cold int deint_v4l2m2m_init(AVFilterContext *avctx)
+@@ -988,8 +1014,10 @@ static av_cold int deint_v4l2m2m_init(AVFilterContext *avctx)
+     ctx->capture.num_buffers = 6;
+     ctx->done = 0;
+     ctx->field_order = V4L2_FIELD_ANY;
+-    ctx->cur_in_frame = NULL;
+-    ctx->prev_in_frame = NULL;
++    ctx->pending = av_fifo_alloc2(8, sizeof(AVFrame *), AV_FIFO_FLAG_AUTO_GROW);
++    if (!ctx->pending)
++        return AVERROR(ENOMEM);
++    ctx->prev_pts = AV_NOPTS_VALUE;
+     ctx->drm_in_format = DRM_FORMAT_NV12;
+     ctx->drm_out_format = DRM_FORMAT_NV12;
+     atomic_init(&ctx->refcount, 1);
+@@ -1016,7 +1044,6 @@ static const AVFilterPad deint_v4l2m2m_inputs[] = {
+     {
+         .name         = "default",
+         .type         = AVMEDIA_TYPE_VIDEO,
+-        .filter_frame = deint_v4l2m2m_filter_frame,
+     },
+ };
+ 
+@@ -1035,6 +1062,7 @@ const FFFilter ff_vf_deinterlace_v4l2m2m = {
+     .priv_size      = sizeof(DeintV4L2M2MContext),
+     .init           = &deint_v4l2m2m_init,
+     .uninit         = &deint_v4l2m2m_uninit,
++    .activate       = deint_v4l2m2m_activate,
+     FILTER_QUERY_FUNC(&deint_v4l2m2m_query_formats),
+     FILTER_INPUTS(deint_v4l2m2m_inputs),
+     FILTER_OUTPUTS(deint_v4l2m2m_outputs),

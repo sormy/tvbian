@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Wed, 25 Nov 2026 13:30:00 -0500
+Subject: [PATCH] avcodec/decode: one thread for a V4L2 request decoder
+
+A V4L2 request decoder decodes in hardware, and one thread already keeps
+it fed: H.264 and HEVC hand out their frames in display order, behind
+the next request. Frame threads only pass frames between them and wait
+on the request context's one mutex. On an RK3528 at 3840x2160, HEVC
+decodes at 113.4 fps on one thread and 105.1 at the automatic count,
+H.264 at 60.1 and 58.6; Rockchip's MPP decoder, never frame threaded,
+at 115.8 and 61.3.
+
+Where the caller leaves the thread count to FFmpeg and hands the decoder
+a V4L2 request device, decode on one thread. A count the caller sets is
+kept.
+---
+diff --git a/libavcodec/decode.c b/libavcodec/decode.c
+index ba6ff8a..29ded4c 100644
+--- a/libavcodec/decode.c
++++ b/libavcodec/decode.c
+@@ -2039,6 +2039,14 @@ av_cold int ff_decode_preinit(AVCodecContext *avctx)
+             dc->initial_pict_type = AV_PICTURE_TYPE_I;
+     }
+ 
++    /* A V4L2 request decoder decodes in hardware: frame threads only hand
++     * frames between them and wait on its one context. Left to choose, it
++     * decodes on one thread. */
++    if (!avctx->thread_count && avctx->hw_device_ctx &&
++        ((AVHWDeviceContext *)avctx->hw_device_ctx->data)->type ==
++            AV_HWDEVICE_TYPE_V4L2REQUEST)
++        avctx->thread_count = 1;
++
+     /* if the decoder init function was already called previously,
+      * free the already allocated subtitle_header before overwriting it */
+     av_freep(&avctx->subtitle_header);

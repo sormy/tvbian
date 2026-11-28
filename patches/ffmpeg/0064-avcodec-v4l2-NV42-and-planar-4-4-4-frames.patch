@@ -1,0 +1,78 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] avcodec/v4l2: NV42 and planar 4:4:4 frames
+
+Map NV42 to V4L2's NV42 and YUV444P to its YUV444M, so a V4L2
+mem2mem encoder that reads them can be fed them. NV42 lays out as NV24
+does, its interleaved chroma twice the luma's row; its DRM format is
+DRM_FORMAT_NV42.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+  libavcodec/v4l2_buffers.c | 13 +++++++++----
+  libavcodec/v4l2_fmt.c     |  4 ++++
+  2 files changed, 13 insertions(+), 4 deletions(-)
+
+diff --git a/libavcodec/v4l2_buffers.c b/libavcodec/v4l2_buffers.c
+index d729d76..4f9e5da 100644
+--- a/libavcodec/v4l2_buffers.c
++++ b/libavcodec/v4l2_buffers.c
+@@ -237,11 +237,13 @@ static void v4l2_get_interlacing(AVFrame *frame, V4L2Buffer *buf)
+     }
+ }
+ 
+-/* NV24 interleaves full-width chroma: twice the luma's row */
++/* NV24 and NV42 interleave full-width chroma: twice the luma's row */
+ static int v4l2_chroma_pitch(const V4L2Buffer *avbuf)
+ {
++    enum AVPixelFormat fmt = avbuf->context->av_pix_fmt;
++
+     return avbuf->plane_info[0].bytesperline *
+-           (avbuf->context->av_pix_fmt == AV_PIX_FMT_NV24 ? 2 : 1);
++           (fmt == AV_PIX_FMT_NV24 || fmt == AV_PIX_FMT_NV42 ? 2 : 1);
+ }
+ 
+ static uint8_t * v4l2_get_drm_frame(V4L2Buffer *avbuf)
+@@ -297,9 +299,11 @@ static uint8_t * v4l2_get_drm_frame(V4L2Buffer *avbuf)
+ 
+     case AV_PIX_FMT_NV16:
+     case AV_PIX_FMT_NV24:
++    case AV_PIX_FMT_NV42:
+ 
+-        layer->format = avbuf->context->av_pix_fmt == AV_PIX_FMT_NV16 ?
+-            DRM_FORMAT_NV16 : DRM_FORMAT_NV24;
++        layer->format = avbuf->context->av_pix_fmt == AV_PIX_FMT_NV16 ? DRM_FORMAT_NV16 :
++                        avbuf->context->av_pix_fmt == AV_PIX_FMT_NV24 ? DRM_FORMAT_NV24 :
++                                                                        DRM_FORMAT_NV42;
+ 
+         if (avbuf->num_planes > 1)
+             break;
+@@ -546,6 +550,7 @@ static int v4l2_buffer_buf_to_swframe(AVFrame *frame, V4L2Buffer *avbuf)
+ 
+     case AV_PIX_FMT_NV16:
+     case AV_PIX_FMT_NV24:
++    case AV_PIX_FMT_NV42:
+         if (avbuf->num_planes > 1)
+             break;
+         frame->linesize[1] = v4l2_chroma_pitch(avbuf);
+diff --git a/libavcodec/v4l2_fmt.c b/libavcodec/v4l2_fmt.c
+index bddf54a..943de3b 100644
+--- a/libavcodec/v4l2_fmt.c
++++ b/libavcodec/v4l2_fmt.c
+@@ -58,6 +58,7 @@ static const struct fmt_conversion {
+     { AV_FMT(NV21),        AV_CODEC(RAWVIDEO),    V4L2_FMT(NV21) },
+     { AV_FMT(NV16),        AV_CODEC(RAWVIDEO),    V4L2_FMT(NV16) },
+     { AV_FMT(NV24),        AV_CODEC(RAWVIDEO),    V4L2_FMT(NV24) },
++    { AV_FMT(NV42),        AV_CODEC(RAWVIDEO),    V4L2_FMT(NV42) },
+     { AV_FMT(NONE),        AV_CODEC(MJPEG),       V4L2_FMT(MJPEG) },
+     { AV_FMT(NONE),        AV_CODEC(MJPEG),       V4L2_FMT(JPEG) },
+ #ifdef V4L2_PIX_FMT_SRGGB8
+@@ -78,6 +79,9 @@ static const struct fmt_conversion {
+ #ifdef V4L2_PIX_FMT_YUV420M
+     { AV_FMT(YUV420P),     AV_CODEC(RAWVIDEO),    V4L2_FMT(YUV420M) },
+ #endif
++#ifdef V4L2_PIX_FMT_YUV444M
++    { AV_FMT(YUV444P),     AV_CODEC(RAWVIDEO),    V4L2_FMT(YUV444M) },
++#endif
+ #ifdef V4L2_PIX_FMT_NV16M
+     { AV_FMT(NV16),        AV_CODEC(RAWVIDEO),    V4L2_FMT(NV16M) },
+ #endif

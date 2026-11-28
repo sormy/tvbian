@@ -337,11 +337,29 @@ block or a hang: the board's patch disables it, with that reason.
 **U-Boot handles the SoC and vendor storage only**: it may set the SoC's Ethernet address and pass
 vendor-storage entries on; a radio's address belongs to that radio's driver.
 
+**Every new feature lands with its integration test**, kernel, driver, package or userspace alike: a
+check in `tools/validate` that runs unattended on the box and verifies the feature through its own
+interfaces, a hand run with `v4l2-ctl` or `modetest` standing in for none. It is written for any
+family and SoC, skips where the feature is absent, and prints what it found, values and not just a
+verdict, so a person or an agent can judge it.
+
+**A mainline kernel reaches parity with the vendor's, then passes it**: each block the vendor kernel
+drives works on it, and a datasheet option the vendor never drove is implemented too; where Linux
+has no interface for it, the driver adds the smallest one its subsystem allows.
+
+**The datasheet says what the hardware does**: a vendor kernel or library failing at an option it
+lists is that software's gap, never a hardware limit. Our driver makes it work; until then it
+refuses it, the refusal a todo, never a finding.
+
 **A driver refuses what it cannot show** rather than show garbage: an atomic check that fails is a
 player's cue to take another route; a picture that breaks is not.
 
 **A driver's limit is the hardware's, measured**: a size or rate cap is set only where the hardware
 fails past it, and its patch names the test that shows it, at the limit and one step past.
+
+**A limit applies to the hardware it was measured on**: a cap from one chip is keyed to that chip,
+its variant data or its compatible, never global in a driver, library or player that serves its
+siblings. Where the driver or library reports a limit, the patch reads it instead.
 
 **Kernel code never needs a reboot to recover**: no implementation may leave a block, a bus or the
 box wedged. A job that times out or faults resets its block and that block's IOMMU, and the next job

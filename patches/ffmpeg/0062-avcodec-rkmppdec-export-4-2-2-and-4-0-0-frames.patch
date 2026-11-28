@@ -1,0 +1,45 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] avcodec/rkmppdec: export 4:2:2 and 4:0:0 frames
+
+MPP decodes H.264 High 4:2:2 and monochrome pictures into NV16 and a
+single luma plane, which the decoder refused as an unsupported frame
+format. Export them as DRM_FORMAT_NV16 and DRM_FORMAT_R8, read back as
+NV16 and GRAY8. Their AFBC forms stay refused.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ libavcodec/rkmppdec.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/libavcodec/rkmppdec.c b/libavcodec/rkmppdec.c
+index 724dd70..cb01053 100644
+--- a/libavcodec/rkmppdec.c
++++ b/libavcodec/rkmppdec.c
+@@ -110,6 +110,8 @@ static uint32_t rkmpp_get_frameformat(MppFrameFormat mppformat)
+     switch (mppformat & MPP_FRAME_FMT_MASK) {
+     case MPP_FMT_YUV420SP:          return afbc ? DRM_FORMAT_YUV420_8BIT : DRM_FORMAT_NV12;
+     case MPP_FMT_YUV420SP_10BIT:    return afbc ? DRM_FORMAT_YUV420_10BIT : DRM_FORMAT_NV15;
++    case MPP_FMT_YUV422SP:          return afbc ? 0 : DRM_FORMAT_NV16;
++    case MPP_FMT_YUV400:            return afbc ? 0 : DRM_FORMAT_R8;
+     default:                        return 0;
+     }
+ }
+@@ -120,6 +122,8 @@ static enum AVPixelFormat rkmpp_get_swformat(MppFrameFormat mppformat)
+     case MPP_FMT_YUV420SP:          return AV_PIX_FMT_NV12;
+     // NV15 has no AVPixelFormat; this one names its samples
+     case MPP_FMT_YUV420SP_10BIT:    return AV_PIX_FMT_YUV420P10;
++    case MPP_FMT_YUV422SP:          return AV_PIX_FMT_NV16;
++    case MPP_FMT_YUV400:            return AV_PIX_FMT_GRAY8;
+     default:                        return AV_PIX_FMT_NONE;
+     }
+ }
+@@ -588,7 +592,8 @@ static int rkmpp_retrieve_frame(AVCodecContext *avctx, AVFrame *frame)
+             desc->nb_layers = 1;
+             layer = &desc->layers[0];
+             layer->format = drmformat;
+-            layer->nb_planes = MPP_FRAME_FMT_IS_AFBC(mppformat) ? 1 : 2;
++            layer->nb_planes = MPP_FRAME_FMT_IS_AFBC(mppformat) ||
++                               (mppformat & MPP_FRAME_FMT_MASK) == MPP_FMT_YUV400 ? 1 : 2;
+             if (MPP_FRAME_FMT_IS_AFBC(mppformat))
+                 desc->objects[0].format_modifier =
+                     DRM_FORMAT_MOD_ARM_AFBC(AFBC_FORMAT_MOD_BLOCK_SIZE_16x16 | AFBC_FORMAT_MOD_SPARSE);

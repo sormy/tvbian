@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artem Butusov <art.sormy@gmail.com>
+Date: Thu, 26 Nov 2026 00:40:00 -0500
+Subject: [PATCH] avutil/hwcontext_v4l2request: refuse a size the driver shrinks
+
+A decoder whose limit is not a box, such as an area in macroblocks,
+enumerates sizes past it and shrinks the OUTPUT format S_FMT is given.
+The frames were then set up at the smaller size, and the stream decoded
+to nothing.
+
+Read the OUTPUT format back and refuse a width or height smaller than
+the stream's, as an unsupported frame size is refused.
+---
+diff --git a/libavutil/hwcontext_v4l2request.c b/libavutil/hwcontext_v4l2request.c
+index 8752ccf..1fc7907 100644
+--- a/libavutil/hwcontext_v4l2request.c
++++ b/libavutil/hwcontext_v4l2request.c
+@@ -618,6 +618,19 @@ static int v4l2request_probe_video_device(AVHWFramesContext *hwfc,
+         goto fail;
+     }
+ 
++    // A driver whose limit is not a box, such as an area, shrinks the size it cannot decode
++    if (V4L2_TYPE_IS_MULTIPLANAR(fctxi->output.format.type) ?
++        fctxi->output.format.fmt.pix_mp.width < hwfc->width ||
++        fctxi->output.format.fmt.pix_mp.height < hwfc->height :
++        fctxi->output.format.fmt.pix.width < hwfc->width ||
++        fctxi->output.format.fmt.pix.height < hwfc->height) {
++        ret = AVERROR(EINVAL);
++        av_log(hwfc, AV_LOG_VERBOSE,
++               "Device %s is missing support for frame size %dx%d of pixelformat %s\n",
++               path, hwfc->width, hwfc->height, av_fourcc2str(pixelformat));
++        goto fail;
++    }
++
+     // The capabilities again, now of the codec format: holding a CAPTURE buffer may depend on it
+     buffers = (struct v4l2_create_buffers) {
+         .count = 0,
