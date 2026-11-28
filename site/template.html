@@ -181,6 +181,7 @@
         font-size: 14px;
         text-decoration: none;
         color: var(--muted);
+        white-space: nowrap;
       }
       nav a:hover,
       .tools a:hover {
@@ -761,6 +762,9 @@
         gap: 36px;
         margin-top: 36px;
       }
+      .features.pair {
+        grid-template-columns: repeat(2, 1fr);
+      }
       .feature {
         border-top: 1px solid var(--line);
         padding-top: 20px;
@@ -937,11 +941,25 @@
           padding: 25px 18px;
           font-size: 10px;
         }
-        nav {
-          gap: 1rem;
-        }
         .bar {
-          gap: 1rem;
+          flex-wrap: wrap;
+          gap: 0 1rem;
+          padding-top: 10px;
+        }
+        nav {
+          order: 3;
+          width: 100%;
+          margin-left: 0;
+          gap: 1.2rem;
+          padding: 10px 0 12px;
+          overflow-x: auto;
+          scrollbar-width: none;
+        }
+        nav::-webkit-scrollbar {
+          display: none;
+        }
+        .tools {
+          margin-left: auto;
         }
       }
       @media (max-width: 650px) {
@@ -951,18 +969,11 @@
         .bar {
           min-height: 64px;
         }
-        nav {
-          gap: 1rem;
-        }
         nav a {
           font-size: 13px;
         }
-        nav a:last-child,
         .tools > a {
           display: none;
-        }
-        .tools {
-          margin-left: auto;
         }
         .hero {
           grid-template-columns: minmax(0, 1fr);
@@ -1005,6 +1016,7 @@
         }
         .boards,
         .features,
+        .features.pair,
         .help,
         .contacts,
         .validation-intro,
@@ -1028,11 +1040,6 @@
           align-items: start;
           flex-direction: column;
           gap: 12px;
-        }
-      }
-      @media (max-width: 480px) {
-        nav a:nth-child(2) {
-          display: none;
         }
       }
       @media (max-width: 380px) {
@@ -1102,7 +1109,7 @@
           ><span aria-hidden="true">↗</span>
         </a>
         <nav aria-label="Main navigation">
-          <a href="#boxes">Hardware</a><a href="#why">The system</a><a href="#help">Contribute</a><a href="#contact">Contact</a>
+          <a href="#boxes">Hardware</a><a href="#why">The system</a><a href="#difference">The difference</a><a href="#help">Contribute</a><a href="#contact">Contact</a>
         </nav>
         <div class="tools">
           <a href="@@REPO@@">GitHub @@STARS@@ ↗</a
@@ -1185,78 +1192,91 @@
             </p>
           </div>
           <div class="feature">
-            <span class="n">02 — THE HARDWARE</span>
-            <h3>The parts Debian can't know.</h3>
-            <p>
-              Debian supplies the base. TVBian supplies board configuration, kernels, drivers, and
-              firmware. The test reports include the awkward bits. Optimism is not a driver.
-            </p>
-          </div>
-          <div class="feature">
-            <span class="n">03 — THE UPDATES</span>
+            <span class="n">02 — THE UPDATES</span>
             <h3>Keep it current with apt.</h3>
             <p>
               Debian packages and a signed TVBian repository for hardware support. Update with apt;
               fresh images arrive weekly. Installing everything again is a hobby, not a requirement.
             </p>
           </div>
+          <div class="feature">
+            <span class="n">03 — THE WAY BACK</span>
+            <h3>An exit before the entrance.</h3>
+            <p>
+              Every chip family has a USB rescue mode. We ship the tools, a loader for each board
+              and a guide, for macOS and Linux. Back up Android first, and put it back any time.
+            </p>
+          </div>
         </div>
-        <section class="validation" aria-labelledby="validation-title">
+      </section>
+      <section id="difference" aria-labelledby="difference-title">
+        <p class="section-label">03 / The difference</p>
+        <h2 id="difference-title">Not a borrowed image.<br />Every part of the chip.</h2>
+        <div class="features pair">
+          <div class="feature">
+            <span class="n">01 — THE KERNEL</span>
+            <h3>Patched until the chip runs out.</h3>
+            <p>
+              Each chip gets its own patched kernel. The H616's alone has 230 patches: 10-bit HEVC
+              and VP9 video, an H.264 encoder, HDR, composite out and more. Rockchip boards also run
+              on mainline Linux. Plenty of work is still in progress.
+            </p>
+          </div>
+          <div class="feature">
+            <span class="n">02 — THE SOFTWARE</span>
+            <h3>The kernel is half the job.</h3>
+            <p>
+              Our FFmpeg has every patch the video hardware needs, and our own VA-API driver lets
+              players and browsers use it. We patch Mesa, GStreamer and Kodi too, aiming at a fast
+              desktop and Kodi.
+            </p>
+          </div>
+        </div>
+        <section class="validation" aria-labelledby="suite-title">
           <div class="validation-intro">
             <div>
-              <p class="section-label">The bar for a finished port</p>
-              <h3 id="validation-title">The login prompt is the starting line.</h3>
+              <p class="section-label">How we test</p>
+              <h3 id="suite-title">Measured, not claimed.</h3>
             </div>
             <p>
-              The AI works through the full bring-up procedure and fixes what it can. “It boots” is
-              excellent news. There is still an entire computer attached to it.
+              The same tests run on every board, on both kernels, after every change. If a number
+              gets more than 10% worse, that's a failure.
             </p>
           </div>
           <ul class="validation-scope">
             <li>
-              <h4>The computer</h4>
-              <p>RAM, storage, physical ports, heat under load, reboots, suspend, and wake.</p>
+              <h4>Video</h4>
+              <p>Every decoder and encoder, every codec and size up to 8K, checked against software.</p>
             </li>
             <li>
-              <h4>The connections</h4>
-              <p>Ethernet, Wi-Fi, Bluetooth, audio, the remote, buttons, and LEDs.</p>
+              <h4>Display</h4>
+              <p>Screen modes, HDR, layers, smooth playback and composite out.</p>
             </li>
             <li>
-              <h4>Every video engine</h4>
-              <p>
-                Each hardware decoder and encoder: codecs, profiles, bit depths, sizes, and output
-                checked against software.
-              </p>
+              <h4>GPU</h4>
+              <p>OpenGL ES conformance tests, and frames read back from the screen.</p>
             </li>
             <li>
-              <h4>The GPU</h4>
-              <p>3D rendering off-screen and on-screen, with the full graphics benchmark suite.</p>
+              <h4>The datasheet</h4>
+              <p>Every feature the chip's datasheet lists, checked through the kernel.</p>
             </li>
             <li>
-              <h4>The display pipeline</h4>
-              <p>
-                HDMI modes and refresh rates, HDR, hardware tone mapping, scaling, and multiple
-                planes composing video and the interface.
-              </p>
+              <h4>Power</h4>
+              <p>Reboots, sleep, wake, power cuts, the watchdog and crash logs.</p>
             </li>
             <li>
-              <h4>The whole path</h4>
-              <p>
-                Real video from decoder to screen, sustained frame rates, clean logs, and a few days
-                of daily use.
-              </p>
+              <h4>Everyday use</h4>
+              <p>Ethernet, Wi-Fi, Bluetooth, audio, the remote, and real video from file to screen.</p>
             </li>
           </ul>
           <p class="validation-result">
-            <strong>Best effort. Honest results.</strong> The aim is hardware you can use straight
-            after installation. We support a current kernel and an opt-in next kernel series. A
-            finished bring-up records every check on both. What works, what's degraded, and what's
-            broken goes in the board's test report, with the remaining gaps and limits spelled out.
+            <strong>Honest results.</strong> Every number goes in the board's test report, and so
+            does every gap: what works, what's slower than stock, and what isn't done yet.
           </p>
         </section>
       </section>
       <section id="help" aria-labelledby="help-title">
-        <p class="section-label">03 / Make it better</p>
+        <p class="section-label">04 / Make it better</p>
         <h2 id="help-title">Bring a box.<br />The AI brings the patience.</h2>
         <div class="features">
           <div class="feature">
@@ -1304,9 +1324,9 @@
           <li>
             <h3>Start with the factory's device tree.</h3>
             <p>
-              Decompile the shipped tree, patch what needs changing, and keep the evidence. You
-              bought a TV box, not the company that designed it. Reconstructing the manufacturer's
-              source tree is not your new unpaid job.
+              Our tools translate the box's own stock device tree, mostly by themselves. You patch
+              what's left and keep the evidence. You bought a TV box, not the company that designed
+              it.
             </p>
             <a class="text-link" href="@@REPO@@/blob/main/docs/bring-up/README.md"
               >Read the bring-up guide <span class="link-arrow" aria-hidden="true">↗</span></a
@@ -1362,7 +1382,7 @@
       <section id="contact" class="contact-section" aria-labelledby="contact-title">
         <div class="section-head">
           <div>
-            <p class="section-label">04 / Contact</p>
+            <p class="section-label">05 / Contact</p>
             <h2 id="contact-title">Talk to a human.</h2>
           </div>
           <p>GitHub for the work. Email for the logistics.</p>
@@ -1400,7 +1420,7 @@
       <section id="credits" aria-labelledby="credits-title">
         <div class="section-head">
           <div>
-            <p class="section-label">05 / Credits</p>
+            <p class="section-label">06 / Credits</p>
             <h2 id="credits-title">Built on and inspired by.</h2>
           </div>
           <p>Where this project comes from.</p>
