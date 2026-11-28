@@ -20,6 +20,7 @@ below; `docs/todo/` holds the open questions.
 | CPU           | 4× Cortex-A53 (`0xd03`), max **1416 MHz** (only 1200/1416 offered)                                                                                                                                |
 | RAM           | **LPDDR3 2 GB** @ 666 MHz final, `ddrconfig:7`, 4-bit PCB · `MemTotal 2045284 kB`                                                                                                                 |
 | Storage       | **Micron `R1J96N` 16 GB eMMC 5.1** — 15,758,000,128 B · **no SD slot**                                                                                                                            |
+| Case          | stick, passive cooling (owner)                                                                                                                                                                    |
 | Serial number | `SN26072800001` · vendor-storage `LAN_MAC 00:ef:01:1a:be:a0`                                                                                                                                      |
 | Wi-Fi / BT    | **Seekwave SWT6621S** — SDIO Wi-Fi + BT over the same chip                                                                                                                                        |
 | Ports         | **Two USB 2.0 ports, no USB 3**: USB-A (host) and USB-C (**OTG — the maskrom/Loader port**, and the intended power input, though USB-A powers it too) · HDMI · **no Ethernet, no SD, no AV jack** |
@@ -49,7 +50,7 @@ tested and broken · ➖ not on this board. Nothing is inherited from the siblin
 | Remote over BLE, keys      |  ✅   | `/dev/input/bt-remote` — must be **trusted**, see quirks                         |
 | Remote over BLE, air-mouse |  ✅   | paired and working — `/dev/input/bt-remote-mouse`                                |
 | Remote over IR             |  ➖   | **no receiver fitted** — see below                                               |
-| Recovery button            |  ✅   | `adc-keys`, reports `KEY_VENDOR`; the factory's `KEY_F11` (`0x57`)              |
+| Recovery button            |  ✅   | `adc-keys`, reports `KEY_VENDOR`; the factory's `KEY_F11` (`0x57`)               |
 | **Display and video**      |       |                                                                                  |
 | HDMI picture, 1080p        |  ✅   | correct full-screen console on a 4K LG TV at 1920x1080p60                        |
 | HDMI EDID and mode list    |  ✅   | 256 B read, LG TV, 40 modes incl. 3840x2160, 4096x2160, 2560x1440                |
@@ -272,8 +273,6 @@ Things that surprise you once and then cost you an hour if you forgot them.
   evidence about this hardware.
 - **The serial console is `ttyFIQ0`, not `ttyS0`.** `serial@ff9f0000` is `disabled` in the tree and
   the vendor fiq-debugger owns that UART instead.
-- **No AV jack, so `tve` is disabled.** The TV encoder has no detect line and cannot tell whether a
-  cable is in.
 - **Either USB socket can power the box.** The included USB-C↔USB-A cable works in both directions,
   so 5 V can go into USB-A and leave USB-C — the only OTG port, the one maskrom uses — free.
 - **The `-2` Seekwave firmware errors in `dmesg` are normal.** The driver probes a board-specific
@@ -296,14 +295,22 @@ the vents. Absent: **no Ethernet, no microSD, no AV/composite, no SPDIF, no anal
 receiver.** Unpopulated footprints may exist, so a node matching nothing visible only means this
 unit has nothing wired to it.
 
-**Nine blocks the tree claims and this PCB lacks**, all now `disabled` and marked `NOT FITTED` in
-`board.patch` — `dtb.md` carries the per-node rationale: `gmac0` (no PHY —
-`RK630 PHY stmmac-0:02: phy_poll_reset failed: -110`), `sfc` (no flash — SPL reads
-`unrecognized JEDEC id bytes: 00, 00, 00`), `sdmmc` (no slot; the controller binds and claims
-`vcc-sd`/`vccio_sd` regardless), `tve` (no AV jack, and no detect line), `spdif` and `acodec` with
-their sound cards, `pwm@ffa90030` (no IR receiver), and the USB 3 phy. Two more are noise rather
-than nodes: `es7243e` ×3 on i2c6 never probes — zero mentions in a 660 KB dmesg — and
-`wifi_chip_type` still names `ap6275s`, a Broadcom part this box does not have.
+**Blocks the tree enables that this PCB lacks.** Each is `disabled` and marked `NOT FITTED` in
+`board.patch`; `dtb.md` gives each node's reason.
+
+| Node                     | Missing      | Evidence                                                   |
+| ------------------------ | ------------ | ---------------------------------------------------------- |
+| `gmac0`                  | Ethernet PHY | `phy_poll_reset failed: -110`                              |
+| `sfc`                    | SPI flash    | SPL: `unrecognized JEDEC id bytes: 00, 00, 00`             |
+| `sdmmc`                  | SD slot      | the controller binds anyway and claims `vcc-sd`/`vccio_sd` |
+| `tve`                    | AV jack      |                                                            |
+| `spdif`, its sound card  | S/PDIF out   |                                                            |
+| `acodec`, its sound card | analog audio |                                                            |
+| `pwm@ffa90030`           | IR receiver  |                                                            |
+| USB 3 PHY                | USB 3 port   |                                                            |
+
+Two more are harmless leftovers: the three `es7243e` on i2c6 never probe (no mention in a 660 KB
+dmesg), and `wifi_chip_type` still names `ap6275s`, a Broadcom chip this box does not have.
 
 ## Factory boot chain
 

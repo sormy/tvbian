@@ -124,6 +124,7 @@ Experimental RK3528 patches for `rk35xx-next2`, the mainline kernel tested on th
 | `crypto-rockchip-rk2-xts-sm4-cts.patch`                    | crypto v2: XTS for SM4 and CTS for AES, as the engine's version registers offer                                 |
 | `crypto-rockchip-rk2-rsa.patch`                            | crypto v2: raw RSA on the public key accelerator, under generic RSA's priority                                  |
 | `crypto-rockchip-rk2-rsa-crt.patch`                        | crypto v2: RSA private keys by the CRT, the two exponentiations on the PKA                                      |
+| `crypto-rockchip-rk2-ccm-experiment.patch`                 | experiment: CCM for AES in three IV layouts, `ccm_iv`; in no conf                                               |
 | `dt-bindings-rockchip-pm-config.patch`                     | The board's sleep configuration node                                                                            |
 | `soc-rockchip-pm-config.patch`                             | BL31's sleep mode, wake sources and PWM regulators from the tree                                                |
 | `dt-bindings-rockchip-pm-config-virtual-poweroff.patch`    | `rockchip,virtual-poweroff` in that node                                                                        |
@@ -142,7 +143,7 @@ Experimental RK3528 patches for `rk35xx-next2`, the mainline kernel tested on th
 | `asoc-simple-card-link-jacks.patch`                        | simple-card: jacks for link codecs                                                                              |
 | `asoc-rockchip-sai-tdm-lanes.patch`                        | SAI TDM: the lanes the channels need; 8-ch HDMI                                                                 |
 | `net-phy-rockchip-rk3528-fephy.patch`                      | Integrated Ethernet PHY tuning                                                                                  |
-| `net-phy-rockchip-rk3528-fephy-test-hot.patch` | test hook: the FEPHY's 85 °C threshold as `hot_mc`, debug builds only |
+| `net-phy-rockchip-rk3528-fephy-test-hot.patch`             | test hook: the FEPHY's 85 °C threshold as `hot_mc`, debug builds only                                           |
 | `media-rkjpegd-v7-bindings.patch`                          | JPEG decoder binding, posted v7                                                                                 |
 | `media-rkjpegd-v7-driver.patch`                            | JPEG decoder driver, posted v7                                                                                  |
 | `media-rkjpegd-queue-memory.patch`                         | A queue takes at most 1/8 of RAM                                                                                |

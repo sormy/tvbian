@@ -72,7 +72,7 @@ at once with `./build.sh boards`. **From the host:** a container runtime, on mac
 `container`, never Docker · `cc` and `patch` · `fdtput` · `fsck.ext4` (keg-only on Homebrew:
 `/opt/homebrew/opt/e2fsprogs/sbin/`) · `xz` · `npx prettier` · `python3` · `mtools` and `mkimage`,
 for a board whose image carries a FAT boot partition. **On the box:** `evtest`, `fio`, `stress-ng`,
-`iw`, `bluez`.
+`iw`, `bluez`, `kexec-tools`, `device-tree-compiler`.
 
 **Every container and volume a session makes is labelled `project=tvbian`**, as `./build.sh`'s are:
 an unlabelled one is stray, deleted once its owner says so.
@@ -85,77 +85,79 @@ a Mac, which cannot mount ext4; the stock one corrupts an image on delete.
 **This table is the only index.** Docs are independent — each stands alone and none links to
 another, so nothing rots when one is rewritten.
 
-| Doc                                      | Holds                                                                 |
-| ---------------------------------------- | --------------------------------------------------------------------- |
-| `docs/bring-up/`                         | bring-up in phases, each do, bites and checks; the run's rules        |
-| `docs/first-login.md`                    | a new box's user, timezone, locale and Wi-Fi, by hand                 |
-| `docs/mpp.md`                            | reaching the video engines; the codec test commands                   |
-| `docs/video-support.md`                  | each SoC's hardware decode, encode and display formats, by codec      |
-| `docs/va-driver.md`                      | Debian's programs in hardware; what the VA driver adds                |
-| `va-driver/README.md`                    | the VA-API driver: what each engine offers, how VA maps onto it       |
-| `va-driver/worklog.md`                   | the VA-API driver's dated history, wrong turns included               |
-| `session/<name>/worklog.md`              | a session's dated history                                             |
-| `docs/emmc-layout.md`                    | the measured eMMC map: every replicated structure and its sectors     |
-| `docs/build.md`                          | `./build.sh`: hosts, steps, outputs, and making a release             |
-| `docs/release-checklist.md`              | what a new package needs to build and publish: extras, new steps      |
-| `site/README.md`                         | the public page: one HTML file from the repo, deployed on a release   |
-| `docs/sources.md`                        | every upstream we build from: what floats, what is pinned, and why    |
-| `docs/migrate.md`                        | moving a box off the overlay: in place on Rockchip, or a reinstall    |
-| `docs/uboot.md`                          | the bootloader pair: what we build, what stays factory, why           |
-| `docs/rockchip-maskrom.md`               | Rockchip's USB service modes: entry, the 32 MiB Loader trap, restore  |
-| `docs/amlogic-burning-mode.md`           | the Amlogic burning gadget: entry, backup, restore, the mask ROM      |
-| `docs/allwinner-fel.md`                  | Allwinner's FEL: back up, restore, install over USB                   |
-| `docs/watchdog.md`                       | the watchdog: checking it, rebooting with it armed, crash records     |
-| `docs/hdmi-edid-override.md`             | banning a display mode the panel advertises but nothing should pick   |
-| `docs/remote-keymap.md`                  | validating IR and BLE keymaps separately; the `hwdb` override         |
-| `docs/front-panel.md`                    | a front-panel display's clock: its settings on the box                |
-| `docs/rk3528-line-buffers.md`            | the RK3528's display line buffers: planes per split, the boot setting |
-| `research/<experiment>/`                 | dead ends and partial results, kept so nobody re-walks them           |
-| `docs/todo/README.md`                    | project-wide items, and the index of every page in `docs/todo/`       |
-| `docs/todo/`                             | a page a scope: family, Wi-Fi/BT chip, box, or project-wide topic     |
-| `docs/<board>/board.md`                  | that board's identity, measured numbers, known gaps                   |
-| `docs/<board>/dtb.md`                    | that board's device-tree changes, tried and reverted ones too         |
-| `docs/<board>/worklog*.md`               | dated history, wrong turns included; split by topic once it grows     |
-| `docs/<family>/worklog.md`               | a kernel, translator rules, SoC blocks: no single box's work          |
-| `docs/<chip>/worklog.md`                 | a Wi-Fi/BT chip's driver, on every board that carries it              |
-| `tools/dtcx/README.md`                   | a blob decompiled as its vendor wrote it: named constants, decimal    |
-| `tools/amlcmd/README.md`                 | the Amlogic burning-mode client we wrote, and its worklog             |
-| `tools/validate/README.md`               | a running box against the bring-up criteria, one script a component   |
-| `patches/dtc/README.md`                  | the patched `dtc` that round-trips a vendor blob with `&label`s       |
-| `patches/u-boot/README.md`               | U-Boot's pylibfdt build off Linux; the MAC from vendor storage        |
-| `patches/arm-trusted-firmware/README.md` | TF-A's BL31 for Allwinner boards: the watchdog reset fix              |
-| `patches/rkdeveloptool/README.md`        | the patched `pack`; why the stock one cannot build a usable loader    |
-| `patches/e2tools/README.md`              | the patched `e2tools`; why the stock one corrupts an image on delete  |
-| `patches/linux-rockchip/README.md`       | the vendor kernel's patches, their PRs, what Rockchip fixed since     |
-| `patches/linux-meson/README.md`          | mainline kernel patches for Amlogic boards, on their way upstream     |
-| `patches/linux-sunxi/README.md`          | mainline kernel patches for Allwinner boards: the H616 display        |
-| `patches/aic8800/README.md`              | the AIC8800 SDIO driver: Radxa's patches, then ours                   |
-| `patches/atbm6031/README.md`             | the ATBM6031 SDIO driver: a community 6.18 port, then ours            |
-| `patches/tm16xx/README.md`               | the TM16xx front-panel display driver on our kernels                  |
-| `patches/seekwave-swt6621s/README.md`    | the H96 Max Wi-Fi driver patches and their PRs                        |
-| `patches/mt76-mt7668/README.md`          | mainline mt76 for the MT7668S: what it does, its gaps, its firmware   |
-| `patches/btmtksdio-mt7668/README.md`     | mainline Bluetooth for the MT7668S, in-tree                           |
-| `patches/mt76x8-mt7668/README.md`        | the vendor MT7668 driver on 6.18: the fallback, not shipped           |
-| `patches/meson-dw-hdmi/README.md`        | mainline HDMI for the GXLX2 (S905L3), in-tree                         |
-| `patches/meson-codecs/README.md`         | the video decoder in-tree and the encoders beside it on the GXLX2     |
-| `patches/gst-plugins-good/README.md`     | VC-1 through V4L2 on GStreamer 1.26.2: the patched plugin, by hand    |
-| `patches/labwc/README.md`                | labwc showing a client's large buffer on a hardware plane             |
-| `patches/libliftoff/README.md`           | libliftoff: upstream's fixes since 0.5.0, a drop-in for Debian's      |
-| `patches/wlroots/README.md`              | wlroots giving libliftoff's plane search time on slow atomic tests    |
-| `patches/gstreamer/README.md`            | GStreamer's plugin registry not rescanned each time a device is used  |
-| `patches/wpewebkit/README.md`            | WPE WebKit's sandbox letting Rockchip's MPP in                        |
-| `patches/mpp/README.md`                  | Rockchip's MPP: its probe a call; IEP2 keeping every field            |
-| `patches/ffmpeg/README.md`               | FFmpeg 9.0.2: V4L2 request, mem2mem and Rockchip MPP codecs           |
-| `patches/kodi/README.md`                 | Kodi 22 on GBM: handing the screen to another program                 |
-| `patches/mesa/README.md`                 | Panfrost fixes on Debian's Mesa, backported from upstream             |
-| `patches/gxlimg/README.md`               | the Amlogic boot-image tool, built on macOS                           |
-| `keyring/README.md`                      | the archive signing key: fingerprint, secret, rotation                |
-| `kernel/regdb-certs/README.md`           | the regulatory database's signing keys our kernels trust              |
+| Doc                                      | Holds                                                                |
+| ---------------------------------------- | -------------------------------------------------------------------- |
+| `docs/bring-up/`                         | bring-up in phases, each do, bites and checks; the run's rules       |
+| `docs/first-login.md`                    | a new box's user, timezone, locale and Wi-Fi, by hand                |
+| `docs/mpp.md`                            | reaching the video engines; the codec test commands                  |
+| `docs/video-support.md`                  | each SoC's hardware decode, encode and display formats, by codec     |
+| `docs/rk3528-datasheet.md`               | RK3528, RK3528A, RK3518 on mainline: each block's status and check   |
+| `docs/va-driver.md`                      | Debian's programs in hardware; what the VA driver adds               |
+| `va-driver/README.md`                    | the VA-API driver: what each engine offers, how VA maps onto it      |
+| `va-driver/worklog.md`                   | the VA-API driver's dated history, wrong turns included              |
+| `session/<name>/worklog.md`              | a session's dated history                                            |
+| `docs/emmc-layout.md`                    | the measured eMMC map: every replicated structure and its sectors    |
+| `docs/build.md`                          | `./build.sh`: hosts, steps, outputs, and making a release            |
+| `docs/release-checklist.md`              | what a new package needs to build and publish: extras, new steps     |
+| `site/README.md`                         | the public page: one HTML file from the repo, deployed on a release  |
+| `docs/sources.md`                        | every upstream we build from: what floats, what is pinned, and why   |
+| `docs/migrate.md`                        | moving a box off the overlay: in place on Rockchip, or a reinstall   |
+| `docs/uboot.md`                          | the bootloader pair: what we build, what stays factory, why          |
+| `docs/rockchip-maskrom.md`               | Rockchip's USB service modes: entry, the 32 MiB Loader trap, restore |
+| `docs/amlogic-burning-mode.md`           | the Amlogic burning gadget: entry, backup, restore, the mask ROM     |
+| `docs/allwinner-fel.md`                  | Allwinner's FEL: back up, restore, install over USB                  |
+| `docs/watchdog.md`                       | the watchdog: checking it, rebooting with it armed, crash records    |
+| `docs/hdmi-edid-override.md`             | banning a display mode the panel advertises but nothing should pick  |
+| `docs/remote-keymap.md`                  | validating IR and BLE keymaps separately; the `hwdb` override        |
+| `docs/front-panel.md`                    | a front-panel display's clock: its settings on the box               |
+| `research/<experiment>/`                 | dead ends, kept so nobody re-walks them                              |
+| `docs/todo/README.md`                    | project-wide items, and the index of every page in `docs/todo/`      |
+| `docs/todo/`                             | a page a scope: family, Wi-Fi/BT chip, box, or project-wide topic    |
+| `docs/<board>/board.md`                  | that board's identity, measured numbers, known gaps                  |
+| `docs/<board>/dtb.md`                    | that board's device-tree changes, tried and reverted ones too        |
+| `docs/<board>/worklog*.md`               | dated history, wrong turns included; split by topic once it grows    |
+| `docs/<family>/worklog*.md`              | a family's kernels, translator rules, SoC blocks; split by topic     |
+| `docs/<chip>/worklog.md`                 | a Wi-Fi/BT chip's driver, on every board that carries it             |
+| `tools/dtcx/README.md`                   | a blob decompiled as its vendor wrote it: named constants, decimal   |
+| `tools/amlcmd/README.md`                 | the Amlogic burning-mode client we wrote, and its worklog            |
+| `tools/validate/README.md`               | a running box against the bring-up criteria, one script a component  |
+| `patches/dtc/README.md`                  | the patched `dtc` that round-trips a vendor blob with `&label`s      |
+| `patches/u-boot/README.md`               | U-Boot's pylibfdt build off Linux; the MAC from vendor storage       |
+| `patches/arm-trusted-firmware/README.md` | TF-A's BL31 for Allwinner boards: the watchdog reset fix             |
+| `patches/rkdeveloptool/README.md`        | the patched `pack`; why the stock one cannot build a usable loader   |
+| `patches/e2tools/README.md`              | the patched `e2tools`; why the stock one corrupts an image on delete |
+| `patches/linux-rockchip/README.md`       | the vendor kernel's patches, their PRs, what Rockchip fixed since    |
+| `patches/linux-meson/README.md`          | mainline kernel patches for Amlogic boards, on their way upstream    |
+| `patches/linux-sunxi/README.md`          | mainline kernel patches for Allwinner boards: the H616 display       |
+| `patches/aic8800/README.md`              | the AIC8800 SDIO driver: Radxa's patches, then ours                  |
+| `patches/atbm6031/README.md`             | the ATBM6031 SDIO driver: a community 6.18 port, then ours           |
+| `patches/tm16xx/README.md`               | the TM16xx front-panel display driver on our kernels                 |
+| `patches/seekwave-swt6621s/README.md`    | the H96 Max Wi-Fi driver patches and their PRs                       |
+| `patches/mt76-mt7668/README.md`          | mainline mt76 for the MT7668S: what it does, its gaps, its firmware  |
+| `patches/btmtksdio-mt7668/README.md`     | mainline Bluetooth for the MT7668S, in-tree                          |
+| `patches/mt76x8-mt7668/README.md`        | the vendor MT7668 driver on 6.18: the fallback, not shipped          |
+| `patches/meson-dw-hdmi/README.md`        | mainline HDMI for the GXLX2 (S905L3), in-tree                        |
+| `patches/meson-codecs/README.md`         | the video decoder in-tree and the encoders beside it on the GXLX2    |
+| `patches/gst-plugins-good/README.md`     | VC-1 through V4L2 on GStreamer 1.26.2: the patched plugin, by hand   |
+| `patches/labwc/README.md`                | labwc showing a client's large buffer on a hardware plane            |
+| `patches/libliftoff/README.md`           | libliftoff: upstream's fixes since 0.5.0, a drop-in for Debian's     |
+| `patches/wlroots/README.md`              | wlroots giving libliftoff's plane search time on slow atomic tests   |
+| `patches/gstreamer/README.md`            | GStreamer's plugin registry not rescanned each time a device is used |
+| `patches/wpewebkit/README.md`            | WPE WebKit's sandbox letting Rockchip's MPP in                       |
+| `patches/mpp/README.md`                  | Rockchip's MPP: its probe a call; IEP2 keeping every field           |
+| `patches/ffmpeg/README.md`               | FFmpeg 9.0.2: V4L2 request, mem2mem and Rockchip MPP codecs          |
+| `patches/kodi/README.md`                 | Kodi 22 on GBM: handing the screen to another program                |
+| `patches/mesa/README.md`                 | Panfrost fixes on Debian's Mesa, backported from upstream            |
+| `patches/gxlimg/README.md`               | the Amlogic boot-image tool, built on macOS                          |
+| `keyring/README.md`                      | the archive signing key: fingerprint, secret, rotation               |
+| `kernel/regdb-certs/README.md`           | the regulatory database's signing keys our kernels trust             |
 
 # Standing rules
 
 **A mistake made twice becomes a rule** here, or in `AGENTS.local.md` when it is about the owner's
 setup.
+
+**A derail means a missing instruction**: fix the doc or rule in the same pass.
 
 ## Claims and evidence
 
@@ -200,17 +202,17 @@ cannot be backed, say so rather than rounding up.
   the folder: `<family>.md` for what spans a family's boards (`rk35xx`), `<chip>.md` for a Wi-Fi/BT
   chip whatever board carries it (`aic8800`), `<board>.md` for one box, and `<topic>.md` for a
   project-wide item too big for a line. A page grows topics as `<scope>-<topic>.md`. Every page has
-  its row in the index. An item says what we want in the end, in a line or two, not how. A finished
-  item is removed: the worklog and the commit record it.
+  its row in the index. An item says what we want in the end, in a line or two, not how. What is
+  known so far, what was tried and what failed, goes in an appendix at the end of its page, and
+  leaves with the item. A finished item is removed: the worklog and the commit record it.
 - **A todo changed is a todo cross-checked**: the board's `board.md` and `dtb.md`, the READMEs that
   name it, and `tools/validate/known.conf`, whose step skips point at todos and go when they land.
 - **An ask made in the middle of other work is a todo first**, to do or to consider, on its page.
   Then back to the work.
 - **Worklogs are written as work happens** — dated entries, wrong turns included. They are the raw
-  material everything else derives from, and what the next port follows. Beside each, `steering.md`
-  logs where the docs or rules steered wrong. A box's results go in its board's worklog; a Wi-Fi/BT
-  chip's driver work in its chip's; a feature's, a session or the VA driver, in its own folder; the
-  rest no single box owns, in its family's.
+  material everything else derives from, and what the next port follows. A box's results go in its
+  board's worklog; a Wi-Fi/BT chip's driver work in its chip's; a feature's, a session or the VA
+  driver, in its own folder; the rest no single box owns, in its family's.
 - **Narrative lives in `docs/`**, never in scripts, payload files or DTB tables. Those stay terse.
 - **Measured numbers live in `docs/<board>/board.md`** — they're per-unit and they decay.
 - **The claim, not its proof.** Dates, evidence and the session's narration go in the worklog; a
@@ -287,9 +289,16 @@ work. A push starts a release.
 **Nothing is committed untested**, unless the owner approves it untested. A kernel, tree or driver
 change is tested on the box it targets, on every kernel it ships on.
 
+**The regression is the release check, not a change's test.** A change is checked by the one test
+that touches it, on the box, failing fast; the full regression runs once a batch of work is done.
+
 **Release-ready means `docs/bring-up/regression.md` passed**: its unattended run, the extended
 profile for a kernel series, and its list of what needs hands, done by the owner. No one suite's
 pass stands in for it.
+
+**Read a run for its numbers, not its pass count.** Its report sets each measure beside the board's
+last run and its own kernel's. A measure more than 10% worse is a finding, just as a failure is. One
+that looks too good gets the same scrutiny: a test that measures at the wrong moment still passes.
 
 **A title. A paragraph only where it earns its place** — something a reader cannot get from the
 diff. The diff is the record; reasoning belongs in the comment, the doc, or the todo it came from.
@@ -326,7 +335,9 @@ what it did on the vendor kernel and the evidence mainline needs no counterpart:
 reads it, or a runtime diff, vendor against mainline on one box, of pin mux, GPIOs, regulators and
 clocks. Each difference is a question until explained. A translation rule that ignores a node is
 presumed a bug, not the norm: a vendor node that did something on the vendor kernel needs its
-mainline counterpart.
+mainline counterpart. A vendor's policy, a power domain kept on or a rate, is read against the
+target driver, not copied as wiring. `pinmux-pins` shows what drivers claimed, not the mux the
+hardware holds: compare the IOMUX registers themselves before probing deeper.
 
 **A tree keeps what its vendor tree enables, and fixes no size the hardware varies.** A vendor ships
 one tree across a board's revisions (a 100M and a 1000M Ethernet, more RAM, a bigger eMMC), so a
@@ -337,19 +348,19 @@ block or a hang: the board's patch disables it, with that reason.
 **U-Boot handles the SoC and vendor storage only**: it may set the SoC's Ethernet address and pass
 vendor-storage entries on; a radio's address belongs to that radio's driver.
 
-**Every new feature lands with its integration test**, kernel, driver, package or userspace alike: a
-check in `tools/validate` that runs unattended on the box and verifies the feature through its own
-interfaces, a hand run with `v4l2-ctl` or `modetest` standing in for none. It is written for any
-family and SoC, skips where the feature is absent, and prints what it found, values and not just a
-verdict, so a person or an agent can judge it.
+**Every new feature lands with its integration test**, whether it is in the kernel, a driver, a
+package or userspace: a check in `tools/validate` that runs unattended on the box and reaches the
+feature through its own interfaces. A hand run with `v4l2-ctl` or `modetest` is not a test. The
+check works on any family and SoC, skips where the feature is absent, and prints the values it
+found, not only a verdict, so a person or an agent can judge it.
 
-**A mainline kernel reaches parity with the vendor's, then passes it**: each block the vendor kernel
-drives works on it, and a datasheet option the vendor never drove is implemented too; where Linux
-has no interface for it, the driver adds the smallest one its subsystem allows.
+**A mainline kernel matches the vendor's, then goes further**: every block the vendor kernel drives
+works on it, and a datasheet option the vendor never drove is implemented too. Where Linux has no
+interface for it, the driver adds the smallest one its subsystem allows.
 
-**The datasheet says what the hardware does**: a vendor kernel or library failing at an option it
-lists is that software's gap, never a hardware limit. Our driver makes it work; until then it
-refuses it, the refusal a todo, never a finding.
+**The datasheet says what the hardware does.** A vendor kernel or library that fails at an option
+the datasheet lists has a bug; the hardware is not limited. Our driver makes the option work, and
+until it does, it refuses it. The refusal is a todo, not a finding.
 
 **A driver refuses what it cannot show** rather than show garbage: an atomic check that fails is a
 player's cue to take another route; a picture that breaks is not.
@@ -357,9 +368,10 @@ player's cue to take another route; a picture that breaks is not.
 **A driver's limit is the hardware's, measured**: a size or rate cap is set only where the hardware
 fails past it, and its patch names the test that shows it, at the limit and one step past.
 
-**A limit applies to the hardware it was measured on**: a cap from one chip is keyed to that chip,
-its variant data or its compatible, never global in a driver, library or player that serves its
-siblings. Where the driver or library reports a limit, the patch reads it instead.
+**A limit applies only to the hardware it was measured on.** A cap found on one chip is tied to that
+chip, through its variant data or its compatible, and never made global in a driver, library or
+player that also serves other chips. Where the driver or library reports its own limit, the patch
+reads that instead.
 
 **Kernel code never needs a reboot to recover**: no implementation may leave a block, a bus or the
 box wedged. A job that times out or faults resets its block and that block's IOMMU, and the next job
@@ -403,17 +415,36 @@ guess, a test or another board's tree.
 - **The first login asks for a new root password**: the image ships `1234`, expired. With a network,
   copy an SSH key into `/root/.ssh/authorized_keys` over serial once, and the rest of bring-up runs
   as `ssh root@<BOARD_HOSTNAME>.local`.
+- **Read the vendor's code before asking a person or calling a block untestable**: its kernel
+  driver, U-Boot and userspace library (MPP), and the box's `board.md` for what it has and lacks.
+  Whatever still needs hands goes straight onto its scope's todo page under 👤 By hand, as the one
+  step a person takes; an ask left only in a message gets lost.
+- **A file a box boots from is never written in place**: the new content goes to a file beside it,
+  is checked, then moves over it, each step joined by `&&`. A shell `>` empties the target before
+  the program writing it runs, and a failed program then leaves the box nothing to boot.
+- **Enter a kernel or tree under test by kexec, not a reboot**, starting from the known-good default
+  and leaving the boot menu alone: use `tools/validate/kexec_once.py`, never a bare `kexec -l`,
+  which on arm64 boots the running kernel's tree whatever `--dtb` says. Any reset, by the watchdog
+  (armed across the kexec) or a power cycle, boots the default again, wherever the new kernel hangs.
+  Where the running kernel has no kexec, `tools/validate/boot_once.py` boots the test kernel once
+  and restores the menu before root mounts. Reboot only for what kexec skips: the bootloader, the
+  boot menu, or a block's state across a reset.
 - **Test everything unattended, and fast.** Synthetic EDIDs, emulators and writeback stand in for
   screens and people; a suite fails fast and runs in minutes.
 - **A test waits on events, each wait bounded by a timeout, not on sleeps**: a socket appearing, a
-  page's beacon, a frame shown, a process exiting. A fixed sleep is too long on a quiet box and too
-  short on a busy one; the timeout only ends a hang, and says which wait hung.
+  page's beacon, a frame shown, a process exiting, a serial capture growing. A fixed sleep is too
+  long on a quiet box and too short on a busy one; the timeout only ends a hang, and says which wait
+  hung.
+- **A question blocks only its own item.** Work waiting on a person's answer is set aside, the ask
+  on its todo page; the rest of the work goes on. A loop ends when no item can move, not at the
+  first ask.
 - **Bring-up and fixes run unattended.** Exhaust the box's readback, the repo and `backup/` before
   asking a person to look, listen or plug in. Make the ask one step, and add the test it shows is
   missing. When the ask is timed, a person watching or acting soon after the agent starts something
   (a button held through a reboot), start only on their word that they are ready.
-- **`/dev/mem`: only the offsets the driver uses, while its device is runtime-active**; a domain
-  reported on can still have the block's clock gated, and anything else hangs or resets the box.
+- **`/dev/mem` only at the offsets the driver uses, while its device is runtime-active and its bus
+  clock's enable count in `clk_summary` is above zero.** A driver may gate that clock between calls,
+  and any other access hangs or resets the box.
 - **A box without a screen gets one in software for a display test**: a panel's EDID
   (`tools/validate/edid-boe-2256x1504.bin`, the M2 Plus's) into
   `/sys/kernel/debug/dri/0/<connector>/edid_override` and `on` into its `force`, written with
@@ -426,14 +457,22 @@ guess, a test or another board's tree.
 - **Tests use our FFmpeg**, built on the host; nothing builds on a box.
 - **Over SSH, stop a process by its exact name (`pkill -x`) or PID.** `pkill -f` matches the SSH
   session's own command line and kills it.
+- **FFmpeg in a script fed on stdin (`ssh box sh -s < script`) runs with `-nostdin`**: without it
+  FFmpeg reads the rest of the script as keystrokes, and the run's results are garbage.
 - `mmcblk` numbering is **not stable** across images or boots. Identify the eMMC by its
   `boot0`/`boot1` companions, an SD or SDIO host by its controller,
-  `/sys/devices/platform/<controller>/mmc_host/mmc*`, never by a remembered number.
+  `/sys/devices/platform/<controller>/mmc_host/mmc*`, never by a remembered number. Sound cards are
+  the same: a test names a card, `CARD=<id>`, never `hw:1,0`.
 - **After any refactor, rebuild the image and diff every payload file against a pre-change build.**
   Comment-level differences only, unless the change is deliberately a rename — and a path moving
   between packages needs `Replaces` and `Breaks`, which the release guard checks.
 - These boxes are daily drivers. Say what you're about to do to them, prefer `--no-reboot` plus an
   explicit reboot you can watch, and keep a known-good DTB where one file copy restores it.
+- **Installing a kernel package moves the boot menu's default to the newest kernel**
+  (`u-boot-update`): after installing one for a test, put `default` in `extlinux.conf` back. A test
+  kernel goes in with its own build's module packages; without them its out-of-tree drivers are
+  missing, and the box comes up with no Wi-Fi, which looks like a hang.
+
 - **A box runs only its own factory DDR blob**: no other DDR init, rkbin's or a sibling's, is
   written to a box or booted on it without the owner's word. Most boxes have no maskrom or FEL
   button: U-Boot reads their recovery button, and U-Boot runs after the DDR init, so one that cannot

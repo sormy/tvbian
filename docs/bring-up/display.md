@@ -4,34 +4,39 @@
 
 1. **Modes** on a TV and a PC monitor, switched at runtime with `modetest -s`, never by rebooting;
    `kmscube` on screen with its stdin held open (`sleep 60 | kmscube`).
-2. **HDR and frame rate**: every transition a player makes at one mode, SDR to HDR, film to film,
-   back, proven by the InfoFrame read back from the HDMI controller; the refresh following the
-   content's 23.976, 24, 25 or 50 fps.
-3. **Audio**: every sound card times 3 s in 3 s (`tools/validate/box.py --suite audio`).
+2. **HDR and frame rate**: every transition a player makes at one mode (SDR to HDR, film to film,
+   and back), each proven by reading the InfoFrame back from the HDMI controller. The refresh rate
+   follows the content's 23.976, 24, 25 or 50 fps.
+3. **Audio**: every sound card plays in real time (`tools/validate/box.py --suite audio`).
 4. **The AV jack and S/PDIF** through the kit's adapters: the composite picture on an HDMI screen,
-   the jack's audio in headphones. First find the jack's ground: the RCA that beeps to a USB shell,
-   box off. A cable grounded elsewhere gives no picture; the CTIA-to-OMTP adapter fixes it. Video
-   can still sit on another plug: colour bars on composite, each plug in turn in the video input.
-   **Composite is `Composite-1`, off by default**: the connector of type Composite, a driver that
-   names it otherwise patched; `video=Composite-1:d` in `BOARD_CMDLINE`, else it sizes the console
-   when HDMI is plugged in after boot. Turn it on for the test with
-   `echo on > /sys/class/drm/card0-Composite-1/status`, and `off` after.
+   the jack's audio in headphones. First find the jack's ground, with the box off: it is the RCA
+   plug that beeps to a USB socket's shell. A cable grounded elsewhere gives no picture; the
+   CTIA-to-OMTP adapter fixes it. Video may still be on another plug: show colour bars on composite
+   and try each plug in the video input.
+
+   **Composite is `Composite-1`, off by default.** The connector has type Composite; a driver that
+   names it otherwise is patched. `BOARD_CMDLINE` carries `video=Composite-1:d`; without it,
+   composite sets the console's size when HDMI is plugged in after boot. Turn it on for the test
+   with `echo on > /sys/class/drm/card0-Composite-1/status`, and `off` after.
+
 5. **The GPU** headless first, EGL on GBM rendering to an FBO, `glReadPixels` on a known triangle;
    then on screen with the full default `glmark2-es2-drm` suite, beside a sibling family's full run.
 6. **Planes**: every plane the CRTC offers, with its formats, compression, scaling, alpha and zpos.
-   Then a video plane under the interface, composed by the engine with no GPU pass, at the native
-   mode and at 4K, with no underrun. Then a minute of a player's commits: nonblocking, each after
-   the last flip, the video scaled.
+   Then a video plane under the desktop, composed by the display engine with no GPU pass, at the
+   native mode and at 4K, with no underrun. Then a minute of commits as a player makes them:
+   nonblocking, each after the last flip, with the video scaled.
 7. **Hardware tone mapping**: each colour stage (a 3D table, EOTF and OETF tables, a matrix), per
    plane and per CRTC, exposed as a property. Its output by writeback matches the same table
    computed on the host, or, with no writeback, its registers read back. Record which planes each
    stage maps and what the engine cannot do, so the player knows when to use the GPU.
-8. **Unattended**: `tools/validate/display.py` runs steps 6 and 7 and the HDR side of step 2, with
-   HDMI unplugged: synthetic EDIDs stand in, and a real screen's gets in their way. Only the picture
-   on a real HDR screen needs a person.
+8. **Unattended**: `tools/validate/display.py` runs steps 6 and 7 and the HDR part of step 2 with
+   HDMI unplugged. Synthetic EDIDs stand in for screens; a real screen's EDID would get in their
+   way. Only the picture on a real HDR screen needs a person.
 
 ## Bites
 
+- **Port a vendor's display sequence whole**: its timing and clocks with its register tables, read
+  from the BSP first. Vendor tables on mainline's timing gave composite black lines.
 - **Memory bandwidth can be the bottleneck**: every plane scans out of RAM each frame, beside the
   decoder. Dropped frames that come with more planes or a larger mode are checked against the
   board's Memory row first.
@@ -61,16 +66,17 @@
 
 ## Check
 
-- [ ] **H1** 👤 A TV at the largest mode the box claims, 8K60 where the kit's TV shows it, 4K60 on
-      most: picture and sound, replugged, plugged in after a headless boot, its remote over CEC; a
-      claim past the TV stays ❓
+- [ ] **H1** 👤 A TV at the largest mode the box claims (8K60 where the kit's TV shows it, 4K60 on
+      most) has picture and sound, after a replug too, and when plugged in after a headless boot;
+      its remote works over CEC. A mode past what the TV can show stays ❓
 - [ ] **H2** 👤 Optional: every refresh rate and 1440p on a TV, and a PC monitor's modes
 - [ ] **H3** Every HDR transition at one mode, the InfoFrame read back, on an HDR screen or the
       synthetic one (`hdmi`)
 - [ ] **H4** 👤 Optional: the refresh follows the content's frame rate; VRR, QMS and ALLM where
       offered
-- [ ] **H5** Every sound card plays a timed 3 s in 3 s, at 44.1 and 48 kHz
-- [ ] **H6** 👤 Optional: multichannel LPCM plays
+- [ ] **H5** Every sound card plays 2 s of audio in 2 s, at every rate it offers
+- [ ] **H6** 2, 6 and 8 channels, and 8 at 192 kHz, play in real time to a synthetic 7.1 screen, the
+      controller set to one lane per channel pair and to the stream's channel count (`hdmi audio`)
 - [ ] **H7** 👤 Optional: AC3 and DTS pass through to a receiver
 - [ ] **H8** `cec-ctl` shows a physical address
 - [ ] **H9** `ddcutil getvcp 10` reads a monitor's brightness
@@ -90,4 +96,12 @@
 - [ ] **H20** What the engine cannot map, recorded for the player's GPU path (`RECORD maps`)
 - [ ] **H21** SDR, HDR10, HLG and HDR10-and-HLG screens: HDR sent for what each lists (`sinks`)
 - [ ] **H22** The display's rating, its largest and fastest sustained modes, in `board.md`
-      (`rating`)
+- [ ] **H23** Each transform a plane lists shows right by writeback, or is refused (`rotation`)
+- [ ] **H24** An HDMI sound card's jack follows the connector: on with a screen, off without
+      (`rating`). On a box with no screen it turns on under a synthetic one and off after it
+      (`hdmi-jack.follows`)
+- [ ] **H25** A CRTC gamma table changes a colour as set, seen by writeback where the SoC takes
+      writeback after gamma; the plane checks after it still pass (`gamma`)
+- [ ] **H26** A plane's SDR-to-PQ and SDR-to-HLG color pipeline matches BT.2408's SDR in HDR by
+      writeback; one partly bypassed, or set apart from another plane's where the stage is shared,
+      is refused (`colorop`)

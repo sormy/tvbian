@@ -69,9 +69,12 @@ until it replaces it. Its `board.patch` applies to the factory tree translated a
 | USB 3                  | `usb_host0_xhci` as host                         |
 | Watchdog, UART0        | Enabled                                          |
 
-Each CPU and GPU OPP runs at the chip's bin's voltage, every bin with its own column, a bin the
-factory leaves to the default given that. Each PWM regulator, CPU, GPU and logic, takes its vendor
-`active` pins as its default: without them the rail stays at its power-on voltage. The logic rail
-follows the DMC's vote. The radio's PCM pins are SAI0's, which mainline lacks: without the pins the
-card fails to initialise. The factory DDC pins sit under dw-hdmi, which refuses address 0x37: DDC/CI
-needs the plain I2C controller.
+Each CPU and GPU OPP runs at the voltage of the chip's bin: every bin has its own column, and a bin
+the factory leaves out takes the default. Each PWM regulator (CPU, GPU and logic) takes the vendor's
+`active` pins as its default; without them the rail stays at its power-on voltage. The logic rail
+follows the DMC's vote.
+
+The radio's PCM pins belong to SAI0 and are held by the SDIO power sequence; without them the card
+fails to initialise. SAI0 is on, as on the vendor kernel, and claims no pins of its own. The factory
+puts the DDC pins under dw-hdmi, which refuses address 0x37, so DDC/CI needs the plain I2C
+controller.

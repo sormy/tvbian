@@ -849,3 +849,55 @@ MPP 1.1.0's `osal/mpp_soc.c`, the `rk3528` entry, against `patches/ffmpeg/`; not
   the power.
 - Back at 20:03 box time, its pstore held `dmesg-ramoops-0` (71,266 B, ending in the panic) and
   `console-ramoops-0`; the run then finished, the default kernel restored.
+
+## 2026-11-24 — next2 7.3.6: composite through Esmart2, and the SD card
+
+- Booted once with `tools/validate/boot_once.py`: the menu back on vendor 3.4 s in.
+- `display.py composite`, line buffer split `02`: PAL and NTSC keep the colour bars by writeback
+  (234,234,234, then yellow, cyan, green, red, blue), VP1 scanning out of Esmart2.
+- The SD card the box runs from, at UHS SDR104: `mmc0: cache flush error -84`, then `-110` and
+  `-74`, `tried to HW reset card, got error -110`, read and write I/O errors at sectors 0 and
+  61079513, and root forced read-only (`emergency_ro`) 3 s in. Vendor 6.1 after: no error, the
+  filesystem clean after an orphan cleanup.
+- The SD node, factory against next2: `max-frequency` 150 MHz and `rockchip,default-sample-phase` 90
+  are the mainline dtsi's own; `rockchip,use-v2-tuning` the translator drops (`none`). The vendor
+  tunes SDR104 that way, mainline its own way. Not retried here: this box's root is on that card.
+
+## 2026-11-24 — next2 7.3.6, final testing on the RK3528A
+
+- The next2 regression: `system` (`units.failed` greetd), `screen` (frame 1 of 3 against llvmpipe
+  25.6% alike, 6.0 dB; frames 0 and 2 at 67.3 dB) and `display-full` failed. In `display-full` the
+  rotation check's `Cluster0-win0` `reflect-y` timed out on its writeback (errno 110), and every
+  commit after it failed: `sdr2pq`, pacing (122239 of 122239), `hdmi`, `sinks`.
+- greetd: its greeter, `agreety`, exits without a session on vendor 6.1 too, the panel's HDMI
+  reading `disconnected` on both kernels: the panel, not next2.
+- `display.py` alone on next2: 67 passed, 0 failed; its rotation check 20 times over: 320 passed.
+  The timeout needs what ran before it; next, `screen.py` then the rotation check, in order.
+- The rotation timeout: `screen.py` then the rotation check, on next2, timed out once on
+  `Cluster0-win0` `reflect-y AFBC`, a second run clean. A writeback job's completion counts its
+  port's vsyncs; a port disabled with a job pending, or the writeback moved to another port, left
+  the job pending for good, and a new job then took its slot, so each later completion signalled the
+  one before: `drm-rk3528-vop2-writeback-jobs.patch` ends such jobs and refuses a writeback while
+  every slot is pending. No timeout since.
+- Still open: `screen.py`, its 6 frames rendered, then the whole display suite: `sdr2pq`'s first
+  commit refused (-22) and every commit after it in that process, 35 passed and 9 failed; the suite
+  alone, and `sdr2pq` alone after `screen.py`, pass. Not seen on the 3518 or the 3518D.
+
+## 2026-11-25 — random write, vendor against next2 in one hour
+
+- The SD slot (`ffc30000.mmc`) empty, root on the eMMC (`mmcblk2p1`, HS200 at 100 MHz): SDR104
+  cannot be retried without the card.
+- Regression `fio.rand.write` on next2 today 3.7–8.2 MB/s, against vendor's 9.8–12.4 of 2026-11-20.
+  The regression's job (4K, `iodepth=32`, direct, 512 MiB, 30 s), five runs each:
+  - vendor 6.1: 5.0 4.1 5.4 4.5 4.4
+  - next2 7.3.6, booted once: 8.1 6.7 6.7 6.4 6.9
+  - vendor 6.1 after: 5.3 4.8 5.2 4.6 5.6
+- The eMMC's random write drifts with its own state, both kernels alike; next2 ahead within the
+  hour. Sequential and random read match vendor (88.3, 76.5, 22.4 against 87.6, 76.4, 23.6 MB/s).
+
+## 2026-11-25 — the greeter on next2, with a screen
+
+- next2 7.3.6, booted once; the panel's HDMI `disconnected`, greetd disabled at boot as
+  `tvb-desktop` now installs it. Under `display.py`'s synthetic screen (`hdr_sink`, HDMI
+  `connected`), `systemctl start greetd`: after 25 s greetd active, labwc and gtkgreet running, 0
+  restarts. The greeter's exits needed a disconnected screen, on vendor 6.1 as on next2.

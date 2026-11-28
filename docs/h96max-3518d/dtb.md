@@ -134,7 +134,7 @@ which is vp1's primary — the TVE output this board does not have.
 **`support-multi-area` is dropped.** With it, the driver offers each Esmart's sub-windows
 (`Esmart0-win1` to `-win3`) as planes. Writeback reads them back, but HDMI shows black. Verified
 2026-11-05 on a 2256x1504 monitor. Without it, the VOP offers `Esmart0`, `Esmart2`, `Esmart3` and
-`Cluster0-win0`, and `display.py` fails on any sub-window.
+`Cluster0-win0`. next2 offers them as planes again, its own patch.
 
 **Refresh rate is a red herring.** 4K30 (297 MHz, half the pixel clock of 4K60) failed in exactly
 the same way. The limit is line width, not bandwidth or TMDS rate — which is what rules out the HDMI
@@ -218,3 +218,15 @@ tty over uart0. `console=ttyFIQ0` is the family default; the baud comes from the
 `rockchip,baudrate`, and systemd's getty-generator follows `/proc/consoles`.
 
 🟡 this board has not booted since; the 3518 runs the same nodes.
+
+## next2: the same blocks not fitted
+
+Translating the factory tree for next2 left some blocks enabled that the vendor kernel's tree turns
+off. `next2/board.patch` disables them again, each with the vendor tree's reason: the TV encoder
+(`tve`), S/PDIF and its sound card, `gmac0`, the SD host (`sdmmc`), the analog codec (`acodec`) and
+its sound card, and the translator's `ir-receiver`. ✅ On next2 7.3.6 there is no Composite
+connector, only the HDMI sound card, no `eth0` and no SD host; `rc0` is the CEC remote, and Wi-Fi
+comes up.
+
+The family's translation drops the vendor's `optee` node: our U-Boot carries no OP-TEE, and the
+node's driver failed with "api uid mismatch" on every kernel.

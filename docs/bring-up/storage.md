@@ -15,10 +15,11 @@
        --direct=1 --ioengine=libaio --iodepth=32 --numjobs=1 --runtime=30 --time_based
    ```
 
-3. The install cycle, in order: external media and `tvb-install`, or the service mode where the box
-   boots none; the eMMC; the service mode on our U-Boot. A new family's also: a write over it, read
-   back identical; a full write that boots shows the same, at more risk. Within a family the
-   family's proof stands.
+3. The install cycle, in order: install from external media with `tvb-install` (or through the
+   service mode, where the box boots no external media); boot from the eMMC; reach the service mode
+   on our U-Boot. For a new family, also write an image through the service mode and read it back
+   identical; a full write that boots shows the same, at more risk. Within a family, the family's
+   proof stands.
 
 ## Bites
 
@@ -34,7 +35,8 @@
 - [ ] **M1** The eMMC under `fio`
 - [ ] **M2** The SD card under `fio`
 - [ ] **M3** 👤 SD hotplug, in and out
-- [ ] **M4** Every speed mode kept survives warm reboots
+- [ ] **M4** Each storage host keeps its speed mode, without errors, across warm reboots
+      (`mmc.errors` across `reboot.<n>`)
 - [ ] **M5** `tvb-install` puts the image on the eMMC, where the box boots external media
 - [ ] **M6** It boots from the eMMC on its own loaders
 - [ ] **M7** The per-unit window is byte-identical to the backup
@@ -42,3 +44,4 @@
 - [ ] **M9** A new family's: it loads the family's loader and reports the eMMC's true size
 - [ ] **M10** A new family's: over it, a write reads back identical, or a full write boots
 - [ ] **M11** Each MMC bus runs stock's fastest mode, or `dtb.md` names the error that stopped it
+      (`mmc.<host>`)

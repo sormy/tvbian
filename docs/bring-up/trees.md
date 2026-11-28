@@ -50,6 +50,8 @@ patch, targeting mainline's tree.
 
 - **Stock first.** An unofficial tree for a one-off box carries its own bring-up's mistakes. Use it
   as a hint when something fails; never copy it.
+- **An H616's Ethernet PHY is chosen by the SID, not the tree.** Word 0x2c bit 8 set means the AC300
+  on MDIO; the factory tree may still describe an AC200 on I2C.
 - **Trust the PCB, not the tree.** Factory trees are often an evaluation board's and claim hardware
   the box lacks. Disable a node only on a positive signal (a driver error, a probe reading nothing);
   silence is not absence. Add no graft without a consumer.

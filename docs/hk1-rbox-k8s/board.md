@@ -66,7 +66,7 @@ at 1500000 baud, 3.3 V.
 | -------------------- | ------ | --------------------------------------------------------- |
 | RAM                  | ✅     | 3921 MiB available to Linux, 3 GiB verified for 60 s      |
 | CPU stress           | ✅     | 62.7 °C over 300 s, no cooling state engaged              |
-| Combined load        | ✅     | 65.5 °C in 120 s, no new warnings or Wi-Fi ping loss      |
+| Combined load        | ✅     | 68.9 °C in 120 s, CPU, RAM and GPU; DDR at 786 MHz        |
 | RAM STREAM read      | ✅     | 1253 MB/s with one worker, 2794 with four; DDR at 786 MHz |
 | eMMC sequential read | ✅     | 242 MB/s, 512 MiB direct I/O                              |
 
@@ -117,7 +117,7 @@ a driver reload: 185 Mb/s up, 198 down.
 | MPEG-4 Part 2    | ✅ 1920×1080, Y-PSNR 75.98 dB              | ➖           |
 | Decoder scaling  | ✅ 4K to 1080p, H.264 67.00, HEVC 65.35 dB | ➖           |
 
-Encode fps at 1920×1080: H.264 53.6, HEVC 60.5. The encoder is 8-bit: Rockchip's MPP and
+Encode fps at 1920×1080: H.264 High 52.9, HEVC Main 60.0. The encoder is 8-bit: Rockchip's MPP and
 next2's driver take 8-bit sources only, and a 10-bit one comes out 8-bit Main.
 
 Interlaced H.264 uses the patched MPP bundled with `ffmpeg9`.
@@ -130,9 +130,8 @@ Decode speed, the engine alone (`tools/validate/video.py` decode), the DDR at 78
 | H.264 10-bit       | ✅     | 58.0  |
 | HEVC               | ✅     | 116.9 |
 | HEVC Main10        | ✅     | 112.4 |
-| H.264 4:2:2, 4:0:0 | ❌     | —     |
-
-FFmpeg's `h264_rkmpp` refuses MPP's 4:2:2 and 4:0:0 frames.
+| H.264 4:2:2        | ✅     | 46.9  |
+| H.264 4:0:0        | ✅     | 75.5  |
 
 ## Vendor 6.12 test
 
@@ -160,6 +159,7 @@ HDMI writeback rejects capture after a composite test. HDMI display commits stil
 | Wi-Fi association and upload | ✅     | DHCP and 120 Mb/s at 2.4 GHz                 |
 | Wi-Fi download at 2.4 GHz    | ❌     | Four runs: nothing twice, 13.1 and 74.7 Mb/s |
 | Wi-Fi download at 5 GHz      | ✅     | 209 Mb/s over six seconds                    |
+| eMMC at HS400ES, 148.5 MHz   | ✅     | 102 MiB/s read; `boot0` writes verified      |
 | Bluetooth discovery          | ✅     | UART2 H4, 8 found, no HCI errors             |
 | HDMI scanout, synthetic 4K60 | ✅     | 601 flips, none late or refused              |
 | Composite writeback          | ✅     | PAL and NTSC keep six colour bars            |
@@ -188,7 +188,7 @@ HDMI writeback rejects capture after a composite test. HDMI display commits stil
 | Bluetooth keyboard   | 🟡  | ❓    | LE scan finds 16, BR/EDR discovery works          |
 | Wi-Fi, owner's       | ✅  | ✅    | Joined on both                                    |
 | Sleep and wake       | ✅  | ❌    | Deep, woken by the remote, the DMC off            |
-| Power off and on     | ✅  | ❌    | On from the remote after `poweroff.target`        |
+| Power off and on     | ✅  | ❌    | Off 5 minutes, then on from the remote            |
 | Reboots by hand      | ✅  | ✅    | 6.1 and 6.12, with the DMC off                    |
 | HDMI on a screen     | ✅  | ✅    | EDID, 23 modes; 6.1 sets 2256×1504 at 60 Hz       |
 | HDMI sound           | ✅  | ❓    | Heard on the screen's speakers                    |

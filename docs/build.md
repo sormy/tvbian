@@ -66,7 +66,8 @@ plan retires it once Debian carries its patches.
 `modules/<name>.conf` naming it in `KERNELS`, build in its step into
 `tvb-<name>-modules-<kernelrelease>`; the metapackage depends on them. A local build is versioned
 `0~local`, below every published one. A board builds once `kernel/` has its `BOARD_KERNEL`.
-`TVB_BUILD_SUITE=forky` builds against Debian testing.
+`TVB_BUILD_SUITE=forky` builds against Debian testing. `TVB_BUILD_DEBUG=1` adds a kernel conf's
+`DEBUG_PATCHES`, test hooks no release ships.
 
 A one-file kernel change goes through the step too: the patch in the kernel's list, then
 `./build.sh kernel`. The step brings ccache and the host's CPUs and memory; a bare `container run`

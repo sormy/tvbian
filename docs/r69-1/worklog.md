@@ -2253,3 +2253,13 @@ nothing failed. The previous tree is kept at `/root/board.dtb.known-good`.
 - 6.12.69 with `97`: two unload and load cycles of `aic8800_fdrv`, each with an address after 4 s,
   where 6.12 failed `wifi.reloads` 2 of 2 runs before. Each release logs
   `aicwf_sdio_release: reg:0 write failed!`; the next load is unaffected.
+
+## 2026-11-24 — the emptied menu restored through the Loader
+
+- `extlinux.conf` was 0 bytes: on 2026-11-23 an `awk` program naming a variable `in`, a keyword,
+  failed to parse after the shell's `>` had emptied the menu, and a `;` let the reboot run.
+- Restored from the H313, the R69-1 on its USB in Loader mode, with an arm64 `rkdeveloptool` and the
+  board's `maskrom_loader.bin`: the root's directory entry for `extlinux.conf` pointed at the inode
+  of `/var/tmp/extlinux.before` (4847 bytes), its link count raised to 2, both blocks'
+  `metadata_csum` checksums recomputed, after the code reproduced the two on disk. 12 bytes written,
+  read back alike; the box came up on 6.1.172, default `l4`, the root's fsck clean.

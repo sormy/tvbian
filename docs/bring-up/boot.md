@@ -67,6 +67,10 @@ From loaders to an installed system, and how a running box is changed without lo
 
 ## Bites
 
+- **Check a symbol in the built kernel's `.config`**, not the defconfig: a symbol no patch defines
+  vanishes without an error.
+- **Build in a driver whose clock the MAC's reset needs.** As a module it loses the race at boot:
+  `EMAC reset timeout`, no Ethernet.
 - **A box that boots U-Boot is never lost**: stop it over serial, load the disk's kernel and tree,
   `fdt rm` or `fdt set` the suspect, `booti`.
 - **A log that stops at `bootconsole [uart0] disabled`** is not a hang yet: boot with `keep_bootcon`

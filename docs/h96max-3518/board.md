@@ -28,6 +28,7 @@ kernel.
 | SoC           | **RK3518** — `SoC: 35181001` (same ID as the R69)                                                                                                                                           |
 | Label MAC     | **`00:EF:00:4A:43:A6`** ✅ — matches the case label, and held in eMMC vendor storage as `LAN_MAC` (live copy v74); serial `YT26050805378`                                                   |
 | RAM / storage | 2 GB LPDDR3 (**a real 2 GB**) · 16 GB Micron eMMC `R1J96N` (14.7 GiB) · SD card slot                                                                                                        |
+| Case          | box, passive cooling (owner)                                                                                                                                                                |
 | Wi-Fi / BT    | **Seekwave SV6160LITE** (module **SWT6621S**) — SDIO Wi-Fi 6, BT muxed over the same SDIO link. **Known bug: TX latches at 6 Mbps** — see `research/seekwave-tx-latch-bug/wifi-tx-latch.md` |
 | Ports         | HDMI · USB 3.0 · USB 2.0 · 10/100 Ethernet · SD slot · AV jack · IR receiver · toothpick button                                                                                             |
 | Remote        | **dual-mode** — works over IR unpaired, and pairs over BLE for air-mouse + battery                                                                                                          |
@@ -43,20 +44,21 @@ while the MAC sleeps. Proven dead on the R69; 🟡 not ✅ because verification 
 
 Not a spec — one box, one kernel. If yours lands in the same ballpark, nothing is wrong.
 
-| What              | Result                                                                 |
-| ----------------- | ---------------------------------------------------------------------- |
-| Ethernet          | **87 Mbit/s goodput** — wire speed for 100FD, both directions          |
-| Wi-Fi (5 GHz, ax) | **414 Mbit/s down / 380 Mbit/s up** to a wired peer, −34 dBm           |
-| eMMC sequential   | **91.6 MB/s read · 44.0 MB/s write** (read is the HS200 ceiling)       |
-| RAM read          | **1124 / 2626 MB/s** on 1 / 4 cores, 786 MHz                           |
-| eMMC random 4K    | **3,016 read / 3,783 write IOPS**                                      |
-| SD, SDR104        | **60.0 MB/s** raw sequential read, 148.5 MHz, 1.8 V                    |
-| SD, high speed    | **22.8 MB/s read · 19.7 write**, 1913/393 IOPS: the 50 MHz bus         |
-| USB 3 sequential  | **389 MB/s read · 360 MB/s write** — SuperSpeed, UAS, ~18% of one core |
-| USB 3 random 4K   | **9,120 read / 8,380 write IOPS** (35.6 / 32.7 MB/s)                   |
-| GPU               | **glmark2 41** at 1080p (lima, Mali-450)                               |
-| Thermals          | 49 °C idle · **60 °C peak** after 5 min 4-core load (95 °C trip)       |
-| Boot              | **~12 s** from eMMC · **18.0 s** from SD (5.3 kernel + 12.7 userspace) |
+| What               | Result                                                                  |
+| ------------------ | ----------------------------------------------------------------------- |
+| Ethernet           | **87 Mbit/s goodput** — wire speed for 100FD, both directions           |
+| Wi-Fi (5 GHz, ax)  | **414 Mbit/s down / 380 Mbit/s up** to a wired peer, −34 dBm            |
+| eMMC sequential    | **91.6 MB/s read · 44.0 MB/s write** (read is the HS200 ceiling)        |
+| RAM read           | **1124 / 2626 MB/s** on 1 / 4 cores, 786 MHz                            |
+| eMMC random 4K     | **3,016 read / 3,783 write IOPS**                                       |
+| SD, SDR104         | **60.0 MB/s** raw sequential read, 148.5 MHz, 1.8 V                     |
+| SD, high speed     | **22.8 MB/s read · 19.7 write**, 1913/393 IOPS: the 50 MHz bus          |
+| USB 3 sequential   | **389 MB/s read · 360 MB/s write** — SuperSpeed, UAS, ~18% of one core  |
+| USB 3 random 4K    | **9,120 read / 8,380 write IOPS** (35.6 / 32.7 MB/s)                    |
+| GPU                | **glmark2 41** at 1080p (lima, Mali-450)                                |
+| 4K read by the CPU | next2: **11.6 fps** uncached · **49 fps** with `cacheable=1`, bit-exact |
+| Thermals           | 49 °C idle · **60 °C peak** after 5 min 4-core load (95 °C trip)        |
+| Boot               | **~12 s** from eMMC · **18.0 s** from SD (5.3 kernel + 12.7 userspace)  |
 
 USB 3 is genuinely SuperSpeed: `5000` Mbps, `uas` not BOT, 389 MB/s sustained for 20 s with no
 resets in `dmesg` — 9× what the 480 Mbps ports carry and **4× this box's own eMMC**, at

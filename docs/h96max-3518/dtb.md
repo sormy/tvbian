@@ -92,3 +92,9 @@ ALERT!  UUID=… does not exist.  Dropping to a shell!
 `driver_async_probe=dwmmc_rockchip,rockchip-drm` — the factory's own setting, confirmed present in
 the failing boot's cmdline. Removing the UHS modes outright stopped it under Armbian; on TVBian's
 stack the loss does not reproduce, and the modes are back.
+
+## next2
+
+The family's translation drops the vendor's `optee` node: our U-Boot carries no OP-TEE, and the
+node's driver failed with "api uid mismatch" on every kernel. ✅ On next2 7.3.6 no device is left
+unbound.

@@ -11,20 +11,39 @@ tools: a line that differs from the board's last run is a finding.
    the last proven tree, `upstream.py --prove`, `dt-validate` against the patched bindings,
    `devices.py`. A board's tree is rebuilt from its patch, `build-dtb.sh`, the patch reproducing it.
 2. **Run the suite on the boxes, which run it alone**:
-   `tools/validate/regression.py run [--profile short|default|extended] BOARD=USER@HOST ...`
-   deploys, waits, collects and reports. Deploy installs the family's kernels, the tools and the
-   board's package built fresh from this tree; a box that fails to install is not run. The host
-   checks what needs the repo: the box runs the repo's tree, and its upstream view proves. Then it
-   copies the suite to the box and starts it; a systemd unit runs `onbox.py` at every boot. It boots
-   each kernel the profile names, the family's and its `-next`, with a guard that brings the default
-   back if the kernel brings no network up (`boot.md`). On each it runs every check unattended, none
-   left out for what the change touched: the `box.py` phases, a soak, `display.py`, `screen.py`,
-   `video.py`'s decode suite, the VA driver's suite through FFmpeg and GStreamer, dEQP against Mesa
-   CI's lists, a panic, an unpinged watchdog and warm reboots. `short` samples them; `default` runs
-   them all; `extended` soaks longer. The decode suite's clips are made by the host's FFmpeg;
-   `video.py`'s conformance streams, pinned from FFmpeg's FATE suite, add what its encoders never
-   make: VC-1, slices, odd widths. Each decodes exact, twice alike, in a `conformance` step of its
-   own that `short` skips.
+   `tools/validate/regression.py run [--profile short|default|extended] BOARD=USER@HOST ...` deploys
+   the suite, waits, collects the results and reports.
+
+   - `--power-switch CMD` names the command that switches the box's outlet, `{state}` standing for
+     on or off. After the on-box run, the host boots each tested kernel and holds the box asleep,
+     then off. A kernel that answers before the hold ends fails. The host then power-cycles the box
+     back.
+   - `--disable STEP` skips a step; `--enable STEP` runs one that is off by default, such as the
+     experimental `va`.
+
+   It refuses a box at once if the run could not finish there: a command a step needs is missing (it
+   prints the `apt install` line), the `iperf3` server is out of reach, `/var/lib` has under 2 GB
+   free, or `/usr/lib/tvb/board-id` names another board. The report fails any result recorded on a
+   different board from the one it is filed under.
+
+   A run goes like this:
+
+   - Deploy installs the family's kernels, the tools and the board's package, all built fresh from
+     this tree. A box that fails to install is not run.
+   - The host checks what needs the repo: that the box runs the repo's tree, and that its upstream
+     view proves.
+   - It copies the suite to the box and starts it; a systemd unit runs `onbox.py` at every boot.
+   - The box boots each kernel the profile names, the family's and its `-next`, with a guard that
+     brings the default back if a kernel brings no network up (`boot.md`).
+   - On each kernel it runs every check unattended, whatever the change touched: the `box.py`
+     phases, a soak, `display.py`, `screen.py`, `video.py`'s decode suite, the VA driver's suite
+     through FFmpeg and GStreamer, dEQP against Mesa CI's lists, a panic, an unpinged watchdog and
+     warm reboots.
+
+   `short` samples the checks, `default` runs them all, and `extended` soaks longer. The decode
+   suite's clips come from the host's FFmpeg. `video.py`'s conformance streams, pinned from FFmpeg's
+   FATE suite, add what its encoders never produce: VC-1, slices, odd widths. Each must decode
+   exactly, the same twice, in a `conformance` step of its own that `short` skips.
 
    | Scope       | `short`               | `default`              | `extended`               |
    | ----------- | --------------------- | ---------------------- | ------------------------ |
@@ -51,14 +70,24 @@ tools: a line that differs from the board's last run is a finding.
    each box's results whenever it answers; the box restores its default and stops when done.
 
 3. **Report**: `regression.py report build/validate/regression/<date>` writes `report.md` there, for
-   the pull request: each board and kernel with its checks and minutes, every ❌ and ❓, and what
-   moved since the board's last run. Parity is a failure too: each device class (network, Bluetooth,
-   input, sound, LEDs, thermal, cooling, devfreq, DRM connectors, rfkill, RTC, watchdog, hwmon)
-   another kernel has fewer of than the board's own, its oldest, with the names it lacks. A step
-   that breaks a box, hanging it or worse, is skipped there by a `step:<name>` line in
-   `tools/validate/known.conf` with its reason: shown ❓ in every report until the fix lands. No
-   failure stops the run: every step runs, and each ❌ is judged in the report against its todo.
-   Attach it to the PR.
+   the pull request, to be read by a person or an agent alike. For each board and kernel it gives:
+
+   - one opening line: failures, untested, checks, minutes and clock span;
+   - the box: board, kernel, tree, idle temperature;
+   - each step's result, checks, minutes and clock times;
+   - every ❌, and the ❓ grouped by reason;
+   - `probe.py`'s options, on and off;
+   - each measure (heat, CPU clock under load, DDR rate, storage, Wi-Fi, GPU) beside the board's
+     last run and its own kernel's, marked WORSE when it is more than 10% worse;
+   - what moved since the board's last run.
+
+   Losing devices fails too: any device class (network, Bluetooth, input, sound, LEDs, thermal,
+   cooling, devfreq, DRM connectors, rfkill, RTC, watchdog, hwmon) where a kernel has fewer than the
+   board's own oldest kernel, with the names it lacks. A step that breaks a box, hanging it or
+   worse, is skipped on that box by a `step:<name>` line in `tools/validate/known.conf` with its
+   reason, and shows as ❓ in every report until the fix lands. No failure stops the run: every step
+   runs, and each ❌ is judged in the report against its todo. Attach the report to the PR.
+
 4. **Record** each kernel's lines in the board's Test report and a worklog entry: the lines that
    moved, and why.
 5. **Hand the human** the lines below that the change reaches, each with what to look for.

@@ -276,7 +276,6 @@ in their own table.
 | READMEs list it | ✅   | README and README_ROCKCHIP list the board         |
 | CI green        | 🟡   | Local `./build.sh test`: 62 pass; CI runs on push |
 | Untested named  | ❓   | —                                                 |
-| Steering closed | ❓   | —                                                 |
 
 ### On `rk35xx-next`
 

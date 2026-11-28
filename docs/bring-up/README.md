@@ -51,23 +51,15 @@ records it before the next phase starts. A phase is done when each of its lines 
 
 **State lives in files, never in memory**, so a run resumes from them:
 
-| File                       | Holds                                                     |
-| -------------------------- | --------------------------------------------------------- |
-| `docs/<board>/board.md`    | the Test report: every line's name, mark and evidence     |
-| `docs/<board>/worklog.md`  | dated: what was tried, the command, what it showed        |
-| `docs/<board>/steering.md` | dated: where the docs or rules steered wrong, and the fix |
-| `build/logs/<board>/`      | every serial and test log, one file per attempt           |
+| File                      | Holds                                                 |
+| ------------------------- | ----------------------------------------------------- |
+| `docs/<board>/board.md`   | the Test report: every line's name, mark and evidence |
+| `docs/<board>/worklog.md` | dated: what was tried, the command, what it showed    |
+| `build/logs/<board>/`     | every serial and test log, one file per attempt       |
 
-**A steering entry** is written when the docs or rules were missing or wrong, a human was asked for
-what should have run unattended, or a deficiency got past every check. Each carries:
+**Where the docs or rules steered wrong**, fix them in the same pass and say so in the worklog
+entry: what was missing or wrong, and who found it. A person's find means a test is missing; add it.
 
-- **Kind**: `missing`, `wrong`, `human`, `escape`, `agent`, `tooling`, or `doc`: a line asking more
-  than it needs.
-- **Found by**: a test, the agent or the human; the human's find means a test is missing.
-- **Cost**: the human's steps and the time lost.
-- **Damage**, when a box or the owner's data was put at risk.
-- **Reversed**, when it overturns an earlier decision: the evidence that decision lacked.
-- **Repeat**, when the same mistake was logged before: it becomes a rule in `AGENTS.md`.
 - **Fix**: the doc, rule or test it asks for, and its commit once made.
 
 What remains is read off the Test report: every line not ✅, ➖ or a recorded ❌. A line's ID lives
@@ -138,12 +130,13 @@ These hold in every phase.
 - Nothing replaces the eMMC's bootloader on a box whose way back is not proven.
 
 **Builds.** Everything goes through `./build.sh` from the first artifact: it brings the cache, the
-host's CPUs and memory. A scratch script is a bug to remove the same day; one container holds the
-build volume at a time; a script is never edited while it runs. Even a one-module change builds on
-the host and goes to the box built: a stick or a small box with poor cooling compiles slowly,
-throttles, and its heat disturbs what is being measured. A box with the headroom may build; the host
-is still the default. Iterate with host-built modules or a kexec'd kernel; a full redeploy is the
-final smoke test only.
+host's CPUs and memory. Edit and check a conf in its own step, then build: a background build hides
+the edit's failure. A scratch script is a bug to remove the same day; one container holds the build
+volume at a time; a script is never edited while it runs. Even a one-module change builds on the
+host and goes to the box built: a stick or a small box with poor cooling compiles slowly, throttles,
+and its heat disturbs what is being measured. A box with the headroom may build; the host is still
+the default. Iterate with host-built modules or a kexec'd kernel; a full redeploy is the final smoke
+test only.
 
 **Experiments fail fast.** Every run has a hard cap and exits the moment the answer is known; its
 worst case is stated before it starts. An event is driven, never waited for: a test access point

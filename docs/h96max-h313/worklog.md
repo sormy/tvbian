@@ -302,7 +302,8 @@ Log paths in this table are under `build/logs/new-board/`.
 - Next: reconcile the earlier Ethernet connection, then resume the corrected build after the owner's
   go-ahead. Longer RAM validation, watchdog reset, Bluetooth, remote, LEDs, video/audio and the
   other kernel remain pending.
-- Detailed corrections recorded in `steering.md`; current hardware claims remain in `board.md`.
+- Detailed corrections were recorded in `steering.md`, since folded into the section below; current
+  hardware claims remain in `board.md`.
 
 ## 2026-11-08 — Ethernet: AC300, not AC200
 
@@ -616,3 +617,33 @@ Log paths in this table are under `build/logs/new-board/`.
 - The button held, SD out, our SPL on the eMMC: `sunxi-fel version` answers. The user's problem is
   fixed.
 - 7.3.5 from the eMMC: the button sends `KEY_VENDOR` too.
+
+## Corrections, 2026-11-08 to 11-09 (from the retired steering file)
+
+Each lesson is now a rule in `docs/bring-up/` or `AGENTS.md`; this is what happened.
+
+- The board record was started late, after the owner asked; facts now go in as they arrive.
+- An extracted root had no merged-`/usr` links; the dependency check failed before any boot.
+- The first kernel went over FEL while the box had an SD slot; the FEL upload timed out. Kernels now
+  boot from SD first.
+- Ethernet's clock and reset providers were not in the kernel; the owner found no network.
+- An experimental build manifest dropped `kernel/sunxi64-next.fragment`; three builds failed.
+- The first boot's Ethernet worked and then dropped; the cause was never pinned down.
+- The tree described an AC200 because the factory tree names one; the SID said AC300. One build and
+  a module test were spent on the wrong chip.
+- A defconfig symbol no patch defines left the EPHY chain without a driver on the first image.
+- The tree carried the Tanix TX1's values: the EPHY on the 1.8 V rail, the SD detect without its
+  pull-up, the TX1's remote and rails.
+- The EPHY drivers as modules lost the boot race once: `EMAC reset timeout`.
+- Composite ran Allwinner's tables on mainline's timing; black lines between picture lines, a dozen
+  live register tests with the owner watching.
+- The owner was asked to boot stock Android to hear a channel order the driver source shows.
+- The first images used SID-derived MAC addresses while the label's were in secure storage.
+- A conf edit failed inside a background build; `hci0` never appeared.
+- Three reboot tests were misread by waiting on uptime or ping; boot ID is the check now.
+- Input names were marked ❌ for USB devices, which already have stable names.
+- USB 2.0 was marked ✅ from a 12M receiver.
+- glmark2 at 41–42 was marked 🟠 and left; it ran on Debian's Mesa, not ours (121).
+- The trees phase said to start from the closest board's patch; the TX1's OPPs, rails, remote and
+  recovery key came along.
+- The eMMC was left at DDR52 (75.5 MB/s) without trying stock's HS200; SD and SDIO alike.

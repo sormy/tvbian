@@ -2974,3 +2974,20 @@ card once the same DDR blob was on its eMMC. The eMMC's FIT is 2026.10 again.
   the box kept `fe:fd:fc:99:08:5f`, BT `FE:FD:FC:99:08:60`, no oops: the chip's eFUSE address.
 - The retired `tvb-swt6621s-mainline-modules` package was still installed beside the new one:
   purged. The next2 module loaded is `tvb-swt6621s-modules`', byte for byte.
+
+## 2026-11-24 — next2 7.3.6's Wi-Fi was its missing modules
+
+- 7.3.6 booted with no `wlan0` and, the cable out, no network: the 7.3.6 module packages were never
+  installed here. With `tvb-swt6621s-modules-7.3.6` in, the SDIO radio's alias loads
+  `skw_sdio_lite`, `swt6621s_wifi` and `skwbt` at boot: `wlan0` at 192.168.1.217, as on 6.1.
+
+## 2026-11-24 — next2 7.3.6, the first `box.py` pass
+
+- Fails on next2 alone: `crypto.selftests`, `rk2-sha1` "Hash result not valid" on test vector 2,
+  `HASH_VALID` not set within the driver's 1 ms after the DMA completed (-110); with it `tainted`
+  512, the self-test's warning. The 3518D passed all 8 at its boot: a race, not a missing hash.
+- Fails on every kernel, 6.1, 6.12 and next2, here and on the 3518D (the 2026-11-22 regression):
+  `firmware.failed`, the Seekwave's board-named files before its generic ones load; `soak.warnings`,
+  `SKW_CMD_GET_STA expect len: 385, recv len: 172`; `drivers.unbound`, `firmware:optee`, no OP-TEE
+  behind the tree's node.
+- Not run: `throughput`, no `iperf3` server named; `suspend`, no RTC to wake by.

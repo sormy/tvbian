@@ -3441,3 +3441,83 @@ driver loads, brings in `skw_sdio_lite`, and the devices it creates bring in the
   adapter brought it back.
 - Each kernel installed with its own modules: Wi-Fi associates at -43 dBm, 360 Mbit/s HE, and
   Bluetooth comes up on 6.1, 6.12 and 7.3.5; no `EBUSY` or symbol errors.
+
+## 2026-11-24 — next2 7.3.6: the encoder and VDPU2 fixes
+
+- next2 7.3.6 beside vendor 6.1, default left on 6.1. Wi-Fi up on the 7.3.6 `swt6621s` modules; no
+  symbol or WARN in the log.
+- An MPEG-4 VOP with `vop_time_increment_resolution` 0: the request completes, both buffers `ERROR`,
+  and an MPEG-4 decode after it matches software at 71 dB.
+- H.264 at 32x64, refused by `rkvenc` twice: no WARN.
+- Encode: H.264 134 fps at 720p, 61.7 at 1080p, 17.1 at 2160p; HEVC 158, 74 and 20; MJPEG 171, 80
+  and 17.5; luma 46.7–50.3 dB.
+- OTP `opp-info` at 0x32–0x43: all zero.
+- Plane rotation by writeback, next2 7.3.6 with the Cluster mirror refusal: the Esmart planes'
+  `reflect-y` right, Cluster0's `reflect-x` and `reflect-y` on a linear buffer refused, `rotate-0`
+  right on all three; 5 passed, 0 failed.
+- next2's tree exposed what the PCB lacks: a Composite connector (`tve`), the analog and SPDIF
+  cards, `gmac0`, `sdmmc` and an IR receiver keyed to another board's remote, all from the factory
+  tree's `okay`. Disabled in `next2/board.patch` as the vendor kernel's tree has them; next2 7.3.6
+  then shows HDMI, its writeback, the HDMI card, the eMMC and the radio's SDIO only.
+- HDMI's planes on next2 in line buffer split `02`: Esmart0 primary, Esmart1 cursor, Esmart2 and
+  Cluster0 overlays; each scans out its fill by writeback, and `display.py` rotation passes 7 of 7.
+
+## 2026-11-24 — next2's DDR and heat against the vendor kernel
+
+- DDR on next2 7.3.6: 666 MHz, `performance`, 0 transitions, the rate BL31 trained for its LPDDR3
+  and stock's final rate: the trained-rate table adds no faster one on this eMCP.
+- Heat, the regressions' lines: idle 52.7 °C on 6.1, 56.1 °C on 6.12, 56.6 °C on next2, each read
+  after the steps before it; the 120 s soak's peak 81.1 °C on both vendor kernels, 86.1 °C on next2.
+- Idle matched, 3 min quiet after boot: 42.0 °C on 6.1, 41.4 °C on next2: no gap. The vendor holds
+  DDR at 666 MHz too (`dmc_ondemand`, its one status rate). next2's GPU idles at 300 MHz, the
+  vendor's at 498; next2 powers the decoder's and the GPU's domains off; 336 clocks on against 250;
+  no cpuidle states on either; CPU 1416 MHz at 900 mV on both.
+- CPU idle, an experiment on next2 7.3.6: the factory tree gives CPU0 and CPU1 `cpu-sleep0`,
+  disabled, so `cpuidle-psci` registers no state on any CPU, vendor or next2. `cpu-sleep0` enabled
+  in a copy of the next2 tree (`fdtput`, its parameters those of `cpu-sleep`, PSCI `0x10000`): the
+  box never answered, not even ping, its next2 tree the copy, the good one at
+  `/var/tmp/board-next2.dtb.good`. It hung before root mounted: `boot_once.py`'s menu, restored as
+  root mounts, was not, and each watchdog reset booted next2 again. The vendor's disabled state
+  stands; CPU idle on this chip is a hang until BL31's PSCI suspend is shown to work.
+- Recovered without a screen: Maskrom by the recovery button, the strip's port 1 cycling it, on the
+  H313's USB; the board's `maskrom_loader.bin` loaded; the menu's `default l0`, which `boot_once.py`
+  left, made `default l4` in its one data block, a byte, read back alike. Up on 6.1.172; the next2
+  tree put back from `/var/tmp/board-next2.dtb.good`.
+
+## 2026-11-24 — next2 7.3.6 regression with every fix
+
+- `default`, next2 alone: 816 checks, 1 fail, 28 untested, 38 min. OP-TEE, the crypto engine and the
+  Seekwave fixes pass. The fail: H.264 encode at 8192x4320, 47.4 -> 46.0 dB against the morning's
+  run.
+- That case is the one encode whose result varies: 47.526727 dB in every 3518 run and in 4 of this
+  box's 7, then 47.436, 45.965 and 32.686, on 7.3.5 and 7.3.6, before and after the DDR table
+  change. The same input encoding differently means data goes wrong at 8K on this box alone.
+- Repeated on next2 at 666 MHz DDR, 53 °C: H.264 encode at 8192x4320 gave 47.527 dB 4 times and
+  29.5, 30.9, 31.7 and 39.4 dB the other 4; at 3840x2160, 47.672 dB 4 of 4. `memtester 1400M 2` of
+  1970 MB next, to tell the memory from the encoder.
+- `memtester 1400M`, pass 1 of 2 at 666 MHz, 58–61 °C: all 18 tests ok, the bit patterns among them.
+  The CPU's view of memory holds; pass 2 stopped for the encode at a fixed DDR rate.
+- DDR held at 324 MHz: 8192x4320 H.264 wrong 5 of 8, at 666 MHz 4 of 8, 50–55 °C. Not the memory
+  rate, not heat, not memory the CPU sees: the encoder at 8192 wide. 7680x4320 is exact in all 10
+  next2 runs. The cap moves to 7680 (`docs/rk35xx/worklog-mainline.md`).
+
+## 2026-11-25 — the soak, vendor against next2 in one session
+
+- `box.py` `soak`, 120 s, each run started at 49.5–50.1 °C; `soak.cpu.ops` is new, stress-ng's CPU
+  bogo ops, the work beside the heat:
+
+  | Kernel     | `soak.c` | `soak.cpu.ops` |
+  | ---------- | -------- | -------------- |
+  | vendor 6.1 | 72.7     | 15964          |
+  | vendor 6.1 | 74.9     | 16057          |
+  | next2      | 77.2     | 17171          |
+  | next2      | 76.6     | 17591          |
+
+- next2 does 7–10% more CPU work for 2–4 °C more; the 86.1 °C of 2026-11-24 was one run. Vendor has
+  `devfreq-dmc` as a cooling device, next2 not.
+- Vendor 6.1 with `drm-lima-devfreq-rockchip-opp.patch` as first written: `soak.warnings` 201 and
+  257, each `devfreq ff700000.gpu: Couldn't update frequency transition information.`, against 11–12
+  on 2026-11-22. Its fix, the suspended GPU's rate reported as the OPP it rounds to: 0 (74.4 °C,
+  16675 ops).
+- One glmark2 off-screen pass takes 329 s on vendor (score 39): longer than the soak, so passes are
+  no measure of its GPU work.

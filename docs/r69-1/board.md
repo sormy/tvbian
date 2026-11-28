@@ -23,6 +23,7 @@ kernel.
 | Sold as       | [amazon.com/dp/B0GK8P5YFT](https://www.amazon.com/dp/B0GK8P5YFT) — ~$35 complete with PSU                                                                            |
 | SoC           | **RK3518A** — `SoC: 35181001`, reports `rk3528` (RK3518 is a variant in the RK3528 family)                                                                           |
 | RAM / storage | 2 GB LPDDR3 at 780 MHz (**~1.5 GB usable** — boot-chain ceiling) · 16 GB Samsung eMMC 5.x (HS200) · microSD                                                          |
+| Case          | box, passive cooling (owner)                                                                                                                                         |
 | Runs from     | eMMC since 2026-08-09 (`mmcblk2p1`); factory Android overwritten — backup in `backup/r69-1-stock.img.xz`                                                             |
 | Label MAC     | **`C4:2A:FE:10:51:77`** — assigned, and held in eMMC vendor storage as `LAN_MAC`                                                                                     |
 | Wi-Fi / BT    | **AIC8800D80** — SDIO Wi-Fi + UART Bluetooth                                                                                                                         |
@@ -273,12 +274,14 @@ Still open:
   on 2026-08-18 sectors 7168–16383 were written back from that image after `armbian-install` zeroed
   them, and `DVKR`/`SSKR`/`LAN_MAC` all came back. Identify the eMMC by its `boot0`/`boot1`
   companions, not a remembered number.
-- **Wi-Fi and BT addresses are derived, the efuse holding neither.** `wlan0` is `8a:00:33:65:64:b6`:
-  AIC's `88:00:33` prefix, which no one holds as an OUI, marked locally administered, and the SoC
-  serial's low bytes. BT is that + 1, `8A:00:33:65:64:B7`, written at setup with AIC's vendor
-  command `0xFC70` in place of the firmware's own `0B:3B:22:AC:88:20` (I/G bit set). ✅ 2026-10-20;
-  a `local-bd-address` in the tree would win, and `btmgmt public-addr` works with the controller
-  powered off.
+- **Wi-Fi and BT addresses are derived, since the eFuse holds neither.** ✅ 2026-10-20.
+  - `wlan0` is `8a:00:33:65:64:b6`: AIC's `88:00:33` prefix (not a registered OUI) marked locally
+    administered, then the low bytes of the SoC serial.
+  - Bluetooth is the Wi-Fi address plus one, `8A:00:33:65:64:B7`. It is written at setup with AIC's
+    vendor command `0xFC70`, replacing the firmware's own `0B:3B:22:AC:88:20`, which has the I/G bit
+    set.
+  - A `local-bd-address` in the tree would take precedence. `btmgmt public-addr` works while the
+    controller is powered off.
 - **A dark window during cold boot** (cosmetic). The power cycle reads off → red, booting → dark,
   running → blue; the SoC reset clears the GPIOs and `leds-gpio` only re-drives blue when it probes
   ~10–15 s in. Filling it would mean driving an LED from U-Boot, which we do build ourselves.

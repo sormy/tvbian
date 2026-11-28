@@ -45,6 +45,8 @@ describes the revision its author had.
 - **A drop's reason covers every property its vendor driver reads**, not the one the comment names.
   The RK3528's `wlan-platdata` was dropped for its host wake, and its Wi-Fi power line went with it;
   `bluetooth-platdata`'s drop took Bluetooth. The regression's parity finds what the tree lost.
+- **A drop whose reason names mainline's own property is a mapping, not a drop**: stock's HDMI
+  supplies were dropped with "mainline takes only `hvcc-supply`".
 - **semdiff only reads what it knows.** A reference property not in `references.py` or the base
   compares as numbers: renumbering shows as a change, and a phandle moved to another node can be
   missed (the RK3528's `clk_pin` pointed at `ioc_grf` in its view until the base declared it).

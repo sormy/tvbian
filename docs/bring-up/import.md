@@ -24,7 +24,7 @@ run.
    apply the family's recipe from the closest board's patch. Per-board rows (names, LEDs, remote,
    radio UART, Ethernet) come from this factory tree, the image's files and the photos, each naming
    its source. A sibling's value is a question, not a row: ask, never guess. Search the tree before
-   calling a part absent.
+   calling a part absent. A remote's keymap uses `docs/remote-keymap.md`'s canonical keys.
 7. **Build**: `./build.sh loader <board>`, `uboot <board>`, `board <board>`, `image <board>`.
 8. **Review before it ships**, a second pass over everything the image writes: every hunk of the
    patches read against this factory tree, every per-board row against its named source, the loader
