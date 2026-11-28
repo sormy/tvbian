@@ -1,6 +1,6 @@
 /dts-v1/;
 
-/* dt-bindings from gregkh/linux v7.3.4, include/ */
+/* dt-bindings from torvalds/linux v7.3 (c03c1a14507dfaf8b856c2608f9ac216021fc222), include/ */
 #include <dt-bindings/clock/rockchip,rk3528-cru.h>
 #include <dt-bindings/reset/rockchip,rk3528-cru.h>
 #include <dt-bindings/power/rockchip,rk3528-power.h>
@@ -12,6 +12,7 @@
 #include <dt-bindings/thermal/thermal.h>
 #include <dt-bindings/phy/phy.h>
 #include <dt-bindings/soc/rockchip,vop2.h>
+#include <dt-bindings/suspend/rockchip-rk3528.h>
 
 / {
 	interrupt-parent = <&gic>;
@@ -249,16 +250,20 @@
 				#clock-cells = <1>;
 			};
 		};
-
-		optee {
-			compatible = "linaro,optee-tz";
-			method = "smc";
-		};
 	};
 
 	psci {
 		compatible = "arm,psci-1.0", "arm,psci-0.2";
 		method = "smc";
+	};
+
+	rockchip_suspend: rockchip-suspend {
+		compatible = "rockchip,pm-rk3528";
+		status = "okay";
+		rockchip,sleep-mode-config = <RKPM_SLP_ARMPD>;
+		rockchip,wakeup-config = <(RKPM_CPU0_WKUP_EN | RKPM_GPIO_WKUP_EN)>;
+		rockchip,virtual-poweroff = <0x01>;
+		rockchip,pwm-regulator-config = <(RKPM_PWM0_M0_REGULATOR_EN | RKPM_PWM1_M0_REGULATOR_EN)>;
 	};
 
 	thermal_zones: thermal-zones {
@@ -2018,6 +2023,17 @@
 			};
 		};
 
+		crypto: crypto@ffc40000 {
+			compatible = "rockchip,rk3528-crypto", "rockchip,rk3568-crypto";
+			reg = <0x0 0xffc40000 0x0 0x2000>;
+			interrupts = <GIC_SPI 19 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&scmi_clk SCMI_CORE_CRYPTO>, <&scmi_clk SCMI_ACLK_CRYPTO>,
+			 <&scmi_clk SCMI_HCLK_CRYPTO>;
+			clock-names = "core", "aclk", "hclk";
+			resets = <&cru SRST_CORE_CRYPTO>;
+			reset-names = "core";
+		};
+
 		rga: rga@ff850000 {
 			compatible = "rockchip,rk3528-rga", "rockchip,rk3288-rga";
 			reg = <0x0 0xff850000 0x0 0x180>;
@@ -2171,6 +2187,34 @@
 			iommus = <&vdec_mmu>;
 			sram = <&vdec_sram>;
 			status = "okay";
+		};
+
+		sai0: sai@ffb80000 {
+			compatible = "rockchip,rk3528-sai", "rockchip,rk3576-sai";
+			reg = <0x0 0xffb80000 0x0 0x1000>;
+			interrupts = <GIC_SPI 125 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&cru MCLK_SAI_I2S0>, <&cru HCLK_SAI_I2S0>;
+			clock-names = "mclk", "hclk";
+			dmas = <&dmac 1>, <&dmac 0>;
+			dma-names = "tx", "rx";
+			resets = <&cru SRST_M_SAI_I2S0>, <&cru SRST_H_SAI_I2S0>;
+			reset-names = "m", "h";
+			#sound-dai-cells = <0>;
+			status = "okay";
+		};
+
+		sai1: sai@ffba0000 {
+			compatible = "rockchip,rk3528-sai", "rockchip,rk3576-sai";
+			reg = <0x0 0xffba0000 0x0 0x1000>;
+			interrupts = <GIC_SPI 126 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&cru MCLK_SAI_I2S1>, <&cru HCLK_SAI_I2S1>;
+			clock-names = "mclk", "hclk";
+			dmas = <&dmac 3>, <&dmac 2>;
+			dma-names = "tx", "rx";
+			resets = <&cru SRST_M_SAI_I2S1>, <&cru SRST_H_SAI_I2S1>;
+			reset-names = "m", "h";
+			#sound-dai-cells = <0>;
+			status = "disabled";
 		};
 
 		vop_mmu: iommu@ff847e00 {
@@ -2586,8 +2630,9 @@
 
 		vop: vop@ff840000 {
 			compatible = "rockchip,rk3528-vop";
-			reg = <0x0 0xff840000 0x0 0x3000>;
-			reg-names = "vop";
+			reg = <0x0 0xff840000 0x0 0x3000>,
+			      <0x0 0xff845000 0x0 0x1000>;
+			reg-names = "vop", "gamma-lut";
 			interrupts = <GIC_SPI 109 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&cru ACLK_VOP>, <&cru HCLK_VOP>, <&cru DCLK_VOP0>,
 			 <&cru DCLK_VOP1>;
@@ -2621,7 +2666,7 @@
 					#address-cells = <1>;
 					#size-cells = <0>;
 
-					vp1_out_tve: endpoint@ROCKCHIP_VOP2_EP_RGB0 {
+					vp1_out_tve: endpoint@1 {
 						reg = <ROCKCHIP_VOP2_EP_RGB0>;
 						remote-endpoint = <&tve_in_vp1>;
 					};
@@ -3052,6 +3097,7 @@
 			power-domains = <&power RK3528_PD_VO>;
 			resets = <&cru SRST_M_SAI_I2S3>, <&cru SRST_H_SAI_I2S3>;
 			reset-names = "m", "h";
+			rockchip,sai-tx-route = <0 1 2 3>;
 			#sound-dai-cells = <0>;
 			status = "okay";
 		};
@@ -3183,6 +3229,7 @@
 				 <&cru SRST_A_EMMC>, <&cru SRST_B_EMMC>,
 				 <&cru SRST_T_EMMC>;
 			reset-names = "core", "bus", "axi", "block", "timer";
+			rockchip,txclk-tapnum = /bits/ 8 <12>;
 			max-frequency = <100000000>;
 			status = "okay";
 			bus-width = <8>;
@@ -3515,6 +3562,7 @@
 		linux,rc-map-name = "rc-h96max-m2-plus";
 		pinctrl-names = "default";
 		pinctrl-0 = <&ir_rx_gpio>;
+		wakeup-source;
 	};
 
 	hdmi-sound {

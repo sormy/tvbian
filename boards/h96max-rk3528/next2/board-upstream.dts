@@ -2,7 +2,7 @@
 
 /*
  * Written by tools/dtcx/upstream.py from board.dts: a view, not edited.
- * Over gregkh/linux at v7.3.4.
+ * Over torvalds/linux at c03c1a14507d.
  * Needs, beyond it, found by name and so best-effort: each
  * patch adding a name the tree uses or a dtsi change it keeps, which may in
  * turn need others before it:
@@ -83,6 +83,32 @@
  *     "rockchip,rk3528-rkvenc"
  *   patches/linux-rockchip-mainline/media-rockchip-vdpp.patch:
  *     "rockchip,rk3528-vdpp"
+ *   patches/linux-rockchip-mainline/arm64-dts-rk3528-vop-gamma-lut.patch:
+ *     &vop reg, &vop reg-names
+ *   patches/linux-rockchip-mainline/dt-bindings-crypto-rockchip-rk3568.patch:
+ *     "rockchip,rk3568-crypto"
+ *   patches/linux-rockchip-mainline/crypto-rockchip-rk3568-offloader.patch:
+ *     "rockchip,rk3568-crypto"
+ *   patches/linux-rockchip-mainline/dt-bindings-crypto-rockchip-rk3528.patch:
+ *     "rockchip,rk3528-crypto"
+ *   patches/linux-rockchip-mainline/crypto-rockchip-rk3528.patch:
+ *     "rockchip,rk3528-crypto"
+ *   patches/linux-rockchip-mainline/arm64-dts-rk3528-crypto.patch:
+ *     &crypto
+ *   patches/linux-rockchip-mainline/arm64-dts-rk3528-emmc-txclk-tapnum.patch:
+ *     &sdhci rockchip,txclk-tapnum
+ *   patches/linux-rockchip-mainline/dt-bindings-rockchip-pm-config.patch:
+ *     "rockchip,pm-rk3528", rockchip,pwm-regulator-config, rockchip,sleep-mode-config,
+ *     rockchip,wakeup-config
+ *   patches/linux-rockchip-mainline/soc-rockchip-pm-config.patch:
+ *     "rockchip,pm-rk3528", rockchip,pwm-regulator-config, rockchip,sleep-mode-config,
+ *     rockchip,wakeup-config
+ *   patches/linux-rockchip-mainline/dt-bindings-rockchip-pm-config-virtual-poweroff.patch:
+ *     rockchip,virtual-poweroff
+ *   patches/linux-rockchip-mainline/soc-rockchip-pm-config-virtual-poweroff.patch:
+ *     rockchip,virtual-poweroff
+ *   patches/linux-rockchip-mainline/mmc-sdhci-of-dwcmshc-rk3528-taps.patch:
+ *     "rockchip,rk3528-dwcmshc"
  * Left out, the distribution's, not the board's:
  *   /reserved-memory/ramoops@110000
  */
@@ -95,6 +121,7 @@
 #include <dt-bindings/pinctrl/rockchip.h>
 #include <dt-bindings/input/linux-event-codes.h>
 #include <dt-bindings/thermal/thermal.h>
+#include <dt-bindings/suspend/rockchip-rk3528.h>
 
 / {
 	compatible = "h96max-rk3528,rk3528-tvbox", "rockchip,rk3528";
@@ -149,13 +176,6 @@
 		};
 	};
 
-	firmware {
-		optee {
-			compatible = "linaro,optee-tz";
-			method = "smc";
-		};
-	};
-
 	reserved-memory {
 		cma {
 			compatible = "shared-dma-pool";
@@ -172,6 +192,15 @@
 		             <GIC_SPI 173 IRQ_TYPE_LEVEL_HIGH>,
 		             <GIC_SPI 174 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-affinity = <&cpu0>, <&cpu1>, <&cpu2>, <&cpu3>;
+	};
+
+	rockchip_suspend: rockchip-suspend {
+		compatible = "rockchip,pm-rk3528";
+		rockchip,sleep-mode-config = <RKPM_SLP_ARMPD>;
+		rockchip,wakeup-config = <(RKPM_CPU0_WKUP_EN | RKPM_GPIO_WKUP_EN)>;
+		rockchip,virtual-poweroff = <0x01>;
+		rockchip,pwm-regulator-config = <(RKPM_PWM0_M0_REGULATOR_EN | RKPM_PWM1_M0_REGULATOR_EN)>;
+		status = "okay";
 	};
 
 	thermal_zones: thermal-zones {
@@ -434,6 +463,7 @@
 		gpios = <&gpio4 RK_PC6 GPIO_ACTIVE_LOW>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&ir_rx_gpio>;
+		wakeup-source;
 	};
 
 	i2c-display {

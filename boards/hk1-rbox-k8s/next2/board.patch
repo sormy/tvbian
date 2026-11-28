@@ -1,6 +1,6 @@
 --- factory_board_translated.dts
 +++ board.dts
-@@ -18,7 +18,7 @@
+@@ -19,7 +19,7 @@
  	interrupt-parent = <&gic>;
  	#address-cells = <2>;
  	#size-cells = <2>;
@@ -9,7 +9,7 @@
  
  	aliases {
  		ethernet0 = &gmac0;
-@@ -2010,6 +2010,7 @@
+@@ -2015,6 +2015,7 @@
  		pinctrl-names = "default";
  		pinctrl-0 = <&wifi_reset>, <&clkm0_32k_out>;
  		reset-gpios = <&gpio3 RK_PB4 GPIO_ACTIVE_LOW>, <&gpio3 RK_PB2 GPIO_ACTIVE_LOW>;
@@ -17,7 +17,7 @@
  	};
  
  	xin24m: clock-xin24m {
-@@ -2712,7 +2713,7 @@
+@@ -2757,7 +2758,7 @@
  			resets = <&cru SRST_A_VOP>, <&cru SRST_H_VOP>,
  			 <&cru SRST_D_VOP0>, <&cru SRST_D_VOP1>;
  			status = "okay";
@@ -26,7 +26,7 @@
  
  			vop_out: ports {
  				#address-cells = <1>;
-@@ -2854,6 +2855,8 @@
+@@ -2900,6 +2901,8 @@
  			pinctrl-0 = <&uart2m0_xfer>, <&uart2m0_ctsn>, <&uart2m0_rtsn>;
  
  			bluetooth {
@@ -35,7 +35,7 @@
  				reset-gpios = <&gpio3 RK_PC2 GPIO_ACTIVE_LOW>;
  			};
  		};
-@@ -3124,7 +3127,7 @@
+@@ -3170,7 +3173,7 @@
  			clocks = <&cru TCLK_WDT_NS>, <&cru PCLK_WDT_NS>;
  			clock-names = "tclk", "pclk";
  			interrupts = <GIC_SPI 28 IRQ_TYPE_LEVEL_HIGH>;
@@ -44,7 +44,7 @@
  		};
  
  		tsadc: tsadc@ffad0000 {
-@@ -3254,9 +3257,6 @@
+@@ -3301,9 +3304,6 @@
  					reg = <0x2>;
  					clocks = <&cru CLK_MACPHY>;
  					phy-is-integrated;
@@ -54,15 +54,15 @@
  					resets = <&cru SRST_MACPHY>;
  					nvmem-cells = <&macphy_txlevel>;
  					nvmem-cell-names = "txlevel";
-@@ -3686,6 +3686,7 @@
+@@ -3734,6 +3732,7 @@
  	ir-receiver {
  		compatible = "gpio-ir-receiver";
  		gpios = <&gpio4 RK_PC6 GPIO_ACTIVE_LOW>;
 +		linux,rc-map-name = "rc-hk1-rbox-k8s";
  		pinctrl-names = "default";
  		pinctrl-0 = <&ir_rx_gpio>;
- 	};
-@@ -3714,5 +3715,46 @@
+ 		wakeup-source;
+@@ -3763,5 +3762,46 @@
  		i2c-gpio,delay-us = <5>;
  		#address-cells = <1>;
  		#size-cells = <0>;

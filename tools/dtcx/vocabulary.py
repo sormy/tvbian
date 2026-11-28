@@ -16,6 +16,8 @@ DROPPED, UNRESOLVED, MAINLINE, UNSUPPORTED = ("none", "unresolved", "mainline", 
 WRAPPER = "wrapper"
 # a property dropped from mainline's node as well as the vendor's
 WITHHOLD = "withhold"
+# a property its driver reads only where the node lacks the ones named
+SHADOWED = "shadowed-by"
 # what a rule can do with a property, beside dropping it or asking
 CONVERSIONS = (
     "same",
@@ -42,6 +44,7 @@ NEEDS_COMMENT = (
     "none-if-empty",
     "unused-by",
     "supply-name",
+    SHADOWED,
 )
 ACTIONS = (
     DROPPED,
@@ -52,6 +55,7 @@ ACTIONS = (
     WITHHOLD,
     "none-if-empty",
     "unused-by",
+    SHADOWED,
     *CONVERSIONS,
 )
 # vendor nodes written as the mainline nodes they describe, each by its conversion in conversions.py
@@ -84,6 +88,7 @@ BUILT = (
     "rk-bluetooth",
     "rk-wlan",
     "panel-bus",
+    "host-vbus",
 )
 
 
@@ -130,9 +135,20 @@ class Vocabulary:
     also: list[Rule] = field(default_factory=list)  # conversions run beside a node's translation
     cells: dict[str, tuple[int, int]] = field(default_factory=dict)
     soc: str = ""
-    pin_group: str = ""  # the property that makes a vendor node a pin group
+    pin_group: list[str] = field(default_factory=list)  # properties that make a node a pin group
     pin_functions: list[str] = field(default_factory=list)  # mainline pinctrl driver sources
     soc_patches: str = ""
+
+    def inherit(self, other: Vocabulary) -> None:
+        """Another base's rules after this one's, so this one's win; its settings where unset."""
+        for name in ("names", "labels", "values", "nodes", "props", "clocks", "states", "also"):
+            getattr(self, name).extend(getattr(other, name))
+        self.compatibles = {**other.compatibles, **self.compatibles}
+        self.cells = {**other.cells, **self.cells}
+        self.pin_functions = self.pin_functions or other.pin_functions
+        self.soc = self.soc or other.soc
+        self.pin_group = self.pin_group or other.pin_group
+        self.soc_patches = self.soc_patches or other.soc_patches
 
     @staticmethod
     def load(base: str) -> Vocabulary:
@@ -164,7 +180,8 @@ class Vocabulary:
             elif key == "also":
                 out.also.append(Rule(Pattern(words[0]), words[1], words[2:], "", words[0]))
             elif key in ("node", "prop", "clock", "state"):
-                at = next((i for i, w in enumerate(words) if w in ACTIONS + BUILT), None)
+                # the first word is a token, even one spelled as an action: the property gpio
+                at = next((i for i, w in enumerate(words) if i and w in ACTIONS + BUILT), None)
                 if at is None:
                     sys.exit(f"{where}:{number}: no action")
                 action, args = words[at], words[at + 1 :]
@@ -178,11 +195,13 @@ class Vocabulary:
             elif key == "pin-functions":
                 out.pin_functions += words
             elif key == "pin-group":
-                out.pin_group = words[0]
+                out.pin_group = words
             elif key == "soc":
                 out.soc = words[0]
             elif key == "soc-patches":
                 out.soc_patches = words[0]
+            elif key == "rules":
+                out.inherit(Vocabulary.load(words[0]))
             else:
                 sys.exit(f"{where}:{number}: unknown key {key}")
         return out

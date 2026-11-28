@@ -2,7 +2,7 @@
 
 /*
  * Written by tools/dtcx/upstream.py from board.dts: a view, not edited.
- * Over gregkh/linux at v7.3.4.
+ * Over torvalds/linux at c03c1a14507d.
  * Needs, beyond it, found by name and so best-effort: each
  * patch adding a name the tree uses or a dtsi change it keeps, which may in
  * turn need others before it:
@@ -11,7 +11,7 @@
  *   patches/linux-rockchip-mainline/dt-bindings-rk3528.patch:
  *     "rockchip,rk3528-vdec", "rockchip,rk3528-tsadc", rockchip,grf, rockchip,hw-tshut-mode,
  *     rockchip,hw-tshut-polarity, rockchip,hw-tshut-temp, "rockchip,rk3528-vop", rockchip,pmu,
- *     "rockchip,rk3528-dw-hdmi", "rockchip,rk3528-hdmi-phy", "rockchip,rk3528-codec"
+ *     "rockchip,rk3528-dw-hdmi", "rockchip,rk3528-hdmi-phy"
  *   patches/linux-rockchip-mainline/dt-bindings-rk3528-audio.patch:
  *     "rockchip,rk3528-sai", "rockchip,rk3576-sai"
  *   patches/linux-rockchip-mainline/dt-bindings-rk3528-core-grf.patch:
@@ -55,14 +55,13 @@
  *   patches/linux-rockchip-mainline/drm-rk3528.patch:
  *     "rockchip,rk3528-dw-hdmi", "rockchip,rk3528-vop", "rockchip,rk3528-hdmi-phy"
  *   patches/linux-rockchip-mainline/drm-rk3528-tve.patch:
- *     "rockchip,rk3528-tve", rockchip,grf
+ *     rockchip,grf
  *   patches/linux-rockchip-mainline/iommu-rockchip-attach-only.patch:
  *     rockchip,disable-device-link-resume
  *   patches/linux-rockchip-mainline/arm64-dts-rk3528-media-display.patch:
- *     &core_grf, &rmii0_phy nvmem-cells, &rmii0_phy nvmem-cell-names, &test_version,
- *     &macphy_txlevel, &vdac_out_current, &spdif, &rng, &rga, &rga_mmu, &iep, &iep_mmu, &vdpp,
- *     &jpegd, &jpegd_mmu, &vpu, &vdpu_mmu, &vdec_mmu, &vdec, &sram, &sai2, &acodec, &vop, &vop_mmu,
- *     &tve, &rkvenc, &rkvenc_mmu, &hdmi, &hdmiphy, &sai3, &tsadc, &display_subsystem
+ *     &core_grf, &test_version, &macphy_txlevel, &vdac_out_current, &rng, &rga, &rga_mmu, &iep,
+ *     &iep_mmu, &vdpp, &jpegd, &jpegd_mmu, &vpu, &vdpu_mmu, &vdec_mmu, &vdec, &sram, &sai2, &vop,
+ *     &vop_mmu, &rkvenc, &rkvenc_mmu, &hdmi, &hdmiphy, &sai3, &tsadc, &display_subsystem
  *   patches/linux-rockchip-mainline/arm64-dts-rk3528-dfi.patch:
  *     &pmu_grf, &dfi
  *   patches/linux-rockchip-mainline/arm64-dts-rk3528-gpu-grf.patch:
@@ -71,10 +70,6 @@
  *     &gpu assigned-clock-rates
  *   patches/linux-rockchip-mainline/arm64-dts-rk3528-dmc.patch:
  *     &dmc, &dmc_opp_table
- *   patches/linux-rockchip-mainline/media-rc-keymaps-h96max-m2-plus.patch:
- *     "rc-h96max-m2-plus"
- *   patches/linux-rockchip-mainline/asoc-rk3528-codec.patch:
- *     "rockchip,rk3528-codec"
  *   patches/linux-rockchip-mainline/media-rkjpegd-v7-bindings.patch:
  *     "rockchip,rk3588-jpegd"
  *   patches/linux-rockchip-mainline/media-rkjpegd-v7-driver.patch:
@@ -85,6 +80,34 @@
  *     "rockchip,rk3528-rkvenc"
  *   patches/linux-rockchip-mainline/media-rockchip-vdpp.patch:
  *     "rockchip,rk3528-vdpp"
+ *   patches/linux-rockchip-mainline/arm64-dts-rk3528-vop-gamma-lut.patch:
+ *     &vop reg, &vop reg-names
+ *   patches/linux-rockchip-mainline/dt-bindings-crypto-rockchip-rk3568.patch:
+ *     "rockchip,rk3568-crypto"
+ *   patches/linux-rockchip-mainline/crypto-rockchip-rk3568-offloader.patch:
+ *     "rockchip,rk3568-crypto"
+ *   patches/linux-rockchip-mainline/dt-bindings-crypto-rockchip-rk3528.patch:
+ *     "rockchip,rk3528-crypto"
+ *   patches/linux-rockchip-mainline/crypto-rockchip-rk3528.patch:
+ *     "rockchip,rk3528-crypto"
+ *   patches/linux-rockchip-mainline/arm64-dts-rk3528-crypto.patch:
+ *     &crypto
+ *   patches/linux-rockchip-mainline/arm64-dts-rk3528-sai0-sai1.patch:
+ *     &sai0
+ *   patches/linux-rockchip-mainline/arm64-dts-rk3528-emmc-txclk-tapnum.patch:
+ *     &sdhci rockchip,txclk-tapnum
+ *   patches/linux-rockchip-mainline/dt-bindings-rockchip-pm-config.patch:
+ *     "rockchip,pm-rk3528", rockchip,pwm-regulator-config, rockchip,sleep-mode-config,
+ *     rockchip,wakeup-config
+ *   patches/linux-rockchip-mainline/soc-rockchip-pm-config.patch:
+ *     "rockchip,pm-rk3528", rockchip,pwm-regulator-config, rockchip,sleep-mode-config,
+ *     rockchip,wakeup-config
+ *   patches/linux-rockchip-mainline/dt-bindings-rockchip-pm-config-virtual-poweroff.patch:
+ *     rockchip,virtual-poweroff
+ *   patches/linux-rockchip-mainline/soc-rockchip-pm-config-virtual-poweroff.patch:
+ *     rockchip,virtual-poweroff
+ *   patches/linux-rockchip-mainline/mmc-sdhci-of-dwcmshc-rk3528-taps.patch:
+ *     "rockchip,rk3528-dwcmshc"
  * Left out, the distribution's, not the board's:
  *   /reserved-memory/ramoops@110000
  */
@@ -97,6 +120,7 @@
 #include <dt-bindings/pinctrl/rockchip.h>
 #include <dt-bindings/input/linux-event-codes.h>
 #include <dt-bindings/thermal/thermal.h>
+#include <dt-bindings/suspend/rockchip-rk3528.h>
 
 / {
 	compatible = "h96max-3518d,rk3518-tvbox", "rockchip,rk3528";
@@ -150,13 +174,6 @@
 		};
 	};
 
-	firmware {
-		optee {
-			compatible = "linaro,optee-tz";
-			method = "smc";
-		};
-	};
-
 	reserved-memory {
 		cma {
 			compatible = "shared-dma-pool";
@@ -173,6 +190,15 @@
 		             <GIC_SPI 173 IRQ_TYPE_LEVEL_HIGH>,
 		             <GIC_SPI 174 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-affinity = <&cpu0>, <&cpu1>, <&cpu2>, <&cpu3>;
+	};
+
+	rockchip_suspend: rockchip-suspend {
+		compatible = "rockchip,pm-rk3528";
+		rockchip,sleep-mode-config = <RKPM_SLP_ARMPD>;
+		rockchip,wakeup-config = <(RKPM_CPU0_WKUP_EN | RKPM_GPIO_WKUP_EN)>;
+		rockchip,virtual-poweroff = <0x01>;
+		rockchip,pwm-regulator-config = <(RKPM_PWM0_M0_REGULATOR_EN | RKPM_PWM1_M0_REGULATOR_EN)>;
+		status = "okay";
 	};
 
 	thermal_zones: thermal-zones {
@@ -218,22 +244,6 @@
 		};
 	};
 
-	acodec_sound: acodec-sound {
-		compatible = "simple-audio-card";
-		simple-audio-card,name = "rk3528-acodec";
-		simple-audio-card,format = "i2s";
-		simple-audio-card,mclk-fs = <256>;
-		status = "okay";
-
-		simple-audio-card,cpu {
-			sound-dai = <&sai2>;
-		};
-
-		simple-audio-card,codec {
-			sound-dai = <&acodec>;
-		};
-	};
-
 	adc_keys: adc-keys {
 		compatible = "adc-keys";
 		io-channels = <&saradc 1>;
@@ -256,21 +266,6 @@
 		regulator-boot-on;
 		regulator-min-microvolt = <12000000>;
 		regulator-max-microvolt = <12000000>;
-	};
-
-	spdif-sound {
-		compatible = "simple-audio-card";
-		simple-audio-card,name = "ROCKCHIP,SPDIF";
-		simple-audio-card,mclk-fs = <128>;
-		status = "okay";
-
-		simple-audio-card,cpu {
-			sound-dai = <&spdif>;
-		};
-
-		simple-audio-card,codec {
-			sound-dai = <&spdif_out>;
-		};
 	};
 
 	spdif_out: spdif-out {
@@ -426,14 +421,6 @@
 		};
 	};
 
-	ir-receiver {
-		compatible = "gpio-ir-receiver";
-		gpios = <&gpio4 RK_PC6 GPIO_ACTIVE_LOW>;
-		linux,rc-map-name = "rc-h96max-m2-plus";
-		pinctrl-names = "default";
-		pinctrl-0 = <&ir_rx_gpio>;
-	};
-
 	hdmi-sound {
 		compatible = "simple-audio-card";
 		simple-audio-card,name = "rockchip,hdmi";
@@ -450,11 +437,6 @@
 			sound-dai = <&hdmi>;
 		};
 	};
-};
-
-&acodec {
-	pa-ctl-gpios = <&gpio0 RK_PA0 GPIO_ACTIVE_HIGH>;
-	status = "okay";
 };
 
 &combphy {
@@ -539,11 +521,6 @@
 		opp-hz = /bits/ 64 <780000000>;
 		opp-microvolt = <900000 900000 1000000>;
 	};
-};
-
-&gmac0 {
-	clock_in_out = "input";
-	status = "okay";
 };
 
 &gpu {
@@ -757,6 +734,10 @@
 	status = "okay";
 };
 
+&sai0 {
+	status = "okay";
+};
+
 &sai2 {
 	status = "okay";
 };
@@ -794,30 +775,7 @@
 	status = "okay";
 };
 
-&sdmmc {
-	pinctrl-0 = <&sdmmc_clk>, <&sdmmc_cmd>, <&sdmmc_det>, <&sdmmc_bus4>;
-	bus-width = <4>;
-	cap-mmc-highspeed;
-	cap-sd-highspeed;
-	disable-wp;
-	sd-uhs-sdr12;
-	sd-uhs-sdr25;
-	sd-uhs-sdr50;
-	sd-uhs-sdr104;
-	vqmmc-supply = <&vccio_sd>;
-	vmmc-supply = <&vcc_sd>;
-	status = "okay";
-};
-
-&spdif {
-	status = "okay";
-};
-
 &tsadc {
-	status = "okay";
-};
-
-&tve {
 	status = "okay";
 };
 

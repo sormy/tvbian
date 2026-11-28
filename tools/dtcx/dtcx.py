@@ -107,6 +107,8 @@ UNIT_SUFFIXES = (
     "-degrees",
 )
 GPIO_FLAGS = {0: "GPIO_ACTIVE_HIGH", 1: "GPIO_ACTIVE_LOW", 6: "GPIO_OPEN_DRAIN"}
+# the flags a value ORs with its polarity
+GPIO_FLAG_BITS = {16: "GPIO_PULL_UP", 32: "GPIO_PULL_DOWN"}
 # Amlogic's pin names, by controller: the always-on bank's, then the peripheral banks'
 MESON_AO = ("GPIOAO_", "GPIO_TEST_N")
 MESON_EE = ("GPIOZ_", "GPIOH_", "BOOT_", "CARD_", "GPIODV_", "GPIOX_", "GPIOCLK_")
@@ -121,7 +123,7 @@ IRQ_TYPES = {
 # an object-like macro; a function-like one has its ( straight after the name
 PROPERTY_START = re.compile(r"^\s*[#\w,.+?-]+ = ")
 STATEMENT_END = re.compile(r";\s*(/\*.*\*/)?\s*$")
-DEFINE = re.compile(r"^#define\s+([A-Za-z_]\w*)\s+\S", re.M)
+DEFINE = re.compile(r"^#define[ \t]+([A-Za-z_]\w*)[ \t]+\S", re.M)
 # C's integer operators; / and % are left out, since Python's differ from C's on negatives
 ARITHMETIC = (
     ast.Expression,
@@ -141,6 +143,8 @@ ARITHMETIC = (
     ast.UAdd,
 )
 CELL_MASK = 0xFFFFFFFF
+# kernel.org turns away Python's default agent
+USER_AGENT = "dtcx"
 FETCH_ATTEMPTS = 5
 FETCH_BACKOFF_S = 10
 PROPERTY = re.compile(r"^(\s*)([#\w,.+?-]+) = (.*);(.*)$")
@@ -259,6 +263,9 @@ class Base:
                 sys.exit(f"{path}: unknown key {key}")
         return base
 
+    def header_url(self, header: str) -> str:
+        return self.url.format(header=header)
+
     @cached_property
     def root(self) -> Path:
         """The include root, every header fetched into it once, kept per pin."""
@@ -270,10 +277,10 @@ class Base:
                 target.write_text((HERE / "headers" / header).read_text())
             elif not target.exists():
                 target.parent.mkdir(parents=True, exist_ok=True)
-                body = fetch(f"{self.url}/{header}")
+                body = fetch(self.header_url(header))
                 # a symlink in the source tree comes back as the path it points to
                 if "\n" not in body.strip() and not body.startswith("/*"):
-                    body = fetch(f"{self.url}/{(Path(header).parent / body.strip())}")
+                    body = fetch(self.header_url(str(Path(header).parent / body.strip())))
                 target.write_text(body)
         return root
 
@@ -314,7 +321,8 @@ def fetch(url: str) -> str:
     url = "/".join(parts)
     for attempt in range(FETCH_ATTEMPTS):
         try:
-            with urllib.request.urlopen(url) as response:
+            request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+            with urllib.request.urlopen(request) as response:
                 return response.read().decode()
         except urllib.error.HTTPError as error:
             if error.code != HTTPStatus.TOO_MANY_REQUESTS:
@@ -354,6 +362,15 @@ def joined(text: str) -> str:
         if open_statement or PROPERTY_START.match(line):
             open_statement = not STATEMENT_END.search(line)
     return "\n".join(out)
+
+
+def gpio_flags(value: int) -> str | None:
+    """A GPIO specifier's flags by name: its polarity, then any pull ORed with it."""
+    pulls = [name for bit, name in GPIO_FLAG_BITS.items() if value & bit]
+    polarity = GPIO_FLAGS.get(value & ~sum(b for b in GPIO_FLAG_BITS if value & b))
+    if polarity is None:
+        return None
+    return f"({' | '.join([polarity, *pulls])})" if pulls else polarity
 
 
 def cells_in_strings(value: str) -> str | None:
@@ -568,24 +585,26 @@ class Renderer:
                             self.unnamed.append(f"{node} {prop} {out[i + 1]}: {found or 'no name'}")
         gpio = "#gpio-cells" in self.dialect.layouts(prop, hog)
         if "gpio-flags" in self.base.renderers and gpio:
-            for i in (i for i, count in references.items() if count >= 2):
-                if number(out[i + 1]) is not None:
-                    pin = number(out[i + 1]) or 0
-                    out[i + 1] = str(pin)
+            # the pin, then its flags, last: sunxi's bank comes before both
+            for i, count in ((i, count) for i, count in references.items() if count >= 2):
+                at, flags = i + count - 1, i + count
+                if number(out[at]) is not None:
+                    pin = number(out[at]) or 0
+                    out[at] = str(pin)
                     if out[i] in self.rockchip_banks and pin < 32:
-                        out[i + 1] = rockchip_pin(pin)
+                        out[at] = rockchip_pin(pin)
                     if "meson-gpio" in self.base.renderers:
                         bank = MESON_AO if out[i] in self.gpio_ao else MESON_EE
                         found = self.lookup(bank, pin)
                         if len(found) == 1:
-                            out[i + 1] = found[0]
+                            out[at] = found[0]
                         else:
                             self.unnamed.append(f"{node} {prop} {pin}: {found or 'no pin name'}")
-                    flag = number(out[i + 2])
-                    if flag in GPIO_FLAGS:
-                        out[i + 2] = GPIO_FLAGS[flag]
+                    flag = number(out[flags])
+                    if flag is not None and (name := gpio_flags(flag)):
+                        out[flags] = name
                     elif flag is not None:
-                        self.unnamed.append(f"{node} {prop} {out[i + 2]}: no gpio flag name")
+                        self.unnamed.append(f"{node} {prop} {out[flags]}: no gpio flag name")
         # a reference dtc left a number, in a property only the model knows holds one
         out = [self.refs.get(c, c) if i in references else c for i, c in enumerate(out)]
         if "gic" in self.base.renderers and prop == "interrupts":

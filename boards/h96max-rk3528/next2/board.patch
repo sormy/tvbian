@@ -1,7 +1,7 @@
 --- factory_board_translated.dts
 +++ board.dts
-@@ -14,11 +14,11 @@
- #include <dt-bindings/soc/rockchip,vop2.h>
+@@ -15,11 +15,11 @@
+ #include <dt-bindings/suspend/rockchip-rk3528.h>
  
  / {
 -	compatible = "rockchip,rk3528";
@@ -14,7 +14,7 @@
  
  	aliases {
  		ethernet0 = &gmac0;
-@@ -2064,8 +2064,8 @@
+@@ -2069,8 +2069,8 @@
  	sdio_pwrseq: sdio-pwrseq {
  		compatible = "mmc-pwrseq-simple";
  		pinctrl-names = "default";
@@ -24,7 +24,7 @@
  	};
  
  	reserved-memory {
-@@ -2796,7 +2796,7 @@
+@@ -2841,7 +2841,7 @@
  			resets = <&cru SRST_A_VOP>, <&cru SRST_H_VOP>,
  			 <&cru SRST_D_VOP0>, <&cru SRST_D_VOP1>;
  			status = "okay";
@@ -33,7 +33,7 @@
  
  			vop_out: ports {
  				#address-cells = <1>;
-@@ -2938,6 +2938,8 @@
+@@ -2983,6 +2983,8 @@
  			pinctrl-0 = <&uart2m1_xfer>, <&uart2m1_ctsn>, <&uart2m1_rtsn>;
  
  			bluetooth {
@@ -42,7 +42,7 @@
  				reset-gpios = <&gpio1 RK_PC1 GPIO_ACTIVE_LOW>;
  				device-wakeup-gpios = <&gpio1 RK_PB4 GPIO_ACTIVE_HIGH>;
  			};
-@@ -3209,7 +3211,7 @@
+@@ -3254,7 +3256,7 @@
  			clocks = <&cru TCLK_WDT_NS>, <&cru PCLK_WDT_NS>;
  			clock-names = "tclk", "pclk";
  			interrupts = <GIC_SPI 28 IRQ_TYPE_LEVEL_HIGH>;
@@ -51,7 +51,7 @@
  		};
  
  		tsadc: tsadc@ffad0000 {
-@@ -3759,6 +3761,77 @@
+@@ -3807,6 +3809,77 @@
  		i2c-gpio,delay-us = <5>;
  		#address-cells = <1>;
  		#size-cells = <0>;

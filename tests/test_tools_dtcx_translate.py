@@ -13,12 +13,14 @@ from dtcx import Base  # noqa: E402
 from dts import Node, Prop, Source, compatibles, unit, walk  # noqa: E402
 from mainline import MESON_FUNCTION, Mainline, amend, numeric_units, touching  # noqa: E402
 from translate import (  # noqa: E402
+    QUESTIONS,
     Report,
     rests,
     selected_functions,
     translate,
     unselected,
     unthrottled,
+    with_state_of,
 )
 from vocabulary import Pattern, Vocabulary, fill  # noqa: E402
 
@@ -1393,6 +1395,18 @@ class ConversionsTest(unittest.TestCase):
             self.assertEqual(gpio(value, active, pull), expected, value)
 
 
+class QuestionsTest(unittest.TestCase):
+    def test_a_build_prints_the_questions_and_not_the_rest(self) -> None:
+        report = Report()
+        report.add("unresolved", "property foo = <1>", "/a")
+        report.add("unknown", "compatible bar", "/b")
+        report.add("unsupported", "node baz", "/c")
+        printed = [l for l in report.text().splitlines() if l.startswith(QUESTIONS)]
+        self.assertEqual(
+            printed, ["unknown compatible bar  [1: /b]", "unresolved property foo = <1>  [1: /a]"]
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
 
@@ -1558,6 +1572,7 @@ class RockchipTest(unittest.TestCase):
         receiver = values(nodes["/ir-receiver"])
         self.assertEqual(receiver["compatible"], '"gpio-ir-receiver"')
         self.assertEqual(receiver["gpios"], "<&gpio4 RK_PC6 GPIO_ACTIVE_LOW>")
+        self.assertIn("wakeup-source", receiver)
         pin = values(nodes["/pinctrl/pwm3/ir-rx-gpio"])
         self.assertEqual(pin["rockchip,pins"], "<4 RK_PC6 RK_FUNC_GPIO &pcfg_pull_none>")
 
@@ -1719,7 +1734,9 @@ class RockchipTest(unittest.TestCase):
                 self.converted(root, "shared-reset", Node("seekwcn_boot", ["seekwcn_boot"]), [])
                 self.assertEqual(values(radio)["reset-gpios"], f"<&gpio3 RK_PB2 {expected}>")
 
-    def test_an_enabled_sai0_lends_its_pins_to_the_radio_s_power_sequence(self) -> None:
+    def test_an_enabled_sai0_is_enabled_and_lends_its_pins_to_the_radio_s_power_sequence(
+        self,
+    ) -> None:
         for status, lent in (('"okay"', True), ('"disabled"', False)):
             with self.subTest(status=status):
                 sequence = Node(
@@ -1729,14 +1746,18 @@ class RockchipTest(unittest.TestCase):
                         Prop.of("pinctrl-0", "<&wifi_enable_h>"),
                     ],
                 )
+                mainline = Node("sai@ffb80000", ["sai0"], props=[Prop.of("status", '"disabled"')])
                 sai = Node(
                     "sai@ffb80000",
                     props=[Prop.of("pinctrl-0", "<&i2s0m0_lrck>"), Prop.of("status", status)],
                 )
-                report = self.converted(Node("/", children=[sequence]), "radio-pcm", sai, [])
+                root = Node("/", children=[sequence, mainline])
+                report = self.converted(root, "radio-pcm", sai, [])
                 pins = "<&wifi_enable_h>, <&i2s0m0_lrck>" if lent else "<&wifi_enable_h>"
                 self.assertEqual(values(sequence)["pinctrl-0"], pins)
-                self.assertEqual(report, ["unsupported node sai@ffb80000"])
+                self.assertEqual(values(mainline)["status"], '"okay"' if lent else '"disabled"')
+                self.assertNotIn("pinctrl-0", values(mainline))
+                self.assertEqual(report, [])
 
     def test_the_gpu_s_power_model_gives_it_a_dynamic_power_coefficient(self) -> None:
         model = Node("power-model", props=[Prop.of("dynamic-coefficient", "<724>")])
@@ -1752,3 +1773,197 @@ class RockchipTest(unittest.TestCase):
     def test_a_withheld_property_leaves_mainline_s_node_too(self) -> None:
         nodes, _ = rockchip()
         self.assertNotIn("operating-points-v2", values(nodes["/gpu@ff700000"]))
+
+
+BSP54 = """/dts-v1/;
+
+/ {
+\tsoc@03000000 {
+\t\tpio: pinctrl@0300b000 {
+\t\t\tboth: sdc0@0 {
+\t\t\t\tpins = "PF0";
+\t\t\t\tfunction = "sdc0";
+\t\t\t\tdrive-strength = <30>;
+\t\t\t\tbias-pull-up;
+\t\t\t\tallwinner,pins = "PF0";
+\t\t\t\tallwinner,function = "sdc0";
+\t\t\t\tallwinner,drive = <3>;
+\t\t\t\tallwinner,pull = <2>;
+\t\t\t};
+
+\t\t\tnamed: uart1-ph-pins {
+\t\t\t\tpins = "PG6";
+\t\t\t\tfunction = "uart1";
+\t\t\t};
+
+\t\t\tunused: sdc0@2 {
+\t\t\t\tpins = "PF2";
+\t\t\t\tfunction = "sdc0";
+\t\t\t};
+
+\t\t\tlegacy: sdc0@1 {
+\t\t\t\tallwinner,pins = "PF1";
+\t\t\t\tallwinner,function = "sdc0";
+\t\t\t\tallwinner,drive = <3>;
+\t\t\t\tallwinner,pull = <1>;
+\t\t\t};
+\t\t};
+
+\t\tsdc0: sdmmc@04020000 {
+\t\t\tcompatible = "allwinner,sunxi-mmc";
+\t\t\tpinctrl-names = "default";
+\t\t\tpinctrl-0 = <&both &legacy &named>;
+\t\t};
+\t};
+
+\tlogo_mmc@4020000 {
+\t\tcompatible = "allwinner,sunxi-mmc";
+\t};
+};
+"""
+BSP54_VOCABULARY = r"""compatible allwinner,sunxi-mmc allwinner,sun50i-h616-mmc
+pin-group pins allwinner,pins
+# the boot logo's copy of a block
+node logo_mmc@4020000 none
+
+prop compatible mainline
+prop pins drive-strength bias-pull-up bias-pull-down same
+prop function as function
+value function sdc{n} mmc{n}
+# read only where the generic property is absent
+prop allwinner,pins shadowed-by pins
+prop allwinner,function shadowed-by function
+prop allwinner,drive shadowed-by drive-strength
+prop allwinner,pull shadowed-by bias-pull-up bias-pull-down
+prop allwinner,pins as pins
+prop allwinner,function as function
+prop allwinner,drive scale drive-strength 10 10 0xffffffff:-
+prop allwinner,pull flag 1:bias-pull-up 2:bias-pull-down
+prop pinctrl-names pinctrl
+# read with pinctrl-names
+prop pinctrl-{n} none
+"""
+
+
+class Bsp54Test(unittest.TestCase):
+    """The 5.4 BSP's dialect: generic pins beside sys_config's copy, inherited rules, a node
+    told from its twin by its unit address, a wrapper's pin state, per-bin OPP rows."""
+
+    def translated(self) -> tuple[dict[str, Node], Report]:
+        source, report = translate(
+            Source.parse(BSP54),
+            Vocabulary.parse(BSP54_VOCABULARY),
+            Mainline(Source.parse(MAINLINE)),
+            base(),
+        )
+        return dict(walk(source.root)) | {"/": source.root}, report
+
+    def group(self, name: str) -> dict[str, str]:
+        nodes, _ = self.translated()
+        return next(values(n) for path, n in nodes.items() if path.endswith(name))
+
+    def test_the_generic_property_shadows_its_legacy_copy(self) -> None:
+        both = self.group("sdc0-a-pins")
+        self.assertEqual(both["drive-strength"], "<30>")
+        self.assertIn("bias-pull-up", both)
+        self.assertNotIn("bias-pull-down", both)
+
+    def test_a_legacy_group_alone_still_translates(self) -> None:
+        legacy = self.group("sdc0-b-pins")
+        self.assertEqual(
+            (legacy["pins"], legacy["function"], legacy["drive-strength"]),
+            ('"PF1"', '"mmc0"', "<40>"),
+        )
+        self.assertIn("bias-pull-up", legacy)
+
+    def test_either_binding_makes_a_pin_group_named_once_and_dropped_unused(self) -> None:
+        nodes, _ = self.translated()
+        groups = [p.rsplit("/", 1)[1] for p in nodes if "/pinctrl" in p and p.count("/") == 3]
+        self.assertEqual(sorted(groups), ["sdc0-a-pins", "sdc0-b-pins", "uart1-ph-pins"])
+
+    def test_a_node_named_with_its_address_beats_its_compatible(self) -> None:
+        nodes, _ = self.translated()
+        self.assertFalse([p for p in nodes if "logo_mmc" in p])
+        self.assertIn("/soc/mmc@4020000", nodes)
+
+    def test_the_property_gpio_is_a_token_not_an_action(self) -> None:
+        rule = Vocabulary.parse("prop gpio same\n").props[0]
+        self.assertEqual((rule.text, rule.action), ("gpio", "same"))
+
+    def test_an_inherited_base_comes_after_this_one(self) -> None:
+        own = Vocabulary.parse("prop foo same\nsoc mine.dtsi\n")
+        own.inherit(Vocabulary.parse("# theirs\nprop foo none\nprop bar same\nsoc theirs.dtsi\n"))
+        self.assertEqual(
+            [(r.text, r.action) for r in own.props][:2], [("foo", "same"), ("foo", "none")]
+        )
+        self.assertEqual(own.soc, "mine.dtsi")
+
+    def test_a_wrapper_passes_its_pin_state_to_a_child_without_one(self) -> None:
+        state = [Prop.of("pinctrl-names", '"default"'), Prop.of("pinctrl-0", "<&clk>")]
+        wrapper = Node("rfkill", [], [], [Prop.of("compatible", '"x"'), *state])
+        bare, own = Node("wlan", [], [], []), Node("bt", [], [], [Prop.of("pinctrl-0", "<&uart>")])
+        self.assertEqual(with_state_of(wrapper, bare).props, state)
+        self.assertEqual(with_state_of(wrapper, own).props, own.props)
+
+    def test_rows_with_a_voltage_per_bin_keep_each(self) -> None:
+        row = Node(
+            "opp@480000000",
+            [],
+            [],
+            [
+                Prop.of("opp-hz", "/bits/ 64 <480000000>"),
+                Prop.of("opp-microvolt-speed0", "<900000>"),
+                Prop.of("opp-microvolt-speed4", "<940000>"),
+                Prop.of("opp-supported-hw", "<0x11>"),
+            ],
+        )
+        table = Node("t", [], [], [], [row])
+        speed_bins(table)
+        merged = values(table.children[0])
+        self.assertEqual(
+            (
+                merged["opp-microvolt-speed0"],
+                merged["opp-microvolt-speed4"],
+                merged["opp-supported-hw"],
+            ),
+            ("<900000>", "<940000>", "<0x11>"),
+        )
+
+    def test_a_host_s_vbus_reaches_its_phy_port_once(self) -> None:
+        phy = Node("phy@5100400", ["usbphy"], [], [])
+        root = Node("/", [], [], [], [phy])
+        conversions = Conversions(
+            root, lambda *_: None, lambda v: v, lambda *_: [], lambda *a: a[1]
+        )
+        for compatible in ("allwinner,sunxi-ehci2", "allwinner,sunxi-ohci2"):
+            host = Node(
+                "h",
+                [],
+                [],
+                [Prop.of("compatible", f'"{compatible}"'), Prop.of("drvvbus-supply", "<&vbus>")],
+            )
+            conversions.host_vbus(host, "/h", [])
+        self.assertEqual(values(phy), {"usb2_vbus-supply": "<&vbus>"})
+
+    def test_a_wifi_host_wake_line_is_asked_not_dropped(self) -> None:
+        asked: list[str] = []
+        root = Node("/", [], [], [], [Node("mmc@4021000", ["mmc1"], [], [])])
+        conversions = Conversions(
+            root,
+            lambda kind, text, path: asked.append(f"{kind} {text}"),
+            lambda v: v,
+            lambda *_: [],
+            lambda *a: a[1],
+        )
+        wlan = Node(
+            "wlan",
+            [],
+            [],
+            [
+                Prop.of("wlan_regon", "<&pio 6 18 0>"),
+                Prop.of("wlan_busnum", "<1>"),
+                Prop.of("wlan_hostwake", "<&pio 6 15 0>"),
+            ],
+        )
+        conversions.pwrseq(wlan, "/wlan", [])
+        self.assertIn("unresolved wlan_hostwake: the chip's out-of-band wake line", asked)

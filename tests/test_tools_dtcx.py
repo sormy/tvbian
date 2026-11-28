@@ -11,6 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools/dtcx"))
 from dtcx import (  # noqa: E402
+    DEFINE,
     Base,
     Cells,
     Renderer,
@@ -60,6 +61,23 @@ MESON = """/dts-v1/;
 \t\treset-gpios = <&gpio 0x02 0x00>;
 \t\tpower-gpios = <&gpio 0x58 0x00>;
 \t\twake-gpios = <&gpio 0x64 0x00>;
+\t};
+};
+"""
+SUNXI = """/dts-v1/;
+
+/ {
+\tpio: pinctrl@300b000 {
+\t\tgpio-controller;
+\t\t#gpio-cells = <3>;
+\t\tphandle = <0x01>;
+\t};
+
+\tdev {
+\t\tcd-gpios = <&pio 0x05 0x06 0x11>;
+\t\treset-gpios = <&pio 0x06 0x13 0x01>;
+\t\tdrain-gpios = <&pio 0x02 0x07 0x06>;
+\t\todd-gpios = <&pio 0x02 0x07 0x40>;
 \t};
 };
 """
@@ -304,6 +322,26 @@ class RendererTest(unittest.TestCase):
         self.assertEqual(lines["power-gpios"], "power-gpios = <&gpio GPIOX_9 GPIO_ACTIVE_HIGH>;")
         self.assertEqual(lines["wake-gpios"], "wake-gpios = <&gpio 100 GPIO_ACTIVE_HIGH>;")
         self.assertTrue(any("wake-gpios 100" in u for u in renderer.unnamed))  # no such pin
+
+    def test_a_sunxi_specifier_names_its_last_cell_and_ors_a_pull(self) -> None:
+        lines, renderer = rendered(SUNXI, frozenset({"gpio-flags"}))
+        cases = {
+            "cd-gpios": "cd-gpios = <&pio 5 6 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;",
+            "reset-gpios": "reset-gpios = <&pio 6 19 GPIO_ACTIVE_LOW>;",
+            "drain-gpios": "drain-gpios = <&pio 2 7 GPIO_OPEN_DRAIN>;",
+            "odd-gpios": "odd-gpios = <&pio 2 7 64>;",
+        }
+        for prop, line in cases.items():
+            with self.subTest(prop):
+                self.assertEqual(lines[prop], line)
+        self.assertEqual(
+            [u for u in renderer.unnamed if "gpio flag" in u],
+            ["/dev odd-gpios 0x40: no gpio flag name"],
+        )
+
+    def test_a_define_after_a_blank_line_is_its_own(self) -> None:
+        header = "#ifndef G_H\n#define G_H\n\n#define CLK_RTC_1K 0\n#endif\n"
+        self.assertEqual(DEFINE.findall(header), ["CLK_RTC_1K"])
 
     def test_gxlx_pins_as_read_off_the_box(self) -> None:
         header = Path(__file__).resolve().parents[1] / "tools/dtcx/headers/dt-bindings/gpio/gxlx.h"

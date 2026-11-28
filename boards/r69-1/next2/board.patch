@@ -1,7 +1,7 @@
 --- factory_board_translated.dts
 +++ board.dts
-@@ -14,11 +14,11 @@
- #include <dt-bindings/soc/rockchip,vop2.h>
+@@ -15,11 +15,11 @@
+ #include <dt-bindings/suspend/rockchip-rk3528.h>
  
  / {
 -	compatible = "rockchip,rk3528";
@@ -14,7 +14,7 @@
  
  	aliases {
  		ethernet0 = &gmac0;
-@@ -1783,17 +1783,18 @@
+@@ -1788,17 +1788,18 @@
  	sdio_pwrseq: sdio-pwrseq {
  		compatible = "mmc-pwrseq-simple";
  		pinctrl-names = "default";
@@ -35,7 +35,7 @@
  			default-state = "on";
  			retain-state-suspended;
  			retain-state-shutdown;
-@@ -2537,7 +2538,7 @@
+@@ -2582,7 +2583,7 @@
  			resets = <&cru SRST_A_VOP>, <&cru SRST_H_VOP>,
  			 <&cru SRST_D_VOP0>, <&cru SRST_D_VOP1>;
  			status = "okay";
@@ -44,7 +44,7 @@
  
  			vop_out: ports {
  				#address-cells = <1>;
-@@ -2679,6 +2680,8 @@
+@@ -2724,6 +2725,8 @@
  			pinctrl-0 = <&uart2m0_xfer>, <&uart2m0_ctsn>, <&uart2m0_rtsn>;
  
  			bluetooth {
@@ -53,7 +53,7 @@
  				reset-gpios = <&gpio3 RK_PC1 GPIO_ACTIVE_LOW>;
  				device-wakeup-gpios = <&gpio3 RK_PB4 GPIO_ACTIVE_HIGH>;
  			};
-@@ -2946,7 +2949,7 @@
+@@ -2991,7 +2994,7 @@
  			clocks = <&cru TCLK_WDT_NS>, <&cru PCLK_WDT_NS>;
  			clock-names = "tclk", "pclk";
  			interrupts = <GIC_SPI 28 IRQ_TYPE_LEVEL_HIGH>;
@@ -62,11 +62,11 @@
  		};
  
  		tsadc: tsadc@ffad0000 {
-@@ -3502,6 +3505,7 @@
+@@ -3549,6 +3552,7 @@
  	ir-receiver {
  		compatible = "gpio-ir-receiver";
  		gpios = <&gpio4 RK_PC6 GPIO_ACTIVE_LOW>;
 +		linux,rc-map-name = "rc-r69-1";
  		pinctrl-names = "default";
  		pinctrl-0 = <&ir_rx_gpio>;
- 	};
+ 		wakeup-source;

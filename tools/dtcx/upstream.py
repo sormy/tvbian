@@ -25,7 +25,7 @@ from pathlib import Path
 
 from dtcx import HERE, REPO, Base, fetch
 from dts import Node, Prop, Source, compatibles, render, unit, walk
-from mainline import FILE_HEADER, dtsi_files, dtsi_history, patched_soc
+from mainline import FILE_HEADER, dtsi_files, dtsi_history, file_name, patched_soc
 from references import PINCTRL, muxes
 from canonical import Blob, Projection, differences
 from semdiff import DTC
@@ -40,7 +40,13 @@ DEFINE = re.compile(r"^#define\s+(\w+)", re.MULTILINE)
 TOKEN = re.compile(r"\b[A-Z_][A-Z0-9_]+\b")
 # a value that names one node: &label, or its path as a string
 PATH_REFERENCE = re.compile(r'^(?:&([\w-]+)|"(/[^"]*)")$')
-PINNED_REPO = re.compile(r"^https://raw\.githubusercontent\.com/([^/]+/[^/]+)/([^/]+)/")
+# a pinned file's repository and revision: GitHub's raw path, or kernel.org's plain view
+PINNED_REPO = (
+    re.compile(r"^https://raw\.githubusercontent\.com/([^/]+/[^/]+)/([^/]+)/"),
+    re.compile(
+        r"^https://git\.kernel\.org/pub/scm/linux/kernel/git/([^/]+/[^/.]+)\.git/plain/.*[?&](?:id|h)=([^&]+)"
+    ),
+)
 COMMIT = re.compile(r"[0-9a-f]{40}")
 SHORT_COMMIT = 12
 # each sunxi GPIO controller's label and its first bank's letter
@@ -658,7 +664,7 @@ def kernel_patches(soc_patches: str) -> list[str]:
 
 def base_kernel(url: str) -> str:
     """The kernel a dtsi URL pins: its repository and tag or commit."""
-    found = PINNED_REPO.match(url)
+    found = next((m for p in PINNED_REPO if (m := p.match(url))), None)
     if found is None:
         return url
     ref = found.group(2)
@@ -673,9 +679,9 @@ def included(files: dict[str, str], base: Base) -> Path:
             target = base.root / header
             if not target.exists():
                 target.parent.mkdir(parents=True, exist_ok=True)
-                body = fetch(f"{base.url}/{header}")
+                body = fetch(base.header_url(header))
                 if "\n" not in body.strip() and not body.startswith("/*"):  # a symlink's target
-                    body = fetch(f"{base.url}/{Path(header).parent / body.strip()}")
+                    body = fetch(base.header_url(str(Path(header).parent / body.strip())))
                 target.write_text(body)
     return base.root
 
@@ -729,7 +735,7 @@ def main() -> None:
     soc = patched_soc(url, named.soc_patches, base).root
     files = dtsi_files(url, named.soc_patches, base)
     setting = Setting(
-        url.rsplit("/", 1)[-1],
+        file_name(url),
         base_kernel(url),
         kernel_patches(named.soc_patches),
         dtsi_history(url, named.soc_patches, base),

@@ -1,7 +1,7 @@
 --- factory_board_translated.dts
 +++ board.dts
-@@ -14,11 +14,11 @@
- #include <dt-bindings/soc/rockchip,vop2.h>
+@@ -15,11 +15,11 @@
+ #include <dt-bindings/suspend/rockchip-rk3528.h>
  
  / {
 -	compatible = "rockchip,rk3528";
@@ -14,7 +14,25 @@
  
  	aliases {
  		ethernet0 = &gmac0;
-@@ -1780,12 +1780,14 @@
+@@ -1618,7 +1618,7 @@
+ 
+ 	acodec_sound: acodec-sound {
+ 		compatible = "simple-audio-card";
+-		status = "okay";
++		status = "disabled"; /* NOT FITTED - sound card for the absent analog codec */
+ 		simple-audio-card,name = "rk3528-acodec";
+ 		simple-audio-card,format = "i2s";
+ 		simple-audio-card,mclk-fs = <256>;
+@@ -1658,7 +1658,7 @@
+ 
+ 	spdif-sound {
+ 		compatible = "simple-audio-card";
+-		status = "okay";
++		status = "disabled"; /* NOT FITTED - sound card for the absent SPDIF */
+ 		simple-audio-card,name = "ROCKCHIP,SPDIF";
+ 		simple-audio-card,mclk-fs = <128>;
+ 
+@@ -1785,12 +1785,14 @@
  		vin-supply = <&vcc5v0_sys>;
  	};
  
@@ -29,7 +47,16 @@
  		pinctrl-0 = <&wifi_enable_h>, <&clkm1_32k_out>, <&i2s0m0_lrck>, <&i2s0m0_sclk>, <&i2s0m0_sdi>, <&i2s0m0_sdo>;
  	};
  
-@@ -2597,7 +2599,7 @@
+@@ -2238,7 +2240,7 @@
+ 			nvmem-cell-names = "out-current", "version";
+ 			power-domains = <&power RK3528_PD_VO>;
+ 			rockchip,grf = <&vo_grf>;
+-			status = "okay";
++			status = "disabled"; /* NOT FITTED - composite video encoder, and this board has no AV jack */
+ 
+ 			port {
+ 				tve_in_vp1: endpoint {
+@@ -2642,7 +2644,7 @@
  			resets = <&cru SRST_A_VOP>, <&cru SRST_H_VOP>,
  			 <&cru SRST_D_VOP0>, <&cru SRST_D_VOP1>;
  			status = "okay";
@@ -38,7 +65,7 @@
  
  			vop_out: ports {
  				#address-cells = <1>;
-@@ -3001,7 +3003,7 @@
+@@ -3046,7 +3048,7 @@
  			clocks = <&cru TCLK_WDT_NS>, <&cru PCLK_WDT_NS>;
  			clock-names = "tclk", "pclk";
  			interrupts = <GIC_SPI 28 IRQ_TYPE_LEVEL_HIGH>;
@@ -47,11 +74,50 @@
  		};
  
  		tsadc: tsadc@ffad0000 {
-@@ -3509,6 +3511,7 @@
+@@ -3138,7 +3140,7 @@
+ 			#sound-dai-cells = <0>;
+ 			pinctrl-names = "default";
+ 			pinctrl-0 = <&spdifm0_pins>;
+-			status = "okay";
++			status = "disabled"; /* NOT FITTED - no SPDIF connector on this board */
+ 		};
+ 
+ 		gmac0: ethernet@ffbd0000 {
+@@ -3165,7 +3167,7 @@
+ 			snps,mtl-tx-config = <&gmac0_mtl_tx_setup>;
+ 			snps,tso;
+ 			clock_in_out = "input";
+-			status = "okay";
++			status = "disabled"; /* NOT FITTED - no ethernet PHY: probing costs a boot delay and errors */
+ 
+ 			mdio0: mdio {
+ 				compatible = "snps,dwmac-mdio";
+@@ -3301,7 +3303,7 @@
+ 			resets = <&cru SRST_H_SDMMC0>;
+ 			reset-names = "reset";
+ 			max-frequency = <150000000>;
+-			status = "okay";
++			status = "disabled"; /* NOT FITTED - no SD slot; it would claim vcc-sd and vccio_sd */
+ 			bus-width = <4>;
+ 			cap-mmc-highspeed;
+ 			cap-sd-highspeed;
+@@ -3521,7 +3523,7 @@
+ 			resets = <&cru SRST_P_ACODEC>;
+ 			reset-names = "acodec";
+ 			#sound-dai-cells = <0>;
+-			status = "okay";
++			status = "disabled"; /* NOT FITTED - no analog audio output on this board */
+ 			pa-ctl-gpios = <&gpio0 RK_PA0 GPIO_ACTIVE_HIGH>;
+ 		};
+ 
+@@ -3554,8 +3556,10 @@
+ 	};
+ 
  	ir-receiver {
++		status = "disabled"; /* NOT FITTED - no IR receiver on this board */
  		compatible = "gpio-ir-receiver";
  		gpios = <&gpio4 RK_PC6 GPIO_ACTIVE_LOW>;
 +		linux,rc-map-name = "rc-h96max-m2-plus";
  		pinctrl-names = "default";
  		pinctrl-0 = <&ir_rx_gpio>;
- 	};
+ 		wakeup-source;

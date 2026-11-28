@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 from dtcx import REPO, Base, fetch
 from dts import Deletion, Node, Source, unit, walk
@@ -144,14 +145,20 @@ def soc_tree(files: dict[str, str], top: str) -> Source:
 
 
 def file_name(url: str) -> str:
-    return url.rsplit("/", 1)[-1]
+    return urlsplit(url).path.rsplit("/", 1)[-1]
+
+
+def sibling(url: str, name: str) -> str:
+    """The file named beside url's, at the same revision."""
+    parts = urlsplit(url)
+    return urlunsplit(parts._replace(path=parts.path.rsplit("/", 1)[0] + "/" + name))
 
 
 def dtsi_urls(url: str, kernel_conf: str, base: Base) -> dict[str, str]:
     """The dtsi and each dtsi it includes, patched, by file name, with its URL."""
     out = {file_name(url): url}
     for name in LOCAL_INCLUDE.findall(patched(url, kernel_conf, base)):
-        out |= dtsi_urls(url.rsplit("/", 1)[0] + "/" + name, kernel_conf, base)
+        out |= dtsi_urls(sibling(url, name), kernel_conf, base)
     return out
 
 
@@ -258,7 +265,7 @@ def revisions(url: str, kernel_conf: str, base: Base) -> list[tuple[str, str]]:
 def cached(url: str, base: Base) -> str:
     """A pinned URL's text, fetched once."""
     digest = hashlib.sha256(url.encode()).hexdigest()[:12]
-    path = base.root.parent / "soc" / digest / url.rsplit("/", 1)[-1]
+    path = base.root.parent / "soc" / digest / file_name(url)
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(fetch(url))

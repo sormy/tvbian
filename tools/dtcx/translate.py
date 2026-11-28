@@ -17,7 +17,7 @@ from __future__ import annotations
 import argparse
 import re
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from conversions import NUMBER, REFERENCE, Conversions, gpio, okay, opp_v2, speed_bins, voltage_bins
@@ -28,6 +28,7 @@ from vocabulary import (
     BUILT,
     DROPPED,
     MAINLINE,
+    SHADOWED,
     UNRESOLVED,
     UNSUPPORTED,
     WITHHOLD,
@@ -39,12 +40,18 @@ from vocabulary import (
 
 OPP_TABLE = "operating-points-v2"
 OPP_HZ = re.compile(r"<\s*(\d+)\s*>")
+# a clock reference: its provider, and its one cell where it has one, as <label>:<cell>
+CLOCK_SPEC = re.compile(r"&([\w-]+)(?:\s+(\w+))?")
 
 SHELL = ("device_type", "status")  # what a vendor-only node keeps once its contents went
 # the devicetree spec's own device types: a node holding one says what it is, as /memory does,
 # whose reg the bootloader writes
 SPEC_DEVICE_TYPES = ('"memory"', '"cpu"')
 Cells = tuple[tuple[int, int], tuple[int, int]]  # (vendor's, mainline's) address and size cells
+
+
+# what a board's build prints item by item: a question for the board, or a gap in the vocabulary
+QUESTIONS = ("unresolved ", "unknown ")
 
 
 @dataclass
@@ -134,9 +141,19 @@ class Translator:
                 if bool(rule.scope) != scoped or (scoped and rule.scope not in scopes):
                     continue
                 numbers = rule.pattern.match(token)
-                if numbers is not None:
+                if numbers is not None and not (
+                    rule.action == SHADOWED and not self.shadowed(rule)
+                ):
                     return rule, numbers
         return None
+
+    def pin_group(self, fnode: Node) -> bool:
+        return any(fnode.prop(name) is not None for name in self.v.pin_group)
+
+    def shadowed(self, rule: Rule) -> bool:
+        """The node also has a property its driver reads in this one's place."""
+        node = self.current
+        return node is not None and any(node.prop(name) is not None for name in rule.args)
 
     def relabel(self, text: str) -> str:
         return REFERENCE.sub(lambda m: "&" + self.labels.get(m.group(1), m.group(1)), text)
@@ -194,7 +211,9 @@ class Translator:
     ) -> Node | None:
         vendor = compatibles(fnode)
         scopes = vendor + [base_name(fnode)]
-        for token in scopes + [fnode.name]:
+        # a name with its unit address is one node, ahead of what it shares with others
+        addressed = [fnode.name] if unit(fnode.name) else []
+        for token in [*addressed, *scopes, fnode.name]:
             found = self.rule(self.v.nodes, token, [])
             self.token = found[0].text if found else token
             if found and found[0].action in BUILT:
@@ -202,6 +221,7 @@ class Translator:
                 return None
             if found and found[0].action == WRAPPER:
                 for child in fnode.children:
+                    child = with_state_of(fnode, child)
                     out = self.node(child, f"{path}/{child.name}", mparent, cells)
                     self.lifted += [out] if out else []
                 return None
@@ -236,7 +256,7 @@ class Translator:
         else:
             name = self.renamed(self.v.names, base_name(fnode)) or base_name(fnode)
             address = unit(fnode.name) or self.address(fnode)
-            if self.v.pin_group and fnode.prop(self.v.pin_group):
+            if self.pin_group(fnode) and not name.endswith(("-pins", "_pins")):
                 name = "-".join([name, variant(address), "pins"] if address else [name, "pins"])
                 name = name.replace("_", "-")  # mainline's pin group names
             elif address:
@@ -257,7 +277,7 @@ class Translator:
             self.merge(self.written[mpath], props, children, path)
             return None
         out = Node(name, labels, [], props, children)
-        if mnode is None and self.v.pin_group and fnode.prop(self.v.pin_group):
+        if mnode is None and self.pin_group(fnode):
             self.pin_groups.add(id(out))
         if mnode is None and not children and all(p.name in SHELL for p in props):
             if not any(p.name == "device_type" and p.value in SPEC_DEVICE_TYPES for p in props):
@@ -303,7 +323,7 @@ class Translator:
                 self.report.add("unknown", f"property {prop.name}", path)
                 continue
             rule, captures = found
-            if rule.action == MAINLINE and mnode is not None:
+            if rule.action == SHADOWED or (rule.action == MAINLINE and mnode is not None):
                 continue
             if (
                 rule.action == MAINLINE
@@ -458,8 +478,9 @@ class Translator:
         has no counterpart of to take them from."""
         found = fnode.prop("clocks")
         specs: list[str] = []
-        for ref in REFERENCE.findall(found.value if found else ""):
-            hit = self.rule(self.v.clocks, ref, [])
+        for label, cell in CLOCK_SPEC.findall(found.value if found else ""):
+            ref = f"{label}:{cell}" if cell else label
+            hit = self.rule(self.v.clocks, ref, []) or self.rule(self.v.clocks, label, [])
             if hit is None:
                 self.report.add("unknown", f"clock {ref}", path)
             elif hit[0].action == "as":
@@ -538,6 +559,15 @@ class Translator:
                     self.report.add("unknown", f"value of {prop.name}: a nonzero high cell", path)
                 keep += ["0"] * -extra + field_[max(extra, 0) :]
         return Prop.of(prop.name, f"<{' '.join(keep)}>")
+
+
+def with_state_of(wrapper: Node, child: Node) -> Node:
+    """A wrapper's child with the wrapper's pin state where it has none: the state its driver
+    selected for every child at once."""
+    state = [p for p in wrapper.props if p.name.startswith("pinctrl-")]
+    if not state or any(p.name.startswith("pinctrl-") for p in child.props):
+        return child
+    return replace(child, props=[*child.props, *state])
 
 
 def selected_functions(root: Node, functions: dict[str, set[str]], report: Report) -> None:
@@ -743,6 +773,9 @@ def main() -> None:
         f"{report.count(k)} {k}" for k in ("unresolved", "dormant", "unsupported", "unknown")
     )
     print(f"  {counts}", file=sys.stderr)
+    for line in report.text().splitlines():
+        if line.startswith(QUESTIONS):
+            print(f"    {line}", file=sys.stderr)
 
 
 if __name__ == "__main__":

@@ -161,6 +161,7 @@ class Conversions:
             "rk-bluetooth": self.rk_bluetooth,
             "rk-wlan": self.rk_wlan,
             "panel-bus": self.panel_bus,
+            "host-vbus": self.host_vbus,
         }
         conversions[action](fnode, path, args)
 
@@ -180,6 +181,9 @@ class Conversions:
         if regon is None or bus is None:
             self.report(UNRESOLVED, "node wlan: no wlan_regon or wlan_busnum", path)
             return
+        if fnode.prop("wlan_hostwake") is not None:
+            # the card interrupts in band on the SDIO bus; the line is wake-on-WLAN's
+            self.report(UNRESOLVED, "wlan_hostwake: the chip's out-of-band wake line", path)
         props = [
             Prop.of("compatible", '"mmc-pwrseq-simple"'),
             *self.clocks(fnode, path, "ext_clock"),
@@ -571,12 +575,12 @@ class Conversions:
         put(node, Prop.of("reset-gpios", shared.value))
 
     def radio_pcm(self, fnode: Node, path: str, args: list[str]) -> None:
-        """SAI0, which mainline's dtsi lacks, carrying the radio's PCM where the vendor enables it:
-        its pins in the SDIO power sequence's state, unpulled before the radio powers."""
-        self.report("unsupported", f"node {fnode.name}", path)
-        pins = fnode.prop("pinctrl-0")
-        if not okay(fnode) or pins is None:
+        """SAI0, carrying the radio's PCM, enabled where the vendor enables it: its pins in the SDIO
+        power sequence's state, unpulled before the radio powers, so SAI0 itself takes none."""
+        pins, sai = fnode.prop("pinctrl-0"), self.by_label.get("sai0")
+        if not okay(fnode) or pins is None or sai is None:
             return
+        put(sai, Prop.of("status", '"okay"'))
         for sequence in self.nodes:
             compatible, state = sequence.prop("compatible"), sequence.prop("pinctrl-0")
             if compatible and '"mmc-pwrseq-simple"' in compatible.value and state is not None:
@@ -734,7 +738,8 @@ class Conversions:
 
     def pwm_ir(self, fnode: Node, path: str, args: list[str]) -> None:
         """Rockchip's PWM-capture IR receiver as mainline's gpio-ir-receiver, which has no PWM
-        capture: the vendor's receiver pin as a GPIO, its demodulator's output active low."""
+        capture: the vendor's receiver pin as a GPIO, its demodulator's output active low, and a
+        wake source, as the vendor's wakes the box on its remote."""
         state = fnode.prop("pinctrl-0")
         group = self.by_label.get(self.relabel(state.value).strip("<>&")) if state else None
         pins = group.prop("rockchip,pins") if group else None
@@ -750,6 +755,7 @@ class Conversions:
             Prop.of("gpios", f"<&gpio{bank} {pin} GPIO_ACTIVE_LOW>"),
             Prop.of("pinctrl-names", '"default"'),
             Prop.of("pinctrl-0", "<&ir_rx_gpio>"),
+            Prop.of("wakeup-source"),
         ]
         self.root.children.append(Node("ir-receiver", [], [], props))
 
@@ -819,11 +825,24 @@ class Conversions:
             if mode:
                 target.props.append(Prop.of("dr_mode", f'"{mode}"'))
 
+    def host_vbus(self, fnode: Node, path: str, args: list[str]) -> None:
+        """A vendor USB host's drvvbus-supply, which its driver enables, as the supply mainline's
+        USB PHY enables for that host's port: the port is the number in the host's compatible."""
+        supply = fnode.prop("drvvbus-supply")
+        phy = self.by_label.get("usbphy")
+        if supply is None or phy is None or not okay(fnode):
+            return
+        port = re.sub(r"\D", "", compatible_of(fnode))
+        name = f"usb{port}_vbus-supply"
+        if phy.prop(name) is None:
+            phy.props.append(Prop.of(name, self.relabel(supply.value)))
+
 
 def speed_bins(table: Node) -> None:
     """A table whose rows serve speed bins (opp-supported-hw) in OPP v2's form for them: one row a
     frequency, the bins' mask, a voltage per bin as opp-microvolt-speed<bin>, which the cpufreq
-    driver names by bin. A row no bin selects says nothing and goes."""
+    driver names by bin, as a row states it or its one voltage for all its bins. A row no bin
+    selects says nothing and goes."""
     rows: dict[str, list[tuple[Node, int]]] = {}
     for row in table.children:
         hz, mask = row.prop("opp-hz"), row.prop("opp-supported-hw")
@@ -835,17 +854,17 @@ def speed_bins(table: Node) -> None:
     for hz, same in rows.items():
         volts: dict[int, str] = {}
         for row, bits in same:
-            microvolt = row.prop("opp-microvolt")
             for speed in range(bits.bit_length()):
+                microvolt = row.prop(f"opp-microvolt-speed{speed}") or row.prop("opp-microvolt")
                 if bits >> speed & 1 and microvolt is not None:
                     volts[speed] = microvolt.value
         if not volts:
             continue
         first = same[0][0]
         props = [Prop.of("opp-hz", hz)]
-        props += [Prop.of(f"opp-microvolt-speed{s}", v) for s, v in sorted(volts.items())]
         props += [p for p in first.props if p.name not in ("opp-hz", "opp-supported-hw")]
-        props = [p for p in props if p.name != "opp-microvolt"]
+        props = [p for p in props if not p.name.startswith("opp-microvolt")]
+        props[1:1] = [Prop.of(f"opp-microvolt-speed{s}", v) for s, v in sorted(volts.items())]
         props.append(Prop.of("opp-supported-hw", f"<0x{sum(1 << s for s in volts):02x}>"))
         merged.append(Node(f"opp-{hz.split('<')[1].strip('>')}", [], [], props))
     table.children = [c for c in table.children if c.prop("opp-supported-hw") is None] + merged

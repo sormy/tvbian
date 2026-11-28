@@ -45,7 +45,7 @@ tree compiles against.
 | Key       | Meaning                                                                                 |
 | --------- | --------------------------------------------------------------------------------------- |
 | `source`  | repository, commit and include directory, written into the tree                         |
-| `url`     | where to fetch the headers from, once, into `build/dtcx/<name>/`                        |
+| `url`     | a header's address, `{header}` its path; fetched once into `build/dtcx/<name>/`         |
 | `header`  | one dt-bindings header                                                                  |
 | `local`   | a header no public tree has, kept in `tools/dtcx/headers/`                              |
 | `render`  | the renderers to run                                                                    |
@@ -98,15 +98,18 @@ The conf maps every vendor token to one outcome. Syntax:
 - `#` starts a comment that explains the rules below it, up to the next blank line. `##` is a
   heading.
 - A rule that drops a token or leaves it open (`none`, `none-if-empty`, `unused-by`, `supply-name`,
-  `unsupported`, `unresolved`) needs a comment saying why.
+  `shadowed-by`, `unsupported`, `unresolved`) needs a comment saying why.
 - In patterns, `{n}` is an instance number, `{w}` a word, `*` any text. `token@scope` limits a rule
   to nodes with that vendor compatible or name (not on `node` lines).
-- The first matching rule wins; scoped rules first.
+- The first matching rule wins; scoped rules first. A node is tried by its name with its unit
+  address, then its compatible, then its name: a twin of a block, sharing its compatible, is told
+  apart by its address.
 
 | Key             | Meaning                                                                         |
 | --------------- | ------------------------------------------------------------------------------- |
 | `soc`           | URL of mainline's SoC dtsi, pinned to a tag                                     |
 | `soc-patches`   | the kernel conf whose patches to that dtsi we apply                             |
+| `rules`         | `<base>`: that base's conf after this one's rules, its settings where unset     |
 | `cells`         | `<vendor node> <address cells> <size cells>`: mainline's counts under that node |
 | `pin-group`     | the property that makes a node a pin group; unselected groups are dropped       |
 | `pin-functions` | a mainline pinctrl driver source; a function it lacks is `unknown`              |
@@ -117,7 +120,7 @@ The conf maps every vendor token to one outcome. Syntax:
 | `node`          | `<tokens…> <action> [args]`: a vendor node by compatible, name or full name     |
 | `prop`          | `<tokens…> <action> [args]`: a vendor property                                  |
 | `state`         | `<tokens…> <action>`: a pin state: `same`, `as`, `used-as <state>` or `none`    |
-| `clock`         | `<tokens…> as <provider> <cell>`: a vendor clock reference, for a built node    |
+| `clock`         | `<tokens…> as <provider> <cell>`: a vendor clock, by `<label>[:<cell>]`         |
 | `also`          | `<token> <conversion> [args]`: a conversion besides the node's translation      |
 
 | Action          | Does                                                                           |
@@ -139,9 +142,10 @@ The conf maps every vendor token to one outcome. Syntax:
 | `none`          | drop it (the comment says why that is safe)                                    |
 | `none-if-empty` | `[same]`: drop when empty; keep a value with `same`, else a question           |
 | `unused-by`     | `<flag>`, on a node: drop when the vendor flag is absent or 0, else a question |
-| `wrapper`       | on a node: drop it, its children translated in its place                       |
+| `wrapper`       | on a node: drop it, its children in its place, its pin state theirs            |
 | `withhold`      | drop it from the vendor's node and mainline's; OPPs' cooling maps too          |
 | `supply-name`   | a supply by regulator name: drop when no vendor regulator has it               |
+| `shadowed-by`   | `<props…>`: drop where the node has one of them, else the next rule applies    |
 | `unresolved`    | a question for the board's bring-up                                            |
 | `unsupported`   | no mainline binding exists: listed, not written                                |
 
@@ -149,11 +153,12 @@ The conf maps every vendor token to one outcome. Syntax:
 vendor's own description: `pwrseq [parent]`, `vbus`, `enable <label>`, `boot-voltage`, `leds`,
 `hdmi-connector <controller> <port>`, `bluetooth-reset <property>` with `bluetooth-uart`,
 `bank-bias`, `recovery-key <level>`, `cec <controller> <hdmi>`, `rk-sound-card`, `pwm-ir`,
-`init-voltage`, `hdmi-ddc-i2c`, `led-roles <name>:<role>…`, `adc-recovery <key>` and `shared-reset`
-(each an `also`), `console`, `radio-pcm`, `gpu-power`, `rk-bluetooth`, `rk-wlan`, and for Amlogic
-`aml-slot <host>`, `aml-pwrseq <host>`, `aml-32k`. OPP rows sharing a frequency merge into one row
-with `opp-microvolt-speed<bin>` per speed bin. An OPP table keeps the vendor's rows, and of
-mainline's only an `opp-suspend` row below them all. Pin states without pin groups are not written.
+`init-voltage`, `hdmi-ddc-i2c`, `led-roles <name>:<role>…`, `adc-recovery <key>`, `shared-reset` and
+`host-vbus` (each an `also`), `console`, `radio-pcm`, `gpu-power`, `rk-bluetooth`, `rk-wlan`, and
+for Amlogic `aml-slot <host>`, `aml-pwrseq <host>`, `aml-32k`. OPP rows sharing a frequency merge
+into one row with `opp-microvolt-speed<bin>` per speed bin, from a row's own per-bin voltages or its
+one voltage. An OPP table keeps the vendor's rows, and of mainline's only an `opp-suspend` row below
+them all. Pin states without pin groups are not written.
 
 `--report <file>` lists every decision the conf made away from the vendor, one a line: `none` (a
 node, property or pin state dropped from an enabled node), `unresolved` (a question), `dormant` (a

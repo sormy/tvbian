@@ -2,7 +2,7 @@
 
 /*
  * Written by tools/dtcx/upstream.py from board.dts: a view, not edited.
- * Over gregkh/linux at v7.3.4.
+ * Over torvalds/linux at c03c1a14507d.
  * Needs, beyond it, found by name and so best-effort: each
  * patch adding a name the tree uses or a dtsi change it keeps, which may in
  * turn need others before it:
