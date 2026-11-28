@@ -1,0 +1,132 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] media: rockchip: rkjpegd: Decode 4:2:2 and 4:4:4 to NV16 and NV24
+
+The VDPU720 writes each sampling semi-planar as it is, or converts it to
+NV12. The driver converted every one, halving the chroma of a 4:2:2 or
+4:4:4 picture. Hand those out as NV16 and NV24, the hardware's own
+layout with the chroma stride the reference driver gives it, and keep
+the conversion for the samplings V4L2 has no format for.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/drivers/media/platform/rockchip/rkjpegd/rkjpegd.c b/drivers/media/platform/rockchip/rkjpegd/rkjpegd.c
+--- a/drivers/media/platform/rockchip/rkjpegd/rkjpegd.c
++++ b/drivers/media/platform/rockchip/rkjpegd/rkjpegd.c
+@@ -247,18 +247,31 @@
+ 	.u.src_change.changes = V4L2_EVENT_SRC_CH_RESOLUTION,
+ };
+ 
+-/* A grayscale frame gets no chroma from the hardware. */
++/*
++ * The hardware writes 4:2:2 and 4:4:4 as they are, NV16 and NV24, and the
++ * other colour samplings converted to NV12. A grayscale frame gets no chroma.
++ */
+ static u32 rkjpegd_raw_pixelformat(const struct v4l2_jpeg_header *hdr)
+ {
+-	return hdr->frame.num_components == 1 ? V4L2_PIX_FMT_GREY :
+-						V4L2_PIX_FMT_NV12;
++	if (hdr->frame.num_components == 1)
++		return V4L2_PIX_FMT_GREY;
++	if (hdr->frame.subsampling == V4L2_JPEG_CHROMA_SUBSAMPLING_422)
++		return V4L2_PIX_FMT_NV16;
++	if (hdr->frame.subsampling == V4L2_JPEG_CHROMA_SUBSAMPLING_444)
++		return V4L2_PIX_FMT_NV24;
++	return V4L2_PIX_FMT_NV12;
+ }
+ 
+-/* NV12 is the larger of the two raw formats. */
++static bool rkjpegd_raw_native(u32 pixelformat)
++{
++	return pixelformat == V4L2_PIX_FMT_NV16 || pixelformat == V4L2_PIX_FMT_NV24;
++}
++
++/* NV24, three bytes a pixel, is the largest of the raw formats. */
+ static bool rkjpegd_raw_fits(u32 width, u32 height)
+ {
+ 	return (u64)ALIGN(width, RKJPEGD_RAW_STEP) *
+-	       ALIGN(height, RKJPEGD_RAW_STEP) * 3 / 2 <= U32_MAX;
++	       ALIGN(height, RKJPEGD_RAW_STEP) * 3 <= U32_MAX;
+ }
+ 
+ static void rkjpegd_fill_raw_fmt(struct v4l2_pix_format_mplane *pix_mp,
+@@ -273,6 +286,10 @@
+ 	pix_mp->plane_fmt[0].sizeimage = width * height;
+ 	if (pixelformat == V4L2_PIX_FMT_NV12)
+ 		pix_mp->plane_fmt[0].sizeimage += width * height / 2;
++	else if (pixelformat == V4L2_PIX_FMT_NV16)
++		pix_mp->plane_fmt[0].sizeimage += width * height;
++	else if (pixelformat == V4L2_PIX_FMT_NV24)
++		pix_mp->plane_fmt[0].sizeimage += width * height * 2;
+ 	/* What V4L2_COLORSPACE_JPEG on the coded side stands for. */
+ 	pix_mp->colorspace = V4L2_COLORSPACE_SRGB;
+ 	pix_mp->xfer_func = V4L2_XFER_FUNC_SRGB;
+@@ -391,7 +408,10 @@
+ static int rkjpegd_enum_fmt_vid_cap(struct file *file, void *priv,
+ 				    struct v4l2_fmtdesc *f)
+ {
+-	static const u32 formats[] = { V4L2_PIX_FMT_NV12, V4L2_PIX_FMT_GREY };
++	static const u32 formats[] = {
++		V4L2_PIX_FMT_NV12, V4L2_PIX_FMT_NV16, V4L2_PIX_FMT_NV24,
++		V4L2_PIX_FMT_GREY,
++	};
+ 
+ 	if (f->index >= ARRAY_SIZE(formats))
+ 		return -EINVAL;
+@@ -418,6 +438,7 @@
+ {
+ 	/* The decoded format follows the bitstream, nothing to enumerate. */
+ 	if (fsize->pixel_format == V4L2_PIX_FMT_NV12 ||
++	    rkjpegd_raw_native(fsize->pixel_format) ||
+ 	    fsize->pixel_format == V4L2_PIX_FMT_GREY)
+ 		return -ENOTTY;
+ 
+@@ -489,7 +510,7 @@
+ 
+ 	/* S_FMT derives the raw format from this one. */
+ 	if (!rkjpegd_raw_fits(pix_mp->width, pix_mp->height))
+-		pix_mp->height = ALIGN_DOWN(U32_MAX / 3 * 2 /
++		pix_mp->height = ALIGN_DOWN(U32_MAX / 3 /
+ 					    ALIGN(pix_mp->width, RKJPEGD_RAW_STEP),
+ 					    RKJPEGD_RAW_STEP);
+ 
+@@ -1106,6 +1127,8 @@
+ 	u32 w_align;
+ 	u32 y_stride;	/* units of 16 pixels */
+ 	u32 y_vstride;	/* sets the UV plane offset */
++	u32 uv_stride;	/* units of 16 bytes */
++	bool native = rkjpegd_raw_native(ctx->dst_fmt.pixelformat);
+ 	u32 nb_comp     = hdr->frame.num_components;
+ 	/* One Q-table entry per component, not one per DQT segment. */
+ 	u32 qtbl_sel  = nb_comp;
+@@ -1119,6 +1142,8 @@
+ 	w_align   = ALIGN(buf_width, 16);
+ 	y_stride  = w_align >> 4;
+ 	y_vstride = y_stride * buf_height;
++	/* NV24 interleaves full-width chroma: twice the luma's row */
++	uv_stride = ctx->dst_fmt.pixelformat == V4L2_PIX_FMT_NV24 ? y_stride * 2 : y_stride;
+ 
+ 	jpeg_mode = vdpu720_jpeg_mode(&hdr->frame);
+ 	if (jpeg_mode < 0) {
+@@ -1140,8 +1165,11 @@
+ 	 * the 8 pixel MCU widths can stop short of the 16 pixel aligned
+ 	 * buffer.
+ 	 */
+-	reg = FIELD_PREP(VDPU720_YUV_OUT_FMT, VDPU720_YUV_OUT_FMT_NV12) |
+-	      VDPU720_FILL_DOWN_E;
++	if (native)
++		reg = FIELD_PREP(VDPU720_YUV_OUT_FMT, VDPU720_YUV_OUT_FMT_NATIVE);
++	else
++		reg = FIELD_PREP(VDPU720_YUV_OUT_FMT, VDPU720_YUV_OUT_FMT_NV12) |
++		      VDPU720_FILL_DOWN_E;
+ 	if (ALIGN(jpeg_width, mcu_width) < ALIGN(jpeg_width, 16))
+ 		reg |= VDPU720_FILL_RIGHT_E;
+ 	rkjpegd_write_relaxed(jpegd, reg, VDPU720_REG_SYS);
+@@ -1174,7 +1202,7 @@
+ 	/* REG5: horizontal virtual strides */
+ 	rkjpegd_write_relaxed(jpegd,
+ 			      FIELD_PREP(VDPU720_Y_HOR_STRIDE, y_stride) |
+-			      FIELD_PREP(VDPU720_UV_HOR_STRIDE, y_stride),
++			      FIELD_PREP(VDPU720_UV_HOR_STRIDE, uv_stride),
+ 			      VDPU720_REG_HOR_STRIDE);
+ 
+ 	/* REG6: total Y-plane size (stride-units * height) */

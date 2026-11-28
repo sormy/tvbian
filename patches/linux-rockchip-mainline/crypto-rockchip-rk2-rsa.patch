@@ -1,0 +1,697 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] crypto: rockchip: rk2 - Add RSA on the public key accelerator
+
+The crypto v2 engine carries a public key accelerator (PKA): up to 32
+numbers of up to 4096 bits in its 4 KiB SRAM, and opcodes for shifts,
+division and modular exponentiation. Rockchip's kernel offers raw RSA on
+it; offer the same as an akcipher.
+
+The sequence is Rockchip's: the length and register tables for the
+modulus's size, the Montgomery constant NP = 2^(bits(N) + 132) / N
+computed by the PKA itself, then MOD_EXP, the result read back once the
+PKA is done, longer for a private exponent. Every wait is bounded, the
+SRAM's hand-over between the CPU and the PKA included, so a stuck PKA
+returns an error instead of spinning. The keys and payloads checked are
+generic RSA's: 512 to 4096-bit moduli, an input above 1 and below N - 1,
+the output written right-aligned into the destination.
+
+The PKA exponentiates with the private exponent, without CRT: on an
+RK3528 it signs 9 times a second at 2048 bits, where the CPU's CRT signs
+faster, so it ranks under generic RSA, there for a caller that names it.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+  drivers/crypto/Kconfig                   |   2 +
+  drivers/crypto/rockchip/Makefile         |   3 +-
+  drivers/crypto/rockchip/rk2_crypto.c     |  37 +++
+  drivers/crypto/rockchip/rk2_crypto.h     |  18 ++
+  drivers/crypto/rockchip/rk2_crypto_pka.c | 491 +++++++++++++++++++++++++++++++
+  5 files changed, 550 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/crypto/Kconfig b/drivers/crypto/Kconfig
+index 1e9eca725..70434d30d 100644
+--- a/drivers/crypto/Kconfig
++++ b/drivers/crypto/Kconfig
+@@ -690,6 +690,8 @@ config CRYPTO_DEV_ROCKCHIP2
+ 	select CRYPTO_CBC
+ 	select CRYPTO_ECB
+ 	select CRYPTO_AEAD
++	select CRYPTO_AKCIPHER
++	select CRYPTO_RSA
+ 	select CRYPTO_ENGINE
+ 	select CRYPTO_GCM
+ 	select CRYPTO_HASH
+diff --git a/drivers/crypto/rockchip/Makefile b/drivers/crypto/rockchip/Makefile
+index 0be9b8a17..4172e12ed 100644
+--- a/drivers/crypto/rockchip/Makefile
++++ b/drivers/crypto/rockchip/Makefile
+@@ -8,4 +8,5 @@ obj-$(CONFIG_CRYPTO_DEV_ROCKCHIP2) += rk_crypto2.o
+ rk_crypto2-objs := rk2_crypto.o \
+ 		   rk2_crypto_skcipher.o \
+ 		   rk2_crypto_ahash.o \
+-		   rk2_crypto_aead.o
++		   rk2_crypto_aead.o \
++		   rk2_crypto_pka.o
+diff --git a/drivers/crypto/rockchip/rk2_crypto.c b/drivers/crypto/rockchip/rk2_crypto.c
+index 61dde2e0f..dbd4417cc 100644
+--- a/drivers/crypto/rockchip/rk2_crypto.c
++++ b/drivers/crypto/rockchip/rk2_crypto.c
+@@ -180,6 +180,8 @@ static irqreturn_t rk2_crypto_irq_handle(int irq, void *dev_id)
+  */
+ #define RK2_PRIORITY			300
+ #define RK2_PRIORITY_BELOW_CPU		200
++/* the PKA exponentiates without CRT: under generic RSA's 100, which signs faster on the CPU */
++#define RK2_PRIORITY_RSA		50
+ 
+ /* A block cipher mode beyond AES's ECB, CBC and XTS, the engine's where it says so */
+ #define RK2_SKCIPHER(mode, name, driver, prio, bs, key_min, key_max, iv, chunk, set) { \
+@@ -270,6 +272,25 @@ static irqreturn_t rk2_crypto_irq_handle(int irq, void *dev_id)
+ }
+ 
+ static const struct rk2_crypto_template rk2_crypto_algs_template[] = {
++	{
++	.type = CRYPTO_ALG_TYPE_AKCIPHER,
++	.alg.akcipher = {
++		.encrypt = rk2_rsa_enc,
++		.decrypt = rk2_rsa_dec,
++		.set_pub_key = rk2_rsa_set_pub_key,
++		.set_priv_key = rk2_rsa_set_priv_key,
++		.max_size = rk2_rsa_max_size,
++		.init = rk2_rsa_init,
++		.exit = rk2_rsa_exit,
++		.base = {
++			.cra_name = "rsa",
++			.cra_driver_name = "rsa-rk2",
++			.cra_priority = RK2_PRIORITY_RSA,
++			.cra_module = THIS_MODULE,
++			.cra_ctxsize = sizeof(struct rk2_rsa_ctx),
++		},
++	},
++	},
+ 	RK2_GCM(RK2_CRYPTO_AES, "gcm(aes)", "gcm-aes-rk2", RK2_PRIORITY_BELOW_CPU),
+ 	RK2_GCM(RK2_CRYPTO_SM4, "gcm(sm4)", "gcm-sm4-rk2", RK2_PRIORITY),
+ 	RK2_HMAC(RK2_CRYPTO_MD5, "hmac(md5)", "rk2-hmac-md5", MD5_DIGEST_SIZE,
+@@ -743,6 +764,10 @@ static bool rk2_crypto_offered(struct rk2_crypto_dev *rkc,
+ {
+ 	u32 hash = readl(rkc->reg + CRYPTO_HASH_VERSION);
+ 
++	/* the public key accelerator, which the RK3528's datasheet lists */
++	if (t->type == CRYPTO_ALG_TYPE_AKCIPHER)
++		return true;
++
+ 	/* a cipher's version register has a bit for each mode, at the mode's code */
+ 	if (t->type == CRYPTO_ALG_TYPE_SKCIPHER || t->type == CRYPTO_ALG_TYPE_AEAD) {
+ 		u32 cipher = t->rk2_mode & RK2_CRYPTO_CIPHER_MASK;
+@@ -778,6 +803,8 @@ static bool rk2_crypto_offered(struct rk2_crypto_dev *rkc,
+ /* A mode only an engine's version registers offer: untested where none says */
+ static bool rk2_crypto_beyond_rk3568(const struct rk2_crypto_template *t)
+ {
++	if (t->type == CRYPTO_ALG_TYPE_AKCIPHER)
++		return true;
+ 	if (t->type != CRYPTO_ALG_TYPE_SKCIPHER)
+ 		return t->rk2_mode & RK2_CRYPTO_HMAC;
+ 	return t->rk2_mode != RK2_CRYPTO_AES_ECB && t->rk2_mode != RK2_CRYPTO_AES_CBC &&
+@@ -808,6 +835,9 @@ static void rk2_crypto_unregister_one(struct rk2_crypto_template *t)
+ 	case CRYPTO_ALG_TYPE_AEAD:
+ 		crypto_engine_unregister_aead(&t->alg.aead);
+ 		break;
++	case CRYPTO_ALG_TYPE_AKCIPHER:
++		crypto_unregister_akcipher(&t->alg.akcipher);
++		break;
+ 	}
+ }
+ 
+@@ -827,6 +857,9 @@ static int rk2_crypto_register(struct rk2_crypto_dev *rkc)
+ 		case CRYPTO_ALG_TYPE_AEAD:
+ 			err = crypto_engine_register_aead(&rkc->algs[i].alg.aead);
+ 			break;
++		case CRYPTO_ALG_TYPE_AKCIPHER:
++			err = crypto_register_akcipher(&rkc->algs[i].alg.akcipher);
++			break;
+ 		}
+ 		if (err)
+ 			goto err_cipher_algs;
+@@ -892,6 +925,10 @@ static int rk2_crypto_probe(struct platform_device *pdev)
+ 	if (!rkc->tl)
+ 		return -ENOMEM;
+ 
++	err = devm_mutex_init(dev, &rkc->pka_lock);
++	if (err)
++		goto err_dma;
++
+ 	rkc->aead_buf = dmam_alloc_coherent(dev, RK2_AEAD_BUF_SIZE, &rkc->aead_phy, GFP_KERNEL);
+ 	if (!rkc->aead_buf) {
+ 		err = -ENOMEM;
+diff --git a/drivers/crypto/rockchip/rk2_crypto.h b/drivers/crypto/rockchip/rk2_crypto.h
+index de1a8e56f..8602f36ca 100644
+--- a/drivers/crypto/rockchip/rk2_crypto.h
++++ b/drivers/crypto/rockchip/rk2_crypto.h
+@@ -12,6 +12,7 @@
+ #include <crypto/aes.h>
+ #include <crypto/engine.h>
+ #include <crypto/internal/aead.h>
++#include <crypto/internal/akcipher.h>
+ #include <crypto/internal/hash.h>
+ #include <crypto/internal/skcipher.h>
+ #include <crypto/md5.h>
+@@ -218,6 +219,8 @@ struct rk2_crypto_dev {
+ 	/* a GCM request's associated data and text, which the engine reads and writes in place */
+ 	u8 *aead_buf;
+ 	dma_addr_t aead_phy;
++	/* the public key accelerator, one operation at a time */
++	struct mutex pka_lock;
+ 	struct rk2_crypto_template *algs;
+ 	int num_algs;
+ #ifdef CONFIG_CRYPTO_DEV_ROCKCHIP2_DEBUG
+@@ -252,6 +255,13 @@ struct rk2_cipher_ctx {
+ /* the largest GCM request the engine takes, its data and text; a larger one is software's */
+ #define RK2_AEAD_BUF_SIZE		SZ_64K
+ 
++struct rk2_rsa_ctx {
++	struct rk2_crypto_dev *rkc;
++	u32 *n, *e, *d;
++	unsigned int words, e_words, d_words;
++	unsigned int key_bytes;
++};
++
+ struct rk2_aead_ctx {
+ 	unsigned int keylen;
+ 	u8 key[AES_MAX_KEY_SIZE];
+@@ -280,6 +290,7 @@ struct rk2_crypto_template {
+ 		struct skcipher_engine_alg skcipher;
+ 		struct ahash_engine_alg hash;
+ 		struct aead_engine_alg aead;
++		struct akcipher_alg akcipher;
+ 	} alg;
+ 	atomic_long_t stat_req;
+ 	atomic_long_t stat_fb;
+@@ -293,6 +304,13 @@ void rk2_crypto_soft_reset(struct rk2_crypto_dev *rkc);
+ int rk2_cipher_run(struct crypto_engine *engine, void *async_req);
+ int rk2_hash_run(struct crypto_engine *engine, void *breq);
+ int rk2_aead_run(struct crypto_engine *engine, void *async_req);
++int rk2_rsa_set_pub_key(struct crypto_akcipher *tfm, const void *key, unsigned int keylen);
++int rk2_rsa_set_priv_key(struct crypto_akcipher *tfm, const void *key, unsigned int keylen);
++unsigned int rk2_rsa_max_size(struct crypto_akcipher *tfm);
++int rk2_rsa_enc(struct akcipher_request *req);
++int rk2_rsa_dec(struct akcipher_request *req);
++int rk2_rsa_init(struct crypto_akcipher *tfm);
++void rk2_rsa_exit(struct crypto_akcipher *tfm);
+ int rk2_aead_tfm_init(struct crypto_aead *tfm);
+ void rk2_aead_tfm_exit(struct crypto_aead *tfm);
+ int rk2_aead_setkey(struct crypto_aead *tfm, const u8 *key, unsigned int keylen);
+diff --git a/drivers/crypto/rockchip/rk2_crypto_pka.c b/drivers/crypto/rockchip/rk2_crypto_pka.c
+new file mode 100644
+--- /dev/null
++++ b/drivers/crypto/rockchip/rk2_crypto_pka.c
+@@ -0,0 +1,491 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * RSA on the Rockchip crypto v2 engine's public key accelerator (PKA).
++ *
++ * The PKA works on up to 32 registers mapped into its 4 KiB SRAM, each a number of up to 4096 bits
++ * stored as little-endian 32-bit words. A modular exponentiation needs N in register 0 and the
++ * Montgomery constant NP = 2^(bits(N) + 132) / N in register 1, which the PKA computes itself by
++ * shifts and divisions, as Rockchip's kernel does.
++ */
++
++#include <crypto/internal/akcipher.h>
++#include <crypto/internal/rsa.h>
++#include <linux/iopoll.h>
++#include <linux/pm_runtime.h>
++#include <linux/scatterlist.h>
++
++#include "rk2_crypto.h"
++
++/* the PKA's registers, from its block at 0x480 */
++#define PKA_BASE		0x0480
++#define PKA_RAM_CTL		0x0000
++#define PKA_RAM_CTL_SEL_MASK	(3 << 16)
++#define PKA_RAM_CTL_CPU		0
++#define PKA_RAM_CTL_PKA		1
++#define PKA_RAM_ST		0x0004
++#define PKA_RAM_ST_RDY		BIT(0)
++#define PKA_MEMORY_MAP0		0x0380
++#define PKA_OPCODE		0x0400
++#define PKA_N_NP_T0_T1		0x0404
++#define PKA_STATUS		0x0408
++#define PKA_STATUS_DIV_BY_ZERO	BIT(4)
++#define PKA_L0			0x0410
++#define PKA_PIPE_RDY		0x0430
++#define PKA_DONE		0x0434
++#define PKA_SRAM		0x0b80
++#define PKA_SRAM_SIZE		0x1000
++
++#define PKA_MAP_REGS		32
++#define PKA_LEN_REGS		8
++#define PKA_MAX_WORDS		(4096 / 32)
++#define PKA_ADDR_NOT_USED	0xffc
++
++/* registers: N and NP fixed, T0 and T1 the PKA's own scratch */
++#define PKA_N			0
++#define PKA_NP			1
++#define PKA_T0			30
++#define PKA_T1			31
++#define PKA_TMP_REGS		2
++#define PKA_R_IN		2
++#define PKA_R_E			3
++#define PKA_R_OUT		4
++
++/* length ids: the modulus's exact size, and one word more for intermediate results */
++#define PKA_EXACT_LEN		0
++#define PKA_CALC_LEN		1
++
++/* the shift NP is computed with */
++#define PKA_NP_SHIFT		132
++
++#define PKA_POLL_US		200
++#define PKA_TIMEOUT_US		50000
++/* a private exponent's exponentiation, the longest, at 4096 bits */
++#define PKA_EXP_POLL_US		2000
++#define PKA_EXP_TIMEOUT_US	2000000
++
++enum pka_opcode {
++	PKA_ADD = 0x04,
++	PKA_AND = 0x08,
++	PKA_OR = 0x09,
++	PKA_SHL0 = 0x0e,
++	PKA_MOD_EXP = 0x13,
++	PKA_DIV = 0x14,
++	PKA_TERMINATE = 0x18,
++};
++
++static void __iomem *pka(struct rk2_crypto_dev *rkc, u32 reg)
++{
++	return rkc->reg + PKA_BASE + reg;
++}
++
++static int pka_poll(struct rk2_crypto_dev *rkc, u32 reg, u32 period, u32 timeout)
++{
++	u32 v;
++
++	return readl_relaxed_poll_timeout(pka(rkc, reg), v, v, period, timeout);
++}
++
++static int pka_wait_done(struct rk2_crypto_dev *rkc)
++{
++	return pka_poll(rkc, PKA_DONE, PKA_POLL_US, PKA_TIMEOUT_US);
++}
++
++/* The SRAM is the CPU's or the PKA's, handed over by a request the RAM status acknowledges */
++static int pka_ram_for(struct rk2_crypto_dev *rkc, u32 owner)
++{
++	u32 st;
++	int err;
++
++	if ((readl_relaxed(pka(rkc, PKA_RAM_CTL)) & 3) == owner)
++		return 0;
++	if (readl_relaxed(pka(rkc, PKA_RAM_ST)) & PKA_RAM_ST_RDY)
++		writel_relaxed(PKA_RAM_ST_RDY, pka(rkc, PKA_RAM_ST));
++	writel_relaxed(PKA_RAM_CTL_SEL_MASK | owner, pka(rkc, PKA_RAM_CTL));
++	err = readl_relaxed_poll_timeout(pka(rkc, PKA_RAM_ST), st, st & PKA_RAM_ST_RDY, 1,
++					 PKA_TIMEOUT_US);
++	writel_relaxed(PKA_RAM_ST_RDY, pka(rkc, PKA_RAM_ST));
++	return err;
++}
++
++static int pka_op(struct rk2_crypto_dev *rkc, enum pka_opcode code, u32 len, u32 a_immed,
++		  u32 a, u32 b_immed, u32 b, u32 res)
++{
++	u32 st;
++
++	writel_relaxed(code << 27 | len << 24 | a_immed << 23 | a << 18 | b_immed << 17 |
++		       b << 12 | res << 6, pka(rkc, PKA_OPCODE));
++
++	switch (code) {
++	case PKA_DIV:
++		if (pka_wait_done(rkc))
++			return -ETIMEDOUT;
++		st = readl_relaxed(pka(rkc, PKA_STATUS));
++		return st & PKA_STATUS_DIV_BY_ZERO ? -EINVAL : 0;
++	case PKA_TERMINATE:
++		return pka_wait_done(rkc);
++	default:
++		return pka_poll(rkc, PKA_PIPE_RDY, PKA_POLL_US, PKA_TIMEOUT_US);
++	}
++}
++
++static int pka_clr(struct rk2_crypto_dev *rkc, u32 r)
++{
++	return pka_op(rkc, PKA_AND, PKA_CALC_LEN, 0, r, 1, 0, r);
++}
++
++static int pka_shl0(struct rk2_crypto_dev *rkc, u32 r, u32 bits)
++{
++	/* the PKA shifts by its operand plus one */
++	return pka_op(rkc, PKA_SHL0, PKA_CALC_LEN, 0, r, 0, bits - 1, r);
++}
++
++static u32 pka_reg_addr(struct rk2_crypto_dev *rkc, u32 r)
++{
++	pka_wait_done(rkc);
++	return readl_relaxed(pka(rkc, PKA_MEMORY_MAP0 + 4 * r));
++}
++
++static u32 pka_calc_words(struct rk2_crypto_dev *rkc)
++{
++	pka_wait_done(rkc);
++	return DIV_ROUND_UP(readl_relaxed(pka(rkc, PKA_L0 + 4 * PKA_CALC_LEN)), 32);
++}
++
++/* Words into, out of or zeroing the SRAM at an address, the SRAM the CPU's meanwhile */
++static int pka_sram(struct rk2_crypto_dev *rkc, u32 addr, u32 *in, u32 *out, u32 words)
++{
++	void __iomem *at = pka(rkc, PKA_SRAM) + addr;
++	int err;
++	u32 i;
++
++	err = pka_wait_done(rkc) ?: pka_ram_for(rkc, PKA_RAM_CTL_CPU);
++	if (err)
++		return err;
++	for (i = 0; i < words; i++) {
++		if (out)
++			out[i] = readl_relaxed(at + 4 * i);
++		else
++			writel_relaxed(in ? in[i] : 0, at + 4 * i);
++	}
++	return pka_ram_for(rkc, PKA_RAM_CTL_PKA);
++}
++
++static int pka_load(struct rk2_crypto_dev *rkc, u32 r, u32 *num, u32 words)
++{
++	u32 addr, calc;
++	int err;
++
++	err = pka_op(rkc, PKA_TERMINATE, 0, 0, 0, 0, 0, 0) ?: pka_wait_done(rkc);
++	if (err)
++		return err;
++	calc = pka_calc_words(rkc);
++	addr = pka_reg_addr(rkc, r);
++	return pka_sram(rkc, addr, num, NULL, words) ?:
++	       pka_sram(rkc, addr + 4 * words, NULL, NULL, calc - words);
++}
++
++static int pka_clear_regs(struct rk2_crypto_dev *rkc, u32 first, u32 count)
++{
++	u32 calc = pka_calc_words(rkc), r;
++	int err = 0;
++
++	for (r = first; r < first + count && r < PKA_MAP_REGS - PKA_TMP_REGS && !err; r++)
++		err = pka_clr(rkc, r);
++	return err ?: pka_wait_done(rkc) ?:
++	       pka_sram(rkc, pka_reg_addr(rkc, PKA_T0), NULL, NULL, calc) ?:
++	       pka_sram(rkc, pka_reg_addr(rkc, PKA_T1), NULL, NULL, calc);
++}
++
++/* Lengths and the register map for a modulus that many words long, every register cleared */
++static int pka_init(struct rk2_crypto_dev *rkc, u32 words)
++{
++	u32 calc = words + 1, bytes = 4 * calc, regs, addr = 0, i;
++	int err;
++
++	err = pka_ram_for(rkc, PKA_RAM_CTL_PKA);
++	if (err)
++		return err;
++
++	for (i = 0; i < PKA_LEN_REGS; i++)
++		writel_relaxed(0, pka(rkc, PKA_L0 + 4 * i));
++	writel_relaxed(32 * words, pka(rkc, PKA_L0 + 4 * PKA_EXACT_LEN));
++	writel_relaxed(32 * calc, pka(rkc, PKA_L0 + 4 * PKA_CALC_LEN));
++
++	regs = min_t(u32, PKA_MAP_REGS, PKA_SRAM_SIZE / bytes);
++	for (i = 0; i < PKA_MAP_REGS; i++)
++		writel_relaxed(PKA_ADDR_NOT_USED, pka(rkc, PKA_MEMORY_MAP0 + 4 * i));
++	for (i = 0; i < regs - PKA_TMP_REGS; i++, addr += bytes)
++		writel_relaxed(addr, pka(rkc, PKA_MEMORY_MAP0 + 4 * i));
++	writel_relaxed(addr, pka(rkc, PKA_MEMORY_MAP0 + 4 * PKA_T0));
++	writel_relaxed(addr + bytes, pka(rkc, PKA_MEMORY_MAP0 + 4 * PKA_T1));
++	writel_relaxed(PKA_N | PKA_NP << 5 | PKA_T0 << 10 | PKA_T1 << 15,
++		       pka(rkc, PKA_N_NP_T0_T1));
++
++	return pka_clear_regs(rkc, 0, regs - PKA_TMP_REGS);
++}
++
++/* NP = 2^(bits + 132) / N: 2^bits in t0, then shifted 132 more a word at a time and divided */
++static int pka_np(struct rk2_crypto_dev *rkc, u32 *n, u32 words, u32 t0, u32 t1, u32 t2)
++{
++	u32 bits = 32 * words, i, s;
++	int err;
++
++	err = pka_load(rkc, PKA_N, n, words) ?: pka_clr(rkc, t0) ?:
++	      pka_op(rkc, PKA_OR, PKA_CALC_LEN, 0, t0, 1, 1, t0);
++	for (i = 0; i < bits / 32 && !err; i++)
++		err = pka_shl0(rkc, t0, 32);
++	if (err)
++		return err;
++
++	err = pka_op(rkc, PKA_OR, PKA_CALC_LEN, 0, t0, 1, 0, t1) ?: pka_clr(rkc, PKA_NP);
++	for (i = 0; i < DIV_ROUND_UP(PKA_NP_SHIFT, 32) && !err; i++) {
++		s = i ? 32 : PKA_NP_SHIFT % 32;
++		if (s)
++			err = pka_shl0(rkc, t1, s);
++		err = err ?: pka_op(rkc, PKA_DIV, PKA_CALC_LEN, 0, t1, 0, PKA_N, t2);
++		if (s && !err)
++			err = pka_shl0(rkc, PKA_NP, s);
++		err = err ?: pka_op(rkc, PKA_ADD, PKA_CALC_LEN, 0, PKA_NP, 0, t2, PKA_NP);
++	}
++	return err ?: pka_wait_done(rkc);
++}
++
++static int pka_highest_bit(const u32 *num, u32 words)
++{
++	while (words && !num[words - 1])
++		words--;
++	return words ? 32 * (words - 1) + fls(num[words - 1]) : 0;
++}
++
++/* out = in ^ exp mod n, every number words long but the exponent, exp_words */
++static int pka_exp_mod(struct rk2_crypto_dev *rkc, u32 *in, u32 *exp, u32 exp_words, u32 *n,
++		       u32 words, u32 *out)
++{
++	bool long_exp = 2 * pka_highest_bit(exp, exp_words) > pka_highest_bit(n, words);
++	int err;
++
++	err = pka_init(rkc, words) ?:
++	      pka_np(rkc, n, words, PKA_R_IN, PKA_R_E, PKA_R_OUT) ?:
++	      pka_clear_regs(rkc, PKA_R_IN, 3) ?:
++	      pka_load(rkc, PKA_R_IN, in, words) ?:
++	      pka_load(rkc, PKA_R_E, exp, exp_words) ?:
++	      pka_load(rkc, PKA_N, n, words) ?:
++	      pka_op(rkc, PKA_MOD_EXP, PKA_EXACT_LEN, 0, PKA_R_IN, 0, PKA_R_E, PKA_R_OUT);
++	if (!err) {
++		writel_relaxed(0, pka(rkc, PKA_OPCODE));
++		err = long_exp ? pka_poll(rkc, PKA_DONE, PKA_EXP_POLL_US, PKA_EXP_TIMEOUT_US) :
++				 pka_wait_done(rkc);
++		err = err ?: pka_sram(rkc, pka_reg_addr(rkc, PKA_R_OUT), NULL, out, words);
++	}
++
++	pka_clear_regs(rkc, 0, 5);
++	pka_clear_regs(rkc, PKA_T0, PKA_TMP_REGS);
++	pka_op(rkc, PKA_TERMINATE, 0, 0, 0, 0, 0, 0);
++	pka_ram_for(rkc, PKA_RAM_CTL_CPU);
++	return err;
++}
++
++/* The words a big-endian number fills, its leading zeros dropped */
++static unsigned int rk2_rsa_len(const u8 *be, size_t len)
++{
++	while (len && !*be) {
++		be++;
++		len--;
++	}
++	return DIV_ROUND_UP(len, 4);
++}
++
++/* A big-endian number into zeroed little-endian words, as many as it fills */
++static void rk2_rsa_fill(u32 *w, const u8 *be, size_t len)
++{
++	size_t i;
++
++	for (i = 0; i < len; i++)
++		w[i / 4] |= (u32)be[len - 1 - i] << (8 * (i % 4));
++}
++
++static u32 *rk2_rsa_words(const u8 *be, size_t len, unsigned int *words)
++{
++	u32 *w;
++
++	/* DER's leading zero byte, kept by the key parser, is no word */
++	while (len && !*be) {
++		be++;
++		len--;
++	}
++	*words = rk2_rsa_len(be, len);
++	w = kcalloc(max(*words, 1u), sizeof(u32), GFP_KERNEL);
++	if (w)
++		rk2_rsa_fill(w, be, len);
++	return w;
++}
++
++/* a < b, both words long */
++static bool rk2_rsa_less(const u32 *a, const u32 *b, unsigned int words)
++{
++	while (words--)
++		if (a[words] != b[words])
++			return a[words] < b[words];
++	return false;
++}
++
++static void rk2_rsa_clear(struct rk2_rsa_ctx *ctx)
++{
++	kfree_sensitive(ctx->d);
++	kfree(ctx->e);
++	kfree(ctx->n);
++	*ctx = (struct rk2_rsa_ctx){ .rkc = ctx->rkc };
++}
++
++static int rk2_rsa_setkey(struct crypto_akcipher *tfm, const void *key, unsigned int keylen,
++			  bool private)
++{
++	struct rk2_rsa_ctx *ctx = akcipher_tfm_ctx(tfm);
++	struct rsa_key raw = {};
++	int err;
++
++	rk2_rsa_clear(ctx);
++	err = private ? rsa_parse_priv_key(&raw, key, keylen) :
++			rsa_parse_pub_key(&raw, key, keylen);
++	if (err)
++		return err;
++
++	ctx->n = rk2_rsa_words(raw.n, raw.n_sz, &ctx->words);
++	ctx->e = rk2_rsa_words(raw.e, raw.e_sz, &ctx->e_words);
++	if (private)
++		ctx->d = rk2_rsa_words(raw.d, raw.d_sz, &ctx->d_words);
++	if (!ctx->n || !ctx->e || (private && !ctx->d)) {
++		rk2_rsa_clear(ctx);
++		return -ENOMEM;
++	}
++
++	/* the sizes generic RSA takes, all within the PKA's 4096 bits */
++	switch (pka_highest_bit(ctx->n, ctx->words)) {
++	case 512: case 1024: case 1536: case 2048: case 3072: case 4096:
++		ctx->key_bytes = 4 * ctx->words;
++		return 0;
++	}
++	rk2_rsa_clear(ctx);
++	return -EINVAL;
++}
++
++int rk2_rsa_set_pub_key(struct crypto_akcipher *tfm, const void *key, unsigned int keylen)
++{
++	return rk2_rsa_setkey(tfm, key, keylen, false);
++}
++
++int rk2_rsa_set_priv_key(struct crypto_akcipher *tfm, const void *key, unsigned int keylen)
++{
++	return rk2_rsa_setkey(tfm, key, keylen, true);
++}
++
++unsigned int rk2_rsa_max_size(struct crypto_akcipher *tfm)
++{
++	struct rk2_rsa_ctx *ctx = akcipher_tfm_ctx(tfm);
++
++	return ctx->key_bytes;
++}
++
++static int rk2_rsa_calc(struct akcipher_request *req, bool private)
++{
++	struct rk2_rsa_ctx *ctx = akcipher_tfm_ctx(crypto_akcipher_reqtfm(req));
++	struct rk2_crypto_dev *rkc = ctx->rkc;
++	unsigned int words = ctx->words, in_words, size, out_bytes, i;
++	u32 *in = NULL, *out, *one;
++	u8 *buf;
++	int err;
++
++	if (!ctx->n || (private && !ctx->d))
++		return -EINVAL;
++	if (req->src_len > ctx->key_bytes)
++		return -EINVAL;
++
++	buf = kzalloc(ctx->key_bytes, GFP_KERNEL);
++	out = kcalloc(2 * words, sizeof(u32), GFP_KERNEL);
++	if (!buf || !out) {
++		err = -ENOMEM;
++		goto free;
++	}
++	one = out + words;
++
++	sg_copy_to_buffer(req->src, sg_nents_for_len(req->src, req->src_len), buf, req->src_len);
++	in_words = rk2_rsa_len(buf, req->src_len);
++	in = kcalloc(words, sizeof(u32), GFP_KERNEL);
++	if (!in) {
++		err = -ENOMEM;
++		goto free;
++	}
++	if (in_words <= words)
++		rk2_rsa_fill(in, buf, req->src_len);
++
++	/* as generic RSA: the input greater than 1 and less than n - 1 */
++	one[0] = 1;
++	memcpy(out, ctx->n, words * sizeof(u32));
++	out[0]--;
++	if (in_words > words || !rk2_rsa_less(one, in, words) || !rk2_rsa_less(in, out, words)) {
++		err = -EINVAL;
++		goto free;
++	}
++
++	err = pm_runtime_resume_and_get(rkc->dev);
++	if (err)
++		goto free;
++	mutex_lock(&rkc->pka_lock);
++	err = pka_exp_mod(rkc, in, private ? ctx->d : ctx->e, private ? ctx->d_words : ctx->e_words,
++			  ctx->n, words, out);
++	mutex_unlock(&rkc->pka_lock);
++	pm_runtime_mark_last_busy(rkc->dev);
++	pm_runtime_put_autosuspend(rkc->dev);
++	if (err)
++		goto free;
++
++	/* written right-aligned into dst_len, as generic RSA writes it */
++	size = DIV_ROUND_UP(pka_highest_bit(out, words), 8);
++	if (req->dst_len < size) {
++		req->dst_len = size;
++		err = -EOVERFLOW;
++		goto free;
++	}
++	out_bytes = req->dst_len;
++	kfree(buf);
++	buf = kzalloc(out_bytes, GFP_KERNEL);
++	if (!buf) {
++		err = -ENOMEM;
++		goto free;
++	}
++	for (i = 0; i < size; i++)
++		buf[out_bytes - 1 - i] = out[i / 4] >> (8 * (i % 4));
++	sg_copy_from_buffer(req->dst, sg_nents_for_len(req->dst, out_bytes), buf, out_bytes);
++
++free:
++	kfree_sensitive(in);
++	kfree_sensitive(out);
++	kfree_sensitive(buf);
++	return err;
++}
++
++int rk2_rsa_enc(struct akcipher_request *req)
++{
++	return rk2_rsa_calc(req, false);
++}
++
++int rk2_rsa_dec(struct akcipher_request *req)
++{
++	return rk2_rsa_calc(req, true);
++}
++
++int rk2_rsa_init(struct crypto_akcipher *tfm)
++{
++	struct rk2_rsa_ctx *ctx = akcipher_tfm_ctx(tfm);
++	struct akcipher_alg *alg = crypto_akcipher_alg(tfm);
++	struct rk2_crypto_template *algt =
++		container_of(alg, struct rk2_crypto_template, alg.akcipher);
++
++	ctx->rkc = algt->dev;
++	return ctx->rkc ? 0 : -ENODEV;
++}
++
++void rk2_rsa_exit(struct crypto_akcipher *tfm)
++{
++	rk2_rsa_clear(akcipher_tfm_ctx(tfm));
++}

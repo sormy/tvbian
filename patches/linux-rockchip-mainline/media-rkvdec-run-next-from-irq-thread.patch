@@ -1,0 +1,31 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] media: rkvdec: Start the next job from the interrupt thread
+
+The decoder idled from a job's interrupt until the mem2mem worker woke
+to start the next. The interrupt is threaded and can sleep: run the
+next job there. On an RK3528 decoding HEVC at 3840x2160 the worker took
+40 to 60 us of the 8.6 ms frame.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ drivers/media/platform/rockchip/rkvdec/rkvdec.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec.c b/drivers/media/platform/rockchip/rkvdec/rkvdec.c
+index 534346a..f773208 100644
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec.c
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec.c
+@@ -1689,8 +1689,12 @@ static irqreturn_t rkvdec_irq_handler(int irq, void *priv)
+ 	struct rkvdec_dev *rkvdec = priv;
+ 	struct rkvdec_ctx *ctx = v4l2_m2m_get_curr_priv(rkvdec->m2m_dev);
+ 	const struct rkvdec_variant *variant = rkvdec->variant;
++	irqreturn_t ret;
+ 
+-	return variant->ops->irq_handler(ctx);
++	ret = variant->ops->irq_handler(ctx);
++	/* The decoder idles until the next job: start it here, not from a worker */
++	v4l2_m2m_run_next(rkvdec->m2m_dev);
++	return ret;
+ }
+ 
+ /*

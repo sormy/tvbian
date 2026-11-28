@@ -1,0 +1,112 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] drm/rockchip: dw_hdmi: Frame-packed 3D on the RK3528
+
+The RK3528's VOP2 doubles a frame-packed mode's timings, as its fixup
+asks: offer the screen's stereo modes, and give the PHY and the mode
+checks the doubled rate, as the vendor's kernel does.
+
+VOP2 bounds each plane by the frame the plane check clipped it to, which
+drm_mode_get_hv_timing() gives as both views: by the mode's own height,
+a plane taller than one view was skipped with a warning.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ drivers/gpu/drm/rockchip/dw_hdmi-rockchip.c  | 18 +++++++++++++-----
+ drivers/gpu/drm/rockchip/rockchip_drm_vop2.c |  9 ++++++---
+ 2 files changed, 19 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/gpu/drm/rockchip/dw_hdmi-rockchip.c b/drivers/gpu/drm/rockchip/dw_hdmi-rockchip.c
+index 21e716f..520a0cf 100644
+--- a/drivers/gpu/drm/rockchip/dw_hdmi-rockchip.c
++++ b/drivers/gpu/drm/rockchip/dw_hdmi-rockchip.c
+@@ -206,6 +206,12 @@ static const struct dw_hdmi_phy_config rockchip_phy_config[] = {
+ 	{ ~0UL,	     0x0000, 0x0000, 0x0000 },
+ };
+ 
++static bool dw_hdmi_rockchip_frame_packed(const struct drm_display_mode *mode)
++{
++	return (mode->flags & DRM_MODE_FLAG_3D_MASK) ==
++	       DRM_MODE_FLAG_3D_FRAME_PACKING;
++}
++
+ static enum drm_mode_status
+ dw_hdmi_rockchip_mode_valid(struct dw_hdmi *dw_hdmi, void *data,
+ 			    const struct drm_display_info *info,
+@@ -214,7 +220,7 @@ dw_hdmi_rockchip_mode_valid(struct dw_hdmi *dw_hdmi, void *data,
+ 	struct rockchip_hdmi *hdmi = data;
+ 	int pclk = mode->clock * 1000;
+ 
+-	if (mode->flags & DRM_MODE_FLAG_DBLCLK)
++	if (mode->flags & DRM_MODE_FLAG_DBLCLK || dw_hdmi_rockchip_frame_packed(mode))
+ 		pclk *= 2;
+ 
+ 	if (hdmi->chip_data->max_tmds_clock &&
+@@ -251,8 +257,8 @@ static unsigned long dw_hdmi_rockchip_tmds_rate(u32 bus_format,
+ 	if (bus_format == MEDIA_BUS_FMT_UYYVYY8_0_5X24 ||
+ 	    bus_format == MEDIA_BUS_FMT_UYYVYY10_0_5X30)
+ 		rate /= 2;
+-	/* pixel repetition sends each pixel twice */
+-	if (mode->flags & DRM_MODE_FLAG_DBLCLK)
++	/* pixel repetition sends each pixel twice, frame packing each frame */
++	if (mode->flags & DRM_MODE_FLAG_DBLCLK || dw_hdmi_rockchip_frame_packed(mode))
+ 		rate *= 2;
+ 
+ 	return rate;
+@@ -610,6 +616,7 @@ dw_hdmi_rk3528_mode_valid(struct dw_hdmi *dw_hdmi, void *data,
+ 			 const struct drm_display_info *info,
+ 			 const struct drm_display_mode *mode)
+ {
++	int clock = mode->clock * (dw_hdmi_rockchip_frame_packed(mode) ? 2 : 1);
+ 	enum drm_mode_status status;
+ 
+ 	status = dw_hdmi_rockchip_mode_valid(dw_hdmi, data, info, mode);
+@@ -617,11 +624,11 @@ dw_hdmi_rk3528_mode_valid(struct dw_hdmi *dw_hdmi, void *data,
+ 		return status;
+ 
+ 	/* This encoder currently transmits RGB888, so TMDS equals pixel rate. */
+-	if (info->max_tmds_clock && mode->clock > info->max_tmds_clock)
++	if (info->max_tmds_clock && clock > info->max_tmds_clock)
+ 		return MODE_CLOCK_HIGH;
+ 
+ 	/* High TMDS rates require scrambling and a working SCDC link. */
+-	if (mode->clock > 340000 &&
++	if (clock > 340000 &&
+ 	    (info->max_tmds_clock <= 340000 || !info->hdmi.scdc.supported ||
+ 	     !info->hdmi.scdc.scrambling.supported))
+ 		return MODE_CLOCK_HIGH;
+@@ -634,6 +641,7 @@ static const struct dw_hdmi_plat_data rk3528_hdmi_drv_data = {
+ 	.dblclk_allowed = true,
+ 	.ycbcr_420_allowed = true,
+ 	.select_bus_format = true,
++	.stereo_allowed = true,
+ 	.phy_data = &rk3528_chip_data,
+ 	.phy_ops = &rk3528_hdmi_phy_ops,
+ 	.phy_name = "inno_dw_hdmi_phy2",
+diff --git a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
+index 3309a63..905b2da 100644
+--- a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
++++ b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
+@@ -1433,6 +1433,7 @@ static void vop2_plane_atomic_update(struct drm_plane *plane,
+ 	struct vop2_win *win = to_vop2_win(plane);
+ 	struct vop2_video_port *vp = to_vop2_video_port(crtc);
+ 	struct drm_display_mode *adjusted_mode = &crtc->state->adjusted_mode;
++	int hdisplay, vdisplay;
+ 	struct vop2 *vop2 = win->vop2;
+ 	struct drm_framebuffer *fb = pstate->fb;
+ 	u32 bpp = vop2_get_bpp(fb->format);
+@@ -1509,10 +1510,12 @@ static void vop2_plane_atomic_update(struct drm_plane *plane,
+ 	dsp_h = drm_rect_height(dest);
+ 
+ 	/* drm_atomic_helper_check_plane_state calls drm_rect_clip_scaled for
+-	 * us, which keeps our planes bounded within the CRTC active area
++	 * us, which keeps our planes bounded within the CRTC active area, as
++	 * drm_mode_get_hv_timing() gives it: a frame-packed mode's both views
+ 	 */
+-	if (WARN_ON(dest->x1 + dsp_w > adjusted_mode->hdisplay) ||
+-	    WARN_ON(dest->y1 + dsp_h > adjusted_mode->vdisplay) ||
++	drm_mode_get_hv_timing(adjusted_mode, &hdisplay, &vdisplay);
++	if (WARN_ON(dest->x1 + dsp_w > hdisplay) ||
++	    WARN_ON(dest->y1 + dsp_h > vdisplay) ||
+ 	    WARN_ON(dsp_w < 4) || WARN_ON(dsp_h < 4) ||
+ 	    WARN_ON(src_w < 4) || WARN_ON(src_h < 4))
+ 		return;

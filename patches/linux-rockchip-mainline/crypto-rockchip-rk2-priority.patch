@@ -1,0 +1,188 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] crypto: rockchip: rk2: Rank under the CPU where the CPU is faster
+
+Every algorithm registered at 300, the priority of the arm64 CPU's own
+AES (aes-ce) and SHA (sha*-lib) drivers. On a tie the engine, registered
+last, was the one every user got, though it is slower. tcrypt on an
+RK3528 (Cortex-A53 at 1.4 GHz), MB/s at 256 B and 4 KiB:
+
+  ecb(aes)     engine 16/245   ecb-aes-ce 401/1224
+  ctr(aes)     engine 15/212   ctr-aes-ce 322/974
+  sha256       engine  6/96    sha256-lib 205/613
+  hmac(sha1)   engine  5/85    hmac-sha1-lib 155/551
+  md5          engine  6/95    md5-lib 129/176
+  ecb(sm4)     engine 15/175   sm4-generic 34/35
+  ecb(des)     engine 16/176   des-generic 29/29
+  sm3          engine  6/94    sm3-lib 56/83
+
+Rank AES, MD5, SHA-1/2 and their HMACs at 200: under the CPU's, over
+plain C (110 for aes-lib), which the engine still outruns. SM3, SM4, DES
+and TDES stay at 300.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+  drivers/crypto/rockchip/rk2_crypto.c | 45 +++++++++++++++++++++---------------
+  1 file changed, 26 insertions(+), 19 deletions(-)
+
+diff --git a/drivers/crypto/rockchip/rk2_crypto.c b/drivers/crypto/rockchip/rk2_crypto.c
+index 2793f66..bc15b3b 100644
+--- a/drivers/crypto/rockchip/rk2_crypto.c
++++ b/drivers/crypto/rockchip/rk2_crypto.c
+@@ -173,14 +173,21 @@ static irqreturn_t rk2_crypto_irq_handle(int irq, void *dev_id)
+ 	return IRQ_HANDLED;
+ }
+ 
++/*
++ * The CPU's AES and SHA instructions, and its MD5, outrun the engine at every request size: its
++ * algorithms rank under theirs and over plain C. SM3, SM4 and DES the engine wins at a page.
++ */
++#define RK2_PRIORITY			300
++#define RK2_PRIORITY_BELOW_CPU		200
++
+ /* A block cipher mode beyond AES's ECB, CBC and XTS, the engine's where it says so */
+-#define RK2_SKCIPHER(mode, name, driver, bs, key_min, key_max, iv, chunk, set) { \
++#define RK2_SKCIPHER(mode, name, driver, prio, bs, key_min, key_max, iv, chunk, set) { \
+ 	.type = CRYPTO_ALG_TYPE_SKCIPHER,					\
+ 	.rk2_mode = mode,							\
+ 	.alg.skcipher.base = {							\
+ 		.base.cra_name = name,						\
+ 		.base.cra_driver_name = driver,					\
+-		.base.cra_priority = 300,					\
++		.base.cra_priority = prio,					\
+ 		.base.cra_flags = CRYPTO_ALG_ASYNC | CRYPTO_ALG_NEED_FALLBACK,	\
+ 		.base.cra_blocksize = bs,					\
+ 		.base.cra_ctxsize = sizeof(struct rk2_cipher_ctx),		\
+@@ -218,7 +225,7 @@ static irqreturn_t rk2_crypto_irq_handle(int irq, void *dev_id)
+ 		.halg.base = {							\
+ 			.cra_name = name,					\
+ 			.cra_driver_name = driver,				\
+-			.cra_priority = 300,					\
++			.cra_priority = RK2_PRIORITY_BELOW_CPU,			\
+ 			.cra_flags = CRYPTO_ALG_ASYNC | CRYPTO_ALG_NEED_FALLBACK, \
+ 			.cra_blocksize = block,					\
+ 			.cra_ctxsize = sizeof(struct rk2_ahash_ctx),		\
+@@ -229,11 +236,11 @@ static irqreturn_t rk2_crypto_irq_handle(int irq, void *dev_id)
+ }
+ 
+ #define RK2_AES(mode, name, driver, bs)						\
+-	RK2_SKCIPHER(RK2_CRYPTO_AES | (mode), name, driver, bs,			\
++	RK2_SKCIPHER(RK2_CRYPTO_AES | (mode), name, driver, RK2_PRIORITY_BELOW_CPU, bs,	\
+ 		     AES_MIN_KEY_SIZE, AES_MAX_KEY_SIZE, AES_BLOCK_SIZE, AES_BLOCK_SIZE,	\
+ 		     rk2_aes_setkey)
+ #define RK2_SM4(mode, name, driver, bs)						\
+-	RK2_SKCIPHER(RK2_CRYPTO_SM4 | (mode), name, driver, bs,			\
++	RK2_SKCIPHER(RK2_CRYPTO_SM4 | (mode), name, driver, RK2_PRIORITY, bs,		\
+ 		     SM4_KEY_SIZE, SM4_KEY_SIZE, SM4_BLOCK_SIZE, SM4_BLOCK_SIZE,		\
+ 		     rk2_sm4_setkey)
+ 
+@@ -250,16 +257,16 @@ static const struct rk2_crypto_template rk2_crypto_algs_template[] = {
+ 	RK2_SM4(RK2_CRYPTO_MODE_ECB, "ecb(sm4)", "ecb-sm4-rk2", SM4_BLOCK_SIZE),
+ 	RK2_SM4(RK2_CRYPTO_MODE_CBC, "cbc(sm4)", "cbc-sm4-rk2", SM4_BLOCK_SIZE),
+ 	RK2_SM4(RK2_CRYPTO_MODE_CTR, "ctr(sm4)", "ctr-sm4-rk2", 1),
+-	RK2_SKCIPHER(RK2_CRYPTO_DES | RK2_CRYPTO_MODE_ECB, "ecb(des)", "ecb-des-rk2",
++	RK2_SKCIPHER(RK2_CRYPTO_DES | RK2_CRYPTO_MODE_ECB, "ecb(des)", "ecb-des-rk2", RK2_PRIORITY,
+ 		     DES_BLOCK_SIZE, DES_KEY_SIZE, DES_KEY_SIZE, 0, 0, rk2_des_setkey),
+-	RK2_SKCIPHER(RK2_CRYPTO_DES | RK2_CRYPTO_MODE_CBC, "cbc(des)", "cbc-des-rk2",
++	RK2_SKCIPHER(RK2_CRYPTO_DES | RK2_CRYPTO_MODE_CBC, "cbc(des)", "cbc-des-rk2", RK2_PRIORITY,
+ 		     DES_BLOCK_SIZE, DES_KEY_SIZE, DES_KEY_SIZE, DES_BLOCK_SIZE, 0,
+ 		     rk2_des_setkey),
+ 	RK2_SKCIPHER(RK2_CRYPTO_TDES | RK2_CRYPTO_MODE_ECB, "ecb(des3_ede)", "ecb-des3-rk2",
+-		     DES3_EDE_BLOCK_SIZE, DES3_EDE_KEY_SIZE, DES3_EDE_KEY_SIZE, 0, 0,
++		     RK2_PRIORITY, DES3_EDE_BLOCK_SIZE, DES3_EDE_KEY_SIZE, DES3_EDE_KEY_SIZE, 0, 0,
+ 		     rk2_des3_setkey),
+ 	RK2_SKCIPHER(RK2_CRYPTO_TDES | RK2_CRYPTO_MODE_CBC, "cbc(des3_ede)", "cbc-des3-rk2",
+-		     DES3_EDE_BLOCK_SIZE, DES3_EDE_KEY_SIZE, DES3_EDE_KEY_SIZE,
++		     RK2_PRIORITY, DES3_EDE_BLOCK_SIZE, DES3_EDE_KEY_SIZE, DES3_EDE_KEY_SIZE,
+ 		     DES3_EDE_BLOCK_SIZE, 0, rk2_des3_setkey),
+ 	{
+ 	.type = CRYPTO_ALG_TYPE_SKCIPHER,
+@@ -267,7 +274,7 @@ static const struct rk2_crypto_template rk2_crypto_algs_template[] = {
+ 	.alg.skcipher.base = {
+ 			.base.cra_name = "ecb(aes)",
+ 			.base.cra_driver_name = "ecb-aes-rk2",
+-			.base.cra_priority = 300,
++			.base.cra_priority = RK2_PRIORITY_BELOW_CPU,
+ 			.base.cra_flags =
+ 			CRYPTO_ALG_ASYNC | CRYPTO_ALG_NEED_FALLBACK,
+ 			.base.cra_blocksize = AES_BLOCK_SIZE,
+@@ -292,7 +299,7 @@ static const struct rk2_crypto_template rk2_crypto_algs_template[] = {
+ 	 .alg.skcipher.base = {
+ 			.base.cra_name = "cbc(aes)",
+ 			.base.cra_driver_name = "cbc-aes-rk2",
+-			.base.cra_priority = 300,
++			.base.cra_priority = RK2_PRIORITY_BELOW_CPU,
+ 			.base.cra_flags =
+ 			CRYPTO_ALG_ASYNC | CRYPTO_ALG_NEED_FALLBACK,
+ 			.base.cra_blocksize = AES_BLOCK_SIZE,
+@@ -319,7 +326,7 @@ static const struct rk2_crypto_template rk2_crypto_algs_template[] = {
+ 	.alg.skcipher.base = {
+ 			.base.cra_name = "xts(aes)",
+ 			.base.cra_driver_name = "xts-aes-rk2",
+-			.base.cra_priority = 300,
++			.base.cra_priority = RK2_PRIORITY_BELOW_CPU,
+ 			.base.cra_flags =
+ 			CRYPTO_ALG_ASYNC | CRYPTO_ALG_NEED_FALLBACK,
+ 			.base.cra_blocksize = AES_BLOCK_SIZE,
+@@ -359,7 +366,7 @@ static const struct rk2_crypto_template rk2_crypto_algs_template[] = {
+ 				.base = {
+ 					.cra_name = "md5",
+ 					.cra_driver_name = "rk2-md5",
+-					.cra_priority = 300,
++					.cra_priority = RK2_PRIORITY_BELOW_CPU,
+ 					.cra_flags =
+ 					CRYPTO_ALG_ASYNC |
+ 					CRYPTO_ALG_NEED_FALLBACK,
+@@ -394,7 +401,7 @@ static const struct rk2_crypto_template rk2_crypto_algs_template[] = {
+ 				.base = {
+ 					.cra_name = "sha1",
+ 					.cra_driver_name = "rk2-sha1",
+-					.cra_priority = 300,
++					.cra_priority = RK2_PRIORITY_BELOW_CPU,
+ 					.cra_flags =
+ 					CRYPTO_ALG_ASYNC |
+ 					CRYPTO_ALG_NEED_FALLBACK,
+@@ -428,7 +435,7 @@ static const struct rk2_crypto_template rk2_crypto_algs_template[] = {
+ 				.base = {
+ 					.cra_name = "sha224",
+ 					.cra_driver_name = "rk2-sha224",
+-					.cra_priority = 300,
++					.cra_priority = RK2_PRIORITY_BELOW_CPU,
+ 					.cra_flags =
+ 					CRYPTO_ALG_ASYNC |
+ 					CRYPTO_ALG_NEED_FALLBACK,
+@@ -462,7 +469,7 @@ static const struct rk2_crypto_template rk2_crypto_algs_template[] = {
+ 				.base = {
+ 					.cra_name = "sha256",
+ 					.cra_driver_name = "rk2-sha256",
+-					.cra_priority = 300,
++					.cra_priority = RK2_PRIORITY_BELOW_CPU,
+ 					.cra_flags =
+ 					CRYPTO_ALG_ASYNC |
+ 					CRYPTO_ALG_NEED_FALLBACK,
+@@ -496,7 +503,7 @@ static const struct rk2_crypto_template rk2_crypto_algs_template[] = {
+ 				.base = {
+ 					.cra_name = "sha384",
+ 					.cra_driver_name = "rk2-sha384",
+-					.cra_priority = 300,
++					.cra_priority = RK2_PRIORITY_BELOW_CPU,
+ 					.cra_flags = CRYPTO_ALG_ASYNC |
+ 					CRYPTO_ALG_NEED_FALLBACK,
+ 					.cra_blocksize = SHA384_BLOCK_SIZE,
+@@ -529,7 +536,7 @@ static const struct rk2_crypto_template rk2_crypto_algs_template[] = {
+ 				.base = {
+ 					.cra_name = "sha512",
+ 					.cra_driver_name = "rk2-sha512",
+-					.cra_priority = 300,
++					.cra_priority = RK2_PRIORITY_BELOW_CPU,
+ 					.cra_flags =
+ 					CRYPTO_ALG_ASYNC |
+ 					CRYPTO_ALG_NEED_FALLBACK,
+@@ -563,7 +570,7 @@ static const struct rk2_crypto_template rk2_crypto_algs_template[] = {
+ 				.base = {
+ 					.cra_name = "sm3",
+ 					.cra_driver_name = "rk2-sm3",
+-					.cra_priority = 300,
++					.cra_priority = RK2_PRIORITY,
+ 					.cra_flags =
+ 					CRYPTO_ALG_ASYNC |
+ 					CRYPTO_ALG_NEED_FALLBACK,

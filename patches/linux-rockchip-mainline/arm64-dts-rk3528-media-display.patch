@@ -19,7 +19,7 @@ index 03cd00f..c0919aa 100644
  		vpu_grf: syscon@ff340000 {
  			compatible = "rockchip,rk3528-vpu-grf", "syscon";
  			reg = <0x0 0xff340000 0x0 0x8000>;
-@@ -1365,3 +1370,454 @@
+@@ -1365,3 +1370,455 @@
  };
  
  #include "rk3528-pinctrl.dtsi"
@@ -430,6 +430,7 @@ index 03cd00f..c0919aa 100644
 +		power-domains = <&power RK3528_PD_VO>;
 +		resets = <&cru SRST_M_SAI_I2S3>, <&cru SRST_H_SAI_I2S3>;
 +		reset-names = "m", "h";
++		rockchip,sai-tx-route = <0 1 2 3>;
 +		#sound-dai-cells = <0>;
 +		status = "disabled";
 +	};

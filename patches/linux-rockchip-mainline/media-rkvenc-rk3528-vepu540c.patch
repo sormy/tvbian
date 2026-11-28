@@ -7,12 +7,14 @@ as a second back end behind a table of hardware operations, so that the
 stateful front end serves both.
 
 The back end codes H.264 from NV12 at one QP per picture, up to
-8192x8192; HEVC is not offered on this core. Past 3072 pixels wide the
-line cache spills into an extension buffer, which each reference slot
-carries; a reference's body follows its header in one buffer, as the
-core writes past the header's size. Encoded and decoded back on an
-RK3528, H.264 holds 47 dB or better up to 8192x8192, and 16384x8640
-fails, as it does under Rockchip's MPP.
+7680 pixels wide and 8192 high; HEVC is not offered on this core. Past
+3072 pixels wide the line cache spills into an extension buffer, which
+each reference slot carries; a reference's body follows its header in
+one buffer, as the core writes past the header's size. Encoded and
+decoded back, H.264 is bit-exact run to run up to 7680x4320 on the
+RK3528 and RK3518 boards; at 8192 wide a picture is now and then
+garbage, with no error: 8192x4320 in half the runs on one RK3518,
+8192x8192 on two other boards. JPEG, added later, shares the width.
 
 Its register image follows Rockchip MPP's H.264 HAL for the block in
 fixed QP mode. Built on a host from the same parameters, the two images
@@ -1173,7 +1175,7 @@ index 33a1340..5cedeb2 100644
  
  struct rkvenc_h264_seq {
 diff --git a/drivers/media/platform/rockchip/rkvenc/rkvenc.c b/drivers/media/platform/rockchip/rkvenc/rkvenc.c
-index 7957208..d99d00c 100644
+index 7957208..81e1989 100644
 --- a/drivers/media/platform/rockchip/rkvenc/rkvenc.c
 +++ b/drivers/media/platform/rockchip/rkvenc/rkvenc.c
 @@ -26,15 +26,12 @@
@@ -1187,8 +1189,8 @@ index 7957208..d99d00c 100644
 -static const struct rkvenc_variant rkvenc_variant_rk3568 = {
 -	.vepu540 = true,
 -};
-+/* 8192x8192 encodes; 16384x8640 fails, as it does under Rockchip's MPP */
-+#define RKVENC_RK3528_MAX_WIDTH		8192
++/* Past 7680 wide a picture is now and then garbage, with no error */
++#define RKVENC_RK3528_MAX_WIDTH		7680
 +#define RKVENC_RK3528_MAX_HEIGHT	8192
  
 -int rkvenc_hw_run(struct rkvenc_dev *dev, const struct rkvenc_frame *f)

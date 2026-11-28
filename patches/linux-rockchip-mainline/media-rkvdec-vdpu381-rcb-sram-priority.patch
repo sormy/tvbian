@@ -1,0 +1,504 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] media: rkvdec: Give the VDPU381's SRAM to the busiest row buffers
+
+The row and column buffers took the SRAM in register order at their
+largest size, each mapped through the IOMMU on its own and so rounded
+to a page: on the RK3528 at 3840 wide the intra, transform and
+stream-row buffers filled it, and the deblocking row, the one the
+decoder reads and writes most, went to DDR. Rockchip's MPP sizes each
+buffer for the stream, aligns it to 64 bytes and hands out the SRAM
+busiest first: deblocking, intra, SAO, then inter.
+
+Map the SRAM once at probe, through the DMA API so its address is
+reserved, and pack the buffers in it at 64 bytes. On
+the VDPU381 a codec may size a buffer for the stream, from its SPS and
+PPS at stream start, and the buffers it sizes take the SRAM in MPP's
+order; the rest keep their size, in DDR. H.264 and HEVC size theirs as
+MPP does for the VDPU382, the larger case where the SPS has not said.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+  .../media/platform/rockchip/rkvdec/rkvdec-rcb.c    | 171 +++++++++++++--------
+  .../media/platform/rockchip/rkvdec/rkvdec-rcb.h    |  25 ++-
+  .../platform/rockchip/rkvdec/rkvdec-vdpu381-h264.c |  23 +++
+  .../platform/rockchip/rkvdec/rkvdec-vdpu381-hevc.c |  36 +++++
+  drivers/media/platform/rockchip/rkvdec/rkvdec.c    |  20 ++-
+  drivers/media/platform/rockchip/rkvdec/rkvdec.h    |  19 +++
+  6 files changed, 226 insertions(+), 68 deletions(-)
+
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec-rcb.c b/drivers/media/platform/rockchip/rkvdec/rkvdec-rcb.c
+index fdcf1f1..e557e3f 100644
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec-rcb.c
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec-rcb.c
+@@ -9,7 +9,7 @@
+ #include "rkvdec.h"
+ #include "rkvdec-rcb.h"
+ 
+-#include <linux/iommu.h>
++#include <linux/dma-mapping.h>
+ #include <linux/genalloc.h>
+ #include <linux/sizes.h>
+ #include <linux/types.h>
+@@ -59,9 +59,6 @@ void rkvdec_free_rcb(struct rkvdec_ctx *ctx)
+ 		switch (cfg->rcb_bufs[i].type) {
+ 		case RKVDEC_ALLOC_SRAM:
+ 			virt_addr = (unsigned long)cfg->rcb_bufs[i].cpu;
+-
+-			if (dev->iommu_domain)
+-				iommu_unmap(dev->iommu_domain, virt_addr, rcb_size);
+ 			gen_pool_free(dev->sram_pool, virt_addr, rcb_size);
+ 			break;
+ 		case RKVDEC_ALLOC_DMA:
+@@ -79,14 +76,83 @@ void rkvdec_free_rcb(struct rkvdec_ctx *ctx)
+ 	devm_kfree(dev->dev, cfg);
+ }
+ 
++/*
++ * The size this stream needs, where the codec knows it: 0 where it uses none,
++ * or where the codec does not say, which leaves the buffer out of the SRAM.
++ */
++static size_t rkvdec_rcb_stream_size(struct rkvdec_ctx *ctx, enum rkvdec_rcb id,
++				     u32 width)
++{
++	const struct rkvdec_coded_fmt_ops *ops = ctx->coded_fmt_desc->ops;
++
++	return ops->rcb_bits ? DIV_ROUND_UP(ops->rcb_bits(ctx, id, width), 8) : 0;
++}
++
++static void rkvdec_sram_chunk(struct gen_pool *pool,
++			      struct gen_pool_chunk *chunk, void *data)
++{
++	struct rkvdec_dev *rkvdec = data;
++
++	/* The buffers' addresses are offsets into one chunk */
++	if (rkvdec->sram_virt) {
++		if (rkvdec->sram_size)
++			dma_unmap_resource(rkvdec->dev, rkvdec->sram_dma,
++					   rkvdec->sram_size, DMA_BIDIRECTIONAL, 0);
++		rkvdec->sram_size = 0;
++		return;
++	}
++	rkvdec->sram_virt = chunk->start_addr;
++	rkvdec->sram_size = chunk->end_addr - chunk->start_addr + 1;
++	rkvdec->sram_dma = dma_map_resource(rkvdec->dev, chunk->phys_addr,
++					    rkvdec->sram_size, DMA_BIDIRECTIONAL, 0);
++	if (dma_mapping_error(rkvdec->dev, rkvdec->sram_dma))
++		rkvdec->sram_size = 0;
++}
++
++/*
++ * The SRAM is mapped once, at an address the DMA API reserves, so buffers
++ * pack in it at the decoder's alignment rather than a page each.
++ */
++void rkvdec_sram_map(struct rkvdec_dev *rkvdec)
++{
++	if (!rkvdec->sram_pool)
++		return;
++
++	gen_pool_for_each_chunk(rkvdec->sram_pool, rkvdec_sram_chunk, rkvdec);
++	if (!rkvdec->sram_size) {
++		dev_warn(rkvdec->dev, "cannot map the SRAM, RCB will be stored in RAM\n");
++		rkvdec->sram_pool = NULL;
++	}
++}
++
++void rkvdec_sram_unmap(struct rkvdec_dev *rkvdec)
++{
++	if (rkvdec->sram_pool)
++		dma_unmap_resource(rkvdec->dev, rkvdec->sram_dma, rkvdec->sram_size,
++				   DMA_BIDIRECTIONAL, 0);
++}
++
++static void *rkvdec_rcb_sram_alloc(struct rkvdec_ctx *ctx, size_t size,
++				   dma_addr_t *dma)
++{
++	struct rkvdec_dev *rkvdec = ctx->dev;
++	dma_addr_t phys;
++	void *cpu;
++
++	cpu = gen_pool_dma_zalloc_align(rkvdec->sram_pool, size, &phys, RKVDEC_RCB_ALIGN);
++	if (cpu)
++		*dma = rkvdec->sram_dma + ((unsigned long)cpu - rkvdec->sram_virt);
++	return cpu;
++}
++
+ int rkvdec_allocate_rcb(struct rkvdec_ctx *ctx,
+ 			const struct rcb_size_info *size_info,
+-			size_t rcb_count)
++			size_t rcb_count, const enum rkvdec_rcb *sram_order)
+ {
+-	int ret, i;
+-	u32 width, height;
+ 	struct rkvdec_dev *rkvdec = ctx->dev;
+ 	struct rkvdec_rcb_config *cfg;
++	u32 width, height;
++	int i;
+ 
+ 	if (!size_info || !rcb_count) {
+ 		ctx->rcb_config = NULL;
+@@ -100,74 +166,47 @@ int rkvdec_allocate_rcb(struct rkvdec_ctx *ctx,
+ 	cfg = ctx->rcb_config;
+ 
+ 	cfg->rcb_bufs = devm_kzalloc(rkvdec->dev, sizeof(*cfg->rcb_bufs) * rcb_count, GFP_KERNEL);
+-	if (!cfg->rcb_bufs) {
+-		ret = -ENOMEM;
++	if (!cfg->rcb_bufs)
+ 		goto err_alloc;
+-	}
++	cfg->rcb_count = rcb_count;
+ 
+ 	width = ctx->decoded_fmt.fmt.pix_mp.width;
+ 	height = ctx->decoded_fmt.fmt.pix_mp.height;
+ 
+-	for (i = 0; i < rcb_count; i++) {
+-		void *cpu = NULL;
+-		dma_addr_t dma;
+-		size_t rcb_size = rkvdec_rcb_size(&size_info[i], width, height);
+-		enum rkvdec_alloc_type alloc_type = RKVDEC_ALLOC_SRAM;
+-
+-		/* Try allocating an SRAM buffer */
+-		if (ctx->dev->sram_pool) {
+-			if (rkvdec->iommu_domain)
+-				rcb_size = ALIGN(rcb_size, SZ_4K);
+-
+-			cpu = gen_pool_dma_zalloc_align(ctx->dev->sram_pool,
+-							rcb_size,
+-							&dma,
+-							SZ_4K);
+-		}
++	/* The SRAM first, to the buffers this stream uses, in the variant's order */
++	for (i = 0; rkvdec->sram_pool && sram_order && i < rcb_count; i++) {
++		struct rkvdec_aux_buf *buf = &cfg->rcb_bufs[sram_order[i]];
++		size_t size = rkvdec_rcb_stream_size(ctx, sram_order[i], width);
+ 
+-		/* If an IOMMU is used, map the SRAM address through it */
+-		if (cpu && rkvdec->iommu_domain) {
+-			unsigned long virt_addr = (unsigned long)cpu;
+-			phys_addr_t phys_addr = dma;
+-
+-			ret = iommu_map(rkvdec->iommu_domain, virt_addr, phys_addr,
+-					rcb_size, IOMMU_READ | IOMMU_WRITE, 0);
+-			if (ret) {
+-				gen_pool_free(ctx->dev->sram_pool,
+-					      (unsigned long)cpu,
+-					      rcb_size);
+-				cpu = NULL;
+-				goto ram_fallback;
+-			}
+-
+-			/*
+-			 * The registers will be configured with the virtual
+-			 * address so that it goes through the IOMMU
+-			 */
+-			dma = virt_addr;
++		if (!size)
++			continue;
++		size = ALIGN(size, RKVDEC_RCB_ALIGN);
++		buf->cpu = rkvdec_rcb_sram_alloc(ctx, size, &buf->dma);
++		if (buf->cpu) {
++			buf->size = size;
++			buf->type = RKVDEC_ALLOC_SRAM;
+ 		}
++	}
+ 
+-ram_fallback:
+-		/* Fallback to RAM */
+-		if (!cpu) {
+-			cpu = dma_alloc_coherent(ctx->dev->dev,
+-						 rcb_size,
+-						 &dma,
+-						 GFP_KERNEL);
+-			alloc_type = RKVDEC_ALLOC_DMA;
+-		}
++	for (i = 0; i < rcb_count; i++) {
++		struct rkvdec_aux_buf *buf = &cfg->rcb_bufs[i];
++		size_t size = rkvdec_rcb_size(&size_info[i], width, height);
+ 
+-		if (!cpu) {
+-			ret = -ENOMEM;
+-			goto err_alloc;
++		if (buf->cpu)
++			continue;
++		if (rkvdec->sram_pool && !sram_order) {
++			size = ALIGN(size, RKVDEC_RCB_ALIGN);
++			buf->cpu = rkvdec_rcb_sram_alloc(ctx, size, &buf->dma);
++			buf->type = RKVDEC_ALLOC_SRAM;
+ 		}
+-
+-		cfg->rcb_bufs[i].cpu = cpu;
+-		cfg->rcb_bufs[i].dma = dma;
+-		cfg->rcb_bufs[i].size = rcb_size;
+-		cfg->rcb_bufs[i].type = alloc_type;
+-
+-		cfg->rcb_count += 1;
++		if (!buf->cpu) {
++			buf->cpu = dma_alloc_coherent(rkvdec->dev, size, &buf->dma,
++						      GFP_KERNEL);
++			buf->type = RKVDEC_ALLOC_DMA;
++		}
++		if (!buf->cpu)
++			goto err_alloc;
++		buf->size = size;
+ 	}
+ 
+ 	return 0;
+@@ -175,5 +214,5 @@ ram_fallback:
+ err_alloc:
+ 	rkvdec_free_rcb(ctx);
+ 
+-	return ret;
++	return -ENOMEM;
+ }
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec-rcb.h b/drivers/media/platform/rockchip/rkvdec/rkvdec-rcb.h
+index 30e8002..c7e1f39 100644
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec-rcb.h
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec-rcb.h
+@@ -6,15 +6,34 @@
+  *  Detlev Casanova <detlev.casanova@collabora.com>
+  */
+ 
++#ifndef RKVDEC_RCB_H_
++#define RKVDEC_RCB_H_
++
+ #include <linux/types.h>
+ 
+ struct rkvdec_ctx;
++struct rkvdec_dev;
++
++#define RKVDEC_RCB_ALIGN	64
+ 
+ enum rcb_axis {
+ 	PIC_WIDTH = 0,
+ 	PIC_HEIGHT = 1
+ };
+ 
++enum rkvdec_rcb {
++	RKVDEC_RCB_INTRA_ROW,
++	RKVDEC_RCB_TRANSD_ROW,
++	RKVDEC_RCB_TRANSD_COL,
++	RKVDEC_RCB_STRMD_ROW,
++	RKVDEC_RCB_INTER_ROW,
++	RKVDEC_RCB_INTER_COL,
++	RKVDEC_RCB_DBLK_ROW,
++	RKVDEC_RCB_SAO_ROW,
++	RKVDEC_RCB_FBC_ROW,
++	RKVDEC_RCB_FILT_COL,
++};
++
+ struct rcb_size_info {
+ 	u8 multiplier;
+ 	enum rcb_axis axis;
+@@ -22,8 +41,12 @@ struct rcb_size_info {
+ 
+ int rkvdec_allocate_rcb(struct rkvdec_ctx *ctx,
+ 			const struct rcb_size_info *size_info,
+-			size_t rcb_count);
++			size_t rcb_count, const enum rkvdec_rcb *sram_order);
+ dma_addr_t rkvdec_rcb_buf_dma_addr(struct rkvdec_ctx *ctx, int id);
+ size_t rkvdec_rcb_buf_size(struct rkvdec_ctx *ctx, int id);
+ int rkvdec_rcb_buf_count(struct rkvdec_ctx *ctx);
+ void rkvdec_free_rcb(struct rkvdec_ctx *ctx);
++void rkvdec_sram_map(struct rkvdec_dev *rkvdec);
++void rkvdec_sram_unmap(struct rkvdec_dev *rkvdec);
++
++#endif /* RKVDEC_RCB_H_ */
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-h264.c b/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-h264.c
+index d663b3e..85c24c6 100644
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-h264.c
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-h264.c
+@@ -460,7 +460,30 @@ static int rkvdec_h264_try_ctrl(struct rkvdec_ctx *ctx, struct v4l2_ctrl *ctrl)
+ 	return 0;
+ }
+ 
++/* Rockchip MPP's sizes for the VDPU382, in bits */
++static u32 rkvdec_h264_rcb_bits(struct rkvdec_ctx *ctx, enum rkvdec_rcb id, u32 width)
++{
++	const struct v4l2_ctrl_h264_sps *sps =
++		v4l2_ctrl_find(&ctx->ctrl_hdl, V4L2_CID_STATELESS_H264_SPS)->p_cur.p;
++	bool mbaff = !(sps->flags & V4L2_H264_SPS_FLAG_FRAME_MBS_ONLY);
++	u32 depth = rkvdec_image_fmt_depth(ctx->image_fmt);
++	u32 planes = rkvdec_image_fmt_grey(ctx->image_fmt) ? 1 : 2;
++
++	width = ALIGN(width, 64);
++	switch (id) {
++	case RKVDEC_RCB_INTER_ROW:
++		return width * 42;
++	case RKVDEC_RCB_INTRA_ROW:
++		return width * (mbaff ? 44 : 11 * planes);
++	case RKVDEC_RCB_DBLK_ROW:
++		return width * (2 + (mbaff ? 12 : 6) * depth);
++	default:
++		return 0;
++	}
++}
++
+ const struct rkvdec_coded_fmt_ops rkvdec_vdpu381_h264_fmt_ops = {
++	.rcb_bits = rkvdec_h264_rcb_bits,
+ 	.adjust_fmt = rkvdec_h264_adjust_fmt,
+ 	.get_image_fmt = rkvdec_h264_get_image_fmt,
+ 	.start = rkvdec_h264_start,
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-hevc.c b/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-hevc.c
+index 28e8727..1518b06 100644
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-hevc.c
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-hevc.c
+@@ -629,7 +629,43 @@ static int rkvdec_hevc_try_ctrl(struct rkvdec_ctx *ctx, struct v4l2_ctrl *ctrl)
+ 	return 0;
+ }
+ 
++/* Rockchip MPP's sizes for the VDPU382, in bits */
++static u32 rkvdec_hevc_rcb_bits(struct rkvdec_ctx *ctx, enum rkvdec_rcb id, u32 width)
++{
++	const struct v4l2_ctrl_hevc_sps *sps =
++		v4l2_ctrl_find(&ctx->ctrl_hdl, V4L2_CID_STATELESS_HEVC_SPS)->p_cur.p;
++	const struct v4l2_ctrl_hevc_pps *pps =
++		v4l2_ctrl_find(&ctx->ctrl_hdl, V4L2_CID_STATELESS_HEVC_PPS)->p_cur.p;
++	u32 log2_ctu = sps->log2_min_luma_coding_block_size_minus3 + 3 +
++		       sps->log2_diff_max_min_luma_coding_block_size;
++	bool known = log2_ctu >= 4 && log2_ctu <= 6;
++	/* An unknown CTU takes the larger edge and SAO terms: 32's, and 16's */
++	u32 ctu = known ? 1 << log2_ctu : 16;
++	u32 edge = !known || ctu == 32 ? 4 : 2;
++	u32 depth = rkvdec_image_fmt_depth(ctx->image_fmt);
++	bool grey = rkvdec_image_fmt_grey(ctx->image_fmt);
++	u32 tile_cuts = pps->num_tile_columns_minus1;
++	u32 tile_align = tile_cuts * 64 * 8;
++
++	width = ALIGN(width, 64);
++	switch (id) {
++	case RKVDEC_RCB_INTER_ROW:
++		return width * 22 + tile_align;
++	case RKVDEC_RCB_INTRA_ROW:
++		return width * 11 * (grey ? 1 : 2) + tile_align;
++	case RKVDEC_RCB_DBLK_ROW:
++		return width * (edge + (grey ? 8 : 6) * depth) +
++		       tile_cuts * (depth == 8 ? 256 : 192) + tile_align;
++	case RKVDEC_RCB_SAO_ROW:
++		return width * (128 / ctu + (grey ? 3 : 2) * depth) +
++		       tile_cuts * (depth == 8 ? 160 : 128) + tile_align;
++	default:
++		return 0;
++	}
++}
++
+ const struct rkvdec_coded_fmt_ops rkvdec_vdpu381_hevc_fmt_ops = {
++	.rcb_bits = rkvdec_hevc_rcb_bits,
+ 	.adjust_fmt = rkvdec_hevc_adjust_fmt,
+ 	.start = rkvdec_hevc_start,
+ 	.stop = rkvdec_hevc_stop,
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec.c b/drivers/media/platform/rockchip/rkvdec/rkvdec.c
+index e4a9f99..534346a 100644
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec.c
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec.c
+@@ -1155,7 +1155,8 @@ static int rkvdec_start_streaming(struct vb2_queue *q, unsigned int count)
+ 	if (WARN_ON(!desc))
+ 		return -EINVAL;
+ 
+-	ret = rkvdec_allocate_rcb(ctx, variant->rcb_sizes, variant->num_rcb_sizes);
++	ret = rkvdec_allocate_rcb(ctx, variant->rcb_sizes, variant->num_rcb_sizes,
++				  variant->rcb_sram_order);
+ 	if (ret)
+ 		return ret;
+ 
+@@ -1866,6 +1867,20 @@ static const struct rcb_size_info vdpu381_rcb_sizes[] = {
+ 	{67,	PIC_HEIGHT},	// filtc col
+ };
+ 
++/* The order Rockchip's MPP gives the buffers the SRAM in, the busiest first */
++static const enum rkvdec_rcb vdpu381_rcb_sram_order[] = {
++	RKVDEC_RCB_DBLK_ROW,
++	RKVDEC_RCB_INTRA_ROW,
++	RKVDEC_RCB_SAO_ROW,
++	RKVDEC_RCB_INTER_ROW,
++	RKVDEC_RCB_FBC_ROW,
++	RKVDEC_RCB_TRANSD_ROW,
++	RKVDEC_RCB_STRMD_ROW,
++	RKVDEC_RCB_INTER_COL,
++	RKVDEC_RCB_FILT_COL,
++	RKVDEC_RCB_TRANSD_COL,
++};
++
+ static const struct rkvdec_variant_ops vdpu381_variant_ops = {
+ 	.irq_handler = vdpu381_irq_handler,
+ 	.colmv_size = rkvdec_colmv_size,
+@@ -1877,6 +1892,7 @@ static const struct rkvdec_variant vdpu381_variant = {
+ 	.num_coded_fmts = ARRAY_SIZE(vdpu381_coded_fmts),
+ 	.rcb_sizes = vdpu381_rcb_sizes,
+ 	.num_rcb_sizes = ARRAY_SIZE(vdpu381_rcb_sizes),
++	.rcb_sram_order = vdpu381_rcb_sram_order,
+ 	.ops = &vdpu381_variant_ops,
+ };
+ 
+@@ -2027,6 +2043,7 @@ static int rkvdec_probe(struct platform_device *pdev)
+ 			dev_warn(rkvdec->dev, "cannot alloc new empty domain\n");
+ 		}
+ 	}
++	rkvdec_sram_map(rkvdec);
+ 
+ 	return 0;
+ 
+@@ -2047,6 +2064,7 @@ static void rkvdec_remove(struct platform_device *pdev)
+ 	pm_runtime_disable(&pdev->dev);
+ 	pm_runtime_dont_use_autosuspend(&pdev->dev);
+ 
++	rkvdec_sram_unmap(rkvdec);
+ 	if (rkvdec->empty_domain)
+ 		iommu_domain_free(rkvdec->empty_domain);
+ }
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec.h b/drivers/media/platform/rockchip/rkvdec/rkvdec.h
+index b0174da..27ef848 100644
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec.h
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec.h
+@@ -22,6 +22,8 @@
+ #include <media/v4l2-device.h>
+ #include <media/v4l2-ioctl.h>
+ #include <media/v4l2-mem2mem.h>
++
++#include "rkvdec-rcb.h"
+ #include <media/videobuf2-core.h>
+ #include <media/videobuf2-dma-contig.h>
+ 
+@@ -85,6 +87,7 @@ struct rkvdec_variant {
+ 	size_t num_coded_fmts;
+ 	const struct rcb_size_info *rcb_sizes;
+ 	size_t num_rcb_sizes;
++	const enum rkvdec_rcb *rcb_sram_order;
+ 	const struct rkvdec_variant_ops *ops;
+ 	bool has_single_reg_region;
+ 	unsigned int quirks;
+@@ -102,6 +105,7 @@ struct rkvdec_coded_fmt_ops {
+ 	int (*try_ctrl)(struct rkvdec_ctx *ctx, struct v4l2_ctrl *ctrl);
+ 	enum rkvdec_image_fmt (*get_image_fmt)(struct rkvdec_ctx *ctx,
+ 					       struct v4l2_ctrl *ctrl);
++	u32 (*rcb_bits)(struct rkvdec_ctx *ctx, enum rkvdec_rcb id, u32 width);
+ };
+ 
+ enum rkvdec_image_fmt {
+@@ -113,6 +117,18 @@ enum rkvdec_image_fmt {
+ 	RKVDEC_IMG_FMT_400_8BIT,
+ };
+ 
++/* A stream's depth and chroma, unknown before its SPS: then the larger */
++static inline u32 rkvdec_image_fmt_depth(enum rkvdec_image_fmt fmt)
++{
++	return fmt == RKVDEC_IMG_FMT_420_8BIT || fmt == RKVDEC_IMG_FMT_422_8BIT ||
++	       fmt == RKVDEC_IMG_FMT_400_8BIT ? 8 : 10;
++}
++
++static inline bool rkvdec_image_fmt_grey(enum rkvdec_image_fmt fmt)
++{
++	return fmt == RKVDEC_IMG_FMT_400_8BIT;
++}
++
+ struct rkvdec_decoded_fmt_desc {
+ 	u32 fourcc;
+ 	enum rkvdec_image_fmt image_fmt;
+@@ -142,6 +158,9 @@ struct rkvdec_dev {
+ 	struct mutex vdev_lock; /* serializes ioctls */
+ 	struct delayed_work watchdog_work;
+ 	struct gen_pool *sram_pool;
++	unsigned long sram_virt;
++	dma_addr_t sram_dma;
++	size_t sram_size;
+ 	struct iommu_domain *iommu_domain;
+ 	struct iommu_domain *empty_domain;
+ 	const struct rkvdec_variant *variant;

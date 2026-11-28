@@ -1,0 +1,61 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] ASoC: rockchip: sai: Use the lanes a TDM stream needs
+
+In TDM mode the driver spreads a stream's channels over every routed
+lane, ignoring the slot count: two channels on four lanes give none per
+lane, and eight channels on one lane of two slots need a bit clock MCLK
+cannot give. Remember the TDM slot count, and use as many lanes as the
+channels need at that many slots each, as I2S mode does at two.
+
+An HDMI controller taking I2S with 32-bit slots, the RK3528's, then
+plays up to 8 channels over four lanes.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/sound/soc/rockchip/rockchip_sai.c b/sound/soc/rockchip/rockchip_sai.c
+--- a/sound/soc/rockchip/rockchip_sai.c
++++ b/sound/soc/rockchip/rockchip_sai.c
+@@ -63,6 +63,7 @@
+ 	bool has_playback;
+ 	bool is_master_mode;
+ 	bool is_tdm;
++	unsigned int tdm_slots;
+ 	bool initialized;
+ 	/* protects register writes that depend on the state of XFER[1:0] */
+ 	spinlock_t xfer_lock;
+@@ -588,18 +589,16 @@
+ 		lanes = sai->rx_lanes;
+ 	}
+ 
+-	if (!sai->is_tdm) {
+-		req_lanes = DIV_ROUND_UP(params_channels(params), 2);
+-		if (lanes < req_lanes) {
+-			dev_err(sai->dev, "not enough lanes (%d) for requested number of %s channels (%d)\n",
+-				lanes, reg == SAI_TXCR ? "playback" : "capture",
+-				params_channels(params));
+-			ret = -EINVAL;
+-			goto err_pm_put;
+-		} else {
+-			lanes = req_lanes;
+-		}
++	req_lanes = DIV_ROUND_UP(params_channels(params),
++				 sai->is_tdm ? sai->tdm_slots : 2);
++	if (lanes < req_lanes) {
++		dev_err(sai->dev, "not enough lanes (%d) for requested number of %s channels (%d)\n",
++			lanes, reg == SAI_TXCR ? "playback" : "capture",
++			params_channels(params));
++		ret = -EINVAL;
++		goto err_pm_put;
+ 	}
++	lanes = req_lanes;
+ 
+ 	dev_dbg(sai->dev, "using %d lanes totalling %d%s channels for %s\n",
+ 		lanes, params_channels(params), sai->is_tdm ? " (TDM)" : "",
+@@ -929,6 +928,7 @@
+ 	} else {
+ 		sai->is_tdm = true;
+ 	}
++	sai->tdm_slots = slots;
+ 
+ 	if (sw < 16 || sw > 32)
+ 		return -EINVAL;

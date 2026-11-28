@@ -1,5 +1,5 @@
 From: Artem Butusov <art.sormy@gmail.com>
-Subject: [PATCH] media: verisilicon: Reset the IOMMU after a timed out job
+Subject: [PATCH] media: verisilicon: Reset the core and its IOMMU after a failed job
 
 A job that never raises its interrupt is finished by the watchdog, which
 soft-resets the core, but the core's IOMMU is left as it stopped:
@@ -7,34 +7,39 @@ stalled on the write it faulted, so every later job fails until a
 reboot. Attach and detach an empty domain after the soft reset, as
 rkvdec does on an error, so the IOMMU is reset and the next job runs.
 
+A job that ends in an error, a bus error on a write the IOMMU faulted
+among them, leaves the core in the same state: end it through the same
+recovery, which can sleep, rather than straight from the interrupt; a
+corrupt stream fails jobs too, so only a timeout is logged.
+
 Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
- drivers/media/platform/verisilicon/hantro.h     |  2 ++
- drivers/media/platform/verisilicon/hantro_drv.c | 30 ++++++++++++++++++++++++++++++
- 2 files changed, 32 insertions(+)
+  drivers/media/platform/verisilicon/hantro.h     |    4 ++
+  drivers/media/platform/verisilicon/hantro_drv.c |   51 +++++++++++++++++++++--
+  2 files changed, 50 insertions(+), 5 deletions(-)
 
 diff --git a/drivers/media/platform/verisilicon/hantro.h b/drivers/media/platform/verisilicon/hantro.h
-index c0a40d3..7b30d69 100644
 --- a/drivers/media/platform/verisilicon/hantro.h
 +++ b/drivers/media/platform/verisilicon/hantro.h
-@@ -187,6 +187,7 @@ hantro_vdev_to_func(struct video_device *vdev)
+@@ -187,6 +187,8 @@
   *			dev_ macros.
   * @clocks:		Array of clock handles.
   * @resets:		Array of reset handles.
 + * @empty_domain:	An IOMMU domain attached and detached to reset the IOMMU.
++ * @job_failed:	The running job ended in an error, its recovery under way.
   * @reg_bases:		Mapped addresses of VPU registers.
   * @enc_base:		Mapped address of VPU encoder register for convenience.
   * @dec_base:		Mapped address of VPU decoder register for convenience.
-@@ -207,6 +208,7 @@ struct hantro_dev {
+@@ -207,6 +209,8 @@
  	struct device *dev;
  	struct clk_bulk_data *clocks;
  	struct reset_control *resets;
 +	struct iommu_domain *empty_domain;
++	bool job_failed;
  	void __iomem **reg_bases;
  	void __iomem *enc_base;
  	void __iomem *dec_base;
 diff --git a/drivers/media/platform/verisilicon/hantro_drv.c b/drivers/media/platform/verisilicon/hantro_drv.c
-index 00f30f8..15d6116 100644
 --- a/drivers/media/platform/verisilicon/hantro_drv.c
 +++ b/drivers/media/platform/verisilicon/hantro_drv.c
 @@ -11,6 +11,7 @@
@@ -45,10 +50,29 @@ index 00f30f8..15d6116 100644
  #include <linux/module.h>
  #include <linux/of.h>
  #include <linux/of_platform.h>
-@@ -116,6 +117,20 @@ void hantro_irq_done(struct hantro_dev *vpu,
- 	}
- }
- 
+@@ -109,10 +110,32 @@
+ 	 * the timeout expired. The watchdog is running,
+ 	 * and will take care of finishing the job.
+ 	 */
+-	if (cancel_delayed_work(&vpu->watchdog_work)) {
+-		if (result == VB2_BUF_STATE_DONE && ctx->codec_ops->done)
+-			ctx->codec_ops->done(ctx);
+-		hantro_job_finish(vpu, ctx, result);
++	if (!cancel_delayed_work(&vpu->watchdog_work))
++		return;
++
++	/* a failed job leaves the core and its IOMMU as a timed out one: the reset sleeps */
++	if (result == VB2_BUF_STATE_ERROR) {
++		vpu->job_failed = true;
++		schedule_delayed_work(&vpu->watchdog_work, 0);
++		return;
++	}
++
++	if (ctx->codec_ops->done)
++		ctx->codec_ops->done(ctx);
++	hantro_job_finish(vpu, ctx, result);
++}
++
 +/*
 + * A core stuck on the bus keeps its IOMMU stalled: after the codec's own
 + * soft reset, attach and detach an empty domain, which resets the IOMMU and
@@ -60,21 +84,25 @@ index 00f30f8..15d6116 100644
 +	if (vpu->empty_domain) {
 +		iommu_attach_device(vpu->empty_domain, vpu->dev);
 +		iommu_detach_device(vpu->empty_domain, vpu->dev);
-+	}
-+}
-+
- void hantro_watchdog(struct work_struct *work)
- {
- 	struct hantro_dev *vpu;
-@@ -128,6 +143,7 @@ void hantro_watchdog(struct work_struct *work)
- 		vpu_err("frame processing timed out!\n");
+ 	}
+ }
+ 
+@@ -125,9 +148,13 @@
+ 			   struct hantro_dev, watchdog_work);
+ 	ctx = v4l2_m2m_get_curr_priv(vpu->m2m_dev);
+ 	if (ctx) {
+-		vpu_err("frame processing timed out!\n");
++		/* a corrupt stream fails a job too: only a timeout is the kernel's to report */
++		if (!vpu->job_failed)
++			vpu_err("frame processing timed out!\n");
++		vpu->job_failed = false;
  		if (ctx->codec_ops->reset)
  			ctx->codec_ops->reset(ctx);
 +		hantro_iommu_reset(vpu);
  		hantro_job_finish(vpu, ctx, VB2_BUF_STATE_ERROR);
  	}
  }
-@@ -1109,6 +1125,11 @@ init_new_m2m_dev:
+@@ -1108,6 +1135,11 @@
  	return v4l2_m2m_init(&vpu_m2m_ops);
  }
  
@@ -86,7 +114,7 @@ index 00f30f8..15d6116 100644
  static int hantro_probe(struct platform_device *pdev)
  {
  	const struct of_device_id *match;
-@@ -1170,6 +1191,15 @@ static int hantro_probe(struct platform_device *pdev)
+@@ -1169,6 +1201,15 @@
  	if (IS_ERR(vpu->resets))
  		return PTR_ERR(vpu->resets);
  

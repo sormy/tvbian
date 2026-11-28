@@ -1,0 +1,132 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] crypto: rockchip: rk2: Recover from a failed job with the engine's own reset
+
+A cipher or hash job that times out or reports a DMA error pulsed the
+engine's CRU reset. Pulsed while its DMA is on the bus, that leaves the
+engine wedged: every later job times out too, until a reboot. One hash
+the RK3528 lacks, an HMAC over SHA512, did that at boot.
+
+Reset it as Rockchip's own driver does instead: interrupts off, the
+engine's soft reset (RST_CTL's SW_CC_RESET) polled until it clears, the
+cipher and hash control cleared, the interrupt status acknowledged. The
+next job then runs.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+  drivers/crypto/rockchip/rk2_crypto.c          | 20 ++++++++++++++++++++
+  drivers/crypto/rockchip/rk2_crypto.h          |  3 +++
+  drivers/crypto/rockchip/rk2_crypto_ahash.c    |  8 ++------
+  drivers/crypto/rockchip/rk2_crypto_skcipher.c |  8 ++------
+  4 files changed, 27 insertions(+), 12 deletions(-)
+
+diff --git a/drivers/crypto/rockchip/rk2_crypto.c b/drivers/crypto/rockchip/rk2_crypto.c
+index e9a4e86..2793f66 100644
+--- a/drivers/crypto/rockchip/rk2_crypto.c
++++ b/drivers/crypto/rockchip/rk2_crypto.c
+@@ -14,6 +14,7 @@
+ #include <linux/delay.h>
+ #include <linux/dma-mapping.h>
+ #include <linux/interrupt.h>
++#include <linux/iopoll.h>
+ #include <linux/module.h>
+ #include <linux/of.h>
+ #include <linux/platform_device.h>
+@@ -58,6 +59,25 @@ static void rk2_crypto_clear_irq(struct rk2_crypto_dev *rkc)
+ 	writel(RK2_CRYPTO_DMA_INT_ALL_MASK, rkc->reg + RK2_CRYPTO_DMA_INT_ST);
+ }
+ 
++/*
++ * The engine's own reset of its cipher, hash and DMA state, after a job that timed out or
++ * failed: a CRU reset pulsed while its DMA is on the bus leaves it wedged.
++ */
++void rk2_crypto_soft_reset(struct rk2_crypto_dev *rkc)
++{
++	u32 v;
++
++	rk2_crypto_disable_irq(rkc);
++	writel(RK2_CRYPTO_SW_CC_RESET | (RK2_CRYPTO_SW_CC_RESET << 16),
++	       rkc->reg + RK2_CRYPTO_RST_CTL);
++	if (readl_poll_timeout_atomic(rkc->reg + RK2_CRYPTO_RST_CTL, v, !v, 0,
++				      RK2_CRYPTO_RESET_POLL_US))
++		dev_err(rkc->dev, "soft reset did not complete\n");
++	writel(0xffff0000, rkc->reg + RK2_CRYPTO_BC_CTL);
++	writel(0xffff0000, rkc->reg + RK2_CRYPTO_HASH_CTL);
++	rk2_crypto_clear_irq(rkc);
++}
++
+ static int rk2_crypto_pm_suspend(struct device *dev)
+ {
+ 	struct rk2_crypto_dev *rkdev = dev_get_drvdata(dev);
+diff --git a/drivers/crypto/rockchip/rk2_crypto.h b/drivers/crypto/rockchip/rk2_crypto.h
+index db1cb6c..58c6257 100644
+--- a/drivers/crypto/rockchip/rk2_crypto.h
++++ b/drivers/crypto/rockchip/rk2_crypto.h
+@@ -27,6 +27,8 @@
+ 
+ #define RK2_CRYPTO_CLK_CTL		0x0000
+ #define RK2_CRYPTO_RST_CTL		0x0004
++#define RK2_CRYPTO_SW_CC_RESET		BIT(0)
++#define RK2_CRYPTO_RESET_POLL_US	1000
+ 
+ #define RK2_CRYPTO_DMA_INT_EN		0x0008
+ 
+@@ -257,6 +259,7 @@ struct rk2_crypto_template {
+ 	atomic_long_t stat_fb_sgdiff;
+ };
+ 
++void rk2_crypto_soft_reset(struct rk2_crypto_dev *rkc);
+ int rk2_cipher_run(struct crypto_engine *engine, void *async_req);
+ int rk2_hash_run(struct crypto_engine *engine, void *breq);
+ 
+diff --git a/drivers/crypto/rockchip/rk2_crypto_ahash.c b/drivers/crypto/rockchip/rk2_crypto_ahash.c
+index 543f233..178245a 100644
+--- a/drivers/crypto/rockchip/rk2_crypto_ahash.c
++++ b/drivers/crypto/rockchip/rk2_crypto_ahash.c
+@@ -467,9 +467,7 @@ int rk2_hash_run(struct crypto_engine *engine, void *breq)
+ 	if (!timeout) {
+ 		dev_err(rkc->dev, "DMA timeout\n");
+ 		err = -ETIMEDOUT;
+-		reset_control_assert(rkc->rst);
+-		udelay(10);
+-		reset_control_deassert(rkc->rst);
++		rk2_crypto_soft_reset(rkc);
+ 		synchronize_irq(rkc->irq);
+ 	}
+ 
+@@ -479,9 +477,7 @@ int rk2_hash_run(struct crypto_engine *engine, void *breq)
+ 	if (!rkc->status) {
+ 		dev_err(rkc->dev, "DMA error\n");
+ 		err = -EIO;
+-		reset_control_assert(rkc->rst);
+-		udelay(10);
+-		reset_control_deassert(rkc->rst);
++		rk2_crypto_soft_reset(rkc);
+ 		goto exit;
+ 	}
+ 
+diff --git a/drivers/crypto/rockchip/rk2_crypto_skcipher.c b/drivers/crypto/rockchip/rk2_crypto_skcipher.c
+index 238dbdb..d4fa50e 100644
+--- a/drivers/crypto/rockchip/rk2_crypto_skcipher.c
++++ b/drivers/crypto/rockchip/rk2_crypto_skcipher.c
+@@ -692,9 +692,7 @@ int rk2_cipher_run(struct crypto_engine *engine, void *async_req)
+ 		if (!timeout) {
+ 			dev_err(rkc->dev, "DMA timeout\n");
+ 			err = -ETIMEDOUT;
+-			reset_control_assert(rkc->rst);
+-			udelay(10);
+-			reset_control_deassert(rkc->rst);
++			rk2_crypto_soft_reset(rkc);
+ 			synchronize_irq(rkc->irq);
+ 		}
+ 
+@@ -714,9 +712,7 @@ int rk2_cipher_run(struct crypto_engine *engine, void *async_req)
+ 			rk2_print(rkc);
+ #endif
+ 			err = -EIO;
+-			reset_control_assert(rkc->rst);
+-			udelay(10);
+-			reset_control_deassert(rkc->rst);
++			rk2_crypto_soft_reset(rkc);
+ 			goto exit;
+ 		}
+ 

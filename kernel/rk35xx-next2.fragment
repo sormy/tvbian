@@ -79,5 +79,15 @@ CONFIG_VIDEO_ROCKCHIP_VDPP=m
 # the dma-buf heaps, built in: no device loads them, and a client allocates its own buffers there
 CONFIG_DMABUF_HEAPS_SYSTEM=y
 CONFIG_DMABUF_HEAPS_CMA=y
+# probe.py's copy through the DMA engine
+CONFIG_DMATEST=m
 # a TV remote's keys over HDMI CEC as input events, as the vendor kernel gives them
 CONFIG_MEDIA_CEC_RC=y
+# the crypto engine: Dawid Olesinski's RK3568/RK3588 driver, which the RK3528's engine is; the
+# kernel's self-tests check each algorithm it registers, their verdict in /proc/crypto
+CONFIG_CRYPTO_DEV_ROCKCHIP2=y
+CONFIG_CRYPTO_SELFTESTS=y
+# the engine's SM4 fallback, there when the engine registers
+CONFIG_CRYPTO_SM4_GENERIC=y
+# the remote and the power key wake the box from deep suspend
+CONFIG_ROCKCHIP_PM_CONFIG=y

@@ -1,0 +1,60 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] media: rockchip: rkvenc: A test parameter that fails the next VEPU540C encode
+
+For a debug build: fail_next_job leaves the next encode unstarted, so it
+times out (1), or moves its bitstream where nothing is mapped, so it
+faults on the IOMMU (2). The parameter clears itself.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+  .../platform/rockchip/rkvenc/rkvenc-vepu540c.c     | 30 ++++++++++++++++++++++
+  1 file changed, 30 insertions(+)
+
+diff --git a/drivers/media/platform/rockchip/rkvenc/rkvenc-vepu540c.c b/drivers/media/platform/rockchip/rkvenc/rkvenc-vepu540c.c
+index 6136867..487ab5d 100644
+--- a/drivers/media/platform/rockchip/rkvenc/rkvenc-vepu540c.c
++++ b/drivers/media/platform/rockchip/rkvenc/rkvenc-vepu540c.c
+@@ -936,6 +936,26 @@ static int vepu540c_img_build(const struct rkvenc_frame *f,
+ 	return 0;
+ }
+ 
++enum vepu540c_test_failure {
++	VEPU540C_TEST_NONE,
++	VEPU540C_TEST_TIMEOUT,
++	VEPU540C_TEST_FAULT,
++};
++
++static int fail_next_job;
++module_param(fail_next_job, int, 0644);
++MODULE_PARM_DESC(fail_next_job,
++		 "Test: the next encode is never started, so it times out (1), or writes where nothing is mapped (2)");
++
++/* An IOVA the DMA API allocates only when the space is nearly full */
++#define VEPU540C_UNMAPPED_IOVA	0x1000
++
++static const u32 vepu540c_bs_regs[] = {
++	VEPU540C_ADR_BSBT, VEPU540C_ADR_BSBB, VEPU540C_ADR_BSBS, VEPU540C_ADR_BSBR,
++	VEPU540C_JPEG_ADR_BSBT, VEPU540C_JPEG_ADR_BSBB, VEPU540C_JPEG_ADR_BSBS,
++	VEPU540C_JPEG_ADR_BSBR,
++};
++
+ static int vepu540c_run(struct rkvenc_dev *dev, const struct rkvenc_frame *f)
+ {
+ 	struct rkvenc_vepu540c_img *img = &dev->img540c;
+@@ -954,6 +974,16 @@ static int vepu540c_run(struct rkvenc_dev *dev, const struct rkvenc_frame *f)
+ 		     a <= vepu540c_write_ranges[i].last; a += 4)
+ 			writel(img->regs[a / 4], regs + a);
+ 
++	/* the recovery under test, as no picture makes a job time out or fault */
++	switch (xchg(&fail_next_job, VEPU540C_TEST_NONE)) {
++	case VEPU540C_TEST_TIMEOUT:
++		return 0;
++	case VEPU540C_TEST_FAULT:
++		for (i = 0; i < ARRAY_SIZE(vepu540c_bs_regs); i++)
++			writel(VEPU540C_UNMAPPED_IOVA, regs + vepu540c_bs_regs[i]);
++		break;
++	}
++
+ 	writel(FIELD_PREP(VEPU540C_ENC_STRT_CMD, VEPU540C_ENC_STRT_CMD_FRAME),
+ 	       regs + VEPU540C_ENC_STRT);
+ 	return 0;

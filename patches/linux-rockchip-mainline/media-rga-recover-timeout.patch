@@ -1,0 +1,218 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] media: rockchip: rga: End a job that never completes
+
+A job the RGA never finishes, as one writing past its destination limit,
+left its buffers queued and the device waiting forever: the process
+closing it stuck in v4l2_m2m_cancel_job, the RGA unusable until a reboot.
+
+Arm a watchdog for each job. Past it, reset the IOMMU by attaching an
+empty domain, then the core by its soft reset as the vendor kernel does,
+its clocks' resets and the busy bit cleared, and fail the job's buffers.
+An interrupt that comes after the watchdog leaves the job to it.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+  drivers/media/platform/rockchip/rga/rga-hw.c | 16 +++++++++
+  drivers/media/platform/rockchip/rga/rga-hw.h |  6 ++++
+  drivers/media/platform/rockchip/rga/rga.c    | 52 +++++++++++++++++++++++++++-
+  drivers/media/platform/rockchip/rga/rga.h    |  3 ++
+  4 files changed, 76 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/media/platform/rockchip/rga/rga-hw.c b/drivers/media/platform/rockchip/rga/rga-hw.c
+index a5283a0..2fed2f6 100644
+--- a/drivers/media/platform/rockchip/rga/rga-hw.c
++++ b/drivers/media/platform/rockchip/rga/rga-hw.c
+@@ -4,6 +4,7 @@
+  * Author: Jacob Chen <jacob-chen@iotwrt.com>
+  */
+ 
++#include <linux/iopoll.h>
+ #include <linux/pm_runtime.h>
+ 
+ #include "rga-hw.h"
+@@ -460,6 +461,19 @@ static void rga_hw_start(struct rockchip_rga *rga,
+ 	rga_write(rga, RGA_CMD_CTRL, 0x1);
+ }
+ 
++/* The core's own reset, as the vendor's: its clocks' soft resets, then the busy bit clear */
++static void rga_soft_reset(struct rockchip_rga *rga)
++{
++	u32 ctrl;
++
++	rga_write(rga, RGA_SYS_CTRL, RGA_SYS_CTRL_ACLK_SRESET |
++		  RGA_SYS_CTRL_CCLK_SRESET | RGA_SYS_CTRL_RST_PROTECT);
++	if (readl_poll_timeout(rga->regs + RGA_SYS_CTRL, ctrl,
++			       !(ctrl & RGA_SYS_CTRL_CMD_OP_ST), 1,
++			       RGA_RESET_TIMEOUT_US))
++		dev_err(rga->dev, "soft reset timed out\n");
++}
++
+ static bool rga_handle_irq(struct rockchip_rga *rga)
+ {
+ 	int intr;
+@@ -604,6 +618,7 @@ const struct rga_hw rga2_hw = {
+ 	.setup_cmdbuf = rga_hw_setup_cmdbuf,
+ 	.start = rga_hw_start,
+ 	.handle_irq = rga_handle_irq,
++	.soft_reset = rga_soft_reset,
+ 	.get_version = rga_get_version,
+ 	.adjust_and_map_format = rga_adjust_and_map_format,
+ 	.enum_format = rga_enum_format,
+@@ -627,6 +642,7 @@ const struct rga_hw rga2e_hw = {
+ 	.setup_cmdbuf = rga_hw_setup_cmdbuf,
+ 	.start = rga_hw_start,
+ 	.handle_irq = rga_handle_irq,
++	.soft_reset = rga_soft_reset,
+ 	.get_version = rga_get_version,
+ 	.adjust_and_map_format = rga_adjust_and_map_format,
+ 	.enum_format = rga_enum_format,
+diff --git a/drivers/media/platform/rockchip/rga/rga-hw.h b/drivers/media/platform/rockchip/rga/rga-hw.h
+index 14ffa5e..4e51862 100644
+--- a/drivers/media/platform/rockchip/rga/rga-hw.h
++++ b/drivers/media/platform/rockchip/rga/rga-hw.h
+@@ -23,6 +23,12 @@
+ /* Registers address */
+ #define RGA_SYS_CTRL 0x0000
+ #define RGA_CMD_CTRL 0x0004
++
++#define RGA_SYS_CTRL_CMD_OP_ST BIT(0)
++#define RGA_SYS_CTRL_ACLK_SRESET BIT(3)
++#define RGA_SYS_CTRL_CCLK_SRESET BIT(4)
++#define RGA_SYS_CTRL_RST_PROTECT BIT(6)
++#define RGA_RESET_TIMEOUT_US 1000
+ #define RGA_CMD_BASE 0x0008
+ #define RGA_INT 0x0010
+ #define RGA_MMU_CTRL0 0x0014
+diff --git a/drivers/media/platform/rockchip/rga/rga.c b/drivers/media/platform/rockchip/rga/rga.c
+index ea445bb..8a503e9 100644
+--- a/drivers/media/platform/rockchip/rga/rga.c
++++ b/drivers/media/platform/rockchip/rga/rga.c
+@@ -9,6 +9,7 @@
+ #include <linux/delay.h>
+ #include <linux/fs.h>
+ #include <linux/interrupt.h>
++#include <linux/iommu.h>
+ #include <linux/module.h>
+ #include <linux/of.h>
+ #include <linux/pm_runtime.h>
+@@ -16,6 +17,7 @@
+ #include <linux/sched.h>
+ #include <linux/slab.h>
+ #include <linux/timer.h>
++#include <linux/workqueue.h>
+ 
+ #include <linux/platform_device.h>
+ #include <media/v4l2-device.h>
+@@ -31,6 +33,9 @@
+ static int debug;
+ module_param(debug, int, 0644);
+ 
++/* a 4096x4096 job takes tens of milliseconds */
++#define RGA_WATCHDOG_MS 1000
++
+ static void device_run(void *prv)
+ {
+ 	struct rga_ctx *ctx = prv;
+@@ -53,6 +58,7 @@ static void device_run(void *prv)
+ 	dst = v4l2_m2m_next_dst_buf(ctx->fh.m2m_ctx);
+ 
+ 	rga->hw->start(rga, vb_to_rga(src), vb_to_rga(dst));
++	schedule_delayed_work(&rga->watchdog, msecs_to_jiffies(RGA_WATCHDOG_MS));
+ }
+ 
+ static irqreturn_t rga_isr(int irq, void *prv)
+@@ -63,7 +69,8 @@ static irqreturn_t rga_isr(int irq, void *prv)
+ 	if (pm_runtime_get_if_in_use(rga->dev) <= 0)
+ 		return IRQ_NONE;
+ 
+-	if (rga->hw->handle_irq(rga)) {
++	/* past its time the watchdog has the job */
++	if (rga->hw->handle_irq(rga) && cancel_delayed_work(&rga->watchdog)) {
+ 		struct vb2_v4l2_buffer *src, *dst;
+ 		struct rga_ctx *ctx = rga->curr;
+ 
+@@ -90,6 +97,39 @@ static irqreturn_t rga_isr(int irq, void *prv)
+ 	return IRQ_HANDLED;
+ }
+ 
++/*
++ * A stalled IOMMU holds the core's reset back: reset it first, attaching an
++ * empty domain, then the core. The CRU reset stays out: pulsed under a busy
++ * core it hangs the bus.
++ */
++static void rga_watchdog(struct work_struct *work)
++{
++	struct rockchip_rga *rga = container_of(to_delayed_work(work), struct rockchip_rga,
++						watchdog);
++	struct iommu_group *group;
++	struct rga_ctx *ctx = rga->curr;
++
++	if (!ctx)
++		return;
++	dev_err(rga->dev, "job timed out, resetting\n");
++	group = iommu_group_get(rga->dev);
++	if (group && rga->empty_domain && !iommu_attach_group(rga->empty_domain, group))
++		iommu_detach_group(rga->empty_domain, group);
++	iommu_group_put(group);
++	if (rga->hw->soft_reset)
++		rga->hw->soft_reset(rga);
++
++	rga->curr = NULL;
++	v4l2_m2m_buf_done(v4l2_m2m_src_buf_remove(ctx->fh.m2m_ctx), VB2_BUF_STATE_ERROR);
++	v4l2_m2m_buf_done(v4l2_m2m_dst_buf_remove(ctx->fh.m2m_ctx), VB2_BUF_STATE_ERROR);
++	v4l2_m2m_job_finish(rga->m2m_dev, ctx->fh.m2m_ctx);
++}
++
++static void rga_free_domain(void *domain)
++{
++	iommu_domain_free(domain);
++}
++
+ static const struct v4l2_m2m_ops rga_m2m_ops = {
+ 	.device_run = device_run,
+ };
+@@ -784,6 +824,15 @@ static int rga_probe(struct platform_device *pdev)
+ 	rga->dev = &pdev->dev;
+ 	spin_lock_init(&rga->ctrl_lock);
+ 	mutex_init(&rga->mutex);
++	INIT_DELAYED_WORK(&rga->watchdog, rga_watchdog);
++	if (iommu_get_domain_for_dev(&pdev->dev)) {
++		rga->empty_domain = iommu_paging_domain_alloc(&pdev->dev);
++		if (IS_ERR(rga->empty_domain))
++			rga->empty_domain = NULL;
++		else if (devm_add_action_or_reset(&pdev->dev, rga_free_domain,
++						  rga->empty_domain))
++			return -ENOMEM;
++	}
+ 
+ 	ret = rga_parse_dt(rga);
+ 	if (ret)
+@@ -884,6 +933,7 @@ static void rga_remove(struct platform_device *pdev)
+ 
+ 	video_unregister_device(rga->vfd);
+ 	devm_free_irq(rga->dev, rga->irq, rga);
++	cancel_delayed_work_sync(&rga->watchdog);
+ 	v4l2_m2m_release(rga->m2m_dev);
+ 	v4l2_device_unregister(&rga->v4l2_dev);
+ 
+diff --git a/drivers/media/platform/rockchip/rga/rga.h b/drivers/media/platform/rockchip/rga/rga.h
+index 77a675d..00d977e 100644
+--- a/drivers/media/platform/rockchip/rga/rga.h
++++ b/drivers/media/platform/rockchip/rga/rga.h
+@@ -84,6 +84,8 @@ struct rockchip_rga {
+ 	spinlock_t ctrl_lock;
+ 
+ 	struct rga_ctx *curr;
++	struct delayed_work watchdog;	/* ends a job that never ended */
++	struct iommu_domain *empty_domain;
+ 
+ 	const struct rga_hw *hw;
+ };
+@@ -157,6 +159,7 @@ struct rga_hw {
+ 	void (*start)(struct rockchip_rga *rga,
+ 		      struct rga_vb_buffer *src, struct rga_vb_buffer *dst);
+ 	bool (*handle_irq)(struct rockchip_rga *rga);
++	void (*soft_reset)(struct rockchip_rga *rga);
+ 	void (*get_version)(struct rockchip_rga *rga);
+ 	void *(*adjust_and_map_format)(struct rga_ctx *ctx,
+ 				       struct v4l2_pix_format_mplane *format,

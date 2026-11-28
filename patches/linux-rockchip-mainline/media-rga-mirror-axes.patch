@@ -1,0 +1,40 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] media: rockchip: rga: Mirror along the axis the control names
+
+RGA_SRC_MIRR_MODE_X mirrors the picture left to right, MODE_Y top to
+bottom, yet the driver set X for V4L2_CID_VFLIP and Y for HFLIP: each
+flip control turned the picture the other way. Measured on an RK3528's
+RGA2, an NV12 frame against FFmpeg's hflip and vflip: HFLIP matched vflip
+exactly, VFLIP hflip, both together a 180 degree turn. Swap the two, for
+the source's mirror mode and for the destination corner chosen with it.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/drivers/media/platform/rockchip/rga/rga-hw.c b/drivers/media/platform/rockchip/rga/rga-hw.c
+--- a/drivers/media/platform/rockchip/rga/rga-hw.c
++++ b/drivers/media/platform/rockchip/rga/rga-hw.c
+@@ -221,10 +221,10 @@
+ 		}
+ 	}
+ 
+-	if (ctx->vflip)
++	if (ctx->hflip)
+ 		src_info.data.mir_mode |= RGA_SRC_MIRR_MODE_X;
+ 
+-	if (ctx->hflip)
++	if (ctx->vflip)
+ 		src_info.data.mir_mode |= RGA_SRC_MIRR_MODE_Y;
+ 
+ 	switch (ctx->rotate) {
+@@ -353,9 +353,9 @@
+ 	dst_x = ctx->out.crop.left;
+ 	dst_y = ctx->out.crop.top;
+ 
+-	if (ctx->vflip)
+-		mir_mode |= RGA_SRC_MIRR_MODE_X;
+ 	if (ctx->hflip)
++		mir_mode |= RGA_SRC_MIRR_MODE_X;
++	if (ctx->vflip)
+ 		mir_mode |= RGA_SRC_MIRR_MODE_Y;
+ 
+ 	switch (ctx->rotate) {

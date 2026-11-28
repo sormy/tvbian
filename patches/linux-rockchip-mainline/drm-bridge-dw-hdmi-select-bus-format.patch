@@ -1,0 +1,87 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] drm/bridge: dw-hdmi: Let a sole bridge pick its bus format
+
+Where dw-hdmi is the encoder's only bridge it offers MEDIA_BUS_FMT_FIXED,
+which the platform glue takes as RGB888: no deep colour and no YCbCr
+4:2:0, whatever the sink lists and max bpc asks. A platform that sets
+select_bus_format instead gets the formats best first: 10 bits where max
+bpc and the sink allow, then 8, RGB before YCbCr 4:2:0 at each depth,
+each only at a TMDS rate the sink takes. 10-bit 4K60 then goes out as
+YCbCr 4:2:0 at 371.25 MHz, where RGB would need 742.5.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c b/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
+--- a/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
++++ b/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
+@@ -2656,12 +2656,45 @@
+ /* Can return a maximum of 11 possible output formats for a mode/connector */
+ #define MAX_OUTPUT_SEL_FORMATS	11
+ 
++/*
++ * The formats a sole bridge offers, best first: 10 bits where max bpc and
++ * the sink allow, then 8; at each depth RGB, then YCbCr 4:2:0 where the
++ * sink takes the mode so, each only at a TMDS rate the sink takes.
++ */
++static unsigned int dw_hdmi_select_bus_fmts(const struct drm_connector *conn,
++					    const struct drm_display_mode *mode,
++					    u8 max_bpc, u32 *fmts)
++{
++	const struct drm_display_info *info = &conn->display_info;
++	unsigned int max_tmds = info->max_tmds_clock ?: 340000;
++	bool rgb = !drm_mode_is_420_only(info, mode);
++	bool y420 = conn->ycbcr_420_allowed &&
++		    (drm_mode_is_420_only(info, mode) ||
++		     drm_mode_is_420_also(info, mode));
++	unsigned int i = 0;
++
++	if (max_bpc >= 10 && info->bpc >= 10) {
++		if (rgb && mode->clock * 10 / 8 <= max_tmds)
++			fmts[i++] = MEDIA_BUS_FMT_RGB101010_1X30;
++		if (y420 && (info->hdmi.y420_dc_modes & DRM_EDID_YCBCR420_DC_30) &&
++		    mode->clock / 2 * 10 / 8 <= max_tmds)
++			fmts[i++] = MEDIA_BUS_FMT_UYYVYY10_0_5X30;
++	}
++	if (rgb)
++		fmts[i++] = MEDIA_BUS_FMT_RGB888_1X24;
++	if (y420)
++		fmts[i++] = MEDIA_BUS_FMT_UYYVYY8_0_5X24;
++
++	return i;
++}
++
+ static u32 *dw_hdmi_bridge_atomic_get_output_bus_fmts(struct drm_bridge *bridge,
+ 					struct drm_bridge_state *bridge_state,
+ 					struct drm_crtc_state *crtc_state,
+ 					struct drm_connector_state *conn_state,
+ 					unsigned int *num_output_fmts)
+ {
++	struct dw_hdmi *hdmi = bridge->driver_private;
+ 	struct drm_connector *conn = conn_state->connector;
+ 	struct drm_display_info *info = &conn->display_info;
+ 	struct drm_display_mode *mode = &crtc_state->mode;
+@@ -2681,6 +2714,12 @@
+ 	/* If dw-hdmi is the first or only bridge, avoid negociating with ourselves */
+ 	if (list_is_singular(&bridge->encoder->bridge_chain) ||
+ 	    list_is_first(&bridge->chain_node, &bridge->encoder->bridge_chain)) {
++		if (hdmi->plat_data->select_bus_format) {
++			*num_output_fmts = dw_hdmi_select_bus_fmts(conn, mode, max_bpc,
++								   output_fmts);
++			return output_fmts;
++		}
++
+ 		*num_output_fmts = 1;
+ 		output_fmts[0] = MEDIA_BUS_FMT_FIXED;
+ 
+diff --git a/include/drm/bridge/dw_hdmi.h b/include/drm/bridge/dw_hdmi.h
+--- a/include/drm/bridge/dw_hdmi.h
++++ b/include/drm/bridge/dw_hdmi.h
+@@ -138,6 +138,8 @@
+ 	bool use_drm_infoframe;
+ 	bool ycbcr_420_allowed;
+ 	bool dblclk_allowed;
++	/* a sole bridge picks its bus format by the sink and the TMDS rate */
++	bool select_bus_format;
+ 
+ 	/*
+ 	 * Private data passed to all the .mode_valid() and .configure_phy()

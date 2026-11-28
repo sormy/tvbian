@@ -1,0 +1,101 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] media: rockchip: rkvenc: Hand out the parameter sets after start_streaming
+
+In separate header mode, buf_queue completes the first CAPTURE buffer with
+the parameter sets. vb2 queues the buffers waiting before STREAMON ahead
+of start_streaming, so that buffer is done before start_streaming runs; if
+start_streaming then fails, it sits on the done list and vb2 warns. Leave
+the buffers queued before start_streaming to the m2m list, and let a
+successful start_streaming take the first of them for the parameter sets.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/drivers/media/platform/rockchip/rkvenc/rkvenc-v4l2.c b/drivers/media/platform/rockchip/rkvenc/rkvenc-v4l2.c
+--- a/drivers/media/platform/rockchip/rkvenc/rkvenc-v4l2.c
++++ b/drivers/media/platform/rockchip/rkvenc/rkvenc-v4l2.c
+@@ -308,6 +308,33 @@
+ 	return 0;
+ }
+ 
++/* The parameter sets take a CAPTURE buffer of their own */
++static bool rkvenc_wants_header_buf(struct rkvenc_ctx *ctx)
++{
++	return ctx->header_pending && ctx->codec != RKVENC_CODEC_JPEG &&
++	       ctx->c.header_mode == V4L2_MPEG_VIDEO_HEADER_MODE_SEPARATE;
++}
++
++static void rkvenc_header_buf_done(struct rkvenc_ctx *ctx,
++				   struct vb2_v4l2_buffer *vbuf)
++{
++	struct vb2_buffer *vb = &vbuf->vb2_buf;
++	u8 *vaddr = vb2_plane_vaddr(vb, 0);
++
++	if (vaddr) {
++		rkvenc_ensure_header(ctx);
++		if (rkvenc_copy_headers(ctx, vaddr, vb2_plane_size(vb, 0)) < 0)
++			vb2_set_plane_payload(vb, 0, 0);
++		else
++			vb2_set_plane_payload(vb, 0, ctx->hdr_len);
++	} else {
++		vb2_set_plane_payload(vb, 0, 0);
++	}
++	vbuf->field = V4L2_FIELD_NONE;
++	v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_DONE);
++	ctx->header_pending = false;
++}
++
+ static void rkvenc_buf_queue(struct vb2_buffer *vb)
+ {
+ 	struct rkvenc_ctx *ctx = vb2_get_drv_priv(vb->vb2_queue);
+@@ -322,26 +349,10 @@
+ 			return;
+ 		}
+ 
+-		/* The parameter sets take a CAPTURE buffer of their own */
+-		if (ctx->header_pending && ctx->codec != RKVENC_CODEC_JPEG &&
+-		    ctx->c.header_mode ==
+-			V4L2_MPEG_VIDEO_HEADER_MODE_SEPARATE) {
+-			u8 *vaddr = vb2_plane_vaddr(vb, 0);
+-
+-			if (vaddr) {
+-				rkvenc_ensure_header(ctx);
+-				if (rkvenc_copy_headers(ctx, vaddr,
+-							vb2_plane_size(vb, 0)) < 0)
+-					vb2_set_plane_payload(vb, 0, 0);
+-				else
+-					vb2_set_plane_payload(vb, 0,
+-							     ctx->hdr_len);
+-			} else {
+-				vb2_set_plane_payload(vb, 0, 0);
+-			}
+-			vbuf->field = V4L2_FIELD_NONE;
+-			v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_DONE);
+-			ctx->header_pending = false;
++		/* Not before start_streaming: a failed one could not take it back */
++		if (vb2_start_streaming_called(vb->vb2_queue) &&
++		    rkvenc_wants_header_buf(ctx)) {
++			rkvenc_header_buf_done(ctx, vbuf);
+ 			return;
+ 		}
+ 	}
+@@ -368,6 +379,7 @@
+ static int rkvenc_start_streaming(struct vb2_queue *q, unsigned int count)
+ {
+ 	struct rkvenc_ctx *ctx = vb2_get_drv_priv(q);
++	struct vb2_v4l2_buffer *vbuf;
+ 	int ret;
+ 
+ 	if (V4L2_TYPE_IS_OUTPUT(q->type))
+@@ -397,6 +409,12 @@
+ 	rkvenc_rc_init(ctx);
+ 	rkvenc_gop_init(ctx);
+ 	ctx->joined_header_done = false;
++
++	if (rkvenc_wants_header_buf(ctx)) {
++		vbuf = v4l2_m2m_dst_buf_remove(ctx->m2m_ctx);
++		if (vbuf)
++			rkvenc_header_buf_done(ctx, vbuf);
++	}
+ 	return 0;
+ }
+ 

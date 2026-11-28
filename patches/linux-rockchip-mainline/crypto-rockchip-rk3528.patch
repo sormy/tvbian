@@ -1,0 +1,175 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] crypto: rockchip: rk2: The RK3528's engine, by its version registers
+
+The RK3528's engine flags in its version registers the hashes and AES
+modes it implements, as the vendor's driver reads them: SHA-384 and
+SHA-512 it lacks, and a SHA-512 request timed out on its DMA, failing
+the self-tests of it and of SHA-224 beside it. Match the RK3528, and
+register only what its engine says it implements.
+
+From version 4, the RK3528's, the engine flags no valid hash: its
+digest is ready once its DMA is done, and polling for the flag timed
+out now and then, failing a different hash's self-test each boot. Poll
+for it only before version 4, as the vendor's driver does.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/drivers/crypto/rockchip/rk2_crypto.c b/drivers/crypto/rockchip/rk2_crypto.c
+--- a/drivers/crypto/rockchip/rk2_crypto.c
++++ b/drivers/crypto/rockchip/rk2_crypto.c
+@@ -23,6 +23,11 @@
+ 	.num_clks = 3,
+ };
+ 
++static const struct rk2_variant rk3528_variant = {
++	.num_clks = 3,
++	.version_regs = true,
++};
++
+ static int rk2_crypto_get_clks(struct rk2_crypto_dev *dev)
+ {
+ 	dev->num_clks = devm_clk_bulk_get_all(dev->dev, &dev->clks);
+@@ -567,6 +572,57 @@
+ #endif
+ }
+ 
++/* Whether the engine implements a template's hash or AES mode, by its version registers */
++static bool rk2_crypto_offered(struct rk2_crypto_dev *rkc,
++			       const struct rk2_crypto_template *t)
++{
++	u32 aes = readl(rkc->reg + CRYPTO_AES_VERSION);
++	u32 hash = readl(rkc->reg + CRYPTO_HASH_VERSION);
++
++	if (t->type == CRYPTO_ALG_TYPE_SKCIPHER) {
++		switch (t->rk2_mode) {
++		case RK2_CRYPTO_AES_ECB:
++			return aes & CRYPTO_AES_ECB_FLAG;
++		case RK2_CRYPTO_AES_CBC:
++			return aes & CRYPTO_AES_CBC_FLAG;
++		case RK2_CRYPTO_AES_XTS:
++			return aes & CRYPTO_AES_XTS_FLAG;
++		}
++		return false;
++	}
++
++	switch (t->rk2_mode) {
++	case RK2_CRYPTO_SHA1:
++		return hash & CRYPTO_HASH_SHA1_FLAG;
++	case RK2_CRYPTO_SHA224:
++		return hash & CRYPTO_HASH_SHA224_FLAG;
++	case RK2_CRYPTO_SHA256:
++		return hash & CRYPTO_HASH_SHA256_FLAG;
++	case RK2_CRYPTO_SHA384:
++		return hash & CRYPTO_HASH_SHA384_FLAG;
++	case RK2_CRYPTO_SHA512:
++		return hash & CRYPTO_HASH_SHA512_FLAG;
++	case RK2_CRYPTO_MD5:
++		return hash & CRYPTO_HASH_MD5_FLAG;
++	case RK2_CRYPTO_SM3:
++		return hash & CRYPTO_HASH_SM3_FLAG;
++	}
++	return false;
++}
++
++/* Keeps the templates the engine implements, where it says which */
++static void rk2_crypto_keep_offered(struct rk2_crypto_dev *rkc)
++{
++	int i, n = 0;
++
++	if (!rkc->variant->version_regs)
++		return;
++	for (i = 0; i < rkc->num_algs; i++)
++		if (rk2_crypto_offered(rkc, &rkc->algs[i]))
++			rkc->algs[n++] = rkc->algs[i];
++	rkc->num_algs = n;
++}
++
+ static int rk2_crypto_register(struct rk2_crypto_dev *rkc)
+ {
+ 	int i, k, err = 0;
+@@ -609,6 +665,9 @@
+ }
+ 
+ static const struct of_device_id crypto_of_id_table[] = {
++	{.compatible = "rockchip,rk3528-crypto",
++	 .data = &rk3528_variant,
++	 },
+ 	{.compatible = "rockchip,rk3568-crypto",
+ 	 .data = &rk3568_variant,
+ 	 },
+@@ -713,6 +772,7 @@
+ 		err = -ENOMEM;
+ 		goto err_pm_put;
+ 	}
++	rk2_crypto_keep_offered(rkc);
+ 
+ 	err = rk2_crypto_register(rkc);
+ 	if (err) {
+diff --git a/drivers/crypto/rockchip/rk2_crypto.h b/drivers/crypto/rockchip/rk2_crypto.h
+--- a/drivers/crypto/rockchip/rk2_crypto.h
++++ b/drivers/crypto/rockchip/rk2_crypto.h
+@@ -8,6 +8,7 @@
+ #ifndef __RK2_CRYPTO_H__
+ #define __RK2_CRYPTO_H__
+ 
++#include <linux/bitfield.h>
+ #include <crypto/aes.h>
+ #include <crypto/engine.h>
+ #include <crypto/internal/hash.h>
+@@ -132,10 +133,23 @@
+ #define CRYPTO_DES_VERSION		0x0684
+ #define CRYPTO_SM4_VERSION		0x0688
+ #define CRYPTO_HASH_VERSION		0x068C
++#define CRYPTO_AES_ECB_FLAG		BIT(0)
++#define CRYPTO_AES_CBC_FLAG		BIT(1)
++#define CRYPTO_AES_XTS_FLAG		BIT(6)
++#define CRYPTO_HASH_SHA1_FLAG		BIT(0)
++#define CRYPTO_HASH_SHA224_FLAG		BIT(1)
++#define CRYPTO_HASH_SHA256_FLAG		BIT(2)
++#define CRYPTO_HASH_SHA384_FLAG		BIT(3)
++#define CRYPTO_HASH_SHA512_FLAG		BIT(4)
++#define CRYPTO_HASH_MD5_FLAG		BIT(7)
++#define CRYPTO_HASH_SM3_FLAG		BIT(8)
+ #define CRYPTO_HMAC_VERSION		0x0690
+ #define CRYPTO_RNG_VERSION		0x0694
+ #define CRYPTO_PKA_VERSION		0x0698
+ #define CRYPTO_CRYPTO_VERSION		0x06F0
++#define     CRYPTO_VERSION_MAJOR		GENMASK(31, 24)
++/* from v4 the engine flags no hash valid: its digest is ready with its DMA done */
++#define CRYPTO_VERSION_HASH_READY	4
+ 
+ #define RK2_LLI_DMA_CTRL_SRC_INT	BIT(10)
+ #define RK2_LLI_DMA_CTRL_DST_INT	BIT(9)
+@@ -161,6 +175,8 @@
+ 
+ struct rk2_variant {
+ 	int num_clks;
++	/* the engine flags the hashes and AES modes it implements */
++	bool version_regs;
+ };
+ 
+ struct rk2_crypto_dev {
+diff --git a/drivers/crypto/rockchip/rk2_crypto_ahash.c b/drivers/crypto/rockchip/rk2_crypto_ahash.c
+--- a/drivers/crypto/rockchip/rk2_crypto_ahash.c
++++ b/drivers/crypto/rockchip/rk2_crypto_ahash.c
+@@ -459,12 +459,14 @@
+ 		goto exit;
+ 	}
+ 
+-	err =
+-	    readl_poll_timeout_atomic(rkc->reg + RK2_CRYPTO_HASH_VALID, v,
+-				      v == 1, 10, 1000);
+-	if (err) {
+-		dev_err(rkc->dev, "Hash result not valid\n");
+-		goto exit;
++	if (FIELD_GET(CRYPTO_VERSION_MAJOR, readl(rkc->reg + CRYPTO_CRYPTO_VERSION)) <
++	    CRYPTO_VERSION_HASH_READY) {
++		err = readl_poll_timeout_atomic(rkc->reg + RK2_CRYPTO_HASH_VALID, v,
++						v == 1, 10, 1000);
++		if (err) {
++			dev_err(rkc->dev, "Hash result not valid\n");
++			goto exit;
++		}
+ 	}
+ 
+ 	/*

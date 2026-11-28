@@ -1,0 +1,682 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] media: rkvenc: The RK3528's source formats
+
+The VEPU540C takes its source in YUV 4:2:0 and 4:2:2, semi-planar,
+planar or packed, and in 32-, 24- and 16-bit RGB, which it converts to
+BT.601 YCbCr itself, as the vendor's MPP sets it; the driver offered
+NV12 alone. Offer them on the RK3528: describe each by the encoder's
+format code and its swap of red and blue or U and V and of alpha, lay a
+source out by v4l2_format_info(), and program the VEPU540C's video and
+JPEG sources from that.
+
+An RGB source is converted to limited range for H.264 and HEVC, whose
+sequence headers now say so, and to full range for JPEG, as JFIF has it.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/drivers/media/platform/rockchip/rkvenc/rkvenc-h264.c b/drivers/media/platform/rockchip/rkvenc/rkvenc-h264.c
+--- a/drivers/media/platform/rockchip/rkvenc/rkvenc-h264.c
++++ b/drivers/media/platform/rockchip/rkvenc/rkvenc-h264.c
+@@ -57,6 +57,7 @@
+ 	seq->beta_offset = ctx->c.lf_beta;
+ 	seq->timing = true;
+ 	seq->fps = ctx->fps ?: 30;
++	seq->bt601_signal = rkvenc_rgb_source(ctx);
+ 
+ 	return rkvenc_h264_headers_write(seq, ctx->hdr, RKVENC_HDR_MAX);
+ }
+diff --git a/drivers/media/platform/rockchip/rkvenc/rkvenc-hevc.c b/drivers/media/platform/rockchip/rkvenc/rkvenc-hevc.c
+--- a/drivers/media/platform/rockchip/rkvenc/rkvenc-hevc.c
++++ b/drivers/media/platform/rockchip/rkvenc/rkvenc-hevc.c
+@@ -43,6 +43,7 @@
+ 	seq->beta_offset = ctx->c.hevc_beta_offset;
+ 	seq->tc_offset = ctx->c.hevc_tc_offset;
+ 	seq->strong_intra_smoothing = ctx->c.hevc_strong_intra;
++	seq->bt601_signal = rkvenc_rgb_source(ctx);
+ 	seq->cabac_init_present = ctx->c.hevc_cabac_init;
+ 
+ 	return rkvenc_hevc_headers_write(seq, ctx->hdr, RKVENC_HDR_MAX);
+diff --git a/drivers/media/platform/rockchip/rkvenc/rkvenc-nal.c b/drivers/media/platform/rockchip/rkvenc/rkvenc-nal.c
+--- a/drivers/media/platform/rockchip/rkvenc/rkvenc-nal.c
++++ b/drivers/media/platform/rockchip/rkvenc/rkvenc-nal.c
+@@ -6,6 +6,10 @@
+ 
+ #include "rkvenc-nal.h"
+ 
++#define VUI_VIDEO_FORMAT_UNSPECIFIED	5
++#define VUI_UNSPECIFIED			2
++#define VUI_MATRIX_BT601		6
++
+ #define NAL_RBSP_MAX		256
+ 
+ #define H264_NAL_SPS		7
+@@ -89,9 +93,27 @@
+ 	return pos;
+ }
+ 
++/*
++ * video_signal_type: limited range, BT.601 matrix, primaries and transfer
++ * unspecified; what the encoder makes of an RGB source.
++ */
++static void vui_bt601_write(struct nal_bw *bw)
++{
++	bw_put(bw, VUI_VIDEO_FORMAT_UNSPECIFIED, 3);
++	bw_put(bw, 0, 1);
++	bw_put(bw, 1, 1);
++	bw_put(bw, VUI_UNSPECIFIED, 8);
++	bw_put(bw, VUI_UNSPECIFIED, 8);
++	bw_put(bw, VUI_MATRIX_BT601, 8);
++}
++
+ static void h264_vui_write(struct nal_bw *bw, const struct rkvenc_h264_seq *seq)
+ {
+-	bw_put(bw, 0, 4);
++	bw_put(bw, 0, 2);
++	bw_put(bw, seq->bt601_signal, 1);
++	if (seq->bt601_signal)
++		vui_bt601_write(bw);
++	bw_put(bw, 0, 1);
+ 	bw_put(bw, seq->timing, 1);
+ 	if (seq->timing) {
+ 		bw_put(bw, 1, 32);
+@@ -278,7 +300,14 @@
+ 	bw_put(bw, 0, 1);
+ 	bw_put(bw, 0, 1);
+ 	bw_put(bw, seq->strong_intra_smoothing, 1);
+-	bw_put(bw, 0, 1);
++	bw_put(bw, seq->bt601_signal, 1);	/* vui_parameters_present_flag */
++	if (seq->bt601_signal) {
++		bw_put(bw, 0, 2);
++		bw_put(bw, 1, 1);
++		vui_bt601_write(bw);
++		/* no chroma location, field or window, timing or restriction */
++		bw_put(bw, 0, 7);
++	}
+ 	bw_put(bw, 0, 1);
+ 	bw_trailing(bw);
+ }
+diff --git a/drivers/media/platform/rockchip/rkvenc/rkvenc-v4l2.c b/drivers/media/platform/rockchip/rkvenc/rkvenc-v4l2.c
+--- a/drivers/media/platform/rockchip/rkvenc/rkvenc-v4l2.c
++++ b/drivers/media/platform/rockchip/rkvenc/rkvenc-v4l2.c
+@@ -21,18 +21,45 @@
+ 
+ struct rkvenc_fmt {
+ 	u32 fourcc;
+-	u8 num_planes;
++	enum rkvenc_cfmt cfmt;
++	bool rbuv_swap;
++	bool alpha_swap;
+ };
+ 
++/* NV12 first: an encoder without any_source takes those alone */
++#define RKVENC_STRIDE_ALIGN	16
++#define RKVENC_NV12_FMTS	2
++
+ static const struct rkvenc_fmt rkvenc_output_fmts[] = {
+-	{ V4L2_PIX_FMT_NV12, 1 },
+-	{ V4L2_PIX_FMT_NV12M, 2 },
++	{ V4L2_PIX_FMT_NV12, RKVENC_CFMT_YUV420SP },
++	{ V4L2_PIX_FMT_NV12M, RKVENC_CFMT_YUV420SP },
++	{ V4L2_PIX_FMT_NV21, RKVENC_CFMT_YUV420SP, true },
++	{ V4L2_PIX_FMT_YUV420, RKVENC_CFMT_YUV420P },
++	{ V4L2_PIX_FMT_YVU420, RKVENC_CFMT_YUV420P, true },
++	{ V4L2_PIX_FMT_NV16, RKVENC_CFMT_YUV422SP },
++	{ V4L2_PIX_FMT_NV61, RKVENC_CFMT_YUV422SP, true },
++	{ V4L2_PIX_FMT_YUV422P, RKVENC_CFMT_YUV422P },
++	{ V4L2_PIX_FMT_YUYV, RKVENC_CFMT_YUYV422 },
++	{ V4L2_PIX_FMT_YVYU, RKVENC_CFMT_YUYV422, true },
++	{ V4L2_PIX_FMT_UYVY, RKVENC_CFMT_UYVY422 },
++	{ V4L2_PIX_FMT_VYUY, RKVENC_CFMT_UYVY422, true },
++	{ V4L2_PIX_FMT_XBGR32, RKVENC_CFMT_BGRA8888 },
++	{ V4L2_PIX_FMT_ABGR32, RKVENC_CFMT_BGRA8888 },
++	{ V4L2_PIX_FMT_RGBX32, RKVENC_CFMT_BGRA8888, true },
++	{ V4L2_PIX_FMT_RGBA32, RKVENC_CFMT_BGRA8888, true },
++	{ V4L2_PIX_FMT_XRGB32, RKVENC_CFMT_BGRA8888, true, true },
++	{ V4L2_PIX_FMT_ARGB32, RKVENC_CFMT_BGRA8888, true, true },
++	{ V4L2_PIX_FMT_BGRX32, RKVENC_CFMT_BGRA8888, false, true },
++	{ V4L2_PIX_FMT_BGRA32, RKVENC_CFMT_BGRA8888, false, true },
++	{ V4L2_PIX_FMT_RGB24, RKVENC_CFMT_BGR888 },
++	{ V4L2_PIX_FMT_BGR24, RKVENC_CFMT_BGR888, true },
++	{ V4L2_PIX_FMT_RGB565, RKVENC_CFMT_BGR565, true },
+ };
+ 
+ static const struct rkvenc_fmt rkvenc_capture_fmts[] = {
+-	{ V4L2_PIX_FMT_H264, 1 },
+-	{ V4L2_PIX_FMT_HEVC, 1 },
+-	{ V4L2_PIX_FMT_JPEG, 1 },
++	{ V4L2_PIX_FMT_H264 },
++	{ V4L2_PIX_FMT_HEVC },
++	{ V4L2_PIX_FMT_JPEG },
+ };
+ 
+ static const struct rkvenc_fmt *
+@@ -47,6 +74,20 @@
+ }
+ 
+ /* H.264, HEVC, then JPEG: a core lists the head it codes */
++static unsigned int rkvenc_num_output_fmts(const struct rkvenc_dev *dev)
++{
++	return dev->variant->any_source ? ARRAY_SIZE(rkvenc_output_fmts) :
++					  RKVENC_NV12_FMTS;
++}
++
++bool rkvenc_rgb_source(const struct rkvenc_ctx *ctx)
++{
++	const struct v4l2_format_info *info =
++		v4l2_format_info(ctx->src_pix.pixelformat);
++
++	return info && info->pixel_enc == V4L2_PIXEL_ENC_RGB;
++}
++
+ static unsigned int rkvenc_num_capture_fmts(struct rkvenc_dev *dev)
+ {
+ 	if (dev->variant->h264_only)
+@@ -228,14 +269,48 @@
+ 		ctx->qp_blocks = 0;
+ }
+ 
+-static u32 rkvenc_output_plane_size(struct rkvenc_ctx *ctx, unsigned int plane)
+-{
+-	u32 bpl = ctx->bytesperline;
+-	u32 h = ctx->height;
++/*
++ * The source as the encoder takes it: each colour plane's address, the luma
++ * and chroma strides, its format and swaps. A semi-planar source gives the
++ * chroma plane again as the third.
++ */
++static void rkvenc_src_setup(struct rkvenc_ctx *ctx, struct vb2_buffer *vb,
++			     struct rkvenc_src *s)
++{
++	const struct v4l2_pix_format_mplane *pix = &ctx->src_pix;
++	const struct v4l2_format_info *info = v4l2_format_info(pix->pixelformat);
++	const struct rkvenc_fmt *fmt =
++		rkvenc_find_fmt(rkvenc_output_fmts, rkvenc_num_output_fmts(ctx->dev),
++				pix->pixelformat);
++	unsigned int i;
++
++	s->width = pix->width;
++	s->height = pix->height;
++	s->cfmt = fmt->cfmt;
++	s->rbuv_swap = fmt->rbuv_swap;
++	s->alpha_swap = fmt->alpha_swap;
++	s->full_range = ctx->codec == RKVENC_CODEC_JPEG;
++	s->stride[0] = pix->plane_fmt[0].bytesperline;
++	/* one buffer's chroma stride is the luma's in proportion, as V4L2 lays it */
++	if (info->mem_planes > 1)
++		s->stride[1] = pix->plane_fmt[1].bytesperline;
++	else if (info->comp_planes > 1)
++		s->stride[1] = s->stride[0] * info->bpp[1] / info->bpp[0] /
++			       info->hdiv;
++	else
++		s->stride[1] = 0;
+ 
+-	if (ctx->src_num_planes == 1)
+-		return bpl * h * 3 / 2;
+-	return plane == 0 ? bpl * h : bpl * h / 2;
++	for (i = 0; i < info->comp_planes; i++) {
++		if (i < info->mem_planes)
++			s->plane[i] = lower_32_bits(vb2_dma_contig_plane_dma_addr(vb, i) +
++						    (i ? vb->planes[i].data_offset : 0));
++		else if (i == 1)
++			s->plane[i] = s->plane[0] + s->stride[0] * s->height;
++		else
++			s->plane[i] = s->plane[1] + s->stride[1] * s->height / info->vdiv;
++	}
++	for (; i < ARRAY_SIZE(s->plane); i++)
++		s->plane[i] = s->plane[i - 1];
+ }
+ 
+ static u32 rkvenc_capture_size(struct rkvenc_ctx *ctx)
+@@ -268,14 +343,9 @@
+ 		return -EINVAL;
+ 
+ 	if (V4L2_TYPE_IS_OUTPUT(vq->type)) {
+-		fmt = rkvenc_find_fmt(rkvenc_output_fmts,
+-				      ARRAY_SIZE(rkvenc_output_fmts),
+-				      ctx->src_fourcc);
+-		if (!fmt)
+-			return -EINVAL;
+-		*num_planes = fmt->num_planes;
++		*num_planes = ctx->src_pix.num_planes;
+ 		for (i = 0; i < *num_planes; i++)
+-			sizes[i] = rkvenc_output_plane_size(ctx, i);
++			sizes[i] = ctx->src_pix.plane_fmt[i].sizeimage;
+ 		return 0;
+ 	}
+ 
+@@ -297,10 +367,13 @@
+ {
+ 	struct vb2_queue *vq = vb->vb2_queue;
+ 	struct rkvenc_ctx *ctx = vb2_get_drv_priv(vq);
++	unsigned int i;
+ 
+ 	if (V4L2_TYPE_IS_OUTPUT(vq->type)) {
+-		if (vb2_plane_size(vb, 0) < rkvenc_output_plane_size(ctx, 0))
+-			return -EINVAL;
++		for (i = 0; i < ctx->src_pix.num_planes; i++)
++			if (vb2_plane_size(vb, i) <
++			    ctx->src_pix.plane_fmt[i].sizeimage)
++				return -EINVAL;
+ 	} else {
+ 		if (vb2_plane_size(vb, 0) < rkvenc_capture_size(ctx))
+ 			return -EINVAL;
+@@ -385,7 +458,7 @@
+ 	if (V4L2_TYPE_IS_OUTPUT(q->type))
+ 		return 0;
+ 
+-	if (!ctx->coded_fourcc || !ctx->src_fourcc) {
++	if (!ctx->coded_fourcc || !ctx->src_pix.pixelformat) {
+ 		rkvenc_return_dst_bufs(ctx);
+ 		return -EINVAL;
+ 	}
+@@ -531,18 +604,7 @@
+ 	f.codec = ctx->codec;
+ 	f.intra = idr;
+ 	f.referenced = true;
+-	f.src.width = ctx->width;
+-	f.src.height = ctx->height;
+-	f.src.stride[0] = ctx->bytesperline;
+-	f.src.stride[1] = ctx->bytesperline;
+-	f.src.plane[0] = lower_32_bits(
+-		vb2_dma_contig_plane_dma_addr(&src->vb2_buf, 0));
+-	if (ctx->src_num_planes == 1)
+-		f.src.plane[1] = f.src.plane[0] + ctx->bytesperline * ctx->height;
+-	else
+-		f.src.plane[1] = lower_32_bits(
+-			vb2_dma_contig_plane_dma_addr(&src->vb2_buf, 1) +
+-			src->vb2_buf.planes[1].data_offset);
++	rkvenc_src_setup(ctx, &src->vb2_buf, &f.src);
+ 
+ 	f.bs.base = lower_32_bits(
+ 		vb2_dma_contig_plane_dma_addr(&dst->vb2_buf, 0));
+@@ -786,7 +848,7 @@
+ 	const struct rkvenc_fmt *fmts = capture ? rkvenc_capture_fmts
+ 						: rkvenc_output_fmts;
+ 	unsigned int n = capture ? rkvenc_num_capture_fmts(ctx->dev)
+-				 : ARRAY_SIZE(rkvenc_output_fmts);
++				 : rkvenc_num_output_fmts(ctx->dev);
+ 
+ 	if (f->index >= n)
+ 		return -EINVAL;
+@@ -821,30 +883,15 @@
+ static void rkvenc_try_fmt_vid_out(struct rkvenc_ctx *ctx, struct v4l2_format *f)
+ {
+ 	struct v4l2_pix_format_mplane *pix = &f->fmt.pix_mp;
+-	const struct rkvenc_fmt *fmt;
+-	u32 bpl;
+ 
+-	fmt = rkvenc_find_fmt(rkvenc_output_fmts,
+-			      ARRAY_SIZE(rkvenc_output_fmts),
+-			      pix->pixelformat);
+-	if (!fmt) {
+-		fmt = &rkvenc_output_fmts[0];
+-		pix->pixelformat = fmt->fourcc;
+-	}
++	if (!rkvenc_find_fmt(rkvenc_output_fmts,
++			     rkvenc_num_output_fmts(ctx->dev), pix->pixelformat))
++		pix->pixelformat = rkvenc_output_fmts[0].fourcc;
+ 
+-	pix->field = V4L2_FIELD_NONE;
+ 	rkvenc_clamp_size(ctx->dev, ctx->codec, pix);
+-	pix->num_planes = fmt->num_planes;
+-
+-	bpl = ALIGN(pix->width, 16);
+-	pix->plane_fmt[0].bytesperline = bpl;
+-	if (fmt->num_planes == 2) {
+-		pix->plane_fmt[0].sizeimage = bpl * pix->height;
+-		pix->plane_fmt[1].bytesperline = bpl;
+-		pix->plane_fmt[1].sizeimage = bpl * pix->height / 2;
+-	} else {
+-		pix->plane_fmt[0].sizeimage = bpl * pix->height * 3 / 2;
+-	}
++	v4l2_fill_pixfmt_mp_aligned(pix, pix->pixelformat, pix->width,
++				    pix->height, RKVENC_STRIDE_ALIGN);
++	pix->field = V4L2_FIELD_NONE;
+ }
+ 
+ static void rkvenc_try_fmt_vid_cap(struct rkvenc_ctx *ctx, struct v4l2_format *f)
+@@ -897,11 +944,9 @@
+ 		return -EBUSY;
+ 
+ 	rkvenc_try_fmt_vid_out(ctx, f);
+-	ctx->src_fourcc = f->fmt.pix_mp.pixelformat;
+-	ctx->src_num_planes = f->fmt.pix_mp.num_planes;
++	ctx->src_pix = f->fmt.pix_mp;
+ 	ctx->width = f->fmt.pix_mp.width;
+ 	ctx->height = f->fmt.pix_mp.height;
+-	ctx->bytesperline = f->fmt.pix_mp.plane_fmt[0].bytesperline;
+ 	return 0;
+ }
+ 
+@@ -926,28 +971,15 @@
+ 	struct v4l2_pix_format_mplane *pix = &f->fmt.pix_mp;
+ 
+ 	if (V4L2_TYPE_IS_OUTPUT(f->type)) {
+-		pix->pixelformat = ctx->src_fourcc;
+-		pix->num_planes = ctx->src_num_planes;
+-	} else {
+-		pix->pixelformat = ctx->coded_fourcc;
+-		pix->num_planes = 1;
++		*pix = ctx->src_pix;
++		return 0;
+ 	}
++	pix->pixelformat = ctx->coded_fourcc;
++	pix->num_planes = 1;
+ 	pix->width = ctx->width;
+ 	pix->height = ctx->height;
+ 	pix->field = V4L2_FIELD_NONE;
+-
+-	if (V4L2_TYPE_IS_OUTPUT(f->type)) {
+-		pix->plane_fmt[0].bytesperline = ctx->bytesperline;
+-		pix->plane_fmt[0].sizeimage =
+-			rkvenc_output_plane_size(ctx, 0);
+-		if (ctx->src_num_planes == 2) {
+-			pix->plane_fmt[1].bytesperline = ctx->bytesperline;
+-			pix->plane_fmt[1].sizeimage =
+-				rkvenc_output_plane_size(ctx, 1);
+-		}
+-	} else {
+-		pix->plane_fmt[0].sizeimage = rkvenc_capture_size(ctx);
+-	}
++	pix->plane_fmt[0].sizeimage = rkvenc_capture_size(ctx);
+ 	return 0;
+ }
+ 
+@@ -1041,11 +1073,11 @@
+ 	ctx->dev = dev;
+ 	ctx->codec = RKVENC_CODEC_H264;
+ 	ctx->coded_fourcc = V4L2_PIX_FMT_H264;
+-	ctx->src_fourcc = V4L2_PIX_FMT_NV12;
+-	ctx->src_num_planes = 1;
+ 	ctx->width = 1920;
+ 	ctx->height = 1080;
+-	ctx->bytesperline = ALIGN(1920, 16);
++	v4l2_fill_pixfmt_mp_aligned(&ctx->src_pix, V4L2_PIX_FMT_NV12,
++				    ctx->width, ctx->height, RKVENC_STRIDE_ALIGN);
++	ctx->src_pix.field = V4L2_FIELD_NONE;
+ 	ctx->fps = 30;
+ 	mutex_init(&ctx->vlock);
+ 
+diff --git a/drivers/media/platform/rockchip/rkvenc/rkvenc-vepu540c-regs.h b/drivers/media/platform/rockchip/rkvenc/rkvenc-vepu540c-regs.h
+--- a/drivers/media/platform/rockchip/rkvenc/rkvenc-vepu540c-regs.h
++++ b/drivers/media/platform/rockchip/rkvenc/rkvenc-vepu540c-regs.h
+@@ -83,9 +83,20 @@
+ #define   VEPU540C_SRC_FILL_H			GENMASK(21, 16)
+ 
+ #define VEPU540C_SRC_FMT			0x0318
++#define   VEPU540C_SRC_FMT_ALPHA_SWAP		BIT(0)
++#define   VEPU540C_SRC_FMT_RBUV_SWAP		BIT(1)
+ #define   VEPU540C_SRC_FMT_CFMT			GENMASK(5, 2)
+-#define   VEPU540C_SRC_FMT_CFMT_NV12		6
+ #define   VEPU540C_SRC_FMT_OUT_FMT		BIT(7)
++#define VEPU540C_SRC_UDFY			0x031c
++#define VEPU540C_SRC_UDFU			0x0320
++#define VEPU540C_SRC_UDFV			0x0324
++#define   VEPU540C_SRC_UDF_B			GENMASK(8, 0)
++#define   VEPU540C_SRC_UDF_G			GENMASK(17, 9)
++#define   VEPU540C_SRC_UDF_R			GENMASK(26, 18)
++#define VEPU540C_SRC_UDFO			0x0328
++#define   VEPU540C_SRC_UDFO_V			GENMASK(7, 0)
++#define   VEPU540C_SRC_UDFO_U			GENMASK(15, 8)
++#define   VEPU540C_SRC_UDFO_Y			GENMASK(20, 16)
+ 
+ #define VEPU540C_SRC_STRD0			0x0334
+ #define   VEPU540C_SRC_STRD0_STRD		GENMASK(16, 0)
+@@ -200,6 +211,10 @@
+ #define VEPU540C_JPEG_ENC_RSL			0x0440
+ #define VEPU540C_JPEG_SRC_FILL			0x0444
+ #define VEPU540C_JPEG_SRC_FMT			0x0448
++#define VEPU540C_JPEG_SRC_UDFY			0x044c
++#define VEPU540C_JPEG_SRC_UDFU			0x0450
++#define VEPU540C_JPEG_SRC_UDFV			0x0454
++#define VEPU540C_JPEG_SRC_UDFO			0x0458
+ #define VEPU540C_JPEG_SRC_STRD0			0x0464
+ #define VEPU540C_JPEG_SRC_STRD1			0x0468
+ #define VEPU540C_JPEG_BASE_CFG			0x047c
+diff --git a/drivers/media/platform/rockchip/rkvenc/rkvenc-vepu540c.c b/drivers/media/platform/rockchip/rkvenc/rkvenc-vepu540c.c
+--- a/drivers/media/platform/rockchip/rkvenc/rkvenc-vepu540c.c
++++ b/drivers/media/platform/rockchip/rkvenc/rkvenc-vepu540c.c
+@@ -219,6 +219,94 @@
+ 		vepu540c_set(img, VEPU540C_RDO_CKG, U32_MAX);
+ }
+ 
++/* The registers describing the source: the video encoder's, or JPEG's */
++struct vepu540c_src_regs {
++	u32 fmt;
++	u32 udf[3];
++	u32 udfo;
++	u32 strd0;
++	u32 strd1;
++	u32 adr[3];
++};
++
++static const struct vepu540c_src_regs vepu540c_video_src = {
++	.fmt = VEPU540C_SRC_FMT,
++	.udf = { VEPU540C_SRC_UDFY, VEPU540C_SRC_UDFU, VEPU540C_SRC_UDFV },
++	.udfo = VEPU540C_SRC_UDFO,
++	.strd0 = VEPU540C_SRC_STRD0,
++	.strd1 = VEPU540C_SRC_STRD1,
++	.adr = { VEPU540C_ADR_SRC0, VEPU540C_ADR_SRC1, VEPU540C_ADR_SRC2 },
++};
++
++static const struct vepu540c_src_regs vepu540c_jpeg_src = {
++	.fmt = VEPU540C_JPEG_SRC_FMT,
++	.udf = { VEPU540C_JPEG_SRC_UDFY, VEPU540C_JPEG_SRC_UDFU,
++		 VEPU540C_JPEG_SRC_UDFV },
++	.udfo = VEPU540C_JPEG_SRC_UDFO,
++	.strd0 = VEPU540C_JPEG_SRC_STRD0,
++	.strd1 = VEPU540C_JPEG_SRC_STRD1,
++	.adr = { VEPU540C_JPEG_ADR_SRC0, VEPU540C_JPEG_ADR_SRC1,
++		 VEPU540C_JPEG_ADR_SRC2 },
++};
++
++/* A 9-bit two's complement weight */
++#define VEPU540C_CSC(w)		((w) & 0x1ff)
++
++/*
++ * RGB to BT.601 YCbCr in 1/256, Y, U, V rows of R, G, B: limited range, as
++ * a video stream's VUI says, and full, as JFIF has it; then Y's offset.
++ */
++static const u32 vepu540c_rgb2yuv[2][3][3] = {
++	{
++		{ VEPU540C_CSC(66), VEPU540C_CSC(129), VEPU540C_CSC(25) },
++		{ VEPU540C_CSC(-38), VEPU540C_CSC(-74), VEPU540C_CSC(112) },
++		{ VEPU540C_CSC(112), VEPU540C_CSC(-94), VEPU540C_CSC(-18) },
++	}, {
++		{ VEPU540C_CSC(77), VEPU540C_CSC(150), VEPU540C_CSC(29) },
++		{ VEPU540C_CSC(-43), VEPU540C_CSC(-85), VEPU540C_CSC(128) },
++		{ VEPU540C_CSC(128), VEPU540C_CSC(-107), VEPU540C_CSC(-21) },
++	},
++};
++
++static const u32 vepu540c_rgb2yuv_y_offset[2] = { 16, 0 };
++
++static void vepu540c_src_build(const struct rkvenc_src *src,
++			       const struct vepu540c_src_regs *r,
++			       struct rkvenc_vepu540c_img *img)
++{
++	unsigned int i;
++	u32 fmt = FIELD_PREP(VEPU540C_SRC_FMT_CFMT, src->cfmt) |
++		  VEPU540C_SRC_FMT_OUT_FMT;
++
++	if (src->alpha_swap)
++		fmt |= VEPU540C_SRC_FMT_ALPHA_SWAP;
++	if (src->rbuv_swap)
++		fmt |= VEPU540C_SRC_FMT_RBUV_SWAP;
++	vepu540c_set(img, r->fmt, fmt);
++
++	if (src->cfmt <= RKVENC_CFMT_BGR565) {
++		const u32 (*w)[3] = vepu540c_rgb2yuv[src->full_range];
++
++		for (i = 0; i < ARRAY_SIZE(r->udf); i++)
++			vepu540c_set(img, r->udf[i],
++				     FIELD_PREP(VEPU540C_SRC_UDF_R, w[i][0]) |
++				     FIELD_PREP(VEPU540C_SRC_UDF_G, w[i][1]) |
++				     FIELD_PREP(VEPU540C_SRC_UDF_B, w[i][2]));
++		vepu540c_set(img, r->udfo,
++			     FIELD_PREP(VEPU540C_SRC_UDFO_Y,
++					vepu540c_rgb2yuv_y_offset[src->full_range]) |
++			     FIELD_PREP(VEPU540C_SRC_UDFO_U, 128) |
++			     FIELD_PREP(VEPU540C_SRC_UDFO_V, 128));
++	}
++
++	vepu540c_set(img, r->strd0,
++		     FIELD_PREP(VEPU540C_SRC_STRD0_STRD, src->stride[0]));
++	vepu540c_set(img, r->strd1,
++		     FIELD_PREP(VEPU540C_SRC_STRD1_STRD, src->stride[1]));
++	for (i = 0; i < ARRAY_SIZE(r->adr); i++)
++		vepu540c_set(img, r->adr[i], src->plane[i]);
++}
++
+ static void vepu540c_buffers_build(const struct rkvenc_frame *f,
+ 				   struct rkvenc_vepu540c_img *img)
+ {
+@@ -235,19 +323,7 @@
+ 	vepu540c_set(img, VEPU540C_SRC_FILL,
+ 		     FIELD_PREP(VEPU540C_SRC_FILL_W, w - src->width) |
+ 		     FIELD_PREP(VEPU540C_SRC_FILL_H, h - src->height));
+-	vepu540c_set(img, VEPU540C_SRC_FMT,
+-		     FIELD_PREP(VEPU540C_SRC_FMT_CFMT,
+-				VEPU540C_SRC_FMT_CFMT_NV12) |
+-		     VEPU540C_SRC_FMT_OUT_FMT);
+-	vepu540c_set(img, VEPU540C_SRC_STRD0,
+-		     FIELD_PREP(VEPU540C_SRC_STRD0_STRD, src->stride[0]));
+-	vepu540c_set(img, VEPU540C_SRC_STRD1,
+-		     FIELD_PREP(VEPU540C_SRC_STRD1_STRD, src->stride[1]));
+-
+-	/* NV12 has no third plane, the hardware gets the chroma one again */
+-	vepu540c_set(img, VEPU540C_ADR_SRC0, src->plane[0]);
+-	vepu540c_set(img, VEPU540C_ADR_SRC1, src->plane[1]);
+-	vepu540c_set(img, VEPU540C_ADR_SRC2, src->plane[1]);
++	vepu540c_src_build(src, &vepu540c_video_src, img);
+ 
+ 	vepu540c_set(img, VEPU540C_ADR_RFPW_H, f->recon.rfp_hdr);
+ 	vepu540c_set(img, VEPU540C_ADR_RFPW_B, f->recon.rfp_hdr + hdr);
+@@ -807,9 +883,6 @@
+ 	vepu540c_set(img, VEPU540C_JPEG_ADR_BSBB, bs->base);
+ 	vepu540c_set(img, VEPU540C_JPEG_ADR_BSBS, bs->base + bs->offset);
+ 	vepu540c_set(img, VEPU540C_JPEG_ADR_BSBR, bs->base);
+-	vepu540c_set(img, VEPU540C_JPEG_ADR_SRC0, src->plane[0]);
+-	vepu540c_set(img, VEPU540C_JPEG_ADR_SRC1, src->plane[1]);
+-	vepu540c_set(img, VEPU540C_JPEG_ADR_SRC2, src->plane[1]);
+ 
+ 	vepu540c_set(img, VEPU540C_JPEG_ENC_RSL,
+ 		     FIELD_PREP(VEPU540C_ENC_RSL_WD8_M1, w / 8 - 1) |
+@@ -817,14 +890,7 @@
+ 	vepu540c_set(img, VEPU540C_JPEG_SRC_FILL,
+ 		     FIELD_PREP(VEPU540C_SRC_FILL_W, w - src->width) |
+ 		     FIELD_PREP(VEPU540C_SRC_FILL_H, h - src->height));
+-	vepu540c_set(img, VEPU540C_JPEG_SRC_FMT,
+-		     FIELD_PREP(VEPU540C_SRC_FMT_CFMT,
+-				VEPU540C_SRC_FMT_CFMT_NV12) |
+-		     VEPU540C_SRC_FMT_OUT_FMT);
+-	vepu540c_set(img, VEPU540C_JPEG_SRC_STRD0,
+-		     FIELD_PREP(VEPU540C_SRC_STRD0_STRD, src->stride[0]));
+-	vepu540c_set(img, VEPU540C_JPEG_SRC_STRD1,
+-		     FIELD_PREP(VEPU540C_SRC_STRD1_STRD, src->stride[1]));
++	vepu540c_src_build(src, &vepu540c_jpeg_src, img);
+ 	vepu540c_set(img, VEPU540C_JPEG_BASE_CFG,
+ 		     VEPU540C_JPEG_BASE_CFG_PIC_LAST_ECS |
+ 		     VEPU540C_JPEG_BASE_CFG_STND);
+diff --git a/drivers/media/platform/rockchip/rkvenc/rkvenc-vepu541.h b/drivers/media/platform/rockchip/rkvenc/rkvenc-vepu541.h
+--- a/drivers/media/platform/rockchip/rkvenc/rkvenc-vepu541.h
++++ b/drivers/media/platform/rockchip/rkvenc/rkvenc-vepu541.h
+@@ -24,11 +24,29 @@
+ 	RKVENC_CODEC_JPEG,
+ };
+ 
++/* The VEPU5xx encoders' source formats */
++enum rkvenc_cfmt {
++	RKVENC_CFMT_BGRA8888 = 0,
++	RKVENC_CFMT_BGR888 = 1,
++	RKVENC_CFMT_BGR565 = 2,
++	RKVENC_CFMT_YUV422SP = 4,
++	RKVENC_CFMT_YUV422P = 5,
++	RKVENC_CFMT_YUV420SP = 6,
++	RKVENC_CFMT_YUV420P = 7,
++	RKVENC_CFMT_YUYV422 = 8,
++	RKVENC_CFMT_UYVY422 = 9,
++};
++
++/* rbuv_swap: red and blue, or U and V, swapped; alpha_swap: alpha first */
+ struct rkvenc_src {
+ 	u32 plane[3];
+ 	u32 stride[2];
+ 	u32 width;
+ 	u32 height;
++	enum rkvenc_cfmt cfmt;
++	bool rbuv_swap;
++	bool alpha_swap;
++	bool full_range;
+ };
+ 
+ struct rkvenc_bs {
+@@ -69,6 +87,7 @@
+ 	s8 beta_offset;
+ 	bool timing;
+ 	u32 fps;
++	bool bt601_signal;
+ };
+ 
+ struct rkvenc_h264_pic {
+@@ -94,6 +113,7 @@
+ 	s8 tc_offset;
+ 	bool strong_intra_smoothing;
+ 	bool cabac_init_present;
++	bool bt601_signal;
+ };
+ 
+ struct rkvenc_hevc_pic {
+diff --git a/drivers/media/platform/rockchip/rkvenc/rkvenc.c b/drivers/media/platform/rockchip/rkvenc/rkvenc.c
+--- a/drivers/media/platform/rockchip/rkvenc/rkvenc.c
++++ b/drivers/media/platform/rockchip/rkvenc/rkvenc.c
+@@ -149,6 +149,7 @@
+ static const struct rkvenc_variant rkvenc_variant_rk3528 = {
+ 	.ops = &rkvenc_vepu540c_ops,
+ 	.jpeg = true,
++	.any_source = true,
+ 	.hevc_log2_ctb_size = 5,
+ 	.hevc_log2_max_tb_size = 4,
+ 	.max_width = RKVENC_RK3528_MAX_WIDTH,
+diff --git a/drivers/media/platform/rockchip/rkvenc/rkvenc.h b/drivers/media/platform/rockchip/rkvenc/rkvenc.h
+--- a/drivers/media/platform/rockchip/rkvenc/rkvenc.h
++++ b/drivers/media/platform/rockchip/rkvenc/rkvenc.h
+@@ -75,6 +75,7 @@
+ 	const struct rkvenc_hw_ops *ops;
+ 	bool h264_only;
+ 	bool jpeg;
++	bool any_source;
+ 	u8 hevc_log2_ctb_size;
+ 	u8 hevc_log2_max_tb_size;
+ 	u32 max_width;
+@@ -165,13 +166,11 @@
+ 	struct v4l2_ctrl_handler ctrl_hdl;
+ 	struct mutex vlock;
+ 
+-	u32 src_fourcc;
++	struct v4l2_pix_format_mplane src_pix;
+ 	u32 coded_fourcc;
+ 	enum rkvenc_codec codec;
+ 	u32 width;
+ 	u32 height;
+-	u32 bytesperline;
+-	u32 src_cfmt;
+ 
+ 	struct rkvenc_ctrls c;
+ 
+@@ -187,8 +186,6 @@
+ 	u32 consecutive_errors;
+ 	bool overflow_retried;
+ 
+-	u32 src_num_planes;
+-
+ 	bool joined_header_done;
+ 
+ 	s32 rc_buf; /* in bits */
+@@ -264,4 +261,6 @@
+ /* rkvenc-jpeg.c */
+ int rkvenc_jpeg_setup(struct rkvenc_ctx *ctx, u32 quality);
+ 
++bool rkvenc_rgb_source(const struct rkvenc_ctx *ctx);
++
+ #endif /* RKVENC_H */

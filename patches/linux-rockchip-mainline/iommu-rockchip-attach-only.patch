@@ -32,8 +32,8 @@ index 21af2f6..228208b 100644
  
  	iommu->reset_disabled = device_property_read_bool(dev,
  					"rockchip,disable-mmu-reset");
-+	iommu->attach_only = device_property_read_bool(dev,
-+					"rockchip,disable-device-link-resume");
++	iommu->attach_only =
++		device_property_read_bool(dev, "rockchip,disable-device-link-resume");
  
  	/*
  	 * Take every clock the devicetree provides.  Most IOMMU instances

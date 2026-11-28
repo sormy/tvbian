@@ -1,0 +1,21 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] ASoC: codecs: rk3528: Offer 12 and 24 kHz
+
+The RK3528 datasheet lists 12 and 24 kHz among the codec's rates, which
+SNDRV_PCM_RATE_8000_192000 leaves out. Offer them.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/sound/soc/codecs/rk3528_codec.c b/sound/soc/codecs/rk3528_codec.c
+--- a/sound/soc/codecs/rk3528_codec.c
++++ b/sound/soc/codecs/rk3528_codec.c
+@@ -502,7 +502,8 @@
+ 			.stream_name = "HiFi Playback",
+ 			.channels_min = 1,
+ 			.channels_max = 2,
+-			.rates = SNDRV_PCM_RATE_8000_192000,
++			.rates = SNDRV_PCM_RATE_8000_192000 |
++				 SNDRV_PCM_RATE_12000 | SNDRV_PCM_RATE_24000,
+ 			.formats = (SNDRV_PCM_FMTBIT_S16_LE |
+ 				    SNDRV_PCM_FMTBIT_S24_LE |
+ 				    SNDRV_PCM_FMTBIT_S32_LE),

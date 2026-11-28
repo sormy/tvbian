@@ -1,0 +1,132 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] media: verisilicon: Limit the RK3528 VDPU2 by area
+
+The RK3528's VDPU2 decodes MPEG-1, MPEG-2, MPEG-4 and VP8 right up to
+8160 macroblocks, the area of 1920x1088, whichever side is the longer:
+1080x1920 decodes as 1920x1080 does, while 1920x1200 or 1600x1600 come
+out broken. Let a format carry such an area limit, applied after its
+size box, and give the RK3528's formats a 1920x1920 box under it.
+H.264 keeps its 1920x1088: past it, untested.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+  drivers/media/platform/verisilicon/hantro.h          |  3 +++
+  drivers/media/platform/verisilicon/hantro_v4l2.c     | 12 ++++++++++++
+  drivers/media/platform/verisilicon/rockchip_vpu_hw.c | 17 ++++++++++++-----
+  3 files changed, 27 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/media/platform/verisilicon/hantro.h b/drivers/media/platform/verisilicon/hantro.h
+index 2eb4f56..7a13e8f 100644
+--- a/drivers/media/platform/verisilicon/hantro.h
++++ b/drivers/media/platform/verisilicon/hantro.h
+@@ -297,6 +297,8 @@ struct hantro_ctx {
+  * @max_depth:	Maximum depth, for bitstream formats
+  * @enc_fmt:	Format identifier for encoder registers.
+  * @frmsize:	Supported range of frame sizes (only for bitstream formats).
++ * @max_macroblocks: The largest frame in macroblocks, where the hardware's
++ *		limit is its area rather than each side; 0 for none.
+  * @postprocessed: Indicates if this format needs the post-processor.
+  * @match_depth: Indicates if format bit depth must match video bit depth
+  */
+@@ -308,6 +310,7 @@ struct hantro_fmt {
+ 	int max_depth;
+ 	enum hantro_enc_fmt enc_fmt;
+ 	struct v4l2_frmsize_stepwise frmsize;
++	unsigned int max_macroblocks;
+ 	bool postprocessed;
+ 	bool match_depth;
+ };
+diff --git a/drivers/media/platform/verisilicon/hantro_v4l2.c b/drivers/media/platform/verisilicon/hantro_v4l2.c
+index 5212f09..fb0e692 100644
+--- a/drivers/media/platform/verisilicon/hantro_v4l2.c
++++ b/drivers/media/platform/verisilicon/hantro_v4l2.c
+@@ -324,6 +324,16 @@ static int vidioc_g_fmt_cap_mplane(struct file *file, void *priv,
+ 	return 0;
+ }
+ 
++static void hantro_apply_area_limit(struct v4l2_pix_format_mplane *pix_mp,
++				    const struct hantro_fmt *fmt)
++{
++	unsigned int mb_width = DIV_ROUND_UP(pix_mp->width, MB_DIM);
++	unsigned int max_mb_height = fmt->max_macroblocks / mb_width;
++
++	if (DIV_ROUND_UP(pix_mp->height, MB_DIM) > max_mb_height)
++		pix_mp->height = max_mb_height * MB_DIM;
++}
++
+ static int hantro_try_fmt(const struct hantro_ctx *ctx,
+ 			  struct v4l2_pix_format_mplane *pix_mp,
+ 			  enum v4l2_buf_type type)
+@@ -362,6 +372,8 @@ static int hantro_try_fmt(const struct hantro_ctx *ctx,
+ 
+ 	v4l2_apply_frmsize_constraints(&pix_mp->width, &pix_mp->height,
+ 				       &vpu_fmt->frmsize);
++	if (vpu_fmt->max_macroblocks)
++		hantro_apply_area_limit(pix_mp, vpu_fmt);
+ 
+ 	if (!coded) {
+ 		/* Fill remaining fields */
+diff --git a/drivers/media/platform/verisilicon/rockchip_vpu_hw.c b/drivers/media/platform/verisilicon/rockchip_vpu_hw.c
+index 5fbd744..4cf97d0 100644
+--- a/drivers/media/platform/verisilicon/rockchip_vpu_hw.c
++++ b/drivers/media/platform/verisilicon/rockchip_vpu_hw.c
+@@ -285,7 +285,10 @@ static const struct hantro_fmt rockchip_vdpu2_dec_fmts[] = {
+ 	},
+ };
+ 
+-/* RK3528's VDPU2 decodes VP8 to 1080p, like its other codecs */
++/* RK3528's VDPU2 decodes to 1080p's area, whichever side is the longer */
++#define RK3528_VDPU2_MAX_MACROBLOCKS \
++	((FMT_FHD_WIDTH / MB_DIM) * (FMT_FHD_HEIGHT / MB_DIM))
++
+ static const struct hantro_fmt rk3528_vpu_dec_fmts[] = {
+ 	{
+ 		.fourcc = V4L2_PIX_FMT_NV12,
+@@ -295,9 +298,10 @@ static const struct hantro_fmt rk3528_vpu_dec_fmts[] = {
+ 			.max_width = FMT_FHD_WIDTH,
+ 			.step_width = MB_DIM,
+ 			.min_height = FMT_MIN_HEIGHT,
+-			.max_height = FMT_16CIF_HEIGHT,
++			.max_height = FMT_FHD_WIDTH,
+ 			.step_height = MB_DIM,
+ 		},
++		.max_macroblocks = RK3528_VDPU2_MAX_MACROBLOCKS,
+ 	},
+ 	{
+ 		.fourcc = V4L2_PIX_FMT_H264_SLICE,
+@@ -321,9 +325,10 @@ static const struct hantro_fmt rk3528_vpu_dec_fmts[] = {
+ 			.max_width = FMT_FHD_WIDTH,
+ 			.step_width = MB_DIM,
+ 			.min_height = FMT_MIN_HEIGHT,
+-			.max_height = FMT_FHD_HEIGHT,
++			.max_height = FMT_FHD_WIDTH,
+ 			.step_height = MB_DIM,
+ 		},
++		.max_macroblocks = RK3528_VDPU2_MAX_MACROBLOCKS,
+ 	},
+ 	{
+ 		.fourcc = V4L2_PIX_FMT_VP8_FRAME,
+@@ -334,9 +339,10 @@ static const struct hantro_fmt rk3528_vpu_dec_fmts[] = {
+ 			.max_width = FMT_FHD_WIDTH,
+ 			.step_width = MB_DIM,
+ 			.min_height = FMT_MIN_HEIGHT,
+-			.max_height = FMT_FHD_HEIGHT,
++			.max_height = FMT_FHD_WIDTH,
+ 			.step_height = MB_DIM,
+ 		},
++		.max_macroblocks = RK3528_VDPU2_MAX_MACROBLOCKS,
+ 	},
+ 	{
+ 		.fourcc = V4L2_PIX_FMT_MPEG4_SLICE,
+@@ -347,9 +353,10 @@ static const struct hantro_fmt rk3528_vpu_dec_fmts[] = {
+ 			.max_width = FMT_FHD_WIDTH,
+ 			.step_width = MB_DIM,
+ 			.min_height = FMT_MIN_HEIGHT,
+-			.max_height = FMT_16CIF_HEIGHT,
++			.max_height = FMT_FHD_WIDTH,
+ 			.step_height = MB_DIM,
+ 		},
++		.max_macroblocks = RK3528_VDPU2_MAX_MACROBLOCKS,
+ 	},
+ };
+ 

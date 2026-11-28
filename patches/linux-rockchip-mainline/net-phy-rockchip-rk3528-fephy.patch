@@ -3,12 +3,19 @@ Subject: [PATCH] net: phy: rockchip: support the RK3528 integrated FEPHY
 
 The RK3528's integrated 10/100 PHY, ID 0x00441400, links as a generic
 PHY but runs with its analog front end untuned. Program it as Rockchip's
-driver does with a fixed receive-detect threshold: transmit levels from
-the per-chip OTP trim, power saving and EEE off, and the transmit
-setting for 10BASE-T on each link change.
+driver does: the receive-detect threshold at 260 mV, Rockchip's below
+85 C, transmit levels from the per-chip OTP trim, power saving and EEE
+off, and the transmit setting for 10BASE-T on each link change. Above
+85 C, read each second from the SoC's thermal zone, the receive detect
+drops to 160 mV, as Rockchip's driver does.
 
 Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
+  drivers/net/phy/Kconfig    |   3 +-
+  drivers/net/phy/rockchip.c | 206 +++++++++++++++++++++++++++++++++++++++++++++
+  2 files changed, 208 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/net/phy/Kconfig b/drivers/net/phy/Kconfig
 --- a/drivers/net/phy/Kconfig
 +++ b/drivers/net/phy/Kconfig
 @@ -414,7 +414,8 @@ config RENESAS_PHY
@@ -21,22 +28,25 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
  
  config SMSC_PHY
  	tristate "SMSC PHYs"
+diff --git a/drivers/net/phy/rockchip.c b/drivers/net/phy/rockchip.c
 --- a/drivers/net/phy/rockchip.c
 +++ b/drivers/net/phy/rockchip.c
-@@ -14,9 +14,12 @@
+@@ -14,9 +14,14 @@
  #include <linux/module.h>
  #include <linux/mii.h>
  #include <linux/netdevice.h>
 +#include <linux/nvmem-consumer.h>
  #include <linux/phy.h>
 +#include <linux/slab.h>
++#include <linux/thermal.h>
++#include <linux/workqueue.h>
  
  #define INTERNAL_EPHY_ID			0x1234d400
 +#define RK3528_EPHY_ID				0x00441400
  
  #define MII_INTERNAL_CTRL_STATUS		17
  #define SMI_ADDR_TSTCNTL			20
-@@ -170,6 +173,133 @@ static int rockchip_phy_resume(struct phy_device *phydev)
+@@ -170,6 +175,192 @@ static int rockchip_phy_resume(struct phy_device *phydev)
  	return rockchip_integrated_phy_config_init(phydev);
  }
  
@@ -45,13 +55,51 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 +#define RK3528_PAGE_AFE				6
 +#define RK3528_AFE_TX_CTRL			0x14
 +#define RK3528_AFE_TX_10M			BIT(13)
++/* receive detect at 260 mV, cleared 160 mV */
++#define RK3528_AFE_RX_DETECT_HIGH		BIT(6)
++/* over this the receive detect drops to 160 mV, as Rockchip's driver does */
++#define RK3528_HOT_MC				85000
++#define RK3528_HOT_POLL_MS			1000
++#define RK3528_THERMAL_ZONE			"soc-thermal"
 +#define RK3528_TX_LEVEL_100M			0x2d
 +#define RK3528_TX_LEVEL_10M			0x32
 +
 +struct rk3528_ephy {
++	struct phy_device *phydev;
++	struct delayed_work hot_work;
++	bool hot;
 +	u8 tx_level_100m;
 +	u8 tx_level_10m;
 +};
++
++static int rk3528_hot_mc = RK3528_HOT_MC;
++
++/* The SoC's temperature, polled: over RK3528_HOT_MC the receive detect at 160 mV */
++static void rk3528_ephy_hot_work(struct work_struct *work)
++{
++	struct rk3528_ephy *priv = container_of(to_delayed_work(work), struct rk3528_ephy,
++						 hot_work);
++	struct phy_device *phydev = priv->phydev;
++	struct thermal_zone_device *tz;
++	int temp, ret;
++	bool hot;
++
++	tz = thermal_zone_get_zone_by_name(RK3528_THERMAL_ZONE);
++	if (!IS_ERR(tz) && !thermal_zone_get_temp(tz, &temp)) {
++		hot = temp > rk3528_hot_mc;
++		if (hot != priv->hot) {
++			ret = phy_modify_paged(phydev, RK3528_PAGE_AFE, RK3528_AFE_TX_CTRL,
++					       RK3528_AFE_RX_DETECT_HIGH,
++					       hot ? 0 : RK3528_AFE_RX_DETECT_HIGH);
++			if (!ret) {
++				priv->hot = hot;
++				phydev_info(phydev, "receive detect at %s mV, %d mC\n",
++					    hot ? "160" : "260", temp);
++			}
++		}
++	}
++	schedule_delayed_work(&priv->hot_work, msecs_to_jiffies(RK3528_HOT_POLL_MS));
++}
 +
 +static int rk3528_ephy_read_page(struct phy_device *phydev)
 +{
@@ -78,6 +126,8 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 +
 +	priv->tx_level_100m = RK3528_TX_LEVEL_100M;
 +	priv->tx_level_10m = RK3528_TX_LEVEL_10M;
++	priv->phydev = phydev;
++	INIT_DELAYED_WORK(&priv->hot_work, rk3528_ephy_hot_work);
 +	phydev->priv = priv;
 +
 +	/* The transmit levels are trimmed per chip in OTP; unprogrammed parts keep the defaults */
@@ -111,7 +161,7 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 +	{ 2, 0x18, 0x0000 },	/* AFE transmit/receive */
 +	{ 6, 0x10, 0x5540 },	/* ADC */
 +	{ 6, 0x12, 0x0400 },	/* gain */
-+	{ 6, RK3528_AFE_TX_CTRL, 0x1088 },	/* receive detect at 160 mV */
++	{ 6, RK3528_AFE_TX_CTRL, 0x10c8 },	/* receive detect at 260 mV */
 +	{ 6, 0x17, 0x0575 },	/* charge pump current */
 +	{ 6, 0x18, 0x0000 },	/* ADC op-amp bias */
 +	{ 6, 0x19, 0x0408 },	/* receive signal detector level */
@@ -150,7 +200,26 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 +
 +	phy_disable_eee(phydev);
 +
++	/* the init above set 260 mV: the poll starts from there */
++	priv->hot = false;
++	mod_delayed_work(system_wq, &priv->hot_work, 0);
++
 +	return 0;
++}
++
++static int rk3528_ephy_suspend(struct phy_device *phydev)
++{
++	struct rk3528_ephy *priv = phydev->priv;
++
++	cancel_delayed_work_sync(&priv->hot_work);
++	return genphy_suspend(phydev);
++}
++
++static void rk3528_ephy_remove(struct phy_device *phydev)
++{
++	struct rk3528_ephy *priv = phydev->priv;
++
++	cancel_delayed_work_sync(&priv->hot_work);
 +}
 +
 +static void rk3528_ephy_link_change_notify(struct phy_device *phydev)
@@ -170,7 +239,7 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
  static struct phy_driver rockchip_phy_driver[] = {
  {
  	.phy_id			= INTERNAL_EPHY_ID,
-@@ -184,12 +314,26 @@ static struct phy_driver rockchip_phy_driver[] = {
+@@ -184,12 +375,27 @@ static struct phy_driver rockchip_phy_driver[] = {
  	.suspend		= genphy_suspend,
  	.resume			= rockchip_phy_resume,
  },
@@ -181,10 +250,11 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 +	.probe			= rk3528_ephy_probe,
 +	.read_page		= rk3528_ephy_read_page,
 +	.write_page		= rk3528_ephy_write_page,
++	.remove			= rk3528_ephy_remove,
 +	.config_init		= rk3528_ephy_config_init,
 +	.link_change_notify	= rk3528_ephy_link_change_notify,
 +	.soft_reset		= genphy_soft_reset,
-+	.suspend		= genphy_suspend,
++	.suspend		= rk3528_ephy_suspend,
 +	.resume			= genphy_resume,
 +},
  };

@@ -1,0 +1,204 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] crypto: rockchip: rk2 - RSA private keys by the CRT
+
+A private key's exponentiation on the PKA takes the full exponent and
+modulus, four times the work of the two half-size ones RFC 3447's CRT
+needs, which generic RSA takes. Where the key carries its CRT
+parameters, run m1 = c^dP mod p and m2 = c^dQ mod q on the PKA, c
+reduced below each prime first, and combine them on the CPU as generic
+RSA does; a key without them keeps the full exponent.
+
+On an RK3518, PKCS#1 SHA-256 signing by keyctl now runs 24.1 times a
+second at 2048 bits and 4.7 at 4096, from 9.1 and 1.4; generic RSA's
+CRT runs 28.9 and 5.3, so the engine still ranks under it.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+  drivers/crypto/rockchip/rk2_crypto.h     |   3 +
+  drivers/crypto/rockchip/rk2_crypto_pka.c | 137 ++++++++++++++++++++++++++++++-
+  2 files changed, 137 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/crypto/rockchip/rk2_crypto.h b/drivers/crypto/rockchip/rk2_crypto.h
+--- a/drivers/crypto/rockchip/rk2_crypto.h
++++ b/drivers/crypto/rockchip/rk2_crypto.h
+@@ -8,6 +8,7 @@
+ #ifndef __RK2_CRYPTO_H__
+ #define __RK2_CRYPTO_H__
+ 
++#include <linux/mpi.h>
+ #include <linux/bitfield.h>
+ #include <crypto/aes.h>
+ #include <crypto/engine.h>
+@@ -260,6 +261,8 @@ struct rk2_rsa_ctx {
+ 	u32 *n, *e, *d;
+ 	unsigned int words, e_words, d_words;
+ 	unsigned int key_bytes;
++	/* a private key's CRT parameters, where it carries them */
++	MPI mn, p, q, dp, dq, qinv;
+ };
+ 
+ struct rk2_aead_ctx {
+diff --git a/drivers/crypto/rockchip/rk2_crypto_pka.c b/drivers/crypto/rockchip/rk2_crypto_pka.c
+--- a/drivers/crypto/rockchip/rk2_crypto_pka.c
++++ b/drivers/crypto/rockchip/rk2_crypto_pka.c
+@@ -329,8 +329,134 @@ static bool rk2_rsa_less(const u32 *a, const u32 *b, unsigned int words)
+ 	return false;
+ }
+ 
++/* A number's little-endian words, as many as words, from an MPI */
++static u32 *rk2_mpi_words(MPI a, unsigned int words)
++{
++	unsigned int len = 4 * words, n;
++	u32 *w = kcalloc(words, sizeof(u32), GFP_KERNEL);
++	u8 *be = kzalloc(len, GFP_KERNEL);
++
++	if (w && be && !mpi_read_buffer(a, be, len, &n, NULL)) {
++		rk2_rsa_fill(w, be, n);
++		kfree_sensitive(be);
++		return w;
++	}
++	kfree_sensitive(be);
++	kfree_sensitive(w);
++	return NULL;
++}
++
++static MPI rk2_words_mpi(const u32 *w, unsigned int words)
++{
++	unsigned int len = 4 * words, i;
++	u8 *be = kzalloc(len, GFP_KERNEL);
++	MPI a;
++
++	if (!be)
++		return NULL;
++	for (i = 0; i < len; i++)
++		be[len - 1 - i] = w[i / 4] >> (8 * (i % 4));
++	a = mpi_read_raw_data(be, len);
++	kfree_sensitive(be);
++	return a;
++}
++
++/* *m = c ^ e mod prime on the PKA, c reduced below the prime first */
++static int rk2_rsa_half(struct rk2_crypto_dev *rkc, MPI *m, MPI c, MPI e, MPI prime)
++{
++	unsigned int words = DIV_ROUND_UP(mpi_get_nbits(prime), 32);
++	u32 *cw = NULL, *ew = NULL, *pw = NULL, *out;
++	MPI r = mpi_alloc(0);
++	int err = -ENOMEM;
++
++	out = kcalloc(words, sizeof(u32), GFP_KERNEL);
++	if (!r || !out || mpi_mod(r, c, prime))
++		goto free;
++	cw = rk2_mpi_words(r, words);
++	ew = rk2_mpi_words(e, words);
++	pw = rk2_mpi_words(prime, words);
++	if (!cw || !ew || !pw)
++		goto free;
++
++	err = pka_exp_mod(rkc, cw, ew, words, pw, words, out);
++	if (err)
++		goto free;
++	*m = rk2_words_mpi(out, words);
++	err = *m ? 0 : -ENOMEM;
++free:
++	mpi_free(r);
++	kfree_sensitive(cw);
++	kfree_sensitive(ew);
++	kfree(pw);
++	kfree_sensitive(out);
++	return err;
++}
++
++/*
++ * RSADP by the CRT, RFC 3447 5.1.2, as generic RSA: the two exponentiations on
++ * the PKA, a quarter of the full one's work each, the rest on the CPU.
++ */
++static int rk2_rsa_crt(struct rk2_rsa_ctx *ctx, const u32 *in, u32 *out)
++{
++	MPI c = rk2_words_mpi(in, ctx->words), t = mpi_alloc(0), h = mpi_alloc(0);
++	MPI m1 = NULL, m2 = NULL;
++	u32 *w = NULL;
++	int err = -ENOMEM;
++
++	if (!c || !t || !h)
++		goto free;
++	err = rk2_rsa_half(ctx->rkc, &m1, c, ctx->dp, ctx->p) ?:
++	      rk2_rsa_half(ctx->rkc, &m2, c, ctx->dq, ctx->q) ?:
++	      mpi_sub(t, m1, m2) ?:
++	      mpi_mulm(h, t, ctx->qinv, ctx->p) ?:
++	      mpi_mul(t, ctx->q, h) ?:
++	      mpi_addm(h, m2, t, ctx->mn);
++	if (err)
++		goto free;
++	w = rk2_mpi_words(h, ctx->words);
++	err = w ? 0 : -ENOMEM;
++	if (w)
++		memcpy(out, w, ctx->words * sizeof(u32));
++free:
++	kfree_sensitive(w);
++	mpi_free(h);
++	mpi_free(t);
++	mpi_free(m2);
++	mpi_free(m1);
++	mpi_free(c);
++	return err;
++}
++
++static void rk2_rsa_clear_crt(struct rk2_rsa_ctx *ctx)
++{
++	MPI *crt[] = { &ctx->mn, &ctx->p, &ctx->q, &ctx->dp, &ctx->dq, &ctx->qinv };
++	int i;
++
++	for (i = 0; i < ARRAY_SIZE(crt); i++) {
++		mpi_free(*crt[i]);
++		*crt[i] = NULL;
++	}
++}
++
++/* The key's CRT parameters, or none: a key without them takes the full exponent */
++static void rk2_rsa_set_crt(struct rk2_rsa_ctx *ctx, const struct rsa_key *raw)
++{
++	if (!raw->p_sz || !raw->q_sz || !raw->dp_sz || !raw->dq_sz || !raw->qinv_sz)
++		return;
++	ctx->mn = mpi_read_raw_data(raw->n, raw->n_sz);
++	ctx->p = mpi_read_raw_data(raw->p, raw->p_sz);
++	ctx->q = mpi_read_raw_data(raw->q, raw->q_sz);
++	ctx->dp = mpi_read_raw_data(raw->dp, raw->dp_sz);
++	ctx->dq = mpi_read_raw_data(raw->dq, raw->dq_sz);
++	ctx->qinv = mpi_read_raw_data(raw->qinv, raw->qinv_sz);
++	if (ctx->mn && ctx->p && ctx->q && ctx->dp && ctx->dq && ctx->qinv)
++		return;
++	rk2_rsa_clear_crt(ctx);
++}
++
+ static void rk2_rsa_clear(struct rk2_rsa_ctx *ctx)
+ {
++	rk2_rsa_clear_crt(ctx);
+ 	kfree_sensitive(ctx->d);
+ 	kfree(ctx->e);
+ 	kfree(ctx->n);
+@@ -352,8 +478,10 @@ static int rk2_rsa_setkey(struct crypto_akcipher *tfm, const void *key, unsigned
+ 
+ 	ctx->n = rk2_rsa_words(raw.n, raw.n_sz, &ctx->words);
+ 	ctx->e = rk2_rsa_words(raw.e, raw.e_sz, &ctx->e_words);
+-	if (private)
++	if (private) {
+ 		ctx->d = rk2_rsa_words(raw.d, raw.d_sz, &ctx->d_words);
++		rk2_rsa_set_crt(ctx, &raw);
++	}
+ 	if (!ctx->n || !ctx->e || (private && !ctx->d)) {
+ 		rk2_rsa_clear(ctx);
+ 		return -ENOMEM;
+@@ -431,8 +559,11 @@ static int rk2_rsa_calc(struct akcipher_request *req, bool private)
+ 	if (err)
+ 		goto free;
+ 	mutex_lock(&rkc->pka_lock);
+-	err = pka_exp_mod(rkc, in, private ? ctx->d : ctx->e, private ? ctx->d_words : ctx->e_words,
+-			  ctx->n, words, out);
++	if (private && ctx->p)
++		err = rk2_rsa_crt(ctx, in, out);
++	else
++		err = pka_exp_mod(rkc, in, private ? ctx->d : ctx->e,
++				  private ? ctx->d_words : ctx->e_words, ctx->n, words, out);
+ 	mutex_unlock(&rkc->pka_lock);
+ 	pm_runtime_mark_last_busy(rkc->dev);
+ 	pm_runtime_put_autosuspend(rkc->dev);

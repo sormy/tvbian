@@ -773,12 +773,12 @@ index 5cedeb2..ffd6115 100644
  	u8 log2_max_poc_lsb_m4;
  	u8 pic_init_qp;
 diff --git a/drivers/media/platform/rockchip/rkvenc/rkvenc.c b/drivers/media/platform/rockchip/rkvenc/rkvenc.c
-index d99d00c..22ee2a5 100644
+index 81e1989..2ab2a80 100644
 --- a/drivers/media/platform/rockchip/rkvenc/rkvenc.c
 +++ b/drivers/media/platform/rockchip/rkvenc/rkvenc.c
 @@ -29,6 +29,9 @@
- /* 8192x8192 encodes; 16384x8640 fails, as it does under Rockchip's MPP */
- #define RKVENC_RK3528_MAX_WIDTH		8192
+ /* Past 7680 wide a picture is now and then garbage, with no error */
+ #define RKVENC_RK3528_MAX_WIDTH		7680
  #define RKVENC_RK3528_MAX_HEIGHT	8192
 +/* Past it HEVC is now and then garbage, with no error to show for it */
 +#define RKVENC_RK3528_HEVC_MAX_WIDTH	5120

@@ -1,0 +1,2465 @@
+From: Dawid Olesinski <dawidro@gmail.com>
+Date: Sun, 16 Aug 2026 20:39:45 +0100
+Subject: [PATCH v3 2/4] crypto: rockchip: Add RK356x/RK3588 cryptographic offloader driver
+
+Add a driver for the second-generation Rockchip cryptographic hardware
+accelerator found on RK3568 and RK3588 SoCs (compatible strings
+"rockchip,rk3568-crypto" and "rockchip,rk3588-crypto").
+
+The hardware provides:
+  - AES block cipher engine: ECB, CBC, and XTS modes, 128/192/256-bit
+    keys. XTS hardware is limited to single-SG requests.
+  - Hash engine: SHA-1, SHA-256, SHA-384, SHA-512, MD5, SM3.
+    The hardware padding engine (HW_PAD) requires the total message
+    length upfront and cannot maintain state across LLI descriptor
+    boundaries, so multi-SG and unaligned requests are routed to a
+    software fallback.
+  - DMA engine: linked-list descriptor (LLI) based, with a 20-entry
+    coherent descriptor table.
+
+Design overview:
+  - Built on top of the crypto engine framework (crypto/engine.h) for
+    serialised hardware request dispatch and automatic fallback handling.
+  - Each platform device gets its own private copy of the algorithm
+    descriptor table at probe time (devm_kmemdup), so the dev pointer in
+    each template always refers to the correct hardware instance. This
+    avoids a global device list without any locking overhead.
+  - Runtime PM with autosuspend (2 s idle timeout) gates clocks and
+    asserts reset between requests to save power.
+  - Symmetric software fallback for all registered algorithms handles
+    requests that cannot be processed in hardware (misaligned buffers,
+    multi-SG inputs for hash, zero-length payloads).
+
+Co-developed-by: Corentin Labbe <clabbe@baylibre.com>
+Signed-off-by: Corentin Labbe <clabbe@baylibre.com>
+Signed-off-by: Dawid Olesinski <dawidro@gmail.com>
+Tested-by: Diederik de Haas <diederik@cknow-tech.com>  # Quartz64-B,
+NanoPi R5S, NanoPC-T6 LTS
+Tested-by: Diederik de Haas <diederik@cknow-tech.com>
+---
+---
+ drivers/crypto/Kconfig                        |  32 +
+ drivers/crypto/Makefile                       |   1 +
+ drivers/crypto/rockchip/Makefile              |   5 +
+ drivers/crypto/rockchip/rk2_crypto.c          | 783 ++++++++++++++++++
+ drivers/crypto/rockchip/rk2_crypto.h          | 254 ++++++
+ drivers/crypto/rockchip/rk2_crypto_ahash.c    | 541 ++++++++++++
+ drivers/crypto/rockchip/rk2_crypto_skcipher.c | 740 +++++++++++++++++
+ 7 files changed, 2356 insertions(+)
+ create mode 100644 drivers/crypto/rockchip/rk2_crypto.c
+ create mode 100644 drivers/crypto/rockchip/rk2_crypto.h
+ create mode 100644 drivers/crypto/rockchip/rk2_crypto_ahash.c
+ create mode 100644 drivers/crypto/rockchip/rk2_crypto_skcipher.c
+
+diff --git a/drivers/crypto/Kconfig b/drivers/crypto/Kconfig
+index d23b58b81ca3..d1ef50a8c1cb 100644
+--- a/drivers/crypto/Kconfig
++++ b/drivers/crypto/Kconfig
+@@ -709,6 +709,38 @@ config CRYPTO_DEV_ROCKCHIP_DEBUG
+ 	  This will create /sys/kernel/debug/rk3288_crypto/stats for displaying
+ 	  the number of requests per algorithm and other internal stats.
+ 
++config CRYPTO_DEV_ROCKCHIP2
++	tristate "Rockchip's RK356x and RK3588 cryptographic offloader"
++	depends on OF && ARCH_ROCKCHIP
++	depends on PM
++	select CRYPTO_AES
++	select CRYPTO_CBC
++	select CRYPTO_ECB
++	select CRYPTO_ENGINE
++	select CRYPTO_HASH
++	select CRYPTO_MD5
++	select CRYPTO_SHA1
++	select CRYPTO_SHA256
++	select CRYPTO_SHA512
++	select CRYPTO_SKCIPHER
++	select CRYPTO_SM3
++	select CRYPTO_XTS
++	help
++	  This driver interfaces with the hardware crypto offloader present
++	  on RK3566, RK3568 and RK3588 SoCs. It provides hardware acceleration
++	  for symmetric block ciphers and hashing functions, offloading the
++	  main CPU cores during heavy cryptographic workloads.
++
++config CRYPTO_DEV_ROCKCHIP2_DEBUG
++	bool "Enable Rockchip crypto stats"
++	depends on CRYPTO_DEV_ROCKCHIP2
++	depends on DEBUG_FS
++	help
++	  Say y to enable Rockchip crypto debug stats.
++	  This will create a directory using the device name
++	  (e.g., /sys/kernel/debug/fe370000.crypto/stats) for displaying
++	  the number of requests per algorithm and other internal stats.
++
+ config CRYPTO_DEV_TEGRA
+ 	tristate "Enable Tegra Security Engine"
+ 	depends on TEGRA_HOST1X
+diff --git a/drivers/crypto/Makefile b/drivers/crypto/Makefile
+index 283bbc650b5b..905538078017 100644
+--- a/drivers/crypto/Makefile
++++ b/drivers/crypto/Makefile
+@@ -30,6 +30,7 @@ obj-$(CONFIG_CRYPTO_DEV_PPC4XX) += amcc/
+ obj-$(CONFIG_CRYPTO_DEV_QCE) += qce/
+ obj-$(CONFIG_CRYPTO_DEV_QCOM_RNG) += qcom-rng.o
+ obj-$(CONFIG_CRYPTO_DEV_ROCKCHIP) += rockchip/
++obj-$(CONFIG_CRYPTO_DEV_ROCKCHIP2) += rockchip/
+ obj-$(CONFIG_CRYPTO_DEV_S5P) += s5p-sss.o
+ obj-$(CONFIG_CRYPTO_DEV_SA2UL) += sa2ul.o
+ obj-$(CONFIG_CRYPTO_DEV_SAHARA) += sahara.o
+diff --git a/drivers/crypto/rockchip/Makefile b/drivers/crypto/rockchip/Makefile
+index 785277aca71e..ea946ba0d4d5 100644
+--- a/drivers/crypto/rockchip/Makefile
++++ b/drivers/crypto/rockchip/Makefile
+@@ -3,3 +3,8 @@ obj-$(CONFIG_CRYPTO_DEV_ROCKCHIP) += rk_crypto.o
+ rk_crypto-objs := rk3288_crypto.o \
+ 		  rk3288_crypto_skcipher.o \
+ 		  rk3288_crypto_ahash.o
++
++obj-$(CONFIG_CRYPTO_DEV_ROCKCHIP2) += rk_crypto2.o
++rk_crypto2-objs := rk2_crypto.o \
++		   rk2_crypto_skcipher.o \
++		   rk2_crypto_ahash.o
+diff --git a/drivers/crypto/rockchip/rk2_crypto.c b/drivers/crypto/rockchip/rk2_crypto.c
+new file mode 100644
+index 000000000000..e818aaaa2401
+--- /dev/null
++++ b/drivers/crypto/rockchip/rk2_crypto.c
+@@ -0,0 +1,783 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Hardware cryptographic offloader for RK3568/RK3588 SoC
++ *
++ * Copyright (c) 2022-2023 Corentin Labbe <clabbe@baylibre.com>
++ * Copyright (c) 2026 Dawid Olesinski <dawidro@gmail.com>
++ */
++
++#include "rk2_crypto.h"
++#include <linux/clk.h>
++#include <linux/crypto.h>
++#include <linux/delay.h>
++#include <linux/dma-mapping.h>
++#include <linux/interrupt.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++#include <linux/pm_runtime.h>
++#include <linux/reset.h>
++#include <crypto/aes.h>
++
++static const struct rk2_variant rk3568_variant = {
++	.num_clks = 3,
++};
++
++static int rk2_crypto_get_clks(struct rk2_crypto_dev *dev)
++{
++	dev->num_clks = devm_clk_bulk_get_all(dev->dev, &dev->clks);
++	if (dev->num_clks < 0)
++		return dev_err_probe(dev->dev, dev->num_clks, "Failed to get clocks\n");
++	if (dev->num_clks < dev->variant->num_clks)
++		return dev_err_probe(dev->dev, -EINVAL,
++				"Missing clocks, got %d instead of %d\n",
++				dev->num_clks, dev->variant->num_clks);
++	return 0;
++}
++
++static void rk2_crypto_enable_irq(struct rk2_crypto_dev *rkc)
++{
++	writel(RK2_CRYPTO_DMA_INT_ENABLE_ALL, rkc->reg + RK2_CRYPTO_DMA_INT_EN);
++}
++
++static void rk2_crypto_disable_irq(struct rk2_crypto_dev *rkc)
++{
++	/* write-enable the mask bits, set enable bits to 0 => all masked */
++	writel(RK2_CRYPTO_DMA_INT_ALL_MASK << 16, rkc->reg + RK2_CRYPTO_DMA_INT_EN);
++}
++
++static void rk2_crypto_clear_irq(struct rk2_crypto_dev *rkc)
++{
++	writel(RK2_CRYPTO_DMA_INT_ALL_MASK, rkc->reg + RK2_CRYPTO_DMA_INT_ST);
++}
++
++static int rk2_crypto_pm_suspend(struct device *dev)
++{
++	struct rk2_crypto_dev *rkdev = dev_get_drvdata(dev);
++
++	rk2_crypto_disable_irq(rkdev);
++	rk2_crypto_clear_irq(rkdev);
++
++	reset_control_assert(rkdev->rst);
++	udelay(10);
++	clk_bulk_disable_unprepare(rkdev->num_clks, rkdev->clks);
++
++	return 0;
++}
++
++static int rk2_crypto_pm_resume(struct device *dev)
++{
++	struct rk2_crypto_dev *rkdev = dev_get_drvdata(dev);
++	int err;
++
++	err = clk_bulk_prepare_enable(rkdev->num_clks, rkdev->clks);
++	if (err)
++		return err;
++
++	reset_control_deassert(rkdev->rst);
++
++	udelay(10);
++	rk2_crypto_clear_irq(rkdev);
++	rk2_crypto_enable_irq(rkdev);
++
++	return 0;
++}
++
++static const struct dev_pm_ops rk2_crypto_pm_ops = {
++	RUNTIME_PM_OPS(rk2_crypto_pm_suspend, rk2_crypto_pm_resume, NULL)
++	SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend,
++			    pm_runtime_force_resume)
++};
++
++static int rk2_crypto_pm_init(struct rk2_crypto_dev *rkdev)
++{
++	int err;
++
++	pm_runtime_use_autosuspend(rkdev->dev);
++	pm_runtime_set_autosuspend_delay(rkdev->dev, 2000);
++
++	err = pm_runtime_set_suspended(rkdev->dev);
++	if (err)
++		return err;
++
++	pm_runtime_enable(rkdev->dev);
++
++	return 0;
++}
++
++static void rk2_crypto_pm_exit(struct rk2_crypto_dev *rkdev)
++{
++	pm_runtime_disable(rkdev->dev);
++}
++
++static irqreturn_t rk2_crypto_irq_handle(int irq, void *dev_id)
++{
++	struct rk2_crypto_dev *rkc = platform_get_drvdata(dev_id);
++	u32 v;
++
++	if (pm_runtime_get_if_active(rkc->dev) <= 0)
++		return IRQ_NONE;
++
++	v = readl(rkc->reg + RK2_CRYPTO_DMA_INT_ST);
++	if (!v) {
++		pm_runtime_put(rkc->dev);
++		return IRQ_NONE;
++	}
++
++	writel(v, rkc->reg + RK2_CRYPTO_DMA_INT_ST);
++
++	/*
++	 * Only signal completion on list-done or hard DMA error.
++	 * Intermediate item completion interrupts (DST_ITEM_DONE / SRC_ITEM_DONE)
++	 * fire for every LLI entry that has RK2_LLI_DMA_CTRL_DST_INT or
++	 * RK2_LLI_DMA_CTRL_SRC_INT set. Completing early on those causes the
++	 * driver to read result registers before all data has been processed,
++	 * producing wrong results.
++	 */
++	if (v & RK2_CRYPTO_DMA_INT_ERR_MASK) {
++		dev_warn(rkc->dev, "DMA Error\n");
++		rkc->status = 0;
++		complete(&rkc->complete);
++	} else if (v & RK2_CRYPTO_DMA_INT_LISTDONE) {
++		rkc->status = 1;
++		complete(&rkc->complete);
++	}
++	pm_runtime_put(rkc->dev);
++	return IRQ_HANDLED;
++}
++
++static const struct rk2_crypto_template rk2_crypto_algs_template[] = {
++	{
++	.type = CRYPTO_ALG_TYPE_SKCIPHER,
++	.rk2_mode = RK2_CRYPTO_AES_ECB,
++	.alg.skcipher.base = {
++			.base.cra_name = "ecb(aes)",
++			.base.cra_driver_name = "ecb-aes-rk2",
++			.base.cra_priority = 300,
++			.base.cra_flags =
++			CRYPTO_ALG_ASYNC | CRYPTO_ALG_NEED_FALLBACK,
++			.base.cra_blocksize = AES_BLOCK_SIZE,
++			.base.cra_ctxsize = sizeof(struct rk2_cipher_ctx),
++			.base.cra_alignmask = 0,
++			.base.cra_module = THIS_MODULE,
++			.init = rk2_cipher_tfm_init,
++			.exit = rk2_cipher_tfm_exit,
++			.min_keysize = AES_MIN_KEY_SIZE,
++			.max_keysize = AES_MAX_KEY_SIZE,
++			.setkey = rk2_aes_setkey,
++			.encrypt = rk2_skcipher_encrypt,
++			.decrypt = rk2_skcipher_decrypt,
++			},
++	.alg.skcipher.op = {
++		.do_one_request = rk2_cipher_run,
++		},
++	},
++	{
++	 .type = CRYPTO_ALG_TYPE_SKCIPHER,
++	 .rk2_mode = RK2_CRYPTO_AES_CBC,
++	 .alg.skcipher.base = {
++			.base.cra_name = "cbc(aes)",
++			.base.cra_driver_name = "cbc-aes-rk2",
++			.base.cra_priority = 300,
++			.base.cra_flags =
++			CRYPTO_ALG_ASYNC | CRYPTO_ALG_NEED_FALLBACK,
++			.base.cra_blocksize = AES_BLOCK_SIZE,
++			.base.cra_ctxsize =
++			sizeof(struct rk2_cipher_ctx),
++			.base.cra_alignmask = 0,
++			.base.cra_module = THIS_MODULE,
++			.init = rk2_cipher_tfm_init,
++			.exit = rk2_cipher_tfm_exit,
++			.min_keysize = AES_MIN_KEY_SIZE,
++			.max_keysize = AES_MAX_KEY_SIZE,
++			.ivsize = AES_BLOCK_SIZE,
++			.setkey = rk2_aes_setkey,
++			.encrypt = rk2_skcipher_encrypt,
++			.decrypt = rk2_skcipher_decrypt,
++			},
++	.alg.skcipher.op = {
++		.do_one_request = rk2_cipher_run,
++		},
++	},
++	{
++	.type = CRYPTO_ALG_TYPE_SKCIPHER,
++	.rk2_mode = RK2_CRYPTO_AES_XTS,
++	.alg.skcipher.base = {
++			.base.cra_name = "xts(aes)",
++			.base.cra_driver_name = "xts-aes-rk2",
++			.base.cra_priority = 300,
++			.base.cra_flags =
++			CRYPTO_ALG_ASYNC | CRYPTO_ALG_NEED_FALLBACK,
++			.base.cra_blocksize = AES_BLOCK_SIZE,
++			.base.cra_ctxsize =
++			sizeof(struct rk2_cipher_ctx),
++			.base.cra_alignmask = 0,
++			.base.cra_module = THIS_MODULE,
++			.init = rk2_cipher_tfm_init,
++			.exit = rk2_cipher_tfm_exit,
++			.min_keysize = AES_MIN_KEY_SIZE * 2,
++			.max_keysize = AES_MAX_KEY_SIZE * 2,
++			.ivsize = AES_BLOCK_SIZE,
++			.setkey = rk2_aes_xts_setkey,
++			.encrypt = rk2_skcipher_encrypt,
++			.decrypt = rk2_skcipher_decrypt,
++			},
++	.alg.skcipher.op = {
++		.do_one_request = rk2_cipher_run,
++		},
++	},
++	{
++	.type = CRYPTO_ALG_TYPE_AHASH,
++	.rk2_mode = RK2_CRYPTO_MD5,
++	.alg.hash.base = {
++			.init = rk2_ahash_init,
++			.update = rk2_ahash_update,
++			.final = rk2_ahash_final,
++			.finup = rk2_ahash_finup,
++			.export = rk2_ahash_export,
++			.import = rk2_ahash_import,
++			.digest = rk2_ahash_digest,
++			.init_tfm = rk2_hash_init_tfm,
++			.exit_tfm = rk2_hash_exit_tfm,
++			.halg = {
++				.digestsize = MD5_DIGEST_SIZE,
++				.statesize = sizeof(struct md5_state),
++				.base = {
++					.cra_name = "md5",
++					.cra_driver_name = "rk2-md5",
++					.cra_priority = 300,
++					.cra_flags =
++					CRYPTO_ALG_ASYNC |
++					CRYPTO_ALG_NEED_FALLBACK,
++					.cra_blocksize =
++					MD5_HMAC_BLOCK_SIZE,
++					.cra_ctxsize =
++					sizeof(struct rk2_ahash_ctx),
++					.cra_module = THIS_MODULE,
++					}
++				}
++			},
++	.alg.hash.op = {
++			.do_one_request = rk2_hash_run,
++			},
++	},
++	{
++	.type = CRYPTO_ALG_TYPE_AHASH,
++	.rk2_mode = RK2_CRYPTO_SHA1,
++	.alg.hash.base = {
++			.init = rk2_ahash_init,
++			.update = rk2_ahash_update,
++			.final = rk2_ahash_final,
++			.finup = rk2_ahash_finup,
++			.export = rk2_ahash_export,
++			.import = rk2_ahash_import,
++			.digest = rk2_ahash_digest,
++			.init_tfm = rk2_hash_init_tfm,
++			.exit_tfm = rk2_hash_exit_tfm,
++			.halg = {
++				.digestsize = SHA1_DIGEST_SIZE,
++				.statesize = sizeof(struct sha1_state),
++				.base = {
++					.cra_name = "sha1",
++					.cra_driver_name = "rk2-sha1",
++					.cra_priority = 300,
++					.cra_flags =
++					CRYPTO_ALG_ASYNC |
++					CRYPTO_ALG_NEED_FALLBACK,
++					.cra_blocksize = SHA1_BLOCK_SIZE,
++					.cra_ctxsize =
++					sizeof(struct rk2_ahash_ctx),
++					.cra_module = THIS_MODULE,
++					}
++				}
++			},
++	.alg.hash.op = {
++			.do_one_request = rk2_hash_run,
++			},
++	},
++	{
++	.type = CRYPTO_ALG_TYPE_AHASH,
++	.rk2_mode = RK2_CRYPTO_SHA224,
++	.alg.hash.base = {
++			.init = rk2_ahash_init,
++			.update = rk2_ahash_update,
++			.final = rk2_ahash_final,
++			.finup = rk2_ahash_finup,
++			.export = rk2_ahash_export,
++			.import = rk2_ahash_import,
++			.digest = rk2_ahash_digest,
++			.init_tfm = rk2_hash_init_tfm,
++			.exit_tfm = rk2_hash_exit_tfm,
++			.halg = {
++				.digestsize = SHA224_DIGEST_SIZE,
++				.statesize = sizeof(struct sha256_state),
++				.base = {
++					.cra_name = "sha224",
++					.cra_driver_name = "rk2-sha224",
++					.cra_priority = 300,
++					.cra_flags =
++					CRYPTO_ALG_ASYNC |
++					CRYPTO_ALG_NEED_FALLBACK,
++					.cra_blocksize = SHA256_BLOCK_SIZE,
++					.cra_ctxsize =
++					sizeof(struct rk2_ahash_ctx),
++					.cra_module = THIS_MODULE,
++					}
++				}
++			},
++	.alg.hash.op = {
++			.do_one_request = rk2_hash_run,
++			},
++	},
++	{
++	.type = CRYPTO_ALG_TYPE_AHASH,
++	.rk2_mode = RK2_CRYPTO_SHA256,
++	.alg.hash.base = {
++			.init = rk2_ahash_init,
++			.update = rk2_ahash_update,
++			.final = rk2_ahash_final,
++			.finup = rk2_ahash_finup,
++			.export = rk2_ahash_export,
++			.import = rk2_ahash_import,
++			.digest = rk2_ahash_digest,
++			.init_tfm = rk2_hash_init_tfm,
++			.exit_tfm = rk2_hash_exit_tfm,
++			.halg = {
++				.digestsize = SHA256_DIGEST_SIZE,
++				.statesize = sizeof(struct sha256_state),
++				.base = {
++					.cra_name = "sha256",
++					.cra_driver_name = "rk2-sha256",
++					.cra_priority = 300,
++					.cra_flags =
++					CRYPTO_ALG_ASYNC |
++					CRYPTO_ALG_NEED_FALLBACK,
++					.cra_blocksize = SHA256_BLOCK_SIZE,
++					.cra_ctxsize =
++					sizeof(struct rk2_ahash_ctx),
++					.cra_module = THIS_MODULE,
++					}
++				}
++			},
++	.alg.hash.op = {
++			.do_one_request = rk2_hash_run,
++			},
++	},
++	{
++	.type = CRYPTO_ALG_TYPE_AHASH,
++	.rk2_mode = RK2_CRYPTO_SHA384,
++	.alg.hash.base = {
++			.init = rk2_ahash_init,
++			.update = rk2_ahash_update,
++			.final = rk2_ahash_final,
++			.finup = rk2_ahash_finup,
++			.export = rk2_ahash_export,
++			.import = rk2_ahash_import,
++			.digest = rk2_ahash_digest,
++			.init_tfm = rk2_hash_init_tfm,
++			.exit_tfm = rk2_hash_exit_tfm,
++			.halg = {
++				.digestsize = SHA384_DIGEST_SIZE,
++				.statesize = sizeof(struct sha512_state),
++				.base = {
++					.cra_name = "sha384",
++					.cra_driver_name = "rk2-sha384",
++					.cra_priority = 300,
++					.cra_flags = CRYPTO_ALG_ASYNC |
++					CRYPTO_ALG_NEED_FALLBACK,
++					.cra_blocksize = SHA384_BLOCK_SIZE,
++					.cra_ctxsize =
++					sizeof(struct rk2_ahash_ctx),
++					.cra_module = THIS_MODULE,
++					}
++				}
++			},
++	.alg.hash.op = {
++			.do_one_request = rk2_hash_run,
++			},
++	},
++	{
++	.type = CRYPTO_ALG_TYPE_AHASH,
++	.rk2_mode = RK2_CRYPTO_SHA512,
++	.alg.hash.base = {
++			.init = rk2_ahash_init,
++			.update = rk2_ahash_update,
++			.final = rk2_ahash_final,
++			.finup = rk2_ahash_finup,
++			.export = rk2_ahash_export,
++			.import = rk2_ahash_import,
++			.digest = rk2_ahash_digest,
++			.init_tfm = rk2_hash_init_tfm,
++			.exit_tfm = rk2_hash_exit_tfm,
++			.halg = {
++				.digestsize = SHA512_DIGEST_SIZE,
++				.statesize = sizeof(struct sha512_state),
++				.base = {
++					.cra_name = "sha512",
++					.cra_driver_name = "rk2-sha512",
++					.cra_priority = 300,
++					.cra_flags =
++					CRYPTO_ALG_ASYNC |
++					CRYPTO_ALG_NEED_FALLBACK,
++					.cra_blocksize = SHA512_BLOCK_SIZE,
++					.cra_ctxsize =
++					sizeof(struct rk2_ahash_ctx),
++					.cra_module = THIS_MODULE,
++					}
++				}
++			},
++	.alg.hash.op = {
++			.do_one_request = rk2_hash_run,
++			},
++	},
++	{
++	.type = CRYPTO_ALG_TYPE_AHASH,
++	.rk2_mode = RK2_CRYPTO_SM3,
++	.alg.hash.base = {
++			.init = rk2_ahash_init,
++			.update = rk2_ahash_update,
++			.final = rk2_ahash_final,
++			.finup = rk2_ahash_finup,
++			.export = rk2_ahash_export,
++			.import = rk2_ahash_import,
++			.digest = rk2_ahash_digest,
++			.init_tfm = rk2_hash_init_tfm,
++			.exit_tfm = rk2_hash_exit_tfm,
++			.halg = {
++				.digestsize = SM3_DIGEST_SIZE,
++				.statesize = sizeof(struct sm3_ctx),
++				.base = {
++					.cra_name = "sm3",
++					.cra_driver_name = "rk2-sm3",
++					.cra_priority = 300,
++					.cra_flags =
++					CRYPTO_ALG_ASYNC |
++					CRYPTO_ALG_NEED_FALLBACK,
++					.cra_blocksize = SM3_BLOCK_SIZE,
++					.cra_ctxsize =
++					sizeof(struct rk2_ahash_ctx),
++					.cra_module = THIS_MODULE,
++					}
++				}
++			},
++	.alg.hash.op = {
++			.do_one_request = rk2_hash_run,
++			},
++	},
++};
++
++#ifdef CONFIG_CRYPTO_DEV_ROCKCHIP2_DEBUG
++static int rk2_crypto_debugfs_stats_show(struct seq_file *seq, void *v)
++{
++	struct rk2_crypto_dev *rkc = seq->private;
++	int i;
++
++	seq_printf(seq, "%s %s requests: %lu\n",
++		   dev_driver_string(rkc->dev), dev_name(rkc->dev), atomic_long_read(&rkc->nreq));
++
++	for (i = 0; i < rkc->num_algs; i++) {
++		switch (rkc->algs[i].type) {
++		case CRYPTO_ALG_TYPE_SKCIPHER:
++			seq_printf(seq, "%s %s reqs=%lu fallback=%lu\n",
++				   rkc->algs[i].alg.skcipher.base.base.cra_driver_name,
++				   rkc->algs[i].alg.skcipher.base.base.cra_name,
++				   atomic_long_read(&rkc->algs[i].stat_req),
++				   atomic_long_read(&rkc->algs[i].stat_fb));
++			seq_printf(seq, "\tfallback due to length: %lu\n",
++				   atomic_long_read(&rkc->algs[i].stat_fb_len));
++			seq_printf(seq, "\tfallback due to alignment: %lu\n",
++				   atomic_long_read(&rkc->algs[i].stat_fb_align));
++			seq_printf(seq, "\tfallback due to SGs: %lu\n",
++				   atomic_long_read(&rkc->algs[i].stat_fb_sgdiff));
++			break;
++		case CRYPTO_ALG_TYPE_AHASH:
++			seq_printf(seq, "%s %s reqs=%lu fallback=%lu\n",
++				   rkc->algs[i].alg.hash.base.halg.base.cra_driver_name,
++				   rkc->algs[i].alg.hash.base.halg.base.cra_name,
++				   atomic_long_read(&rkc->algs[i].stat_req),
++				   atomic_long_read(&rkc->algs[i].stat_fb));
++			seq_printf(seq, "\tfallback due to alignment: %lu\n",
++				   atomic_long_read(&rkc->algs[i].stat_fb_align));
++			seq_printf(seq, "\tfallback due to SG length: %lu\n",
++				   atomic_long_read(&rkc->algs[i].stat_fb_sglen));
++			seq_printf(seq, "\tfallback due to SGs: %lu\n",
++				   atomic_long_read(&rkc->algs[i].stat_fb_sgdiff));
++			break;
++		}
++	}
++	return 0;
++}
++
++static int rk2_crypto_debugfs_info_show(struct seq_file *seq, void *d)
++{
++	struct rk2_crypto_dev *rkc = seq->private;
++	u32 v;
++	int err;
++
++	err = pm_runtime_resume_and_get(rkc->dev);
++	if (err)
++		return err;
++
++	v = readl(rkc->reg + RK2_CRYPTO_CLK_CTL);
++	seq_printf(seq, "CRYPTO_CLK_CTL %x\n", v);
++	v = readl(rkc->reg + RK2_CRYPTO_RST_CTL);
++	seq_printf(seq, "CRYPTO_RST_CTL %x\n", v);
++	v = readl(rkc->reg + CRYPTO_AES_VERSION);
++	seq_printf(seq, "CRYPTO_AES_VERSION %x\n", v);
++	if (v & RK2_AES_VER_SUPP_192)
++		seq_puts(seq, "  -> HW Feature: AES-192 Supported\n");
++	v = readl(rkc->reg + CRYPTO_DES_VERSION);
++	seq_printf(seq, "CRYPTO_DES_VERSION %x\n", v);
++	v = readl(rkc->reg + CRYPTO_SM4_VERSION);
++	seq_printf(seq, "CRYPTO_SM4_VERSION %x\n", v);
++	v = readl(rkc->reg + CRYPTO_HASH_VERSION);
++	seq_printf(seq, "CRYPTO_HASH_VERSION %x\n", v);
++	v = readl(rkc->reg + CRYPTO_HMAC_VERSION);
++	seq_printf(seq, "CRYPTO_HMAC_VERSION %x\n", v);
++	v = readl(rkc->reg + CRYPTO_RNG_VERSION);
++	seq_printf(seq, "CRYPTO_RNG_VERSION %x\n", v);
++	v = readl(rkc->reg + CRYPTO_PKA_VERSION);
++	seq_printf(seq, "CRYPTO_PKA_VERSION %x\n", v);
++	v = readl(rkc->reg + CRYPTO_CRYPTO_VERSION);
++	seq_printf(seq, "CRYPTO_CRYPTO_VERSION %x\n", v);
++
++	pm_runtime_mark_last_busy(rkc->dev);
++	pm_runtime_put_autosuspend(rkc->dev);
++
++	return 0;
++}
++
++DEFINE_SHOW_ATTRIBUTE(rk2_crypto_debugfs_stats);
++DEFINE_SHOW_ATTRIBUTE(rk2_crypto_debugfs_info);
++
++#endif
++
++static void register_debugfs(struct rk2_crypto_dev *rkc)
++{
++#ifdef CONFIG_CRYPTO_DEV_ROCKCHIP2_DEBUG
++	/* Create a directory using the device name
++	 * (e.g., /sys/kernel/debug/fe370000.crypto)
++	 */
++	rkc->dbgfs_dir = debugfs_create_dir(dev_name(rkc->dev), NULL);
++
++	debugfs_create_file("stats", 0440, rkc->dbgfs_dir, rkc,
++			    &rk2_crypto_debugfs_stats_fops);
++	debugfs_create_file("info", 0440, rkc->dbgfs_dir, rkc,
++			    &rk2_crypto_debugfs_info_fops);
++#endif
++}
++
++static int rk2_crypto_register(struct rk2_crypto_dev *rkc)
++{
++	int i, k, err = 0;
++
++	for (i = 0; i < rkc->num_algs; i++) {
++		rkc->algs[i].dev = rkc;
++		switch (rkc->algs[i].type) {
++		case CRYPTO_ALG_TYPE_SKCIPHER:
++			err = crypto_engine_register_skcipher(&rkc->algs[i].alg.skcipher);
++			break;
++		case CRYPTO_ALG_TYPE_AHASH:
++			err = crypto_engine_register_ahash(&rkc->algs[i].alg.hash);
++			break;
++		}
++		if (err)
++			goto err_cipher_algs;
++	}
++	return 0;
++
++ err_cipher_algs:
++	for (k = 0; k < i; k++) {
++		if (rkc->algs[k].type == CRYPTO_ALG_TYPE_SKCIPHER)
++			crypto_engine_unregister_skcipher(&rkc->algs[k].alg.skcipher);
++		else
++			crypto_engine_unregister_ahash(&rkc->algs[k].alg.hash);
++	}
++	return err;
++}
++
++static void rk2_crypto_unregister(struct rk2_crypto_dev *rkc)
++{
++	int i;
++
++	for (i = 0; i < rkc->num_algs; i++) {
++		if (rkc->algs[i].type == CRYPTO_ALG_TYPE_SKCIPHER)
++			crypto_engine_unregister_skcipher(&rkc->algs[i].alg.skcipher);
++		else
++			crypto_engine_unregister_ahash(&rkc->algs[i].alg.hash);
++	}
++}
++
++static const struct of_device_id crypto_of_id_table[] = {
++	{.compatible = "rockchip,rk3568-crypto",
++	 .data = &rk3568_variant,
++	 },
++	{}
++};
++
++MODULE_DEVICE_TABLE(of, crypto_of_id_table);
++
++static int rk2_crypto_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct rk2_crypto_dev *rkc;
++	int err = 0;
++
++	rkc = devm_kzalloc(dev, sizeof(*rkc), GFP_KERNEL);
++	if (!rkc)
++		return -ENOMEM;
++
++	rkc->dev = dev;
++	platform_set_drvdata(pdev, rkc);
++
++	rkc->variant = of_device_get_match_data(dev);
++	if (!rkc->variant)
++		return dev_err_probe(dev, -EINVAL, "Missing variant\n");
++
++	rkc->rst = devm_reset_control_array_get_exclusive(dev);
++	if (IS_ERR(rkc->rst))
++		return dev_err_probe(dev, PTR_ERR(rkc->rst), "Fail to get resets\n");
++
++	err = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
++	if (err)
++		return dev_err_probe(dev, err, "No usable 32-bit DMA configuration\n");
++
++	/* Manual DMA allocation requires manual cleanup in error paths */
++	rkc->tl = dma_alloc_coherent(dev,
++				     sizeof(struct rk2_crypto_lli) * MAX_LLI,
++				     &rkc->t_phy, GFP_KERNEL);
++
++	if (!rkc->tl)
++		return -ENOMEM;
++
++	rkc->reg = devm_platform_ioremap_resource(pdev, 0);
++	if (IS_ERR(rkc->reg)) {
++		err = dev_err_probe(dev, PTR_ERR(rkc->reg), "Fail to get resources\n");
++		goto err_dma;
++	}
++
++	err = rk2_crypto_get_clks(rkc);
++	if (err)
++		goto err_dma;
++
++	rkc->irq = platform_get_irq(pdev, 0);
++	if (rkc->irq < 0) {
++		err = dev_err_probe(dev, rkc->irq, "Interrupt is not available.\n");
++		goto err_dma;
++	}
++
++	rkc->engine = crypto_engine_alloc_init(dev, true);
++	if (!rkc->engine) {
++		err = -ENOMEM;
++		goto err_dma;
++	}
++
++	err = crypto_engine_start(rkc->engine);
++	if (err) {
++		err = dev_err_probe(dev, err, "Failed to start crypto engine\n");
++		goto err_engine;
++	}
++
++	init_completion(&rkc->complete);
++
++	err = rk2_crypto_pm_init(rkc);
++	if (err) {
++		err = dev_err_probe(dev, err, "Failed to initialize runtime PM\n");
++		goto err_engine;
++	}
++
++	err = pm_runtime_resume_and_get(dev);
++	if (err) {
++		err = dev_err_probe(dev, err, "Failed to resume device\n");
++		goto err_pm;
++	}
++
++	err = devm_request_irq(dev, rkc->irq,
++			       rk2_crypto_irq_handle, 0,
++			       "rk-crypto", pdev);
++	if (err) {
++		err = dev_err_probe(dev, err, "IRQ request failed.\n");
++		goto err_pm_put;
++	}
++
++	/*
++	 * Duplicate the algorithm templates so each device has its own copy
++	 * with a back-pointer to its rk2_crypto_dev. Exactly one crypto block
++	 * exists per SoC, so registering these driver_names cannot collide
++	 * (-EEXIST) on real hardware.
++	 */
++	rkc->num_algs = ARRAY_SIZE(rk2_crypto_algs_template);
++	rkc->algs = kmemdup(rk2_crypto_algs_template,
++			    sizeof(rk2_crypto_algs_template), GFP_KERNEL);
++	if (!rkc->algs) {
++		err = -ENOMEM;
++		goto err_pm_put;
++	}
++
++	err = rk2_crypto_register(rkc);
++	if (err) {
++		err = dev_err_probe(dev, err, "Fail to register crypto algorithms\n");
++		goto err_free_algs;
++	}
++
++	register_debugfs(rkc);
++
++	pm_runtime_mark_last_busy(dev);
++	pm_runtime_put_autosuspend(dev);
++
++	return 0;
++
++ err_free_algs:
++	kfree(rkc->algs);
++ err_pm_put:
++	pm_runtime_put_sync(dev);
++ err_pm:
++	rk2_crypto_pm_exit(rkc);
++ err_engine:
++	crypto_engine_exit(rkc->engine);
++ err_dma:
++	dma_free_coherent(dev, sizeof(struct rk2_crypto_lli) * MAX_LLI,
++			  rkc->tl, rkc->t_phy);
++	return err;
++}
++
++static void rk2_crypto_remove(struct platform_device *pdev)
++{
++	struct rk2_crypto_dev *rkc = platform_get_drvdata(pdev);
++
++	rk2_crypto_unregister(rkc);
++
++#ifdef CONFIG_CRYPTO_DEV_ROCKCHIP2_DEBUG
++	debugfs_remove_recursive(rkc->dbgfs_dir);
++#endif
++
++	crypto_engine_exit(rkc->engine);
++
++	pm_runtime_get_sync(rkc->dev);
++	pm_runtime_dont_use_autosuspend(rkc->dev);
++	pm_runtime_put_sync(rkc->dev);
++	rk2_crypto_pm_exit(rkc);
++
++	dma_free_coherent(rkc->dev, sizeof(struct rk2_crypto_lli) * MAX_LLI,
++			  rkc->tl, rkc->t_phy);
++
++	kfree(rkc->algs);
++}
++
++static struct platform_driver crypto_driver = {
++	.probe = rk2_crypto_probe,
++	.remove = rk2_crypto_remove,
++	.driver = {
++		   .name = "rk2-crypto",
++		   .pm = pm_ptr(&rk2_crypto_pm_ops),
++		   .of_match_table = crypto_of_id_table,
++		   },
++};
++
++module_platform_driver(crypto_driver);
++
++MODULE_DESCRIPTION("Rockchip Crypto Engine cryptographic offloader");
++MODULE_LICENSE("GPL");
++MODULE_AUTHOR("Corentin Labbe <clabbe@baylibre.com>");
++MODULE_AUTHOR("Dawid Olesinski <dawidro@gmail.com>");
++
+diff --git a/drivers/crypto/rockchip/rk2_crypto.h b/drivers/crypto/rockchip/rk2_crypto.h
+new file mode 100644
+index 000000000000..189c4557f525
+--- /dev/null
++++ b/drivers/crypto/rockchip/rk2_crypto.h
+@@ -0,0 +1,254 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Hardware cryptographic offloader for RK3568/RK3588 SoC
++ *
++ * Copyright (c) 2022-2023 Corentin Labbe <clabbe@baylibre.com>
++ * Copyright (c) 2026 Dawid Olesinski <dawidro@gmail.com>
++ */
++#ifndef __RK2_CRYPTO_H__
++#define __RK2_CRYPTO_H__
++
++#include <crypto/aes.h>
++#include <crypto/engine.h>
++#include <crypto/internal/hash.h>
++#include <crypto/internal/skcipher.h>
++#include <crypto/md5.h>
++#include <crypto/sha1.h>
++#include <crypto/sha2.h>
++#include <crypto/sm3.h>
++#include <linux/clk.h>
++#include <linux/completion.h>
++#include <linux/debugfs.h>
++#include <linux/device.h>
++#include <linux/io.h>
++#include <linux/reset.h>
++#include <linux/types.h>
++
++#define RK2_CRYPTO_CLK_CTL		0x0000
++#define RK2_CRYPTO_RST_CTL		0x0004
++
++#define RK2_CRYPTO_DMA_INT_EN		0x0008
++
++/* RK2_CRYPTO_DMA_INT_ST / RK2_CRYPTO_DMA_INT_EN bit definitions */
++#define RK2_CRYPTO_DMA_INT_LISTDONE       BIT(0)  /* all LLI transfers done */
++#define RK2_CRYPTO_DMA_INT_DST_ITEM_DONE  BIT(1)  /* one LLI write done     */
++#define RK2_CRYPTO_DMA_INT_SRC_ITEM_DONE  BIT(2)  /* one LLI read done      */
++#define RK2_CRYPTO_DMA_INT_DST_ERR        BIT(3)
++#define RK2_CRYPTO_DMA_INT_SRC_ERR        BIT(4)
++#define RK2_CRYPTO_DMA_INT_LIST_ERR       BIT(5)
++#define RK2_CRYPTO_DMA_INT_ZERO_LEN       BIT(6)
++#define RK2_CRYPTO_DMA_INT_ERR_MASK  (RK2_CRYPTO_DMA_INT_DST_ERR | \
++				      RK2_CRYPTO_DMA_INT_SRC_ERR | \
++				      RK2_CRYPTO_DMA_INT_LIST_ERR | \
++				      RK2_CRYPTO_DMA_INT_ZERO_LEN)
++
++#define RK2_CRYPTO_DMA_INT_ALL_MASK	0x7F
++
++/* The DMA interrupt enable register uses the upper 16 bits as a write-enable mask.
++ * To enable bits 0-6, we must write 1s to bits 16-22 as well.
++ */
++#define RK2_CRYPTO_DMA_INT_ENABLE_ALL	((RK2_CRYPTO_DMA_INT_ALL_MASK << 16) | \
++					  RK2_CRYPTO_DMA_INT_ALL_MASK)
++
++/* values in RK2_CRYPTO_DMA_INT_ST are the same as in RK2_CRYPTO_DMA_INT_EN */
++#define RK2_CRYPTO_DMA_INT_ST		0x000C
++
++#define RK2_CRYPTO_DMA_CTL		0x0010
++#define RK2_CRYPTO_DMA_CTL_START	BIT(0)
++
++#define RK2_CRYPTO_DMA_LLI_ADDR		0x0014
++#define RK2_CRYPTO_DMA_ST		0x0018
++#define RK2_CRYPTO_DMA_STATE		0x001C
++#define RK2_CRYPTO_DMA_LLI_RADDR	0x0020
++#define RK2_CRYPTO_DMA_SRC_RADDR	0x0024
++#define RK2_CRYPTO_DMA_DST_WADDR	0x0028
++#define RK2_CRYPTO_DMA_ITEM_ID		0x002C
++
++#define RK2_CRYPTO_FIFO_CTL		0x0040
++
++#define RK2_CRYPTO_BC_CTL		0x0044
++#define RK2_CRYPTO_AES			(0 << 8)
++#define RK2_CRYPTO_MODE_ECB		(0 << 4)
++#define RK2_CRYPTO_MODE_CBC		(1 << 4)
++#define RK2_CRYPTO_XTS			(6 << 4)
++
++#define RK2_CRYPTO_HASH_CTL		0x0048
++#define RK2_CRYPTO_HW_PAD		BIT(2)
++#define RK2_CRYPTO_SHA1			(0 << 4)
++#define RK2_CRYPTO_MD5			(1 << 4)
++#define RK2_CRYPTO_SHA224		(3 << 4)
++#define RK2_CRYPTO_SHA256		(2 << 4)
++#define RK2_CRYPTO_SHA384		(9 << 4)
++#define RK2_CRYPTO_SHA512		(8 << 4)
++#define RK2_CRYPTO_SM3			(4 << 4)
++
++#define RK2_CRYPTO_AES_ECB		(RK2_CRYPTO_AES | RK2_CRYPTO_MODE_ECB)
++#define RK2_CRYPTO_AES_CBC		(RK2_CRYPTO_AES | RK2_CRYPTO_MODE_CBC)
++#define RK2_CRYPTO_AES_XTS		(RK2_CRYPTO_AES | RK2_CRYPTO_XTS)
++#define RK2_CRYPTO_AES_128BIT_key	(0 << 2)
++#define RK2_CRYPTO_AES_192BIT_key	(1 << 2)
++#define RK2_CRYPTO_AES_256BIT_key	(2 << 2)
++
++#define RK2_CRYPTO_DEC			BIT(1)
++#define RK2_CRYPTO_ENABLE		BIT(0)
++
++#define RK2_CRYPTO_CIPHER_ST		0x004C
++#define RK2_CRYPTO_CIPHER_STATE		0x0050
++
++#define RK2_CRYPTO_CH0_IV_0		0x0100
++
++#define RK2_CRYPTO_KEY0			0x0180
++#define RK2_CRYPTO_KEY1			0x0184
++#define RK2_CRYPTO_KEY2			0x0188
++#define RK2_CRYPTO_KEY3			0x018C
++#define RK2_CRYPTO_KEY4			0x0190
++#define RK2_CRYPTO_KEY5			0x0194
++#define RK2_CRYPTO_KEY6			0x0198
++#define RK2_CRYPTO_KEY7			0x019C
++#define RK2_CRYPTO_CH4_KEY0		0x01c0
++
++#define RK2_CRYPTO_CH0_PC_LEN_0		0x0280
++
++#define RK2_CRYPTO_CH0_IV_LEN		0x0300
++
++#define RK2_CRYPTO_HASH_DOUT_0		0x03A0
++#define RK2_CRYPTO_HASH_VALID		0x03E4
++
++#define RK2_CRYPTO_TRNG_CTL		0x0400
++#define RK2_CRYPTO_TRNG_START		BIT(0)
++#define RK2_CRYPTO_TRNG_ENABLE		BIT(1)
++#define RK2_CRYPTO_TRNG_256		(0x3 << 4)
++#define RK2_CRYPTO_TRNG_SAMPLE_CNT	0x0404
++#define RK2_CRYPTO_TRNG_DOUT		0x0410
++
++#define CRYPTO_AES_VERSION		0x0680
++
++/*
++ * RK3588 TRM V1.0, CRYPTO chapter, NSCRYPTO_AES_VERSION:
++ * Bit 17 indicates hardware support for AES-192.
++ */
++#define RK2_AES_VER_SUPP_192		BIT(17)
++
++#define CRYPTO_DES_VERSION		0x0684
++#define CRYPTO_SM4_VERSION		0x0688
++#define CRYPTO_HASH_VERSION		0x068C
++#define CRYPTO_HMAC_VERSION		0x0690
++#define CRYPTO_RNG_VERSION		0x0694
++#define CRYPTO_PKA_VERSION		0x0698
++#define CRYPTO_CRYPTO_VERSION		0x06F0
++
++#define RK2_LLI_DMA_CTRL_SRC_INT	BIT(10)
++#define RK2_LLI_DMA_CTRL_DST_INT	BIT(9)
++#define RK2_LLI_DMA_CTRL_LIST_INT	BIT(8)
++#define RK2_LLI_DMA_CTRL_LAST		BIT(0)
++
++#define RK2_LLI_STRING_LAST		BIT(2)
++#define RK2_LLI_STRING_FIRST		BIT(1)
++#define RK2_LLI_CIPHER_START		BIT(0)
++
++#define MAX_LLI 20
++
++struct rk2_crypto_lli {
++	__le32 src_addr;
++	__le32 src_len;
++	__le32 dst_addr;
++	__le32 dst_len;
++	__le32 user;
++	__le32 iv;
++	__le32 dma_ctrl;
++	__le32 next;
++};
++
++struct rk2_variant {
++	int num_clks;
++};
++
++struct rk2_crypto_dev {
++	struct device *dev;
++	struct clk_bulk_data *clks;
++	int num_clks;
++	struct reset_control *rst;
++	void __iomem *reg;
++	int irq;
++	const struct rk2_variant *variant;
++	atomic_long_t nreq;
++	struct crypto_engine *engine;
++	struct completion complete;
++	int status;
++	struct rk2_crypto_lli *tl;
++	dma_addr_t t_phy;
++	struct rk2_crypto_template *algs;
++	int num_algs;
++#ifdef CONFIG_CRYPTO_DEV_ROCKCHIP2_DEBUG
++	struct dentry *dbgfs_dir;
++#endif
++};
++
++/* the private variable of hash */
++struct rk2_ahash_ctx {
++	/* for fallback */
++	struct crypto_ahash *fallback_tfm;
++};
++
++/* the private variable of hash for fallback */
++struct rk2_ahash_rctx {
++	struct rk2_crypto_dev *dev;
++	u32 mode;
++	int nrsgs;
++	struct ahash_request fallback_req;
++};
++
++/* the private variable of cipher */
++struct rk2_cipher_ctx {
++	unsigned int keylen;
++	u8 key[AES_MAX_KEY_SIZE * 2];
++	struct crypto_skcipher *fallback_tfm;
++};
++
++struct rk2_cipher_rctx {
++	struct rk2_crypto_dev *dev;
++	u8 backup_iv[AES_BLOCK_SIZE];
++	u32 mode;
++	/* must be last, see __ctx placement */
++	struct skcipher_request fallback_req;
++};
++
++struct rk2_crypto_template {
++	u32 type;
++	u32 rk2_mode;
++	struct rk2_crypto_dev *dev;
++	union {
++		struct skcipher_engine_alg skcipher;
++		struct ahash_engine_alg hash;
++	} alg;
++	atomic_long_t stat_req;
++	atomic_long_t stat_fb;
++	atomic_long_t stat_fb_len;
++	atomic_long_t stat_fb_sglen;
++	atomic_long_t stat_fb_align;
++	atomic_long_t stat_fb_sgdiff;
++};
++
++int rk2_cipher_run(struct crypto_engine *engine, void *async_req);
++int rk2_hash_run(struct crypto_engine *engine, void *breq);
++
++int rk2_cipher_tfm_init(struct crypto_skcipher *tfm);
++void rk2_cipher_tfm_exit(struct crypto_skcipher *tfm);
++int rk2_aes_setkey(struct crypto_skcipher *cipher, const u8 *key,
++		   unsigned int keylen);
++int rk2_aes_xts_setkey(struct crypto_skcipher *cipher, const u8 *key,
++		       unsigned int keylen);
++int rk2_skcipher_encrypt(struct skcipher_request *req);
++int rk2_skcipher_decrypt(struct skcipher_request *req);
++
++int rk2_ahash_init(struct ahash_request *req);
++int rk2_ahash_update(struct ahash_request *req);
++int rk2_ahash_final(struct ahash_request *req);
++int rk2_ahash_finup(struct ahash_request *req);
++int rk2_ahash_import(struct ahash_request *req, const void *in);
++int rk2_ahash_export(struct ahash_request *req, void *out);
++int rk2_ahash_digest(struct ahash_request *req);
++int rk2_hash_init_tfm(struct crypto_ahash *tfm);
++void rk2_hash_exit_tfm(struct crypto_ahash *tfm);
++
++#endif /* __RK2_CRYPTO_H__ */
+diff --git a/drivers/crypto/rockchip/rk2_crypto_ahash.c b/drivers/crypto/rockchip/rk2_crypto_ahash.c
+new file mode 100644
+index 000000000000..bfbfd9eec355
+--- /dev/null
++++ b/drivers/crypto/rockchip/rk2_crypto_ahash.c
+@@ -0,0 +1,541 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Hardware cryptographic offloader for RK3568/RK3588 SoC
++ *
++ * Copyright (c) 2022-2023 Corentin Labbe <clabbe@baylibre.com>
++ * Copyright (c) 2026 Dawid Olesinski <dawidro@gmail.com>
++ */
++#include <linux/dma-mapping.h>
++#include <linux/iopoll.h>
++#include <linux/interrupt.h>
++#include <linux/pm_runtime.h>
++#include <linux/reset.h>
++#include <linux/scatterlist.h>
++#include <linux/unaligned.h>
++#include <crypto/aes.h>
++#include <crypto/md5.h>
++#include <crypto/sha1.h>
++#include <crypto/sha2.h>
++#include <crypto/sm3.h>
++#include "rk2_crypto.h"
++
++static bool rk2_ahash_need_fallback(struct ahash_request *areq)
++{
++	struct crypto_ahash *tfm = crypto_ahash_reqtfm(areq);
++	struct ahash_alg *alg = crypto_ahash_alg(tfm);
++	struct rk2_crypto_template *algt =
++	    container_of(alg, struct rk2_crypto_template, alg.hash.base);
++	struct scatterlist *sg;
++	int nents = sg_nents_for_len(areq->src, areq->nbytes);
++
++	/*
++	 * The hardware's Merkle-Damgard padding engine (HW_PAD) requires the
++	 * total message length to be known upfront via CH0_PC_LEN_0. When a
++	 * request spans multiple LLI descriptors, the hardware either treats
++	 * each descriptor as an independent padded message, or loses running
++	 * hash state at descriptor boundaries. Either way the result is a
++	 * wrong digest. This behaviour is not documented in the RK3588 TRM,
++	 * which advertises LLI chaining but does not specify whether hash
++	 * operations may span multiple linked descriptors.
++	 * Work around this by falling back to software for any multi-SG
++	 * request. Single-SG requests with HW_PAD work correctly.
++	 */
++
++	if (nents < 0) {
++		dev_err(algt->dev->dev, "Invalid SG list: length mismatch\n");
++		return true;	/* force fallback safely */
++	}
++	if (nents > 1) {
++		atomic_long_inc(&algt->stat_fb_sgdiff);
++		return true;
++	}
++
++	sg = areq->src;
++	while (sg) {
++		if (!IS_ALIGNED(sg->offset, sizeof(u32))) {
++			atomic_long_inc(&algt->stat_fb_align);
++			return true;
++		}
++		if (sg->length % 4) {
++			atomic_long_inc(&algt->stat_fb_sglen);
++			return true;
++		}
++		sg = sg_next(sg);
++	}
++	return false;
++}
++
++static int rk2_ahash_digest_fb(struct ahash_request *areq)
++{
++	struct rk2_ahash_rctx *rctx = ahash_request_ctx(areq);
++	struct crypto_ahash *tfm = crypto_ahash_reqtfm(areq);
++	struct rk2_ahash_ctx *tfmctx = crypto_ahash_ctx(tfm);
++	struct ahash_alg *alg = crypto_ahash_alg(tfm);
++	struct rk2_crypto_template *algt =
++	    container_of(alg, struct rk2_crypto_template, alg.hash.base);
++
++	atomic_long_inc(&algt->stat_fb);
++
++	ahash_request_set_tfm(&rctx->fallback_req, tfmctx->fallback_tfm);
++	ahash_request_set_callback(&rctx->fallback_req, areq->base.flags,
++				   areq->base.complete, areq->base.data);
++
++	rctx->fallback_req.nbytes = areq->nbytes;
++	rctx->fallback_req.src = areq->src;
++	rctx->fallback_req.result = areq->result;
++
++	return crypto_ahash_digest(&rctx->fallback_req);
++}
++
++static int zero_message_process(struct ahash_request *req)
++{
++	struct crypto_ahash *tfm = crypto_ahash_reqtfm(req);
++	struct ahash_alg *alg = crypto_ahash_alg(tfm);
++	struct rk2_crypto_template *algt =
++	    container_of(alg, struct rk2_crypto_template, alg.hash.base);
++	int digestsize = crypto_ahash_digestsize(tfm);
++
++	switch (algt->rk2_mode) {
++	case RK2_CRYPTO_SHA1:
++		memcpy(req->result, sha1_zero_message_hash, digestsize);
++		break;
++	case RK2_CRYPTO_SHA224:
++		memcpy(req->result, sha224_zero_message_hash, digestsize);
++		break;
++	case RK2_CRYPTO_SHA256:
++		memcpy(req->result, sha256_zero_message_hash, digestsize);
++		break;
++	case RK2_CRYPTO_SHA384:
++		memcpy(req->result, sha384_zero_message_hash, digestsize);
++		break;
++	case RK2_CRYPTO_SHA512:
++		memcpy(req->result, sha512_zero_message_hash, digestsize);
++		break;
++	case RK2_CRYPTO_MD5:
++		memcpy(req->result, md5_zero_message_hash, digestsize);
++		break;
++	case RK2_CRYPTO_SM3:
++		sm3((const u8 *)"", 0, req->result);
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	return 0;
++}
++
++/**
++ * rk2_ahash_init() - Initialize context for a hash request
++ * @req: The asynchronous hash request structure.
++ *
++ * Initializes the software fallback context. The physical hardware engine
++ * is only utilized during atomic digest operations.
++ *
++ * Return: 0 on success, or a negative error code on failure.
++ */
++int rk2_ahash_init(struct ahash_request *req)
++{
++	struct rk2_ahash_rctx *rctx = ahash_request_ctx(req);
++	struct crypto_ahash *tfm = crypto_ahash_reqtfm(req);
++	struct rk2_ahash_ctx *ctx = crypto_ahash_ctx(tfm);
++
++	ahash_request_set_tfm(&rctx->fallback_req, ctx->fallback_tfm);
++	ahash_request_set_callback(&rctx->fallback_req, req->base.flags,
++				   req->base.complete, req->base.data);
++
++	return crypto_ahash_init(&rctx->fallback_req);
++}
++
++/**
++ * rk2_ahash_update() - Feed a message block into the hash stream
++ * @req: The asynchronous hash request structure.
++ *
++ * Passes the message block to the software fallback. The hardware engine
++ * does not support fragmented streaming updates.
++ *
++ * Return: 0 on success, or a negative error code on failure.
++ */
++int rk2_ahash_update(struct ahash_request *req)
++{
++	struct rk2_ahash_rctx *rctx = ahash_request_ctx(req);
++	struct crypto_ahash *tfm = crypto_ahash_reqtfm(req);
++	struct rk2_ahash_ctx *ctx = crypto_ahash_ctx(tfm);
++
++	ahash_request_set_tfm(&rctx->fallback_req, ctx->fallback_tfm);
++	ahash_request_set_callback(&rctx->fallback_req, req->base.flags,
++				   req->base.complete, req->base.data);
++	rctx->fallback_req.nbytes = req->nbytes;
++	rctx->fallback_req.src = req->src;
++
++	return crypto_ahash_update(&rctx->fallback_req);
++}
++
++/**
++ * rk2_ahash_final() - Finalize the hashing operation
++ * @req: The asynchronous hash request structure.
++ *
++ * Finalizes the hash and extracts the digest via the software fallback.
++ *
++ * Return: 0 on success, or a negative error code on failure.
++ */
++int rk2_ahash_final(struct ahash_request *req)
++{
++	struct rk2_ahash_rctx *rctx = ahash_request_ctx(req);
++	struct crypto_ahash *tfm = crypto_ahash_reqtfm(req);
++	struct rk2_ahash_ctx *ctx = crypto_ahash_ctx(tfm);
++
++	ahash_request_set_tfm(&rctx->fallback_req, ctx->fallback_tfm);
++	ahash_request_set_callback(&rctx->fallback_req, req->base.flags,
++				   req->base.complete, req->base.data);
++	rctx->fallback_req.result = req->result;
++
++	return crypto_ahash_final(&rctx->fallback_req);
++}
++
++/**
++ * rk2_ahash_finup() - Perform update and final hash operations sequentially
++ * @req: The asynchronous hash request structure.
++ *
++ * Convenience wrapper that performs update and final operations
++ * via the software fallback.
++ *
++ * Return: 0 on success, or a negative error code on failure.
++ */
++int rk2_ahash_finup(struct ahash_request *req)
++{
++	struct rk2_ahash_rctx *rctx = ahash_request_ctx(req);
++	struct crypto_ahash *tfm = crypto_ahash_reqtfm(req);
++	struct rk2_ahash_ctx *ctx = crypto_ahash_ctx(tfm);
++
++	ahash_request_set_tfm(&rctx->fallback_req, ctx->fallback_tfm);
++	ahash_request_set_callback(&rctx->fallback_req, req->base.flags,
++				   req->base.complete, req->base.data);
++
++	rctx->fallback_req.nbytes = req->nbytes;
++	rctx->fallback_req.src = req->src;
++	rctx->fallback_req.result = req->result;
++
++	return crypto_ahash_finup(&rctx->fallback_req);
++}
++
++/**
++ * rk2_ahash_import() - Restore a saved hash context
++ * @req: The target asynchronous hash request structure.
++ * @in: Buffer containing the previously exported state.
++ *
++ * Restores the software fallback state from an export block.
++ *
++ * Return: 0 on success, or a negative error code on failure.
++ */
++int rk2_ahash_import(struct ahash_request *req, const void *in)
++{
++	struct rk2_ahash_rctx *rctx = ahash_request_ctx(req);
++	struct crypto_ahash *tfm = crypto_ahash_reqtfm(req);
++	struct rk2_ahash_ctx *ctx = crypto_ahash_ctx(tfm);
++
++	ahash_request_set_tfm(&rctx->fallback_req, ctx->fallback_tfm);
++	ahash_request_set_callback(&rctx->fallback_req, req->base.flags,
++				   req->base.complete, req->base.data);
++
++	return crypto_ahash_import(&rctx->fallback_req, in);
++}
++
++/**
++ * rk2_ahash_export() - Serialize an active hash context
++ * @req: The source asynchronous hash request structure.
++ * @out: Destination buffer where the state will be written.
++ *
++ * Freezes the progression of the software fallback stream into a byte array.
++ *
++ * Return: 0 on success, or a negative error code on failure.
++ */
++int rk2_ahash_export(struct ahash_request *req, void *out)
++{
++	struct rk2_ahash_rctx *rctx = ahash_request_ctx(req);
++	struct crypto_ahash *tfm = crypto_ahash_reqtfm(req);
++	struct rk2_ahash_ctx *ctx = crypto_ahash_ctx(tfm);
++
++	ahash_request_set_tfm(&rctx->fallback_req, ctx->fallback_tfm);
++	ahash_request_set_callback(&rctx->fallback_req, req->base.flags,
++				   req->base.complete, req->base.data);
++
++	return crypto_ahash_export(&rctx->fallback_req, out);
++}
++
++/**
++ * rk2_ahash_digest() - Compute a complete message digest in a single transaction
++ * @req: The asynchronous hash request structure.
++ *
++ * Evaluates hardware constraints (e.g., scatterlist alignment) and either
++ * routes the atomic request to the hardware engine or diverts to the fallback.
++ *
++ * Return: 0 on synchronous completion, -EINPROGRESS if submitted to the
++ *         hardware engine, or a negative error code on failure.
++ */
++int rk2_ahash_digest(struct ahash_request *req)
++{
++	struct rk2_ahash_rctx *rctx = ahash_request_ctx(req);
++	struct crypto_ahash *tfm = crypto_ahash_reqtfm(req);
++	struct ahash_alg *alg = crypto_ahash_alg(tfm);
++	struct rk2_crypto_template *algt;
++	struct rk2_crypto_dev *rkc;
++	struct crypto_engine *engine;
++
++	if (!req->nbytes)
++		return zero_message_process(req);
++
++	if (rk2_ahash_need_fallback(req))
++		return rk2_ahash_digest_fb(req);
++
++	/* Extract the device pointer from the algorithm template! */
++	algt = container_of(alg, struct rk2_crypto_template, alg.hash.base);
++	rkc = algt->dev;
++	if (!rkc)
++		return -ENODEV;
++
++	rctx->dev = rkc;
++	engine = rkc->engine;
++
++	return crypto_transfer_hash_request_to_engine(engine, req);
++}
++
++static int rk2_hash_prepare(struct crypto_engine *engine, void *breq)
++{
++	struct ahash_request *areq =
++	    container_of(breq, struct ahash_request, base);
++	struct rk2_ahash_rctx *rctx = ahash_request_ctx(areq);
++	struct rk2_crypto_dev *rkc = rctx->dev;
++	int n = sg_nents_for_len(areq->src, areq->nbytes);
++	int ret;
++
++	if (n < 0) {
++		dev_err(rkc->dev, "SG list too short for %u bytes\n", areq->nbytes);
++		return -EINVAL;
++	}
++	rctx->nrsgs = n;
++	ret = dma_map_sg(rkc->dev, areq->src, rctx->nrsgs, DMA_TO_DEVICE);
++	if (ret <= 0) {
++		/*
++		 * clear nrsgs on map failure to prevent spurious unmap in unprepare
++		 */
++		rctx->nrsgs = 0;
++		return -EINVAL;
++	}
++	return 0;
++}
++
++static void rk2_hash_unprepare(struct crypto_engine *engine, void *breq)
++{
++	struct ahash_request *areq =
++	    container_of(breq, struct ahash_request, base);
++	struct rk2_ahash_rctx *rctx = ahash_request_ctx(areq);
++	struct rk2_crypto_dev *rkc = rctx->dev;
++
++	if (rctx->nrsgs)
++		dma_unmap_sg(rkc->dev, areq->src, rctx->nrsgs, DMA_TO_DEVICE);
++}
++
++/**
++ * rk2_hash_run() - Execute an asynchronous hash request via the hardware
++ * @engine: The crypto engine queue managing this request.
++ * @breq: The asynchronous hash request to process.
++ *
++ * Configures the hardware hash engine, programs DMA block descriptors,
++ * and copies the final digest back from the hardware registers.
++ *
++ * Return: Always 0. Errors are reported through the crypto engine
++ *         finalization callback.
++ */
++int rk2_hash_run(struct crypto_engine *engine, void *breq)
++{
++	struct ahash_request *areq =
++	    container_of(breq, struct ahash_request, base);
++	struct crypto_ahash *tfm = crypto_ahash_reqtfm(areq);
++	struct rk2_ahash_rctx *rctx = ahash_request_ctx(areq);
++	struct ahash_alg *alg = crypto_ahash_alg(tfm);
++	struct rk2_crypto_template *algt =
++	    container_of(alg, struct rk2_crypto_template, alg.hash.base);
++	struct scatterlist *sgs = areq->src;
++	struct rk2_crypto_dev *rkc = rctx->dev;
++	struct rk2_crypto_lli *dd = &rkc->tl[0];
++	int err = 0;
++	int i;
++	unsigned long timeout;
++	u32 v;
++
++	err = rk2_hash_prepare(engine, breq);
++	if (err)
++		goto exit_unmap;
++
++	err = pm_runtime_resume_and_get(rkc->dev);
++	if (err)
++		goto exit_unmap;
++
++	dev_dbg(rkc->dev, "%s %s len=%u\n", __func__,
++		crypto_tfm_alg_name(areq->base.tfm), areq->nbytes);
++
++	atomic_long_inc(&algt->stat_req);
++	atomic_long_inc(&rkc->nreq);
++
++	/*
++	 * The upper bits are a write enable mask, so we need to write 1 to all
++	 * upper 16 bits to allow write to the 16 lower bits
++	 */
++	rctx->mode = algt->rk2_mode;
++	rctx->mode |= 0xffff0000;
++	rctx->mode |= RK2_CRYPTO_ENABLE | RK2_CRYPTO_HW_PAD;
++	writel(rctx->mode, rkc->reg + RK2_CRYPTO_HASH_CTL);
++
++	/*
++	 * Multi-SG requests are forced into the software fallback path due to
++	 * hardware padding limitations (HW_PAD). Therefore, we are guaranteed
++	 * to only process a single scatterlist element here.
++	 */
++	dd->src_addr = cpu_to_le32(lower_32_bits(sg_dma_address(sgs)));
++	dd->src_len  = cpu_to_le32(sg_dma_len(sgs));
++	dd->dst_addr = 0;
++	dd->dst_len  = 0;
++	dd->iv       = 0;
++
++	/*
++	 * next is ignored by hardware when RK2_LLI_DMA_CTRL_LAST is set.
++	 * Set it to an obviously-invalid-but-non-zero sentinel so it stands
++	 * out if ever read in a debug dump.
++	 */
++	dd->next     = cpu_to_le32(1);
++
++	/* Since this is the only LLI, it is both the FIRST and LAST string */
++	dd->user     = cpu_to_le32(RK2_LLI_CIPHER_START |
++				   RK2_LLI_STRING_FIRST |
++				   RK2_LLI_STRING_LAST);
++
++	dd->dma_ctrl = cpu_to_le32(RK2_LLI_DMA_CTRL_LAST |
++				   RK2_LLI_DMA_CTRL_SRC_INT |
++				   RK2_LLI_DMA_CTRL_LIST_INT);
++
++	dev_dbg(rkc->dev,
++		"HASH sglen=%u user=%x dma=%x mode=%x phy=%pad\n",
++		sgs->length,
++		le32_to_cpu(dd->user),
++		le32_to_cpu(dd->dma_ctrl),
++		rctx->mode,
++		&rkc->t_phy);
++
++	/* Program total payload length for hardware padding */
++	writel(areq->nbytes, rkc->reg + RK2_CRYPTO_CH0_PC_LEN_0);
++
++	/* Clear stale interrupts, then enable with proper write-mask */
++	writel(RK2_CRYPTO_DMA_INT_ALL_MASK, rkc->reg + RK2_CRYPTO_DMA_INT_ST);
++	writel(RK2_CRYPTO_DMA_INT_ENABLE_ALL, rkc->reg + RK2_CRYPTO_DMA_INT_EN);
++
++	writel(lower_32_bits(rkc->t_phy), rkc->reg + RK2_CRYPTO_DMA_LLI_ADDR);
++
++	reinit_completion(&rkc->complete);
++	rkc->status = 0;
++
++	writel(RK2_CRYPTO_DMA_CTL_START | (RK2_CRYPTO_DMA_CTL_START << 16),
++	       rkc->reg + RK2_CRYPTO_DMA_CTL);
++
++	timeout = wait_for_completion_timeout(&rkc->complete,
++					      msecs_to_jiffies(2000));
++	if (!timeout) {
++		dev_err(rkc->dev, "DMA timeout\n");
++		err = -ETIMEDOUT;
++		reset_control_assert(rkc->rst);
++		udelay(10);
++		reset_control_deassert(rkc->rst);
++		synchronize_irq(rkc->irq);
++	}
++
++	if (err)
++		goto exit;
++
++	if (!rkc->status) {
++		dev_err(rkc->dev, "DMA error\n");
++		err = -EIO;
++		reset_control_assert(rkc->rst);
++		udelay(10);
++		reset_control_deassert(rkc->rst);
++		goto exit;
++	}
++
++	err =
++	    readl_poll_timeout_atomic(rkc->reg + RK2_CRYPTO_HASH_VALID, v,
++				      v == 1, 10, 1000);
++	if (err) {
++		dev_err(rkc->dev, "Hash result not valid\n");
++		goto exit;
++	}
++
++	/*
++	 * Hardware outputs digest words in big-endian format.
++	 * Because readl() performs a native little-endian read,
++	 * put_unaligned_be32() is used to store the result correctly
++	 * into the byte array.
++	 */
++	for (i = 0; i < crypto_ahash_digestsize(tfm) / 4; i++) {
++		v = readl(rkc->reg + RK2_CRYPTO_HASH_DOUT_0 + i * 4);
++		put_unaligned_be32(v, areq->result + i * 4);
++	}
++ exit:
++	writel(0xffff0000, rkc->reg + RK2_CRYPTO_HASH_CTL);
++	pm_runtime_mark_last_busy(rkc->dev);
++	pm_runtime_put_autosuspend(rkc->dev);
++
++ exit_unmap:
++	rk2_hash_unprepare(engine, breq);
++	local_bh_disable();
++	crypto_finalize_hash_request(engine, breq, err);
++	local_bh_enable();
++
++	return 0;
++}
++
++/**
++ * rk2_hash_init_tfm() - Initialize the transformation context
++ * @tfm: The crypto ahash handle.
++ *
++ * Allocates software fallback transformations required to guarantee
++ * processing integrity when hardware constraints are violated.
++ *
++ * Return: 0 on success, or a negative error code on failure.
++ */
++int rk2_hash_init_tfm(struct crypto_ahash *tfm)
++{
++	struct rk2_ahash_ctx *tctx = crypto_ahash_ctx(tfm);
++	const char *alg_name = crypto_ahash_alg_name(tfm);
++	struct ahash_alg *alg = crypto_ahash_alg(tfm);
++	struct rk2_crypto_template *algt =
++	    container_of(alg, struct rk2_crypto_template, alg.hash.base);
++	unsigned int fallback_statesize;
++
++	tctx->fallback_tfm = crypto_alloc_ahash(alg_name, 0,
++						CRYPTO_ALG_NEED_FALLBACK);
++	if (IS_ERR(tctx->fallback_tfm)) {
++		dev_err(algt->dev->dev, "Could not load fallback driver.\n");
++		return PTR_ERR(tctx->fallback_tfm);
++	}
++
++	/* Promote statesize if fallback needs more space for export/import */
++	fallback_statesize = crypto_ahash_statesize(tctx->fallback_tfm);
++	if (fallback_statesize > crypto_ahash_statesize(tfm))
++		crypto_ahash_set_statesize(tfm, fallback_statesize);
++
++	crypto_ahash_set_reqsize(tfm,
++				 sizeof(struct rk2_ahash_rctx) +
++				 crypto_ahash_reqsize(tctx->fallback_tfm));
++	return 0;
++}
++
++/**
++ * rk2_hash_exit_tfm() - Clean up an ahash transformation context
++ * @tfm: The crypto ahash handle.
++ *
++ * Safely frees internal software fallback transformations.
++ */
++void rk2_hash_exit_tfm(struct crypto_ahash *tfm)
++{
++	struct rk2_ahash_ctx *tctx = crypto_ahash_ctx(tfm);
++
++	crypto_free_ahash(tctx->fallback_tfm);
++}
+diff --git a/drivers/crypto/rockchip/rk2_crypto_skcipher.c b/drivers/crypto/rockchip/rk2_crypto_skcipher.c
+new file mode 100644
+index 000000000000..d524a9d5eeb2
+--- /dev/null
++++ b/drivers/crypto/rockchip/rk2_crypto_skcipher.c
+@@ -0,0 +1,740 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Hardware cryptographic offloader for RK3568/RK3588 SoC
++ *
++ * Copyright (c) 2022-2023 Corentin Labbe <clabbe@baylibre.com>
++ * Copyright (c) 2026 Dawid Olesinski <dawidro@gmail.com>
++ */
++#include <linux/delay.h>
++#include <linux/dma-mapping.h>
++#include <linux/pm_runtime.h>
++#include <linux/reset.h>
++#include <linux/unaligned.h>
++#include <crypto/scatterwalk.h>
++#include <crypto/aes.h>
++#include <crypto/xts.h>
++#include "rk2_crypto.h"
++
++#ifdef CONFIG_CRYPTO_DEV_ROCKCHIP2_DEBUG
++static void rk2_print(struct rk2_crypto_dev *rkc)
++{
++	u32 v;
++
++	v = readl(rkc->reg + RK2_CRYPTO_DMA_ST);
++	dev_info(rkc->dev, "DMA_ST %x\n", v);
++	switch (v) {
++	case 0:
++		dev_info(rkc->dev, "DMA_ST: DMA IDLE\n");
++		break;
++	case 1:
++		dev_info(rkc->dev, "DMA_ST: DMA BUSY\n");
++		break;
++	default:
++		dev_err(rkc->dev, "DMA_ST: invalid value\n");
++	}
++
++	v = readl(rkc->reg + RK2_CRYPTO_DMA_STATE);
++	dev_info(rkc->dev, "DMA_STATE %x\n", v);
++
++	switch (v & 0x3) {
++	case 0:
++		dev_info(rkc->dev, "DMA_STATE: DMA DST IDLE\n");
++		break;
++	case 1:
++		dev_info(rkc->dev, "DMA_STATE: DMA DST LOAD\n");
++		break;
++	case 2:
++		dev_info(rkc->dev, "DMA_STATE: DMA DST WORK\n");
++		break;
++	default:
++		dev_err(rkc->dev, "DMA DST invalid\n");
++		break;
++	}
++	switch ((v >> 2) & 0x3) {
++	case 0:
++		dev_info(rkc->dev, "DMA_STATE: DMA SRC IDLE\n");
++		break;
++	case 1:
++		dev_info(rkc->dev, "DMA_STATE: DMA SRC LOAD\n");
++		break;
++	case 2:
++		dev_info(rkc->dev, "DMA_STATE: DMA SRC WORK\n");
++		break;
++	default:
++		dev_err(rkc->dev, "DMA_STATE: DMA SRC invalid\n");
++		break;
++	}
++	switch ((v >> 4) & 0x3) {
++	case 0:
++		dev_info(rkc->dev, "DMA_STATE: DMA LLI IDLE\n");
++		break;
++	case 1:
++		dev_info(rkc->dev, "DMA_STATE: DMA LLI LOAD\n");
++		break;
++	case 2:
++		dev_info(rkc->dev, "DMA_STATE: LLI WORK\n");
++		break;
++	default:
++		dev_err(rkc->dev, "DMA_STATE: LLI invalid\n");
++		break;
++	}
++
++	v = readl(rkc->reg + RK2_CRYPTO_DMA_LLI_RADDR);
++	dev_info(rkc->dev, "DMA_LLI_RADDR %x\n", v);
++	v = readl(rkc->reg + RK2_CRYPTO_DMA_SRC_RADDR);
++	dev_info(rkc->dev, "DMA_SRC_RADDR %x\n", v);
++	v = readl(rkc->reg + RK2_CRYPTO_DMA_DST_WADDR);
++	dev_info(rkc->dev, "DMA_DST_WADDR %x\n", v);
++	v = readl(rkc->reg + RK2_CRYPTO_DMA_ITEM_ID);
++	dev_info(rkc->dev, "DMA_ITEM_ID %x\n", v);
++
++	v = readl(rkc->reg + RK2_CRYPTO_CIPHER_ST);
++	dev_info(rkc->dev, "CIPHER_ST %x\n", v);
++	if (v & BIT(0))
++		dev_info(rkc->dev, "CIPHER_ST: BLOCK CIPHER BUSY\n");
++	else
++		dev_info(rkc->dev, "CIPHER_ST: BLOCK CIPHER IDLE\n");
++	if (v & BIT(2))
++		dev_info(rkc->dev, "CIPHER_ST: HASH BUSY\n");
++	else
++		dev_info(rkc->dev, "CIPHER_ST: HASH IDLE\n");
++	if (v & BIT(3))
++		dev_info(rkc->dev, "CIPHER_ST: OTP KEY VALID\n");
++	else
++		dev_info(rkc->dev, "CIPHER_ST: OTP KEY INVALID\n");
++
++	v = readl(rkc->reg + RK2_CRYPTO_CIPHER_STATE);
++	dev_info(rkc->dev, "CIPHER_STATE %x\n", v);
++	switch (v & 0x3) {
++	case 0:
++		dev_info(rkc->dev, "serial: IDLE state\n");
++		break;
++	case 1:
++		dev_info(rkc->dev, "serial: PRE state\n");
++		break;
++	case 2:
++		dev_info(rkc->dev, "serial: BULK state\n");
++		break;
++	default:
++		dev_info(rkc->dev, "serial: reserved state\n");
++		break;
++	}
++	switch ((v >> 2) & 0x3) {
++	case 0:
++		dev_info(rkc->dev, "mac_state: IDLE state\n");
++		break;
++	case 1:
++		dev_info(rkc->dev, "mac_state: PRE state\n");
++		break;
++	case 2:
++		dev_info(rkc->dev, "mac_state: BULK state\n");
++		break;
++	default:
++		dev_info(rkc->dev, "mac_state: reserved state\n");
++		break;
++	}
++	switch ((v >> 4) & 0x3) {
++	case 0:
++		dev_info(rkc->dev, "parallel_state: IDLE state\n");
++		break;
++	case 1:
++		dev_info(rkc->dev, "parallel_state: PRE state\n");
++		break;
++	case 2:
++		dev_info(rkc->dev, "parallel_state: BULK state\n");
++		break;
++	default:
++		dev_info(rkc->dev, "parallel_state: reserved state\n");
++		break;
++	}
++	switch ((v >> 6) & 0x3) {
++	case 0:
++		dev_info(rkc->dev, "ccm_state: IDLE state\n");
++		break;
++	case 1:
++		dev_info(rkc->dev, "ccm_state: PRE state\n");
++		break;
++	case 2:
++		dev_info(rkc->dev, "ccm_state: NA state\n");
++		break;
++	default:
++		dev_info(rkc->dev, "ccm_state: reserved state\n");
++		break;
++	}
++	switch ((v >> 8) & 0xF) {
++	case 0:
++		dev_info(rkc->dev, "gcm_state: IDLE state\n");
++		break;
++	case 1:
++		dev_info(rkc->dev, "gcm_state: PRE state\n");
++		break;
++	case 2:
++		dev_info(rkc->dev, "gcm_state: NA state\n");
++		break;
++	case 3:
++		dev_info(rkc->dev, "gcm_state: PC state\n");
++		break;
++	}
++	switch ((v >> 10) & 0x1F) {
++	case 0x1:
++		dev_info(rkc->dev, "hash_state: IDLE state\n");
++		break;
++	case 0x2:
++		dev_info(rkc->dev, "hash_state: IPAD state\n");
++		break;
++	case 0x4:
++		dev_info(rkc->dev, "hash_state: TEXT state\n");
++		break;
++	case 0x8:
++		dev_info(rkc->dev, "hash_state: OPAD state\n");
++		break;
++	case 0x10:
++		dev_info(rkc->dev, "hash_state: OPAD EXT state\n");
++		break;
++	default:
++		dev_info(rkc->dev, "hash_state: invalid state\n");
++		break;
++	}
++
++	v = readl(rkc->reg + RK2_CRYPTO_DMA_INT_ST);
++	dev_info(rkc->dev, "RK2_CRYPTO_DMA_INT_ST %x\n", v);
++}
++#endif
++
++static int rk2_cipher_need_fallback(struct skcipher_request *req)
++{
++	struct crypto_skcipher *tfm = crypto_skcipher_reqtfm(req);
++	struct skcipher_alg *alg = crypto_skcipher_alg(tfm);
++	struct rk2_crypto_template *algt =
++	    container_of(alg, struct rk2_crypto_template, alg.skcipher.base);
++	struct scatterlist *sgs, *sgd;
++	unsigned int stodo, dtodo, len;
++	unsigned int bs = crypto_skcipher_blocksize(tfm);
++
++	if (!req->cryptlen)
++		return true;
++
++	/*
++	 * The hardware XTS implementation programs the tweak once before
++	 * DMA starts and cannot update it at SG boundaries. Restrict to
++	 * exactly one source and one destination SG entry.
++	 */
++	if (algt->rk2_mode == RK2_CRYPTO_AES_XTS) {
++		if (sg_nents_for_len(req->src, req->cryptlen) != 1)
++			return true;
++		if (sg_nents_for_len(req->dst, req->cryptlen) != 1)
++			return true;
++	}
++
++	len = req->cryptlen;
++	sgs = req->src;
++	sgd = req->dst;
++
++	while (len > 0 && sgs && sgd) {
++		if (!IS_ALIGNED(sgs->offset, sizeof(u32))) {
++			atomic_long_inc(&algt->stat_fb_align);
++			return true;
++		}
++		if (!IS_ALIGNED(sgd->offset, sizeof(u32))) {
++			atomic_long_inc(&algt->stat_fb_align);
++			return true;
++		}
++
++		stodo = min(len, sgs->length);
++		if (stodo % bs) {
++			atomic_long_inc(&algt->stat_fb_len);
++			return true;
++		}
++
++		dtodo = min(len, sgd->length);
++		if (dtodo % bs) {
++			atomic_long_inc(&algt->stat_fb_len);
++			return true;
++		}
++
++		/* DMA engines usually require symmetrical source/destination chunks */
++		if (stodo != dtodo) {
++			atomic_long_inc(&algt->stat_fb_sgdiff);
++			return true;
++		}
++
++		len -= stodo;
++		sgs = sg_next(sgs);
++		sgd = sg_next(sgd);
++	}
++
++	/* If len > 0, the scatterlist was too short for the request */
++	return len > 0;
++}
++
++static int rk2_cipher_fallback(struct skcipher_request *areq)
++{
++	struct crypto_skcipher *tfm = crypto_skcipher_reqtfm(areq);
++	struct rk2_cipher_ctx *op = crypto_skcipher_ctx(tfm);
++	struct rk2_cipher_rctx *rctx = skcipher_request_ctx(areq);
++	struct skcipher_alg *alg = crypto_skcipher_alg(tfm);
++	struct rk2_crypto_template *algt =
++	    container_of(alg, struct rk2_crypto_template, alg.skcipher.base);
++	int err;
++
++	atomic_long_inc(&algt->stat_fb);
++
++	skcipher_request_set_tfm(&rctx->fallback_req, op->fallback_tfm);
++	skcipher_request_set_callback(&rctx->fallback_req, areq->base.flags,
++				      areq->base.complete, areq->base.data);
++	skcipher_request_set_crypt(&rctx->fallback_req, areq->src, areq->dst,
++				   areq->cryptlen, areq->iv);
++
++	if (rctx->mode & RK2_CRYPTO_DEC)
++		err = crypto_skcipher_decrypt(&rctx->fallback_req);
++	else
++		err = crypto_skcipher_encrypt(&rctx->fallback_req);
++	return err;
++}
++
++static int rk2_cipher_handle_req(struct skcipher_request *req)
++{
++	struct rk2_cipher_rctx *rctx = skcipher_request_ctx(req);
++	struct crypto_skcipher *tfm = crypto_skcipher_reqtfm(req);
++	struct rk2_cipher_ctx *ctx = crypto_skcipher_ctx(tfm);
++	struct skcipher_alg *alg = crypto_skcipher_alg(tfm);
++	struct rk2_crypto_template *algt =
++			container_of(alg, struct rk2_crypto_template, alg.skcipher.base);
++	struct rk2_crypto_dev *rkc;
++	struct crypto_engine *engine;
++
++	if (algt->rk2_mode == RK2_CRYPTO_AES_XTS && ctx->keylen == AES_KEYSIZE_192 * 2)
++		return rk2_cipher_fallback(req);
++
++	if (rk2_cipher_need_fallback(req))
++		return rk2_cipher_fallback(req);
++
++	rkc = algt->dev;
++	if (!rkc)
++		return -ENODEV;
++	engine = rkc->engine;
++	rctx->dev = rkc;
++
++	return crypto_transfer_skcipher_request_to_engine(engine, req);
++}
++
++/**
++ * rk2_aes_setkey() - Configure the key for standard AES algorithms
++ * @cipher: The crypto skcipher handle.
++ * @key: Buffer containing the raw key material.
++ * @keylen: Length of the key in bytes.
++ *
++ * Validates key length, stores the key in the context, and configures
++ * the software fallback transformation.
++ *
++ * Return: 0 on success, or a negative error code on failure.
++ */
++int rk2_aes_setkey(struct crypto_skcipher *cipher, const u8 *key,
++		   unsigned int keylen)
++{
++	struct crypto_tfm *tfm = crypto_skcipher_tfm(cipher);
++	struct rk2_cipher_ctx *ctx = crypto_tfm_ctx(tfm);
++	int err;
++
++	if (keylen != AES_KEYSIZE_128 && keylen != AES_KEYSIZE_192 &&
++	    keylen != AES_KEYSIZE_256)
++		return -EINVAL;
++
++	ctx->keylen = keylen;
++	memcpy(ctx->key, key, keylen);
++
++	crypto_skcipher_clear_flags(ctx->fallback_tfm, CRYPTO_TFM_REQ_MASK);
++	crypto_skcipher_set_flags(ctx->fallback_tfm,
++				  crypto_skcipher_get_flags(cipher) &
++				  CRYPTO_TFM_REQ_MASK);
++
++	err = crypto_skcipher_setkey(ctx->fallback_tfm, key, keylen);
++	if (err) {
++		memzero_explicit(ctx->key, keylen);
++		ctx->keylen = 0;
++	}
++
++	return err;
++}
++
++/**
++ * rk2_aes_xts_setkey() - Configure the key for AES-XTS mode
++ * @cipher: The crypto skcipher handle.
++ * @key: Buffer containing both cipher and tweak keys.
++ * @keylen: Total length of the key in bytes.
++ *
++ * Validates XTS-specific bounds (e.g., FIPS requirements) and configures
++ * both the hardware context and fallback.
++ *
++ * Return: 0 on success, or a negative error code on failure.
++ */
++int rk2_aes_xts_setkey(struct crypto_skcipher *cipher, const u8 *key,
++		       unsigned int keylen)
++{
++	struct crypto_tfm *tfm = crypto_skcipher_tfm(cipher);
++	struct rk2_cipher_ctx *ctx = crypto_tfm_ctx(tfm);
++	int err;
++
++	err = xts_verify_key(cipher, key, keylen);
++	if (err)
++		return err;
++
++	ctx->keylen = keylen;
++	memcpy(ctx->key, key, keylen);
++
++	crypto_skcipher_clear_flags(ctx->fallback_tfm, CRYPTO_TFM_REQ_MASK);
++	crypto_skcipher_set_flags(ctx->fallback_tfm,
++				  crypto_skcipher_get_flags(cipher) &
++				  CRYPTO_TFM_REQ_MASK);
++
++	err = crypto_skcipher_setkey(ctx->fallback_tfm, key, keylen);
++	if (err) {
++		memzero_explicit(ctx->key, keylen);
++		ctx->keylen = 0;
++	}
++
++	return err;
++}
++
++/**
++ * rk2_skcipher_encrypt() - General skcipher encryption entry point
++ * @req: The skcipher request structure.
++ *
++ * Evaluates hardware constraints and enqueues the request into the crypto
++ * engine, or diverts to software fallback.
++ *
++ * Return: 0 on success, negative error code, or -EINPROGRESS.
++ */
++int rk2_skcipher_encrypt(struct skcipher_request *req)
++{
++	struct rk2_cipher_rctx *rctx = skcipher_request_ctx(req);
++	struct crypto_skcipher *tfm = crypto_skcipher_reqtfm(req);
++	struct skcipher_alg *alg = crypto_skcipher_alg(tfm);
++	struct rk2_crypto_template *algt =
++		container_of(alg, struct rk2_crypto_template, alg.skcipher.base);
++
++	rctx->mode = algt->rk2_mode;
++	return rk2_cipher_handle_req(req);
++}
++
++/**
++ * rk2_skcipher_decrypt() - General skcipher decryption entry point
++ * @req: The skcipher request structure.
++ *
++ * Evaluates hardware constraints and enqueues the request into the crypto
++ * engine, or diverts to software fallback.
++ *
++ * Return: 0 on success, negative error code, or -EINPROGRESS.
++ */
++int rk2_skcipher_decrypt(struct skcipher_request *req)
++{
++	struct rk2_cipher_rctx *rctx = skcipher_request_ctx(req);
++	struct crypto_skcipher *tfm = crypto_skcipher_reqtfm(req);
++	struct skcipher_alg *alg = crypto_skcipher_alg(tfm);
++	struct rk2_crypto_template *algt =
++	    container_of(alg, struct rk2_crypto_template, alg.skcipher.base);
++
++	rctx->mode = algt->rk2_mode | RK2_CRYPTO_DEC;
++	return rk2_cipher_handle_req(req);
++}
++
++/**
++ * rk2_cipher_run() - Execute an asynchronous skcipher request
++ * @engine: The crypto engine queue managing this request.
++ * @async_req: The asynchronous skcipher request to process.
++ *
++ * Prepares the hardware context, configures DMA descriptors, programs
++ * cipher registers, and triggers the physical cryptographic accelerator.
++ *
++ * Return: Always 0. Errors are reported through the crypto engine
++ *         finalization callback.
++ */
++int rk2_cipher_run(struct crypto_engine *engine, void *async_req)
++{
++	struct skcipher_request *areq = container_of(async_req, struct skcipher_request, base);
++	struct crypto_skcipher *tfm = crypto_skcipher_reqtfm(areq);
++	struct rk2_cipher_rctx *rctx = skcipher_request_ctx(areq);
++	struct rk2_cipher_ctx *ctx = crypto_skcipher_ctx(tfm);
++	struct skcipher_alg *alg = crypto_skcipher_alg(tfm);
++	struct rk2_crypto_template *algt =
++		container_of(alg, struct rk2_crypto_template, alg.skcipher.base);
++	struct rk2_crypto_dev *rkc = rctx->dev;
++	struct rk2_crypto_lli *dd = &rkc->tl[0];
++	struct scatterlist *sgs, *sgd;
++	int ivsize = crypto_skcipher_ivsize(tfm);
++	bool update_iv = ivsize && areq->iv && algt->rk2_mode != RK2_CRYPTO_AES_XTS;
++	unsigned int len = areq->cryptlen;
++	unsigned int this_len, todo, offset;
++	unsigned long timeout = 0;
++	int err, i;
++	u32 m;
++
++	m = rctx->mode | RK2_CRYPTO_ENABLE;
++	if (algt->rk2_mode == RK2_CRYPTO_AES_XTS) {
++		switch (ctx->keylen) {
++		case AES_KEYSIZE_128 * 2:
++			m |= RK2_CRYPTO_AES_128BIT_key;
++			break;
++		case AES_KEYSIZE_256 * 2:
++			m |= RK2_CRYPTO_AES_256BIT_key;
++			break;
++		default:
++			dev_err(rkc->dev, "Invalid key length %u\n",
++				ctx->keylen);
++			err = -EINVAL;
++			goto exit_no_pm;
++		}
++	} else {
++		switch (ctx->keylen) {
++		case AES_KEYSIZE_128:
++			m |= RK2_CRYPTO_AES_128BIT_key;
++			break;
++		case AES_KEYSIZE_192:
++			m |= RK2_CRYPTO_AES_192BIT_key;
++			break;
++		case AES_KEYSIZE_256:
++			m |= RK2_CRYPTO_AES_256BIT_key;
++			break;
++		default:
++			dev_err(rkc->dev, "Invalid key length %u\n",
++				ctx->keylen);
++			err = -EINVAL;
++			goto exit_no_pm;
++		}
++	}
++
++	err = pm_runtime_resume_and_get(rkc->dev);
++	if (err)
++		goto exit_no_pm;
++
++	atomic_long_inc(&algt->stat_req);
++	atomic_long_inc(&rkc->nreq);
++
++	/* the upper bits are a write enable mask, so we need to write 1 to all
++	 * upper 16 bits to allow write to the 16 lower bits
++	 */
++	m |= 0xffff0000;
++
++	dev_dbg(rkc->dev, "%s %s len=%u keylen=%u mode=%x\n", __func__,
++		crypto_tfm_alg_name(areq->base.tfm),
++		areq->cryptlen, ctx->keylen, m);
++	sgs = areq->src;
++	sgd = areq->dst;
++
++	while (sgs && sgd && len) {
++		if (!sgs->length) {
++			sgs = sg_next(sgs);
++			sgd = sg_next(sgd);
++			continue;
++		}
++
++		this_len = min(len, sgs->length);
++		if (update_iv && (rctx->mode & RK2_CRYPTO_DEC)) {
++			offset = this_len - ivsize;
++			scatterwalk_map_and_copy(rctx->backup_iv, sgs,
++						 offset, ivsize, 0);
++		}
++
++		dev_dbg(rkc->dev, "SG len=%u mode=%x ivsize=%u\n", sgs->length,
++			m, ivsize);
++
++		if (sgs == sgd) {
++			err = dma_map_sg(rkc->dev, sgs, 1, DMA_BIDIRECTIONAL);
++			if (err != 1) {
++				dev_err(rkc->dev, "Invalid sg number %d\n",
++					err);
++				err = -EINVAL;
++				goto exit;
++			}
++		} else {
++			err = dma_map_sg(rkc->dev, sgs, 1, DMA_TO_DEVICE);
++			if (err != 1) {
++				dev_err(rkc->dev, "Invalid sg number %d\n",
++					err);
++				err = -EINVAL;
++				goto exit;
++			}
++			err = dma_map_sg(rkc->dev, sgd, 1, DMA_FROM_DEVICE);
++			if (err != 1) {
++				dev_err(rkc->dev, "Invalid sg number %d\n",
++					err);
++				err = -EINVAL;
++				dma_unmap_sg(rkc->dev, sgs, 1, DMA_TO_DEVICE);
++				goto exit;
++			}
++		}
++		err = 0;
++		writel(m, rkc->reg + RK2_CRYPTO_BC_CTL);
++
++		if (algt->rk2_mode == RK2_CRYPTO_AES_XTS) {
++			for (i = 0; i < ctx->keylen / 8; i++) {
++				writel(get_unaligned_be32(ctx->key + i * 4),
++				       rkc->reg + RK2_CRYPTO_KEY0 + i * 4);
++			}
++			for (i = 0; i < (ctx->keylen / 8); i++) {
++				writel(get_unaligned_be32(ctx->key + (ctx->keylen / 8) * 4 + i * 4),
++				       rkc->reg + RK2_CRYPTO_CH4_KEY0 + i * 4);
++			}
++		} else {
++			for (i = 0; i < ctx->keylen / 4; i++) {
++				writel(get_unaligned_be32(ctx->key + i * 4),
++				       rkc->reg + RK2_CRYPTO_KEY0 + i * 4);
++			}
++		}
++
++		if (ivsize) {
++			for (i = 0; i < ivsize / 4; i++)
++				writel(get_unaligned_be32(areq->iv + i * 4),
++				       rkc->reg + RK2_CRYPTO_CH0_IV_0 + i * 4);
++			writel(ivsize, rkc->reg + RK2_CRYPTO_CH0_IV_LEN);
++		}
++
++		/*
++		 * Process one SG entry per DMA operation. The cipher engine requires
++		 * the IV to be updated between SG entries for CBC and XTS modes;
++		 * the backup_iv mechanism handles this correctly for decryption.
++		 * Building a full multi-descriptor chain is possible but adds
++		 * complexity for no measurable throughput gain on typical workloads.
++		 */
++		todo = min(sg_dma_len(sgs), len);
++		len -= todo;
++		dd->src_addr = cpu_to_le32(lower_32_bits(sg_dma_address(sgs)));
++		dd->src_len  = cpu_to_le32(todo);
++		dd->dst_addr = cpu_to_le32(lower_32_bits(sg_dma_address(sgd)));
++		dd->dst_len  = cpu_to_le32(todo);
++		dd->iv       = 0;
++
++		/*
++		 * next is ignored by hardware when RK2_LLI_DMA_CTRL_LAST is set in
++		 * dma_ctrl. Set it to an obviously-invalid-but-non-zero sentinel so
++		 * it stands out if ever read in a debug dump.
++		 */
++		dd->next     = cpu_to_le32(1);
++		dd->user     = cpu_to_le32(RK2_LLI_CIPHER_START |
++					RK2_LLI_STRING_FIRST | RK2_LLI_STRING_LAST);
++		dd->dma_ctrl = cpu_to_le32(RK2_LLI_DMA_CTRL_DST_INT |
++					RK2_LLI_DMA_CTRL_LAST | RK2_LLI_DMA_CTRL_LIST_INT);
++
++		/* Clear stale interrupts, then enable with proper write-mask */
++		writel(RK2_CRYPTO_DMA_INT_ALL_MASK, rkc->reg + RK2_CRYPTO_DMA_INT_ST);
++		writel(RK2_CRYPTO_DMA_INT_ENABLE_ALL, rkc->reg + RK2_CRYPTO_DMA_INT_EN);
++
++		writel(lower_32_bits(rkc->t_phy), rkc->reg + RK2_CRYPTO_DMA_LLI_ADDR);
++
++		reinit_completion(&rkc->complete);
++		rkc->status = 0;
++
++		writel(RK2_CRYPTO_DMA_CTL_START |
++		       (RK2_CRYPTO_DMA_CTL_START << 16),
++		       rkc->reg + RK2_CRYPTO_DMA_CTL);
++
++		timeout = wait_for_completion_timeout(&rkc->complete,
++						      msecs_to_jiffies(2000));
++
++		if (!timeout) {
++			dev_err(rkc->dev, "DMA timeout\n");
++			err = -ETIMEDOUT;
++			reset_control_assert(rkc->rst);
++			udelay(10);
++			reset_control_deassert(rkc->rst);
++			synchronize_irq(rkc->irq);
++		}
++
++		if (sgs == sgd) {
++			dma_unmap_sg(rkc->dev, sgs, 1, DMA_BIDIRECTIONAL);
++		} else {
++			dma_unmap_sg(rkc->dev, sgs, 1, DMA_TO_DEVICE);
++			dma_unmap_sg(rkc->dev, sgd, 1, DMA_FROM_DEVICE);
++		}
++
++		if (err)
++			goto exit;
++
++		if (!rkc->status) {
++			dev_err(rkc->dev, "DMA error\n");
++#ifdef CONFIG_CRYPTO_DEV_ROCKCHIP2_DEBUG
++			rk2_print(rkc);
++#endif
++			err = -EIO;
++			reset_control_assert(rkc->rst);
++			udelay(10);
++			reset_control_deassert(rkc->rst);
++			goto exit;
++		}
++
++		if (update_iv) {
++			offset = this_len - ivsize;
++			if (rctx->mode & RK2_CRYPTO_DEC) {
++				memcpy(areq->iv, rctx->backup_iv, ivsize);
++				memzero_explicit(rctx->backup_iv, ivsize);
++			} else {
++				scatterwalk_map_and_copy(areq->iv, sgd, offset,
++							 ivsize, 0);
++			}
++		}
++		sgs = sg_next(sgs);
++		sgd = sg_next(sgd);
++	}
++ exit:
++	writel(0xffff0000, rkc->reg + RK2_CRYPTO_BC_CTL);
++	pm_runtime_mark_last_busy(rkc->dev);
++	pm_runtime_put_autosuspend(rkc->dev);
++ exit_no_pm:
++	local_bh_disable();
++	crypto_finalize_skcipher_request(engine, areq, err);
++	local_bh_enable();
++	return 0;
++}
++
++/**
++ * rk2_cipher_tfm_init() - Initialize the transformation context
++ * @tfm: The crypto skcipher handle.
++ *
++ * Allocates the software fallback transformations required when requests
++ * fail to meet hardware constraints (e.g., severe scatterlist misalignment).
++ *
++ * Return: 0 on success, or a negative error code on failure.
++ */
++int rk2_cipher_tfm_init(struct crypto_skcipher *tfm)
++{
++	struct rk2_cipher_ctx *ctx = crypto_skcipher_ctx(tfm);
++	const char *name = crypto_tfm_alg_name(&tfm->base);
++	struct skcipher_alg *alg = crypto_skcipher_alg(tfm);
++	struct rk2_crypto_template *algt =
++	    container_of(alg, struct rk2_crypto_template, alg.skcipher.base);
++
++	ctx->fallback_tfm =
++	    crypto_alloc_skcipher(name, 0, CRYPTO_ALG_NEED_FALLBACK);
++	if (IS_ERR(ctx->fallback_tfm)) {
++		dev_err(algt->dev->dev,
++			"Cannot allocate fallback for %s %ld\n", name,
++			PTR_ERR(ctx->fallback_tfm));
++		return PTR_ERR(ctx->fallback_tfm);
++	}
++
++	dev_dbg(algt->dev->dev, "Fallback for %s is %s\n",
++		crypto_tfm_alg_driver_name(&tfm->base),
++		crypto_tfm_alg_driver_name(crypto_skcipher_tfm
++					   (ctx->fallback_tfm)));
++
++	crypto_skcipher_set_reqsize(tfm,
++				    sizeof(struct rk2_cipher_rctx) +
++				    crypto_skcipher_reqsize(ctx->fallback_tfm));
++
++	return 0;
++}
++
++/**
++ * rk2_cipher_tfm_exit() - Free skcipher initialization resources
++ * @tfm: The crypto skcipher handle.
++ *
++ * Synchronously releases internal software fallback transformations
++ * and zeroes out sensitive key material.
++ */
++void rk2_cipher_tfm_exit(struct crypto_skcipher *tfm)
++{
++	struct rk2_cipher_ctx *ctx = crypto_skcipher_ctx(tfm);
++
++	memzero_explicit(ctx->key, ctx->keylen);
++	crypto_free_skcipher(ctx->fallback_tfm);
++}
+-- 
+2.47.3

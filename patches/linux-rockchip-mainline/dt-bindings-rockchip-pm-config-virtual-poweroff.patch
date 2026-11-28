@@ -1,0 +1,29 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] dt-bindings: soc: rockchip: pm-config: Add rockchip,virtual-poweroff
+
+A board may ask that power-off be a sleep the wake sources end, so a
+remote's power key starts a box its user turned off. Describe the flag.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ Documentation/devicetree/bindings/soc/rockchip/rockchip,pm-config.yaml | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/soc/rockchip/rockchip,pm-config.yaml b/Documentation/devicetree/bindings/soc/rockchip/rockchip,pm-config.yaml
+index b6cdf2a..0284ec4 100644
+--- a/Documentation/devicetree/bindings/soc/rockchip/rockchip,pm-config.yaml
++++ b/Documentation/devicetree/bindings/soc/rockchip/rockchip,pm-config.yaml
+@@ -30,6 +30,13 @@ properties:
+     $ref: /schemas/types.yaml#/definitions/uint32
+     description: The PWM outputs that drive a regulator the firmware keeps.
+ 
++  rockchip,virtual-poweroff:
++    $ref: /schemas/types.yaml#/definitions/uint32
++    enum: [0, 1]
++    description:
++      1 powers off as a sleep the wake sources end, the board then starting
++      afresh.
++
+ required:
+   - compatible
+ 

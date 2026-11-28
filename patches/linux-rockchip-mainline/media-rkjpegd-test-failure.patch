@@ -1,0 +1,53 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] media: rockchip: rkjpegd: A test parameter that fails the next decode
+
+For a debug build: fail_next_job leaves the next decode unstarted, so it
+times out (1), or points its output where nothing is mapped, so it
+faults on the IOMMU (2). The parameter clears itself.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+  drivers/media/platform/rockchip/rkjpegd/rkjpegd.c | 23 +++++++++++++++++++++++
+  1 file changed, 23 insertions(+)
+
+diff --git a/drivers/media/platform/rockchip/rkjpegd/rkjpegd.c b/drivers/media/platform/rockchip/rkjpegd/rkjpegd.c
+index 260a936..8982c61 100644
+--- a/drivers/media/platform/rockchip/rkjpegd/rkjpegd.c
++++ b/drivers/media/platform/rockchip/rkjpegd/rkjpegd.c
+@@ -68,6 +68,20 @@
+  */
+ #define RKJPEGD_QUEUE_RAM_SHARE	8
+ 
++enum rkjpegd_test_failure {
++	RKJPEGD_TEST_NONE,
++	RKJPEGD_TEST_TIMEOUT,
++	RKJPEGD_TEST_FAULT,
++};
++
++static int fail_next_job;
++module_param(fail_next_job, int, 0644);
++MODULE_PARM_DESC(fail_next_job,
++		 "Test: the next decode is never started, so it times out (1), or writes where nothing is mapped (2)");
++
++/* An IOVA the DMA API allocates only when the space is nearly full */
++#define RKJPEGD_UNMAPPED_IOVA	0x1000
++
+ /* Milliseconds a frame may take before the watchdog resets the block. */
+ #define RKJPEGD_TIMEOUT_MS	2000
+ 
+@@ -1422,6 +1436,15 @@ static int rkjpegd_vdpu720_run(struct rkjpegd_ctx *ctx)
+ 
+ 	rkjpegd_arm_watchdog(jpegd);
+ 
++	/* the recovery under test, as no picture makes a job time out or fault */
++	switch (xchg(&fail_next_job, RKJPEGD_TEST_NONE)) {
++	case RKJPEGD_TEST_TIMEOUT:
++		return 0;
++	case RKJPEGD_TEST_FAULT:
++		rkjpegd_write_addr(jpegd, VDPU720_REG_OUT_BASE, RKJPEGD_UNMAPPED_IOVA);
++		break;
++	}
++
+ 	/*
+ 	 * A frame whose entropy data ends early runs the decoder off the end
+ 	 * of the stream, and with the condition masked it waits instead of

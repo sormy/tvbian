@@ -264,7 +264,7 @@ new file mode 100644
 index 0000000..0208087
 --- /dev/null
 +++ b/drivers/media/platform/verisilicon/rockchip_vpu2_hw_mpeg4_dec.c
-@@ -0,0 +1,265 @@
+@@ -0,0 +1,267 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * Hantro VPU codec driver: Rockchip VDPU2 MPEG-4 Part 2 and H.263 decoding,
@@ -434,8 +434,10 @@ index 0000000..0208087
 +	p = vop->vop_coding_type == V4L2_MPEG4_VOP_TYPE_P;
 +
 +	/* The decoder parses video packet headers by it: zero hangs it */
-+	if (!h263 && !vop->vop_time_increment_resolution)
++	if (!h263 && !vop->vop_time_increment_resolution) {
++		hantro_end_prepare_run(ctx);
 +		return -EINVAL;
++	}
 +
 +	vdpu_write_relaxed(vpu, VDPU_REG_FILTERING_DIS(1), VDPU_SWREG(50));
 +

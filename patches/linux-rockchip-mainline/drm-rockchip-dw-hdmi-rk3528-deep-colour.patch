@@ -1,0 +1,123 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] drm/rockchip: dw_hdmi: Deep colour and YCbCr 4:2:0 on the RK3528
+
+The RK3528's HDMI took dw-hdmi's fixed RGB888 and configured its PHY only
+from the HDMI helper's TMDS rate, which this bridge never sets. Have
+dw-hdmi pick the bus format, allow YCbCr 4:2:0, and set the TMDS rate
+from the format HDMI carries, the bridge's output, not the VOP's: the
+pixel clock, by 10/8 at 10 bits, halved for 4:2:0, doubled for pixel
+repetition, and unchanged for 4:2:2.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/drivers/gpu/drm/rockchip/dw_hdmi-rockchip.c b/drivers/gpu/drm/rockchip/dw_hdmi-rockchip.c
+--- a/drivers/gpu/drm/rockchip/dw_hdmi-rockchip.c
++++ b/drivers/gpu/drm/rockchip/dw_hdmi-rockchip.c
+@@ -238,6 +238,26 @@
+ 	return MODE_OK;
+ }
+ 
++/* The PHY's rate: the format HDMI carries, at the mode's clock */
++static unsigned long dw_hdmi_rockchip_tmds_rate(u32 bus_format,
++						const struct drm_display_mode *mode)
++{
++	unsigned long rate = mode->clock * 1000UL;
++
++	if (bus_format == MEDIA_BUS_FMT_RGB101010_1X30 ||
++	    bus_format == MEDIA_BUS_FMT_YUV10_1X30 ||
++	    bus_format == MEDIA_BUS_FMT_UYYVYY10_0_5X30)
++		rate = rate * 10 / 8;
++	if (bus_format == MEDIA_BUS_FMT_UYYVYY8_0_5X24 ||
++	    bus_format == MEDIA_BUS_FMT_UYYVYY10_0_5X30)
++		rate /= 2;
++	/* pixel repetition sends each pixel twice */
++	if (mode->flags & DRM_MODE_FLAG_DBLCLK)
++		rate *= 2;
++
++	return rate;
++}
++
+ static void
+ dw_hdmi_rockchip_encoder_atomic_mode_set(struct drm_encoder *encoder,
+ 					 struct drm_crtc_state *crtc_state,
+@@ -246,7 +266,7 @@
+ 	struct rockchip_hdmi *hdmi = to_rockchip_hdmi(encoder);
+ 	struct drm_display_mode *adj_mode = &crtc_state->adjusted_mode;
+ 
+-	if (hdmi->phy && conn_state->hdmi.tmds_char_rate) {
++	if (hdmi->phy) {
+ 		union phy_configure_opts opts = {};
+ 
+ 		opts.hdmi.bpc = conn_state->hdmi.output_bpc;
+@@ -287,24 +307,27 @@
+ 	dev_dbg(hdmi->dev, "vop %s output to hdmi\n", ret ? "LIT" : "BIG");
+ }
+ 
+-static u32 dw_hdmi_rockchip_get_bus_format(struct drm_encoder *encoder,
+-					   struct drm_connector_state *conn_state)
++/* The bridge's formats: the VOP's in, and HDMI's out */
++static void dw_hdmi_rockchip_get_bus_formats(struct drm_encoder *encoder,
++					     struct drm_connector_state *conn_state,
++					     u32 *in, u32 *out)
+ {
+ 	struct drm_bridge *bridge __free(drm_bridge_put) = NULL;
+ 	struct drm_bridge_state *bridge_state;
+ 
++	*in = 0;
++	*out = MEDIA_BUS_FMT_FIXED;
+ 	bridge = drm_bridge_chain_get_first_bridge(encoder);
+ 	if (!bridge)
+-		return 0;
++		return;
+ 
+ 	bridge_state = drm_atomic_get_bridge_state(conn_state->state, bridge);
+ 	if (!bridge_state)
+-		return 0;
+-
+-	if (bridge_state->input_bus_cfg.format != MEDIA_BUS_FMT_FIXED)
+-		return bridge_state->input_bus_cfg.format;
++		return;
+ 
+-	return bridge_state->output_bus_cfg.format;
++	*out = bridge_state->output_bus_cfg.format;
++	*in = bridge_state->input_bus_cfg.format != MEDIA_BUS_FMT_FIXED ?
++	      bridge_state->input_bus_cfg.format : *out;
+ }
+ 
+ static int
+@@ -315,9 +338,10 @@
+ 	struct rockchip_crtc_state *s = to_rockchip_crtc_state(crtc_state);
+ 	struct rockchip_hdmi *hdmi = to_rockchip_hdmi(encoder);
+ 	union phy_configure_opts opts = {};
+-	u32 bus_format;
++	u32 bus_format, hdmi_format;
+ 
+-	bus_format = dw_hdmi_rockchip_get_bus_format(encoder, conn_state);
++	dw_hdmi_rockchip_get_bus_formats(encoder, conn_state, &bus_format,
++					 &hdmi_format);
+ 
+ 	switch (bus_format) {
+ 	case MEDIA_BUS_FMT_FIXED:
+@@ -340,9 +364,12 @@
+ 	s->output_type = DRM_MODE_CONNECTOR_HDMIA;
+ 	s->bus_format = bus_format;
+ 
+-	if (!hdmi->phy || !conn_state->hdmi.tmds_char_rate)
++	if (!hdmi->phy)
+ 		return 0;
+ 
++	conn_state->hdmi.tmds_char_rate =
++		dw_hdmi_rockchip_tmds_rate(hdmi_format,
++					   &crtc_state->adjusted_mode);
+ 	opts.hdmi.bpc = conn_state->hdmi.output_bpc;
+ 	opts.hdmi.tmds_char_rate = conn_state->hdmi.tmds_char_rate;
+ 
+@@ -605,6 +632,8 @@
+ static const struct dw_hdmi_plat_data rk3528_hdmi_drv_data = {
+ 	.mode_valid = dw_hdmi_rk3528_mode_valid,
+ 	.dblclk_allowed = true,
++	.ycbcr_420_allowed = true,
++	.select_bus_format = true,
+ 	.phy_data = &rk3528_chip_data,
+ 	.phy_ops = &rk3528_hdmi_phy_ops,
+ 	.phy_name = "inno_dw_hdmi_phy2",

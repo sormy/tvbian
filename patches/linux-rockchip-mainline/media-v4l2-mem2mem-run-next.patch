@@ -1,0 +1,59 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] media: v4l2-mem2mem: Let a driver run the next job at once
+
+A job finished schedules the next on the system workqueue, as the
+caller may be atomic. A driver that finishes its jobs in a threaded
+interrupt handler can sleep, yet its device idles until a worker wakes:
+on an RK3528 decoding at 3840x2160, 40 to 60 us a frame.
+
+Add v4l2_m2m_run_next(), which runs the next queued job in the
+caller's context, as v4l2_m2m_resume() already does. The scheduled
+work still runs and finds the job running.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ drivers/media/v4l2-core/v4l2-mem2mem.c |  7 +++++++
+ include/media/v4l2-mem2mem.h           | 12 ++++++++++++
+ 2 files changed, 19 insertions(+)
+
+diff --git a/drivers/media/v4l2-core/v4l2-mem2mem.c b/drivers/media/v4l2-core/v4l2-mem2mem.c
+index a65cbb1..66fd21a 100644
+--- a/drivers/media/v4l2-core/v4l2-mem2mem.c
++++ b/drivers/media/v4l2-core/v4l2-mem2mem.c
+@@ -541,6 +541,13 @@ unlock:
+ }
+ EXPORT_SYMBOL(v4l2_m2m_buf_done_and_job_finish);
+ 
++void v4l2_m2m_run_next(struct v4l2_m2m_dev *m2m_dev)
++{
++	might_sleep();
++	v4l2_m2m_try_run(m2m_dev);
++}
++EXPORT_SYMBOL(v4l2_m2m_run_next);
++
+ void v4l2_m2m_suspend(struct v4l2_m2m_dev *m2m_dev)
+ {
+ 	unsigned long flags;
+diff --git a/include/media/v4l2-mem2mem.h b/include/media/v4l2-mem2mem.h
+index 31de25d..84af910 100644
+--- a/include/media/v4l2-mem2mem.h
++++ b/include/media/v4l2-mem2mem.h
+@@ -313,6 +313,18 @@ v4l2_m2m_is_last_draining_src_buf(struct v4l2_m2m_ctx *m2m_ctx,
+ void v4l2_m2m_last_buffer_done(struct v4l2_m2m_ctx *m2m_ctx,
+ 			       struct vb2_v4l2_buffer *vbuf);
+ 
++/**
++ * v4l2_m2m_run_next() - run the next queued job now
++ *
++ * @m2m_dev: opaque pointer to the internal data to handle M2M context
++ *
++ * Called after v4l2_m2m_job_finish() or v4l2_m2m_buf_done_and_job_finish()
++ * from a context that can sleep, such as a threaded interrupt handler, it
++ * starts the next job without waiting for the workqueue those schedule. The
++ * work still runs, and finds the job already running.
++ */
++void v4l2_m2m_run_next(struct v4l2_m2m_dev *m2m_dev);
++
+ /**
+  * v4l2_m2m_suspend() - stop new jobs from being run and wait for current job
+  * to finish

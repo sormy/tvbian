@@ -1,0 +1,179 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] mmc: sdhci-of-dwcmshc: Add the RK3528's delay-line taps
+
+The RK3528 matched the RK3588's data, whose delay line takes 90-degree
+transmit and command taps in HS400 and fixed taps elsewhere. An eMMC
+behind it then failed: at HS400 enhanced strobe its writes failed with
+I/O errors at boot, and at HS200 one boot in two the card did not
+initialise (-110). Rockchip's kernel drives the same card at HS400ES with
+the RK3528's own taps, each counted against the DLL's lock value: the
+receive clock gated, transmit 12 in HS200 and 6 in HS400, command 6 on
+both clock edges in HS400, strobe 3, and a strobe delay of 10 below
+52 MHz. The lock value is read once the DLL locks.
+
+Give the RK3528 its own data with those taps; the SoCs without a table
+keep theirs.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+  drivers/mmc/host/sdhci-of-dwcmshc.c |   84 ++++++++++++++++++++++++++++++++---
+  1 file changed, 77 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/mmc/host/sdhci-of-dwcmshc.c b/drivers/mmc/host/sdhci-of-dwcmshc.c
+index 1baa2379c..88668402f 100644
+--- a/drivers/mmc/host/sdhci-of-dwcmshc.c
++++ b/drivers/mmc/host/sdhci-of-dwcmshc.c
+@@ -117,6 +117,9 @@
+ #define DLL_CMDOUT_TAPNUM_FROM_SW	BIT(24)
+ #define DLL_CMDOUT_SRC_CLK_NEG		BIT(28)
+ #define DLL_CMDOUT_EN_SRC_CLK_NEG	BIT(29)
++#define DLL_CMDOUT_BOTH_CLK_EDGE	BIT(30)
++#define DLL_TAP_VALUE_SEL		BIT(25)
++#define DLL_TAP_VALUE_OFFSET		8
+ 
+ #define DLL_LOCK_WO_TMOUT(x) \
+ 	((((x) & DWCMSHC_EMMC_DLL_LOCKED) == DWCMSHC_EMMC_DLL_LOCKED) && \
+@@ -325,8 +328,22 @@ struct k230_pltfm_data {
+ 	u32 write_prot_bit;
+ };
+ 
++/*
++ * A SoC's own delay-line taps, as Rockchip's kernel sets them: each is counted against the
++ * DLL's lock value, so the lock is read once the DLL locks, and in HS400 the command line drives
++ * on both clock edges.
++ */
++struct rockchip_dll_taps {
++	u8 hs200_txclk;
++	u8 hs400_txclk;
++	u8 hs400_cmdout;
++	u8 strbin;
++	u8 strbin_delay;
++};
++
+ struct rockchip_pltfm_data {
+ 	struct dwcmshc_pltfm_data dwcmshc_pdata;
++	const struct rockchip_dll_taps *taps;
+ 	/*
+ 	 * The controller hardware has two known revisions documented internally:
+ 	 * - Revision 0: Exclusively used by RK3566 and RK3568 SoCs.
+@@ -755,8 +772,9 @@ static void dwcmshc_rk3568_set_clock(struct sdhci_host *host, unsigned int clock
+ 	struct dwcmshc_priv *dwc_priv = sdhci_pltfm_priv(pltfm_host);
+ 	struct rk35xx_priv *priv = dwc_priv->priv;
+ 	const struct rockchip_pltfm_data *rockchip_pdata = to_pltfm_data(dwc_priv, rockchip);
++	const struct rockchip_dll_taps *taps = rockchip_pdata->taps;
+ 	u8 txclk_tapnum = DLL_TXCLK_TAPNUM_DEFAULT;
+-	u32 extra, reg;
++	u32 extra, reg, tap_sel = 0;
+ 	int err;
+ 
+ 	host->mmc->actual_clock = 0;
+@@ -810,7 +828,8 @@ static void dwcmshc_rk3568_set_clock(struct sdhci_host *host, unsigned int clock
+ 		 */
+ 		extra = DWCMSHC_EMMC_DLL_DLYENA |
+ 			DLL_STRBIN_DELAY_NUM_SEL |
+-			DLL_STRBIN_DELAY_NUM_DEFAULT << DLL_STRBIN_DELAY_NUM_OFFSET;
++			(taps ? taps->strbin_delay : DLL_STRBIN_DELAY_NUM_DEFAULT) <<
++			DLL_STRBIN_DELAY_NUM_OFFSET;
+ 		sdhci_writel(host, extra, DWCMSHC_EMMC_DLL_STRBIN);
+ 		goto enable_clk;
+ 	}
+@@ -842,6 +861,14 @@ static void dwcmshc_rk3568_set_clock(struct sdhci_host *host, unsigned int clock
+ 		goto enable_clk;
+ 	}
+ 
++	if (taps) {
++		u32 lock = (sdhci_readl(host, DWCMSHC_EMMC_DLL_STATUS0) & 0xff) * 2 & 0xff;
++
++		tap_sel = DLL_TAP_VALUE_SEL | lock << DLL_TAP_VALUE_OFFSET;
++		sdhci_writel(host, DWCMSHC_EMMC_DLL_DLYENA | DLL_RXCLK_ORI_GATE | tap_sel,
++			     DWCMSHC_EMMC_DLL_RXCLK);
++	}
++
+ 	extra = 0x1 << 16 | /* tune clock stop en */
+ 		0x3 << 17 | /* pre-change delay */
+ 		0x3 << 19;  /* post-change delay */
+@@ -849,9 +876,20 @@ static void dwcmshc_rk3568_set_clock(struct sdhci_host *host, unsigned int clock
+ 
+ 	if (host->mmc->ios.timing == MMC_TIMING_MMC_HS200 ||
+ 	    host->mmc->ios.timing == MMC_TIMING_MMC_HS400)
+-		txclk_tapnum = priv->txclk_tapnum;
++		txclk_tapnum = taps ? taps->hs200_txclk : priv->txclk_tapnum;
++
++	if (taps && host->mmc->ios.timing == MMC_TIMING_MMC_HS400) {
++		txclk_tapnum = taps->hs400_txclk;
+ 
+-	if (rockchip_pdata->revision == 1 && host->mmc->ios.timing == MMC_TIMING_MMC_HS400) {
++		extra = DLL_CMDOUT_SRC_CLK_NEG |
++			DLL_CMDOUT_BOTH_CLK_EDGE |
++			DWCMSHC_EMMC_DLL_DLYENA |
++			taps->hs400_cmdout |
++			DLL_CMDOUT_TAPNUM_FROM_SW |
++			tap_sel;
++		sdhci_writel(host, extra, DECMSHC_EMMC_DLL_CMDOUT);
++	} else if (rockchip_pdata->revision == 1 &&
++		   host->mmc->ios.timing == MMC_TIMING_MMC_HS400) {
+ 		txclk_tapnum = DLL_TXCLK_TAPNUM_90_DEGREES;
+ 
+ 		extra = DLL_CMDOUT_SRC_CLK_NEG |
+@@ -865,12 +903,14 @@ static void dwcmshc_rk3568_set_clock(struct sdhci_host *host, unsigned int clock
+ 	extra = DWCMSHC_EMMC_DLL_DLYENA |
+ 		DLL_TXCLK_TAPNUM_FROM_SW |
+ 		DLL_RXCLK_NO_INVERTER << DWCMSHC_EMMC_DLL_RXCLK_SRCSEL |
+-		txclk_tapnum;
++		txclk_tapnum |
++		tap_sel;
+ 	sdhci_writel(host, extra, DWCMSHC_EMMC_DLL_TXCLK);
+ 
+ 	extra = DWCMSHC_EMMC_DLL_DLYENA |
+-		DLL_STRBIN_TAPNUM_DEFAULT |
+-		DLL_STRBIN_TAPNUM_FROM_SW;
++		(taps ? taps->strbin : DLL_STRBIN_TAPNUM_DEFAULT) |
++		DLL_STRBIN_TAPNUM_FROM_SW |
++		tap_sel;
+ 	sdhci_writel(host, extra, DWCMSHC_EMMC_DLL_STRBIN);
+ 
+ enable_clk:
+@@ -2139,6 +2179,32 @@ static const struct rockchip_pltfm_data sdhci_dwcmshc_rk3568_pdata = {
+ 	.revision = 0,
+ };
+ 
++/* Rockchip's kernel's RK3528 taps */
++static const struct rockchip_dll_taps rk3528_dll_taps = {
++	.hs200_txclk = 12,
++	.hs400_txclk = 6,
++	.hs400_cmdout = 6,
++	.strbin = 3,
++	.strbin_delay = 10,
++};
++
++static const struct rockchip_pltfm_data sdhci_dwcmshc_rk3528_pdata = {
++	.dwcmshc_pdata = {
++		.pdata = {
++			.ops = &sdhci_dwcmshc_rk35xx_ops,
++			.quirks = SDHCI_QUIRK_CAP_CLOCK_BASE_BROKEN |
++				  SDHCI_QUIRK_BROKEN_TIMEOUT_VAL,
++			.quirks2 = SDHCI_QUIRK2_PRESET_VALUE_BROKEN |
++				   SDHCI_QUIRK2_CLOCK_DIV_ZERO_BROKEN,
++		},
++		.cqhci_host_ops = &rk35xx_cqhci_ops,
++		.init = dwcmshc_rk35xx_init,
++		.postinit = dwcmshc_rk35xx_postinit,
++	},
++	.taps = &rk3528_dll_taps,
++	.revision = 1,
++};
++
+ static const struct rockchip_pltfm_data sdhci_dwcmshc_rk3576_pdata = {
+ 	.dwcmshc_pdata = {
+ 		.pdata = {
+@@ -2337,6 +2403,10 @@ static const struct of_device_id sdhci_dwcmshc_dt_ids[] = {
+ 		.compatible = "canaan,k230-sdio",
+ 		.data = &k230_sdio_data.dwcmshc_pdata,
+ 	},
++	{
++		.compatible = "rockchip,rk3528-dwcmshc",
++		.data = &sdhci_dwcmshc_rk3528_pdata,
++	},
+ 	{
+ 		.compatible = "rockchip,rk3588-dwcmshc",
+ 		.data = &sdhci_dwcmshc_rk3588_pdata,

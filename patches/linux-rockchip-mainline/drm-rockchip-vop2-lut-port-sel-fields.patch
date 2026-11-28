@@ -1,0 +1,48 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] drm/rockchip: vop2: Keep LUT_PORT_SEL's other fields
+
+Selecting the port whose gamma table is written wrote all of
+LUT_PORT_SEL, clearing the fields beside the port's: the writeback's
+port on the RK3568 and RK3588, and on the RK3528 the Esmart line
+buffers' split, so a gamma table set at runtime took the line buffers
+from the windows using them. Update the port's field alone.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
+--- a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
++++ b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
+@@ -1717,8 +1717,9 @@
+ 						struct vop2_video_port *vp,
+ 						struct drm_crtc *crtc)
+ {
+-	vop2_writel(vop2, RK3568_LUT_PORT_SEL,
+-		    FIELD_PREP(RK3588_LUT_PORT_SEL__GAMMA_AHB_WRITE_SEL, vp->id));
++	regmap_update_bits(vop2->map, RK3568_LUT_PORT_SEL,
++			   RK3588_LUT_PORT_SEL__GAMMA_AHB_WRITE_SEL,
++			   FIELD_PREP(RK3588_LUT_PORT_SEL__GAMMA_AHB_WRITE_SEL, vp->id));
+ 	vop2_vp_dsp_lut_enable(vp);
+ 	vop2_crtc_write_gamma_lut(vop2, crtc);
+ 	vop2_vp_dsp_lut_update_enable(vp);
+@@ -1733,7 +1734,9 @@
+ 	if (!vop2_vp_dsp_lut_poll_disabled(vp))
+ 		return;
+ 
+-	vop2_writel(vop2, RK3568_LUT_PORT_SEL, vp->id);
++	regmap_update_bits(vop2->map, RK3568_LUT_PORT_SEL,
++			   RK3568_LUT_PORT_SEL__GAMMA_PORT_SEL,
++			   FIELD_PREP(RK3568_LUT_PORT_SEL__GAMMA_PORT_SEL, vp->id));
+ 	vop2_crtc_write_gamma_lut(vop2, crtc);
+ 	vop2_vp_dsp_lut_enable(vp);
+ }
+diff --git a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.h b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.h
+--- a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.h
++++ b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.h
+@@ -692,6 +692,7 @@
+ #define RK3568_WB_XSCAL_FACTOR__FIFO_THROD		GENMASK(9, 0)
+ 
+ #define RK3568_LUT_PORT_SEL__WB_VP			GENMASK(9, 8)
++#define RK3568_LUT_PORT_SEL__GAMMA_PORT_SEL		GENMASK(1, 0)
+ 
+ #define RK3568_VP_DSP_CTRL__STANDBY			BIT(31)
+ #define RK3568_VP_DSP_CTRL__DSP_LUT_EN			BIT(28)

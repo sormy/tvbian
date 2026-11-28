@@ -1,0 +1,75 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] crypto: rockchip: rk2: A test parameter that fails the next hash
+
+For a debug build: fail_next_job leaves the next hash unstarted, so it
+times out (1), or asks for an HMAC over SHA512, which the RK3528 lacks
+and which wedges its engine (2). The parameter clears itself.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+  drivers/crypto/rockchip/rk2_crypto_ahash.c | 24 +++++++++++++++++++++---
+  1 file changed, 21 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/crypto/rockchip/rk2_crypto_ahash.c b/drivers/crypto/rockchip/rk2_crypto_ahash.c
+index 771df66..59b7525 100644
+--- a/drivers/crypto/rockchip/rk2_crypto_ahash.c
++++ b/drivers/crypto/rockchip/rk2_crypto_ahash.c
+@@ -5,6 +5,7 @@
+  * Copyright (c) 2022-2023 Corentin Labbe <clabbe@baylibre.com>
+  * Copyright (c) 2026 Dawid Olesinski <dawidro@gmail.com>
+  */
++#include <linux/moduleparam.h>
+ #include <linux/dma-mapping.h>
+ #include <linux/iopoll.h>
+ #include <linux/interrupt.h>
+@@ -19,6 +20,17 @@
+ #include <crypto/sm3.h>
+ #include "rk2_crypto.h"
+ 
++enum rk2_test_failure {
++	RK2_TEST_NONE,
++	RK2_TEST_TIMEOUT,
++	RK2_TEST_WEDGE,
++};
++
++static int fail_next_job;
++module_param(fail_next_job, int, 0644);
++MODULE_PARM_DESC(fail_next_job,
++		 "Test: the next hash is never started, so it times out (1), or asks for an HMAC the engine lacks, which wedges it (2)");
++
+ static bool rk2_ahash_need_fallback(struct ahash_request *areq)
+ {
+ 	struct crypto_ahash *tfm = crypto_ahash_reqtfm(areq);
+@@ -383,7 +395,7 @@ int rk2_hash_run(struct crypto_engine *engine, void *breq)
+ 	struct rk2_crypto_dev *rkc = rctx->dev;
+ 	struct rk2_crypto_lli *dd = &rkc->tl[0];
+ 	int err = 0;
+-	int i;
++	int i, test;
+ 	unsigned long timeout;
+ 	u32 v;
+ 
+@@ -408,6 +420,11 @@ int rk2_hash_run(struct crypto_engine *engine, void *breq)
+ 	rctx->mode = algt->rk2_mode;
+ 	rctx->mode |= 0xffff0000;
+ 	rctx->mode |= RK2_CRYPTO_ENABLE | RK2_CRYPTO_HW_PAD;
++	/* the recovery under test, as no request makes a job time out or wedge */
++	test = xchg(&fail_next_job, RK2_TEST_NONE);
++	if (test == RK2_TEST_WEDGE)
++		rctx->mode = 0xffff0000 | RK2_CRYPTO_SHA512 | RK2_CRYPTO_HMAC |
++			     RK2_CRYPTO_ENABLE | RK2_CRYPTO_HW_PAD;
+ 	if (algt->rk2_mode & RK2_CRYPTO_HMAC)
+ 		for (i = 0; i < crypto_ahash_blocksize(tfm) / 4; i++)
+ 			writel(get_unaligned_be32(tctx->key + i * 4),
+@@ -461,8 +478,9 @@ int rk2_hash_run(struct crypto_engine *engine, void *breq)
+ 	reinit_completion(&rkc->complete);
+ 	rkc->status = 0;
+ 
+-	writel(RK2_CRYPTO_DMA_CTL_START | (RK2_CRYPTO_DMA_CTL_START << 16),
+-	       rkc->reg + RK2_CRYPTO_DMA_CTL);
++	if (test != RK2_TEST_TIMEOUT)
++		writel(RK2_CRYPTO_DMA_CTL_START | (RK2_CRYPTO_DMA_CTL_START << 16),
++		       rkc->reg + RK2_CRYPTO_DMA_CTL);
+ 
+ 	timeout = wait_for_completion_timeout(&rkc->complete,
+ 					      msecs_to_jiffies(2000));

@@ -1,0 +1,51 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] media: rockchip: vdpp: A test parameter that fails the next job
+
+For a debug build: fail_next_job leaves the next job unstarted, so it
+times out (1), or points its output where nothing is mapped, so it
+faults on the IOMMU (2). The parameter clears itself.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+  .../platform/rockchip/vdpp/rockchip-vdpp-m2m.c      | 21 +++++++++++++++++++++
+  1 file changed, 21 insertions(+)
+
+diff --git a/drivers/media/platform/rockchip/vdpp/rockchip-vdpp-m2m.c b/drivers/media/platform/rockchip/vdpp/rockchip-vdpp-m2m.c
+index 481c516..58aaedd 100644
+--- a/drivers/media/platform/rockchip/vdpp/rockchip-vdpp-m2m.c
++++ b/drivers/media/platform/rockchip/vdpp/rockchip-vdpp-m2m.c
+@@ -46,6 +46,19 @@
+ #define VDPP_RESET_TIMEOUT_US	5
+ /* twice VDPP_TIMEOUT_CYCLES at the slowest core clock */
+ #define VDPP_WATCHDOG_MS	1000
++/* An IOVA the DMA API allocates only when the space is nearly full */
++#define VDPP_UNMAPPED_IOVA	0x1000
++
++enum vdpp_test_failure {
++	VDPP_TEST_NONE,
++	VDPP_TEST_TIMEOUT,
++	VDPP_TEST_FAULT,
++};
++
++static int fail_next_job;
++module_param(fail_next_job, int, 0644);
++MODULE_PARM_DESC(fail_next_job,
++		 "Test: the next job is never started, so it times out (1), or writes where nothing is mapped (2)");
+ 
+ struct vdpp_dev {
+ 	struct v4l2_device v4l2_dev;
+@@ -190,6 +203,14 @@ static void vdpp_device_run(void *priv)
+ 	vdpp_write(vdpp, VDPP_INT_EN, VDPP_INT_FRM_DONE | VDPP_INT_OSD_MAX | VDPP_INT_ERRORS);
+ 
+ 	schedule_delayed_work(&vdpp->watchdog, msecs_to_jiffies(VDPP_WATCHDOG_MS));
++	/* the recovery under test, as no picture makes a job time out or fault */
++	switch (xchg(&fail_next_job, VDPP_TEST_NONE)) {
++	case VDPP_TEST_TIMEOUT:
++		return;
++	case VDPP_TEST_FAULT:
++		vdpp_write(vdpp, VDPP_DST_ADDR_Y, VDPP_UNMAPPED_IOVA);
++		break;
++	}
+ 
+ 	/* registers before the start */
+ 	wmb();

@@ -7,6 +7,10 @@ vendor driver does: shared between both video ports, the first's cursor,
 Esmart3 VP1's primary in its place. The driver keeps a window the table
 types cursor as one, and hands it to the first video port it serves.
 
+Line buffer split 2 feeds Esmart0, Esmart1 and Esmart2, not Esmart3,
+which scans out black: there Esmart2 is VP1's primary and Esmart1 the
+cursor.
+
 Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
 --- a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.h
@@ -74,6 +78,40 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
  						&vop2_crtc_funcs,
  						"video_port%d", vp->id);
  		if (ret)
+@@ -3149,6 +3156,24 @@
+ 	return 0;
+ };
+ 
++/*
++ * The RK3528 line buffer split 2 feeds Esmart0, Esmart1 and Esmart2, not
++ * Esmart3: video port 1 scans out of Esmart2, and Esmart1 is the cursor in
++ * its place.
++ */
++static enum drm_plane_type vop2_win_type(struct vop2 *vop2,
++					 const struct vop2_win_data *win_data)
++{
++	if (vop2->version != VOP_VERSION_RK3528 ||
++	    vop2->esmart_lb_mode != RK3528_ESMART_LB_MODE_4K_2K_2K)
++		return win_data->type;
++	if (win_data->phys_id == ROCKCHIP_VOP2_ESMART1)
++		return DRM_PLANE_TYPE_CURSOR;
++	if (win_data->phys_id == ROCKCHIP_VOP2_ESMART2)
++		return DRM_PLANE_TYPE_PRIMARY;
++	return win_data->type;
++}
++
+ static int vop2_win_init(struct vop2 *vop2)
+ {
+ 	const struct vop2_data *vop2_data = vop2->data;
+@@ -3160,7 +3185,7 @@
+ 
+ 		win = &vop2->win[i];
+ 		win->data = win_data;
+-		win->type = win_data->type;
++		win->type = vop2_win_type(vop2, win_data);
+ 		win->offset = win_data->base;
+ 		win->win_id = i;
+ 		win->vop2 = vop2;
 --- a/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c
 +++ b/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c
 @@ -2705,13 +2705,13 @@

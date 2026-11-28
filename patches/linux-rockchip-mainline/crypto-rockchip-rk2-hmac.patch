@@ -1,0 +1,250 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] crypto: rockchip: rk2: HMAC in the engine
+
+The engine computes an HMAC itself: HASH_CTL's bit 3 enables it, the key
+is written as big-endian words from KEY0, zero-padded to the hash's
+block. Offer hmac(md5), (sha1), (sha256) and (sha512) where HMAC_VERSION
+reports them: one bit each, in the order Rockchip's own driver lists
+them, SHA1, SHA256, SHA512, MD5, SM3. The RK3528 reads 0x1b, SHA512
+clear as in HASH_VERSION. Its bit for SM3 is set, but hmac(sm3) fails
+its self-test on a wrong digest, so it is not offered.
+
+A key longer than the block, and an empty message, go to the software
+fallback, which holds the same key.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+  drivers/crypto/rockchip/rk2_crypto.c       | 63 +++++++++++++++++++++++++++++-
+  drivers/crypto/rockchip/rk2_crypto.h       | 10 +++++
+  drivers/crypto/rockchip/rk2_crypto_ahash.c | 36 ++++++++++++++---
+  3 files changed, 102 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/crypto/rockchip/rk2_crypto.c b/drivers/crypto/rockchip/rk2_crypto.c
+index 9e906fd..e9a4e86 100644
+--- a/drivers/crypto/rockchip/rk2_crypto.c
++++ b/drivers/crypto/rockchip/rk2_crypto.c
+@@ -178,6 +178,36 @@ static irqreturn_t rk2_crypto_irq_handle(int irq, void *dev_id)
+ 	.alg.skcipher.op.do_one_request = rk2_cipher_run,			\
+ }
+ 
++/* An HMAC the engine keys itself; the vendor's list of them */
++#define RK2_HMAC(alg_mode, name, driver, digest_size, state, block) {		\
++	.type = CRYPTO_ALG_TYPE_AHASH,						\
++	.rk2_mode = (alg_mode) | RK2_CRYPTO_HMAC,				\
++	.alg.hash.base = {							\
++		.init = rk2_ahash_init,						\
++		.update = rk2_ahash_update,					\
++		.final = rk2_ahash_final,					\
++		.finup = rk2_ahash_finup,					\
++		.export = rk2_ahash_export,					\
++		.import = rk2_ahash_import,					\
++		.digest = rk2_ahash_digest,					\
++		.setkey = rk2_hmac_setkey,					\
++		.init_tfm = rk2_hash_init_tfm,					\
++		.exit_tfm = rk2_hash_exit_tfm,					\
++		.halg.digestsize = digest_size,					\
++		.halg.statesize = sizeof(state),				\
++		.halg.base = {							\
++			.cra_name = name,					\
++			.cra_driver_name = driver,				\
++			.cra_priority = 300,					\
++			.cra_flags = CRYPTO_ALG_ASYNC | CRYPTO_ALG_NEED_FALLBACK, \
++			.cra_blocksize = block,					\
++			.cra_ctxsize = sizeof(struct rk2_ahash_ctx),		\
++			.cra_module = THIS_MODULE,				\
++		},								\
++	},									\
++	.alg.hash.op.do_one_request = rk2_hash_run,				\
++}
++
+ #define RK2_AES(mode, name, driver, bs)						\
+ 	RK2_SKCIPHER(RK2_CRYPTO_AES | (mode), name, driver, bs,			\
+ 		     AES_MIN_KEY_SIZE, AES_MAX_KEY_SIZE, AES_BLOCK_SIZE, AES_BLOCK_SIZE,	\
+@@ -188,6 +218,14 @@ static irqreturn_t rk2_crypto_irq_handle(int irq, void *dev_id)
+ 		     rk2_sm4_setkey)
+ 
+ static const struct rk2_crypto_template rk2_crypto_algs_template[] = {
++	RK2_HMAC(RK2_CRYPTO_MD5, "hmac(md5)", "rk2-hmac-md5", MD5_DIGEST_SIZE,
++		 struct md5_state, MD5_HMAC_BLOCK_SIZE),
++	RK2_HMAC(RK2_CRYPTO_SHA1, "hmac(sha1)", "rk2-hmac-sha1", SHA1_DIGEST_SIZE,
++		 struct sha1_state, SHA1_BLOCK_SIZE),
++	RK2_HMAC(RK2_CRYPTO_SHA256, "hmac(sha256)", "rk2-hmac-sha256", SHA256_DIGEST_SIZE,
++		 struct sha256_state, SHA256_BLOCK_SIZE),
++	RK2_HMAC(RK2_CRYPTO_SHA512, "hmac(sha512)", "rk2-hmac-sha512", SHA512_DIGEST_SIZE,
++		 struct sha512_state, SHA512_BLOCK_SIZE),
+ 	RK2_AES(RK2_CRYPTO_MODE_CTR, "ctr(aes)", "ctr-aes-rk2", 1),
+ 	RK2_SM4(RK2_CRYPTO_MODE_ECB, "ecb(sm4)", "ecb-sm4-rk2", SM4_BLOCK_SIZE),
+ 	RK2_SM4(RK2_CRYPTO_MODE_CBC, "cbc(sm4)", "cbc-sm4-rk2", SM4_BLOCK_SIZE),
+@@ -623,6 +661,22 @@ static void register_debugfs(struct rk2_crypto_dev *rkc)
+ #endif
+ }
+ 
++/* Whether the engine keys a hash itself, by HMAC_VERSION's bit for it */
++static bool rk2_hmac_offered(u32 hmac, u32 mode)
++{
++	switch (mode & ~RK2_CRYPTO_HMAC) {
++	case RK2_CRYPTO_SHA1:
++		return hmac & CRYPTO_HMAC_SHA1_FLAG;
++	case RK2_CRYPTO_SHA256:
++		return hmac & CRYPTO_HMAC_SHA256_FLAG;
++	case RK2_CRYPTO_SHA512:
++		return hmac & CRYPTO_HMAC_SHA512_FLAG;
++	case RK2_CRYPTO_MD5:
++		return hmac & CRYPTO_HMAC_MD5_FLAG;
++	}
++	return false;
++}
++
+ /* Whether the engine implements a template's hash or AES mode, by its version registers */
+ static bool rk2_crypto_offered(struct rk2_crypto_dev *rkc,
+ 			       const struct rk2_crypto_template *t)
+@@ -639,6 +693,9 @@ static bool rk2_crypto_offered(struct rk2_crypto_dev *rkc,
+ 		return version & BIT(FIELD_GET(RK2_CRYPTO_MODE_MASK, t->rk2_mode));
+ 	}
+ 
++	if (t->rk2_mode & RK2_CRYPTO_HMAC)
++		return rk2_hmac_offered(readl(rkc->reg + CRYPTO_HMAC_VERSION), t->rk2_mode);
++
+ 	switch (t->rk2_mode) {
+ 	case RK2_CRYPTO_SHA1:
+ 		return hash & CRYPTO_HASH_SHA1_FLAG;
+@@ -661,8 +718,10 @@ static bool rk2_crypto_offered(struct rk2_crypto_dev *rkc,
+ /* A mode only an engine's version registers offer: untested where none says */
+ static bool rk2_crypto_beyond_rk3568(const struct rk2_crypto_template *t)
+ {
+-	return t->type == CRYPTO_ALG_TYPE_SKCIPHER && t->rk2_mode != RK2_CRYPTO_AES_ECB &&
+-	       t->rk2_mode != RK2_CRYPTO_AES_CBC && t->rk2_mode != RK2_CRYPTO_AES_XTS;
++	if (t->type != CRYPTO_ALG_TYPE_SKCIPHER)
++		return t->rk2_mode & RK2_CRYPTO_HMAC;
++	return t->rk2_mode != RK2_CRYPTO_AES_ECB && t->rk2_mode != RK2_CRYPTO_AES_CBC &&
++	       t->rk2_mode != RK2_CRYPTO_AES_XTS;
+ }
+ 
+ /* Keeps the templates the engine implements, where it says which */
+diff --git a/drivers/crypto/rockchip/rk2_crypto.h b/drivers/crypto/rockchip/rk2_crypto.h
+index 264219f..db1cb6c 100644
+--- a/drivers/crypto/rockchip/rk2_crypto.h
++++ b/drivers/crypto/rockchip/rk2_crypto.h
+@@ -81,6 +81,7 @@
+ 
+ #define RK2_CRYPTO_HASH_CTL		0x0048
+ #define RK2_CRYPTO_HW_PAD		BIT(2)
++#define RK2_CRYPTO_HMAC			BIT(3)
+ #define RK2_CRYPTO_SHA1			(0 << 4)
+ #define RK2_CRYPTO_MD5			(1 << 4)
+ #define RK2_CRYPTO_SHA224		(3 << 4)
+@@ -147,6 +148,11 @@
+ #define CRYPTO_HASH_MD5_FLAG		BIT(7)
+ #define CRYPTO_HASH_SM3_FLAG		BIT(8)
+ #define CRYPTO_HMAC_VERSION		0x0690
++/* RK3528: 0x1b, the list Rockchip's driver offers in order, SHA512 clear as in HASH_VERSION */
++#define CRYPTO_HMAC_SHA1_FLAG		BIT(0)
++#define CRYPTO_HMAC_SHA256_FLAG		BIT(1)
++#define CRYPTO_HMAC_SHA512_FLAG		BIT(2)
++#define CRYPTO_HMAC_MD5_FLAG		BIT(3)
+ #define CRYPTO_RNG_VERSION		0x0694
+ #define CRYPTO_PKA_VERSION		0x0698
+ #define CRYPTO_CRYPTO_VERSION		0x06F0
+@@ -207,6 +213,9 @@ struct rk2_crypto_dev {
+ struct rk2_ahash_ctx {
+ 	/* for fallback */
+ 	struct crypto_ahash *fallback_tfm;
++	/* an HMAC's key, zero-padded to the block, as the engine reads it */
++	unsigned int keylen;
++	u8 key[SHA512_BLOCK_SIZE];
+ };
+ 
+ /* the private variable of hash for fallback */
+@@ -267,6 +276,7 @@ int rk2_skcipher_encrypt(struct skcipher_request *req);
+ int rk2_skcipher_decrypt(struct skcipher_request *req);
+ 
+ int rk2_ahash_init(struct ahash_request *req);
++int rk2_hmac_setkey(struct crypto_ahash *tfm, const u8 *key, unsigned int keylen);
+ int rk2_ahash_update(struct ahash_request *req);
+ int rk2_ahash_final(struct ahash_request *req);
+ int rk2_ahash_finup(struct ahash_request *req);
+diff --git a/drivers/crypto/rockchip/rk2_crypto_ahash.c b/drivers/crypto/rockchip/rk2_crypto_ahash.c
+index 2a4aa21..543f233 100644
+--- a/drivers/crypto/rockchip/rk2_crypto_ahash.c
++++ b/drivers/crypto/rockchip/rk2_crypto_ahash.c
+@@ -25,9 +25,14 @@ static bool rk2_ahash_need_fallback(struct ahash_request *areq)
+ 	struct ahash_alg *alg = crypto_ahash_alg(tfm);
+ 	struct rk2_crypto_template *algt =
+ 	    container_of(alg, struct rk2_crypto_template, alg.hash.base);
++	struct rk2_ahash_ctx *ctx = crypto_ahash_ctx(tfm);
+ 	struct scatterlist *sg;
+ 	int nents = sg_nents_for_len(areq->src, areq->nbytes);
+ 
++	/* a key past the block the engine cannot take: the fallback hashed it */
++	if ((algt->rk2_mode & RK2_CRYPTO_HMAC) && ctx->keylen > crypto_ahash_blocksize(tfm))
++		return true;
++
+ 	/*
+ 	 * The hardware's Merkle-Damgard padding engine (HW_PAD) requires the
+ 	 * total message length to be known upfront via CH0_PC_LEN_0. When a
+@@ -133,6 +138,22 @@ static int zero_message_process(struct ahash_request *req)
+  *
+  * Return: 0 on success, or a negative error code on failure.
+  */
++/* An HMAC's key, for the engine and its software fallback alike */
++int rk2_hmac_setkey(struct crypto_ahash *tfm, const u8 *key, unsigned int keylen)
++{
++	struct rk2_ahash_ctx *ctx = crypto_ahash_ctx(tfm);
++	int err;
++
++	err = crypto_ahash_setkey(ctx->fallback_tfm, key, keylen);
++	if (err)
++		return err;
++	ctx->keylen = keylen;
++	memset(ctx->key, 0, sizeof(ctx->key));
++	if (keylen <= crypto_ahash_blocksize(tfm))
++		memcpy(ctx->key, key, keylen);
++	return 0;
++}
++
+ int rk2_ahash_init(struct ahash_request *req)
+ {
+ 	struct rk2_ahash_rctx *rctx = ahash_request_ctx(req);
+@@ -277,18 +298,18 @@ int rk2_ahash_digest(struct ahash_request *req)
+ 	struct rk2_ahash_rctx *rctx = ahash_request_ctx(req);
+ 	struct crypto_ahash *tfm = crypto_ahash_reqtfm(req);
+ 	struct ahash_alg *alg = crypto_ahash_alg(tfm);
+-	struct rk2_crypto_template *algt;
++	struct rk2_crypto_template *algt =
++		container_of(alg, struct rk2_crypto_template, alg.hash.base);
+ 	struct rk2_crypto_dev *rkc;
+ 	struct crypto_engine *engine;
+ 
+-	if (!req->nbytes)
++	/* an empty message's digest is a plain hash's alone */
++	if (!req->nbytes && !(algt->rk2_mode & RK2_CRYPTO_HMAC))
+ 		return zero_message_process(req);
+ 
+-	if (rk2_ahash_need_fallback(req))
++	if (!req->nbytes || rk2_ahash_need_fallback(req))
+ 		return rk2_ahash_digest_fb(req);
+ 
+-	/* Extract the device pointer from the algorithm template! */
+-	algt = container_of(alg, struct rk2_crypto_template, alg.hash.base);
+ 	rkc = algt->dev;
+ 	if (!rkc)
+ 		return -ENODEV;
+@@ -355,6 +376,7 @@ int rk2_hash_run(struct crypto_engine *engine, void *breq)
+ 	struct ahash_alg *alg = crypto_ahash_alg(tfm);
+ 	struct rk2_crypto_template *algt =
+ 	    container_of(alg, struct rk2_crypto_template, alg.hash.base);
++	struct rk2_ahash_ctx *tctx = crypto_ahash_ctx(tfm);
+ 	struct scatterlist *sgs = areq->src;
+ 	struct rk2_crypto_dev *rkc = rctx->dev;
+ 	struct rk2_crypto_lli *dd = &rkc->tl[0];
+@@ -384,6 +406,10 @@ int rk2_hash_run(struct crypto_engine *engine, void *breq)
+ 	rctx->mode = algt->rk2_mode;
+ 	rctx->mode |= 0xffff0000;
+ 	rctx->mode |= RK2_CRYPTO_ENABLE | RK2_CRYPTO_HW_PAD;
++	if (algt->rk2_mode & RK2_CRYPTO_HMAC)
++		for (i = 0; i < crypto_ahash_blocksize(tfm) / 4; i++)
++			writel(get_unaligned_be32(tctx->key + i * 4),
++			       rkc->reg + RK2_CRYPTO_KEY0 + i * 4);
+ 	writel(rctx->mode, rkc->reg + RK2_CRYPTO_HASH_CTL);
+ 
+ 	/*

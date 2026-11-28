@@ -1,0 +1,63 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] dt-bindings: soc: rockchip: Add the board's sleep configuration node
+
+Rockchip's BL31 takes a board's sleep mode, wake sources and
+PWM-driven regulators from the kernel. Describe the node that holds
+them: rockchip,sleep-mode-config, rockchip,wakeup-config and
+rockchip,pwm-regulator-config, each a mask of the firmware's flags.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ Documentation/devicetree/bindings/soc/rockchip/rockchip,pm-config.yaml | 44 ++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 44 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/soc/rockchip/rockchip,pm-config.yaml b/Documentation/devicetree/bindings/soc/rockchip/rockchip,pm-config.yaml
+new file mode 100644
+index 0000000..b6cdf2a
+--- /dev/null
++++ b/Documentation/devicetree/bindings/soc/rockchip/rockchip,pm-config.yaml
+@@ -0,0 +1,44 @@
++# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
++%YAML 1.2
++---
++$id: http://devicetree.org/schemas/soc/rockchip/rockchip,pm-config.yaml#
++$schema: http://devicetree.org/meta-schemas/core.yaml#
++
++title: Rockchip suspend firmware configuration
++
++maintainers:
++  - Artem Butusov <art.sormy@gmail.com>
++
++description:
++  The board's sleep mode, wake sources and PWM-driven regulators, handed to
++  Rockchip's suspend firmware (BL31) at boot. Each value is a mask of the
++  firmware's RKPM_* flags.
++
++properties:
++  compatible:
++    const: rockchip,pm-rk3528
++
++  rockchip,sleep-mode-config:
++    $ref: /schemas/types.yaml#/definitions/uint32
++    description: What deep suspend powers down.
++
++  rockchip,wakeup-config:
++    $ref: /schemas/types.yaml#/definitions/uint32
++    description: The interrupts that wake it.
++
++  rockchip,pwm-regulator-config:
++    $ref: /schemas/types.yaml#/definitions/uint32
++    description: The PWM outputs that drive a regulator the firmware keeps.
++
++required:
++  - compatible
++
++additionalProperties: false
++
++examples:
++  - |
++    power-management {
++        compatible = "rockchip,pm-rk3528";
++        rockchip,sleep-mode-config = <0x2>;
++        rockchip,wakeup-config = <0x11>;
++    };

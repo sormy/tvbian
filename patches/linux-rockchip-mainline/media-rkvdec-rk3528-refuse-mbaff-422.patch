@@ -1,0 +1,76 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] media: rkvdec: Refuse 4:2:2 H.264 in MBAFF on the RK3528
+
+An H.264 High 4:2:2 stream coded with macroblock-adaptive frame/field
+decodes on the RK3528 with its luma exact and its chroma mispredicted:
+U at 15 dB and V at 10 dB against FFmpeg's software decode, intra
+frames and CAVLC alike. 4:2:2 interlaced without MBAFF and 4:2:0 in
+MBAFF are exact. Until the driver programs it right, give the RK3528
+its own variant and refuse such a sequence parameter set, so a player
+decodes it on the CPU instead of showing the wrong colours.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+  drivers/media/platform/rockchip/rkvdec/rkvdec-h264-common.c |  4 ++++
+  drivers/media/platform/rockchip/rkvdec/rkvdec.c             | 12 +++++++++++-
+  drivers/media/platform/rockchip/rkvdec/rkvdec.h             |  2 ++
+  3 files changed, 17 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec-h264-common.c b/drivers/media/platform/rockchip/rkvdec/rkvdec-h264-common.c
+index 900919be7..8e32cac65 100644
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec-h264-common.c
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec-h264-common.c
+@@ -176,6 +176,10 @@ int rkvdec_h264_validate_sps(struct rkvdec_ctx *ctx,
+ 	if (sps->bit_depth_luma_minus8 != 0 && sps->bit_depth_luma_minus8 != 2)
+ 		/* Only 8-bit and 10-bit is supported */
+ 		return -EINVAL;
++	if ((ctx->dev->variant->quirks & RKVDEC_QUIRK_NO_MBAFF_422) &&
++	    sps->chroma_format_idc == 2 &&
++	    (sps->flags & V4L2_H264_SPS_FLAG_MB_ADAPTIVE_FRAME_FIELD))
++		return -EINVAL;
+ 
+ 	width = (sps->pic_width_in_mbs_minus1 + 1) * 16;
+ 	height = (sps->pic_height_in_map_units_minus1 + 1) * 16;
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec.c b/drivers/media/platform/rockchip/rkvdec/rkvdec.c
+index c004a4d42..f37c2acf6 100644
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec.c
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec.c
+@@ -1903,6 +1903,16 @@ static const struct rkvdec_variant vdpu381_variant = {
+ 	.ops = &vdpu381_variant_ops,
+ };
+ 
++static const struct rkvdec_variant rk3528_variant = {
++	.coded_fmts = vdpu381_coded_fmts,
++	.num_coded_fmts = ARRAY_SIZE(vdpu381_coded_fmts),
++	.rcb_sizes = vdpu381_rcb_sizes,
++	.num_rcb_sizes = ARRAY_SIZE(vdpu381_rcb_sizes),
++	.rcb_sram_order = vdpu381_rcb_sram_order,
++	.ops = &vdpu381_variant_ops,
++	.quirks = RKVDEC_QUIRK_NO_MBAFF_422,
++};
++
+ static const struct rcb_size_info vdpu383_rcb_sizes[] = {
+ 	{6,	PIC_WIDTH},	// streamd
+ 	{6,	PIC_WIDTH},	// streamd_tile
+@@ -1958,7 +1968,7 @@ static const struct of_device_id of_rkvdec_match[] = {
+ 		 * delta is the reset routine, which this driver does not use.
+ 		 */
+ 		.compatible = "rockchip,rk3528-vdec",
+-		.data = &vdpu381_variant,
++		.data = &rk3528_variant,
+ 	},
+ 	{ /* sentinel */ }
+ };
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec.h b/drivers/media/platform/rockchip/rkvdec/rkvdec.h
+index 74345c822..04b06e351 100644
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec.h
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec.h
+@@ -29,6 +29,8 @@
+ #include <media/videobuf2-dma-contig.h>
+ 
+ #define RKVDEC_QUIRK_DISABLE_QOS	BIT(0)
++/* 4:2:2 in MBAFF: chroma not yet decoded right */
++#define RKVDEC_QUIRK_NO_MBAFF_422	BIT(1)
+ 
+ #define RKVDEC_1080P_PIXELS		(1920 * 1088)
+ #define RKVDEC_4K_PIXELS		(4096 * 2304)

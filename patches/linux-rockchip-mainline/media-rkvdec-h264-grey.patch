@@ -1,0 +1,48 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] media: rkvdec: H.264 4:0:0 as GREY on the VDPU381
+
+A 4:0:0 stream was decoded into NV12, the decoder writing its luma and
+leaving the chroma plane as the memory held it. The VDPU381 writes no
+chroma for it, as the vendor's MPP sizes a 4:0:0 picture: offer GREY
+for such a stream, and nothing else.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec-h264-common.c b/drivers/media/platform/rockchip/rkvdec/rkvdec-h264-common.c
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec-h264-common.c
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec-h264-common.c
+@@ -146,6 +146,8 @@
+ 		return RKVDEC_IMG_FMT_ANY;
+ 
+ 	if (sps->bit_depth_luma_minus8 == 0) {
++		if (sps->chroma_format_idc == 0)
++			return RKVDEC_IMG_FMT_400_8BIT;
+ 		if (sps->chroma_format_idc == 2)
+ 			return RKVDEC_IMG_FMT_422_8BIT;
+ 		else
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec.c b/drivers/media/platform/rockchip/rkvdec/rkvdec.c
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec.c
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec.c
+@@ -462,6 +462,11 @@
+ 		.image_fmt = RKVDEC_IMG_FMT_420_8BIT,
+ 	},
+ 	{
++		/* 4:0:0 as it is: the decoder writes no chroma */
++		.fourcc = V4L2_PIX_FMT_GREY,
++		.image_fmt = RKVDEC_IMG_FMT_400_8BIT,
++	},
++	{
+ 		.fourcc = V4L2_PIX_FMT_NV15,
+ 		.image_fmt = RKVDEC_IMG_FMT_420_10BIT,
+ 	},
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec.h b/drivers/media/platform/rockchip/rkvdec/rkvdec.h
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec.h
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec.h
+@@ -110,6 +110,7 @@
+ 	RKVDEC_IMG_FMT_420_10BIT,
+ 	RKVDEC_IMG_FMT_422_8BIT,
+ 	RKVDEC_IMG_FMT_422_10BIT,
++	RKVDEC_IMG_FMT_400_8BIT,
+ };
+ 
+ struct rkvdec_decoded_fmt_desc {

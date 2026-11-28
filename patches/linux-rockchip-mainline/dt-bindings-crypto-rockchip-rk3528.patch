@@ -1,0 +1,20 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] dt-bindings: crypto: rockchip: Add the RK3528's crypto engine
+
+The RK3528's crypto engine is the RK3568's second-generation one, with
+version registers the vendor's driver reads beside it: describe it with
+the RK3568's compatible as its fallback.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/Documentation/devicetree/bindings/crypto/rockchip,rk3588-crypto.yaml b/Documentation/devicetree/bindings/crypto/rockchip,rk3588-crypto.yaml
+--- a/Documentation/devicetree/bindings/crypto/rockchip,rk3588-crypto.yaml
++++ b/Documentation/devicetree/bindings/crypto/rockchip,rk3588-crypto.yaml
+@@ -17,6 +17,7 @@
+       - const: rockchip,rk3568-crypto
+       - items:
+           - enum:
++              - rockchip,rk3528-crypto
+               - rockchip,rk3588-crypto
+           - const: rockchip,rk3568-crypto
+ 

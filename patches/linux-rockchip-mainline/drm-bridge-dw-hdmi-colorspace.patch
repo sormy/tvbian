@@ -1,0 +1,50 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] drm/bridge: dw-hdmi: Take the colorimetry userspace asks for
+
+dw-hdmi sends HDR static metadata but derives the AVI InfoFrame's
+colorimetry from the bus format alone, so an HDR10 picture went out
+marked as its format's default, not BT.2020. Attach the HDMI Colorspace
+property where the HDR metadata property is, write the colorimetry it
+names into the AVI InfoFrame, and have a change of it set the mode, as
+a change of the HDR metadata does.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c b/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
+--- a/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
++++ b/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
+@@ -1835,6 +1835,11 @@
+ 			HDMI_EXTENDED_COLORIMETRY_XV_YCC_601;
+ 	}
+ 
++	/* A colorimetry userspace asks for, BT.2020 for HDR, over the format's */
++	if (connector->state &&
++	    connector->state->colorspace != DRM_MODE_COLORIMETRY_DEFAULT)
++		drm_hdmi_avi_infoframe_colorimetry(&frame, connector->state);
++
+ 	/*
+ 	 * The Designware IP uses a different byte format from standard
+ 	 * AVI info frames, though generally the bits are in the correct
+@@ -2544,7 +2549,8 @@
+ 	if (!crtc)
+ 		return 0;
+ 
+-	if (!drm_connector_atomic_hdr_metadata_equal(old_state, new_state)) {
++	if (!drm_connector_atomic_hdr_metadata_equal(old_state, new_state) ||
++	    old_state->colorspace != new_state->colorspace) {
+ 		crtc_state = drm_atomic_get_crtc_state(state, crtc);
+ 		if (IS_ERR(crtc_state))
+ 			return PTR_ERR(crtc_state);
+@@ -2612,8 +2618,11 @@
+ 
+ 	drm_connector_attach_max_bpc_property(connector, 8, 16);
+ 
+-	if (hdmi->version >= 0x200a && hdmi->plat_data->use_drm_infoframe)
++	if (hdmi->version >= 0x200a && hdmi->plat_data->use_drm_infoframe) {
+ 		drm_connector_attach_hdr_output_metadata_property(connector);
++		if (!drm_mode_create_hdmi_colorspace_property(connector, 0))
++			drm_connector_attach_colorspace_property(connector);
++	}
+ 
+ 	drm_connector_attach_encoder(connector, hdmi->bridge.encoder);
+ 

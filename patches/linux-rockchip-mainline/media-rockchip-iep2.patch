@@ -3,28 +3,29 @@ From: Artem Butusov <art.sormy@gmail.com>
 Date: Wed, 18 Nov 2026 00:51:15 -0500
 Subject: [PATCH] media: rockchip: Add the RK3528 IEP2 deinterlacer
 
-The RK3528's IEP2 deinterlaces with edge-directed interpolation,
-motion detection and comb, OSD and pulldown detection, which mainline
-has no driver for. Add a mem2mem driver taking an interlaced NV12 frame
-and giving a progressive frame from each of its fields, in the mode and
-with the tuning Rockchip's MPP gives the vendor kernel, as the
-sun8i deinterlacer does on Allwinner. The interrupt line is shared with
-the VDPP and the IOMMU, so it is answered only while the IEP is in use
-and in its own work mode.
+The RK3528's IEP2 deinterlaces with edge-directed interpolation, motion
+detection and comb, OSD and pulldown detection, which mainline has no
+driver for. Add a mem2mem driver taking an interlaced NV12 frame and
+giving a progressive frame from each of its fields, as the sun8i
+deinterlacer does on Allwinner, with the tuning Rockchip's MPP gives the
+vendor kernel. It runs the I5O2 mode, motion read from the frames either
+side: a frame goes back once it is no frame's previous, the first frame
+stands in for its own previous, and on V4L2_DEC_CMD_STOP the last for
+its own next, its second field's frame marked V4L2_BUF_FLAG_LAST. Each
+stream keeps its own motion history, zeroed at its start, so a stream's
+output does not depend on the one before it. The interrupt line is
+shared with the VDPP and the IOMMU, so it is answered only while the
+IEP is in use and in its own work mode.
 
 Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
- drivers/media/platform/rockchip/Kconfig       |   1 +
- drivers/media/platform/rockchip/Makefile      |   1 +
- drivers/media/platform/rockchip/iep2/Kconfig  |  15 +
- drivers/media/platform/rockchip/iep2/Makefile |   2 +
- .../rockchip/iep2/rockchip-iep2-regs.h        | 118 +++
- .../platform/rockchip/iep2/rockchip-iep2.c    | 792 ++++++++++++++++++
- 6 files changed, 929 insertions(+)
- create mode 100644 drivers/media/platform/rockchip/iep2/Kconfig
- create mode 100644 drivers/media/platform/rockchip/iep2/Makefile
- create mode 100644 drivers/media/platform/rockchip/iep2/rockchip-iep2-regs.h
- create mode 100644 drivers/media/platform/rockchip/iep2/rockchip-iep2.c
+  drivers/media/platform/rockchip/Kconfig            |   1 +
+  drivers/media/platform/rockchip/Makefile           |   1 +
+  drivers/media/platform/rockchip/iep2/Kconfig       |  15 +
+  drivers/media/platform/rockchip/iep2/Makefile      |   2 +
+  .../platform/rockchip/iep2/rockchip-iep2-regs.h    | 118 +++
+  .../media/platform/rockchip/iep2/rockchip-iep2.c   | 927 +++++++++++++++++++++
+  6 files changed, 1064 insertions(+)
 
 diff --git a/drivers/media/platform/rockchip/Kconfig b/drivers/media/platform/rockchip/Kconfig
 index ba401d3..4f65bd0 100644
@@ -203,10 +204,9 @@ index 0000000..a56dd94
 +#endif
 diff --git a/drivers/media/platform/rockchip/iep2/rockchip-iep2.c b/drivers/media/platform/rockchip/iep2/rockchip-iep2.c
 new file mode 100644
-index 0000000..d1f60f7
 --- /dev/null
 +++ b/drivers/media/platform/rockchip/iep2/rockchip-iep2.c
-@@ -0,0 +1,792 @@
+@@ -0,0 +1,927 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * Rockchip IEP2 deinterlacer: an interlaced NV12 frame in, a progressive
@@ -245,9 +245,12 @@ index 0000000..d1f60f7
 +#define IEP2_MAX_HEIGHT		(IEP2_TILES_H_MAX * IEP2_TILE_H)
 +#define IEP2_STRIDE_UNIT	4	/* stride registers count 32-bit words */
 +
++#define IEP2_FMT_YUV422		2
 +#define IEP2_FMT_YUV420		3
 +#define IEP2_YUV_SWAP_SP_UV	0
-+#define IEP2_DIL_MODE_I2O2	4	/* both fields in, a frame from each out */
++#define IEP2_YUV_SWAP_SP_VU	1
++#define IEP2_DIL_MODE_I5O2	1	/* a frame from each field, the frames either side read */
++#define IEP2_DIL_MODE_I2O2	4	/* a frame from each field, the frame alone */
 +#define IEP2_OUT_MODE_LINE	0
 +#define IEP2_FIELD_ORDER_TB	0
 +#define IEP2_FIELD_ORDER_BT	1
@@ -279,6 +282,7 @@ index 0000000..d1f60f7
 +#define IEP2_RESET_TIMEOUT_US	5
 +#define IEP2_CRU_RESET_US	5
 +#define IEP2_FRAMES_PER_JOB	2	/* a frame from each field */
++#define IEP2_SRC_FRAMES		3	/* the previous, the current and the next */
 +
 +static const u32 iep2_mtn_tab[] = {
 +	0x00000000, 0x00000000, 0x00000000, 0x00000000,
@@ -303,14 +307,42 @@ index 0000000..d1f60f7
 +	struct clk_bulk_data *clks;
 +	int num_clks;
 +	struct reset_control *rstc;	/* held while streaming: the engine is the VDPP's too */
-+	struct iep2_aux mv, md, roi;
++	struct iep2_aux roi;
 +};
++
++/* A frame's layout: the engine's format and U-V order, and chroma rows to luma's */
++struct iep2_fmt {
++	u32 fourcc;
++	u8 hw;
++	u8 swap;
++	u8 vdiv;
++};
++
++static const struct iep2_fmt iep2_formats[] = {
++	{ V4L2_PIX_FMT_NV12, IEP2_FMT_YUV420, IEP2_YUV_SWAP_SP_UV, 2 },
++	{ V4L2_PIX_FMT_NV21, IEP2_FMT_YUV420, IEP2_YUV_SWAP_SP_VU, 2 },
++	{ V4L2_PIX_FMT_NV16, IEP2_FMT_YUV422, IEP2_YUV_SWAP_SP_UV, 1 },
++	{ V4L2_PIX_FMT_NV61, IEP2_FMT_YUV422, IEP2_YUV_SWAP_SP_VU, 1 },
++};
++
++static const struct iep2_fmt *iep2_find_fmt(u32 fourcc)
++{
++	unsigned int i;
++
++	for (i = 0; i < ARRAY_SIZE(iep2_formats); i++)
++		if (iep2_formats[i].fourcc == fourcc)
++			return &iep2_formats[i];
++	return NULL;
++}
 +
 +struct iep2_ctx {
 +	struct v4l2_fh fh;
 +	struct iep2_dev *iep;
 +	struct v4l2_pix_format src_fmt;
 +	struct v4l2_pix_format dst_fmt;
++	struct iep2_aux mv, md;	/* the stream's motion history, zeroed at its start */
++	bool primed;	/* the queue's head is the running frame's previous */
++	bool last;	/* the running frame is the last before a stop */
 +};
 +
 +static inline void iep2_write(struct iep2_dev *iep, u32 reg, u32 val)
@@ -333,19 +365,25 @@ index 0000000..d1f60f7
 +	return ctx->src_fmt.field == V4L2_FIELD_INTERLACED_BT;
 +}
 +
++/* The first frame and the last before a stop lack a frame on one side: no motion read */
++static bool iep2_edge(struct iep2_ctx *ctx)
++{
++	return !ctx->primed || ctx->last;
++}
++
 +static void iep2_config(struct iep2_dev *iep, struct iep2_ctx *ctx)
 +{
 +	const struct v4l2_pix_format *src = &ctx->src_fmt;
 +	const struct v4l2_pix_format *dst = &ctx->dst_fmt;
++	const struct iep2_fmt *sf = iep2_find_fmt(src->pixelformat);
++	const struct iep2_fmt *df = iep2_find_fmt(dst->pixelformat);
 +	u32 tiles_w = DIV_ROUND_UP(src->width, IEP2_TILE_W);
 +	u32 tiles_h = DIV_ROUND_UP(src->height, IEP2_TILE_H);
 +	u32 reg;
 +	int i;
 +
-+	reg = IEP2_SRC_FMT(IEP2_FMT_YUV420) |
-+	      IEP2_SRC_YUV_SWAP(IEP2_YUV_SWAP_SP_UV) |
-+	      IEP2_DST_FMT(IEP2_FMT_YUV420) |
-+	      IEP2_DST_YUV_SWAP(IEP2_YUV_SWAP_SP_UV) |
++	reg = IEP2_SRC_FMT(sf->hw) | IEP2_SRC_YUV_SWAP(sf->swap) |
++	      IEP2_DST_FMT(df->hw) | IEP2_DST_YUV_SWAP(df->swap) |
 +	      IEP2_DEBUG_DATA_EN;
 +	iep2_write(iep, IEP2_CONFIG0, reg);
 +	iep2_write(iep, IEP2_WORK_MODE, IEP2_WORK_MODE_IEP2);
@@ -366,15 +404,15 @@ index 0000000..d1f60f7
 +	      IEP2_DIL_FIELD_ORDER(iep2_bottom_first(ctx) ? IEP2_FIELD_ORDER_BT :
 +							     IEP2_FIELD_ORDER_TB) |
 +	      IEP2_DIL_OUT_MODE(IEP2_OUT_MODE_LINE) |
-+	      IEP2_DIL_MODE(IEP2_DIL_MODE_I2O2);
++	      IEP2_DIL_MODE(iep2_edge(ctx) ? IEP2_DIL_MODE_I2O2 : IEP2_DIL_MODE_I5O2);
 +	iep2_write(iep, IEP2_DIL_CONFIG0, reg);
 +
 +	iep2_write(iep, IEP2_TIMEOUT_CFG, IEP2_TIMEOUT_CFG_EN | IEP2_TIMEOUT_CYCLES);
 +
-+	iep2_write(iep, IEP2_SRC_ADDR_MD, iep->md.dma);
-+	iep2_write(iep, IEP2_SRC_ADDR_MV, iep->mv.dma);
-+	iep2_write(iep, IEP2_DST_ADDR_MD, iep->md.dma);
-+	iep2_write(iep, IEP2_DST_ADDR_MV, iep->mv.dma);
++	iep2_write(iep, IEP2_SRC_ADDR_MD, ctx->md.dma);
++	iep2_write(iep, IEP2_SRC_ADDR_MV, ctx->mv.dma);
++	iep2_write(iep, IEP2_DST_ADDR_MD, ctx->md.dma);
++	iep2_write(iep, IEP2_DST_ADDR_MV, ctx->mv.dma);
 +	iep2_write(iep, IEP2_ROI_ADDR, iep->roi.dma);
 +
 +	reg = IEP2_MD_THETA(IEP2_MD_THETA_DEF) | IEP2_MD_R(IEP2_MD_R_DEF) |
@@ -412,17 +450,40 @@ index 0000000..d1f60f7
 +		iep2_write(iep, IEP2_DIL_MTN_TAB(i), iep2_mtn_tab[i]);
 +}
 +
-+static void iep2_set_src(struct iep2_dev *iep, struct iep2_ctx *ctx, dma_addr_t y)
++static void iep2_set_frame(struct iep2_dev *iep, struct iep2_ctx *ctx, u32 luma, u32 chroma,
++			   struct vb2_v4l2_buffer *buf)
 +{
-+	dma_addr_t uv = y + ctx->src_fmt.bytesperline * ctx->src_fmt.height;
++	dma_addr_t y = vb2_dma_contig_plane_dma_addr(&buf->vb2_buf, 0);
 +
-+	/* one frame holds both fields: it is current, next and previous at once */
-+	iep2_write(iep, IEP2_SRC_ADDR_CURY, y);
-+	iep2_write(iep, IEP2_SRC_ADDR_CURUV, uv);
-+	iep2_write(iep, IEP2_SRC_ADDR_NXTY, y);
-+	iep2_write(iep, IEP2_SRC_ADDR_NXTUV, uv);
-+	iep2_write(iep, IEP2_SRC_ADDR_PREY, y);
-+	iep2_write(iep, IEP2_SRC_ADDR_PREUV, uv);
++	iep2_write(iep, luma, y);
++	iep2_write(iep, chroma, y + ctx->src_fmt.bytesperline * ctx->src_fmt.height);
++}
++
++/*
++ * The current frame and the frames either side: the queue's head is the
++ * previous once a frame has gone out, the first frame its own previous, and the
++ * last before a stop its own next.
++ */
++static struct vb2_v4l2_buffer *iep2_set_src(struct iep2_dev *iep, struct iep2_ctx *ctx)
++{
++	struct v4l2_m2m_ctx *m2m = ctx->fh.m2m_ctx;
++	struct vb2_v4l2_buffer *frames[IEP2_SRC_FRAMES], *cur, *next;
++	struct v4l2_m2m_buffer *b;
++	int n = 0;
++
++	v4l2_m2m_for_each_src_buf(m2m, b) {
++		frames[n] = &b->vb;
++		if (++n == IEP2_SRC_FRAMES)
++			break;
++	}
++	cur = frames[ctx->primed];
++	ctx->last = v4l2_m2m_is_last_draining_src_buf(m2m, cur);
++	next = ctx->last ? cur : frames[ctx->primed + 1];
++
++	iep2_set_frame(iep, ctx, IEP2_SRC_ADDR_PREY, IEP2_SRC_ADDR_PREUV, frames[0]);
++	iep2_set_frame(iep, ctx, IEP2_SRC_ADDR_CURY, IEP2_SRC_ADDR_CURUV, cur);
++	iep2_set_frame(iep, ctx, IEP2_SRC_ADDR_NXTY, IEP2_SRC_ADDR_NXTUV, next);
++	return cur;
 +}
 +
 +static void iep2_set_dst(struct iep2_dev *iep, struct iep2_ctx *ctx,
@@ -445,16 +506,14 @@ index 0000000..d1f60f7
 +	struct v4l2_m2m_buffer *b;
 +	int n = 0;
 +
-+	src = v4l2_m2m_next_src_buf(ctx->fh.m2m_ctx);
++	src = iep2_set_src(iep, ctx);
++	iep2_config(iep, ctx);
 +	v4l2_m2m_for_each_dst_buf(ctx->fh.m2m_ctx, b) {
 +		dst[n] = &b->vb;
 +		v4l2_m2m_buf_copy_metadata(src, dst[n]);
 +		if (++n == IEP2_FRAMES_PER_JOB)
 +			break;
 +	}
-+
-+	iep2_config(iep, ctx);
-+	iep2_set_src(iep, ctx, vb2_dma_contig_plane_dma_addr(&src->vb2_buf, 0));
 +
 +	/* the first field in time fills the first buffer */
 +	first = vb2_dma_contig_plane_dma_addr(&dst[0]->vb2_buf, 0);
@@ -476,8 +535,15 @@ index 0000000..d1f60f7
 +{
 +	struct iep2_ctx *ctx = priv;
 +
-+	return v4l2_m2m_num_src_bufs_ready(ctx->fh.m2m_ctx) >= 1 &&
-+	       v4l2_m2m_num_dst_bufs_ready(ctx->fh.m2m_ctx) >= IEP2_FRAMES_PER_JOB;
++	struct v4l2_m2m_ctx *m2m = ctx->fh.m2m_ctx;
++	unsigned int ready = v4l2_m2m_num_src_bufs_ready(m2m);
++	/* the previous once primed, the current, and the next */
++	unsigned int need = ctx->primed + 2;
++
++	if (v4l2_m2m_num_dst_bufs_ready(m2m) < IEP2_FRAMES_PER_JOB)
++		return 0;
++	/* draining, the last frame stands in for its own next */
++	return ready >= need || (m2m->is_draining && m2m->last_src_buf && ready == need - 1);
 +}
 +
 +static void iep2_reset(struct iep2_dev *iep)
@@ -496,13 +562,39 @@ index 0000000..d1f60f7
 +	reset_control_deassert(iep->rstc);
 +}
 +
++/*
++ * The frames out, and the previous frame back, no frame's previous now; the
++ * last frame before a stop goes too, its second field's frame marked last.
++ */
++static void iep2_job_done(struct iep2_dev *iep, struct iep2_ctx *ctx,
++			  enum vb2_buffer_state state)
++{
++	struct v4l2_m2m_ctx *m2m = ctx->fh.m2m_ctx;
++	struct vb2_v4l2_buffer *dst;
++	int i;
++
++	for (i = 0; i < IEP2_FRAMES_PER_JOB; i++) {
++		dst = v4l2_m2m_dst_buf_remove(m2m);
++		if (ctx->last && i == IEP2_FRAMES_PER_JOB - 1)
++			dst->flags |= V4L2_BUF_FLAG_LAST;
++		v4l2_m2m_buf_done(dst, state);
++	}
++	if (ctx->primed)
++		v4l2_m2m_buf_done(v4l2_m2m_src_buf_remove(m2m), state);
++	ctx->primed = !ctx->last;
++	if (ctx->last) {
++		v4l2_m2m_buf_done(v4l2_m2m_src_buf_remove(m2m), state);
++		v4l2_m2m_mark_stopped(m2m);
++	}
++	v4l2_m2m_job_finish(iep->m2m_dev, m2m);
++}
++
 +static irqreturn_t iep2_irq(int irq, void *data)
 +{
 +	struct iep2_dev *iep = data;
 +	enum vb2_buffer_state state = VB2_BUF_STATE_DONE;
 +	struct iep2_ctx *ctx;
 +	u32 mode, status;
-+	int i;
 +
 +	/* the line is shared with the VDPP and the IOMMU; an unclocked IEP cannot be read */
 +	if (pm_runtime_get_if_in_use(iep->dev) <= 0)
@@ -529,10 +621,7 @@ index 0000000..d1f60f7
 +		iep2_reset(iep);
 +	}
 +
-+	for (i = 0; i < IEP2_FRAMES_PER_JOB; i++)
-+		v4l2_m2m_buf_done(v4l2_m2m_dst_buf_remove(ctx->fh.m2m_ctx), state);
-+	v4l2_m2m_buf_done(v4l2_m2m_src_buf_remove(ctx->fh.m2m_ctx), state);
-+	v4l2_m2m_job_finish(iep->m2m_dev, ctx->fh.m2m_ctx);
++	iep2_job_done(iep, ctx, state);
 +
 +handled:
 +	pm_runtime_put(iep->dev);
@@ -544,12 +633,16 @@ index 0000000..d1f60f7
 +
 +static void iep2_prepare_format(struct v4l2_pix_format *pix)
 +{
-+	pix->pixelformat = V4L2_PIX_FMT_NV12;
++	const struct iep2_fmt *fmt = iep2_find_fmt(pix->pixelformat) ?: &iep2_formats[0];
++	u32 luma;
++
++	pix->pixelformat = fmt->fourcc;
 +	pix->width = ALIGN(clamp(pix->width, IEP2_MIN_WIDTH, IEP2_MAX_WIDTH), IEP2_TILE_W);
 +	pix->height = ALIGN(clamp(pix->height, IEP2_MIN_HEIGHT, IEP2_MAX_HEIGHT),
 +			    IEP2_TILE_H);
 +	pix->bytesperline = pix->width;
-+	pix->sizeimage = pix->bytesperline * pix->height * 3 / 2;
++	luma = pix->bytesperline * pix->height;
++	pix->sizeimage = luma + luma / fmt->vdiv;
 +}
 +
 +static int iep2_querycap(struct file *file, void *priv, struct v4l2_capability *cap)
@@ -562,17 +655,17 @@ index 0000000..d1f60f7
 +
 +static int iep2_enum_fmt(struct file *file, void *priv, struct v4l2_fmtdesc *f)
 +{
-+	if (f->index)
++	if (f->index >= ARRAY_SIZE(iep2_formats))
 +		return -EINVAL;
 +
-+	f->pixelformat = V4L2_PIX_FMT_NV12;
++	f->pixelformat = iep2_formats[f->index].fourcc;
 +	return 0;
 +}
 +
 +static int iep2_enum_framesizes(struct file *file, void *priv,
 +				struct v4l2_frmsizeenum *fsize)
 +{
-+	if (fsize->index || fsize->pixel_format != V4L2_PIX_FMT_NV12)
++	if (fsize->index || !iep2_find_fmt(fsize->pixel_format))
 +		return -EINVAL;
 +
 +	fsize->type = V4L2_FRMSIZE_TYPE_STEPWISE;
@@ -648,6 +741,20 @@ index 0000000..d1f60f7
 +	return 0;
 +}
 +
++/*
++ * A stop schedules the last frame's job: the core only marks it, and with the
++ * job before it already done, nothing else would.
++ */
++static int iep2_decoder_cmd(struct file *file, void *priv, struct v4l2_decoder_cmd *dc)
++{
++	struct iep2_ctx *ctx = iep2_file2ctx(file);
++	int ret = v4l2_m2m_ioctl_decoder_cmd(file, priv, dc);
++
++	if (!ret)
++		v4l2_m2m_try_schedule(ctx->fh.m2m_ctx);
++	return ret;
++}
++
 +static const struct v4l2_ioctl_ops iep2_ioctl_ops = {
 +	.vidioc_querycap		= iep2_querycap,
 +	.vidioc_enum_framesizes		= iep2_enum_framesizes,
@@ -668,6 +775,8 @@ index 0000000..d1f60f7
 +	.vidioc_expbuf			= v4l2_m2m_ioctl_expbuf,
 +	.vidioc_streamon		= v4l2_m2m_ioctl_streamon,
 +	.vidioc_streamoff		= v4l2_m2m_ioctl_streamoff,
++	.vidioc_decoder_cmd		= iep2_decoder_cmd,
++	.vidioc_try_decoder_cmd		= v4l2_m2m_ioctl_try_decoder_cmd,
 +};
 +
 +static struct v4l2_pix_format *iep2_queue_fmt(struct vb2_queue *vq)
@@ -705,8 +814,15 @@ index 0000000..d1f60f7
 +static void iep2_buf_queue(struct vb2_buffer *vb)
 +{
 +	struct iep2_ctx *ctx = vb2_get_drv_priv(vb->vb2_queue);
++	struct vb2_v4l2_buffer *vbuf = to_vb2_v4l2_buffer(vb);
 +
-+	v4l2_m2m_buf_queue(ctx->fh.m2m_ctx, to_vb2_v4l2_buffer(vb));
++	/* a stop with no frame left marks the next capture buffer last */
++	if (V4L2_TYPE_IS_CAPTURE(vb->vb2_queue->type) &&
++	    v4l2_m2m_dst_buf_is_last(ctx->fh.m2m_ctx)) {
++		v4l2_m2m_last_buffer_done(ctx->fh.m2m_ctx, vbuf);
++		return;
++	}
++	v4l2_m2m_buf_queue(ctx->fh.m2m_ctx, vbuf);
 +}
 +
 +static void iep2_queue_cleanup(struct vb2_queue *vq, enum vb2_buffer_state state)
@@ -724,6 +840,25 @@ index 0000000..d1f60f7
 +	}
 +}
 +
++static int iep2_alloc_aux(struct iep2_dev *iep, struct iep2_aux *aux, size_t size)
++{
++	aux->size = size;
++	aux->cpu = dma_alloc_coherent(iep->dev, size, &aux->dma, GFP_KERNEL);
++	return aux->cpu ? 0 : -ENOMEM;
++}
++
++static void iep2_free_history(struct iep2_ctx *ctx)
++{
++	struct iep2_aux *aux[] = { &ctx->mv, &ctx->md };
++	int i;
++
++	for (i = 0; i < ARRAY_SIZE(aux); i++) {
++		if (aux[i]->cpu)
++			dma_free_coherent(ctx->iep->dev, aux[i]->size, aux[i]->cpu, aux[i]->dma);
++		aux[i]->cpu = NULL;
++	}
++}
++
 +static int iep2_start_streaming(struct vb2_queue *vq, unsigned int count)
 +{
 +	struct iep2_ctx *ctx = vb2_get_drv_priv(vq);
@@ -731,6 +866,11 @@ index 0000000..d1f60f7
 +
 +	if (!V4L2_TYPE_IS_OUTPUT(vq->type))
 +		return 0;
++
++	ret = iep2_alloc_aux(ctx->iep, &ctx->mv, IEP2_MV_BUF_SIZE) ?:
++	      iep2_alloc_aux(ctx->iep, &ctx->md, IEP2_MD_BUF_SIZE);
++	if (ret)
++		goto err;
 +
 +	ret = reset_control_acquire(ctx->iep->rstc);
 +	if (ret)
@@ -744,6 +884,7 @@ index 0000000..d1f60f7
 +	return 0;
 +
 +err:
++	iep2_free_history(ctx);
 +	iep2_queue_cleanup(vq, VB2_BUF_STATE_QUEUED);
 +	return ret;
 +}
@@ -755,6 +896,8 @@ index 0000000..d1f60f7
 +	if (V4L2_TYPE_IS_OUTPUT(vq->type)) {
 +		pm_runtime_put(ctx->iep->dev);
 +		reset_control_release(ctx->iep->rstc);
++		iep2_free_history(ctx);
++		ctx->primed = false;
 +	}
 +
 +	iep2_queue_cleanup(vq, VB2_BUF_STATE_ERROR);
@@ -872,13 +1015,6 @@ index 0000000..d1f60f7
 +	.job_ready	= iep2_job_ready,
 +};
 +
-+static int iep2_alloc_aux(struct iep2_dev *iep, struct iep2_aux *aux, size_t size)
-+{
-+	aux->size = size;
-+	aux->cpu = dmam_alloc_coherent(iep->dev, size, &aux->dma, GFP_KERNEL);
-+	return aux->cpu ? 0 : -ENOMEM;
-+}
-+
 +static int iep2_probe(struct platform_device *pdev)
 +{
 +	struct device *dev = &pdev->dev;
@@ -904,11 +1040,10 @@ index 0000000..d1f60f7
 +	if (IS_ERR(iep->rstc))
 +		return dev_err_probe(dev, PTR_ERR(iep->rstc), "failed to get resets\n");
 +
-+	ret = iep2_alloc_aux(iep, &iep->mv, IEP2_MV_BUF_SIZE) ?:
-+	      iep2_alloc_aux(iep, &iep->md, IEP2_MD_BUF_SIZE) ?:
-+	      iep2_alloc_aux(iep, &iep->roi, IEP2_ROI_BUF_SIZE);
-+	if (ret)
-+		return ret;
++	iep->roi.size = IEP2_ROI_BUF_SIZE;
++	iep->roi.cpu = dmam_alloc_coherent(dev, iep->roi.size, &iep->roi.dma, GFP_KERNEL);
++	if (!iep->roi.cpu)
++		return -ENOMEM;
 +
 +	irq = platform_get_irq(pdev, 0);
 +	if (irq < 0)

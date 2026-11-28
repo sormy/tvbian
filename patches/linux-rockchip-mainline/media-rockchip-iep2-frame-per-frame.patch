@@ -1,0 +1,201 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] media: rockchip: iep2: Add a frame per input frame
+
+The IEP2 can deinterlace to one frame for each input frame, from the
+field first in time, as well as one for each field: modes I5O1T and
+I5O1B with the frames either side read, I1O1T and I1O1B with the frame
+alone. A player showing at the source's frame rate wants one frame an
+input and half the output.
+
+Add a driver control, V4L2_CID_ROCKCHIP_IEP2_FRAME_PER_FRAME, in a
+control range reserved for the driver, set before streaming: with it
+each job takes one capture buffer, written by the one-frame mode of the
+first field, the frame alone at the stream's edges as before.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+  .../media/platform/rockchip/iep2/rockchip-iep2.c   | 126 +++++++++++++++++----
+  include/uapi/linux/v4l2-controls.h                 |   8 ++
+  2 files changed, 110 insertions(+), 24 deletions(-)
+
+diff --git a/include/uapi/linux/v4l2-controls.h b/include/uapi/linux/v4l2-controls.h
+index 01c39857b..cefbaefdd 100644
+--- a/include/uapi/linux/v4l2-controls.h
++++ b/include/uapi/linux/v4l2-controls.h
+@@ -234,6 +234,14 @@ enum v4l2_colorfx {
+  */
+ #define V4L2_CID_USER_MALI_C55_BASE		(V4L2_CID_USER_BASE + 0x1230)
+ 
++/*
++ * The base for the Rockchip IEP2 deinterlacer driver controls.
++ * We reserve 16 controls for this driver.
++ */
++#define V4L2_CID_USER_ROCKCHIP_IEP2_BASE	(V4L2_CID_USER_BASE + 0x1240)
++/* one deinterlaced frame for each input frame, from its first field, not one for each field */
++#define V4L2_CID_ROCKCHIP_IEP2_FRAME_PER_FRAME	(V4L2_CID_USER_ROCKCHIP_IEP2_BASE + 0)
++
+ /* MPEG-class control IDs */
+ /* The MPEG controls are applicable to all codec controls
+  * and the 'MPEG' part of the define is historical */
+diff --git a/drivers/media/platform/rockchip/iep2/rockchip-iep2.c b/drivers/media/platform/rockchip/iep2/rockchip-iep2.c
+--- a/drivers/media/platform/rockchip/iep2/rockchip-iep2.c
++++ b/drivers/media/platform/rockchip/iep2/rockchip-iep2.c
+@@ -16,6 +16,7 @@
+ #include <linux/pm_runtime.h>
+ #include <linux/reset.h>
+ #include <linux/slab.h>
++#include <media/v4l2-ctrls.h>
+ #include <media/v4l2-device.h>
+ #include <media/v4l2-ioctl.h>
+ #include <media/v4l2-mem2mem.h>
+@@ -41,7 +42,11 @@
+ #define IEP2_YUV_SWAP_SP_UV	0
+ #define IEP2_YUV_SWAP_SP_VU	1
+ #define IEP2_DIL_MODE_I5O2	1	/* a frame from each field, the frames either side read */
++#define IEP2_DIL_MODE_I5O1T	2	/* the top field's frame, the next and previous read */
++#define IEP2_DIL_MODE_I5O1B	3	/* the bottom field's frame, the next and previous read */
+ #define IEP2_DIL_MODE_I2O2	4	/* a frame from each field, the frame alone */
++#define IEP2_DIL_MODE_I1O1T	5	/* the top field's frame, the frame alone */
++#define IEP2_DIL_MODE_I1O1B	6	/* the bottom field's frame, the frame alone */
+ #define IEP2_OUT_MODE_LINE	0
+ #define IEP2_FIELD_ORDER_TB	0
+ #define IEP2_FIELD_ORDER_BT	1
+@@ -132,6 +137,8 @@ struct iep2_ctx {
+ 	struct v4l2_pix_format src_fmt;
+ 	struct v4l2_pix_format dst_fmt;
+ 	struct iep2_aux mv, md;	/* the stream's motion history, zeroed at its start */
++	struct v4l2_ctrl_handler ctrls;
++	bool frame_per_frame;	/* one frame out for each in, from its first field */
+ 	bool primed;	/* the queue's head is the running frame's previous */
+ 	bool last;	/* the running frame is the last before a stop */
+ };
+@@ -162,6 +169,22 @@ static bool iep2_edge(struct iep2_ctx *ctx)
+ 	return !ctx->primed || ctx->last;
+ }
+ 
++static unsigned int iep2_frames(const struct iep2_ctx *ctx)
++{
++	return ctx->frame_per_frame ? 1 : IEP2_FRAMES_PER_JOB;
++}
++
++static u32 iep2_mode(struct iep2_ctx *ctx)
++{
++	bool bottom = iep2_bottom_first(ctx);
++
++	if (!ctx->frame_per_frame)
++		return iep2_edge(ctx) ? IEP2_DIL_MODE_I2O2 : IEP2_DIL_MODE_I5O2;
++	if (iep2_edge(ctx))
++		return bottom ? IEP2_DIL_MODE_I1O1B : IEP2_DIL_MODE_I1O1T;
++	return bottom ? IEP2_DIL_MODE_I5O1B : IEP2_DIL_MODE_I5O1T;
++}
++
+ static void iep2_config(struct iep2_dev *iep, struct iep2_ctx *ctx)
+ {
+ 	const struct v4l2_pix_format *src = &ctx->src_fmt;
+@@ -195,7 +218,7 @@ static void iep2_config(struct iep2_dev *iep, struct iep2_ctx *ctx)
+ 	      IEP2_DIL_FIELD_ORDER(iep2_bottom_first(ctx) ? IEP2_FIELD_ORDER_BT :
+ 							     IEP2_FIELD_ORDER_TB) |
+ 	      IEP2_DIL_OUT_MODE(IEP2_OUT_MODE_LINE) |
+-	      IEP2_DIL_MODE(iep2_edge(ctx) ? IEP2_DIL_MODE_I2O2 : IEP2_DIL_MODE_I5O2);
++	      IEP2_DIL_MODE(iep2_mode(ctx));
+ 	iep2_write(iep, IEP2_DIL_CONFIG0, reg);
+ 
+ 	iep2_write(iep, IEP2_TIMEOUT_CFG, IEP2_TIMEOUT_CFG_EN | IEP2_TIMEOUT_CYCLES);
+@@ -302,13 +325,13 @@ static void iep2_device_run(void *priv)
+ 	v4l2_m2m_for_each_dst_buf(ctx->fh.m2m_ctx, b) {
+ 		dst[n] = &b->vb;
+ 		v4l2_m2m_buf_copy_metadata(src, dst[n]);
+-		if (++n == IEP2_FRAMES_PER_JOB)
++		if (++n == iep2_frames(ctx))
+ 			break;
+ 	}
+ 
+-	/* the first field in time fills the first buffer */
++	/* the first field in time fills the first buffer; one frame fills either */
+ 	first = vb2_dma_contig_plane_dma_addr(&dst[0]->vb2_buf, 0);
+-	second = vb2_dma_contig_plane_dma_addr(&dst[1]->vb2_buf, 0);
++	second = vb2_dma_contig_plane_dma_addr(&dst[n - 1]->vb2_buf, 0);
+ 	if (iep2_bottom_first(ctx))
+ 		iep2_set_dst(iep, ctx, second, first);
+ 	else
+@@ -331,7 +354,7 @@ static int iep2_job_ready(void *priv)
+ 	/* the previous once primed, the current, and the next */
+ 	unsigned int need = ctx->primed + 2;
+ 
+-	if (v4l2_m2m_num_dst_bufs_ready(m2m) < IEP2_FRAMES_PER_JOB)
++	if (v4l2_m2m_num_dst_bufs_ready(m2m) < iep2_frames(ctx))
+ 		return 0;
+ 	/* draining, the last frame stands in for its own next */
+ 	return ready >= need || (m2m->is_draining && m2m->last_src_buf && ready == need - 1);
+@@ -364,9 +387,9 @@ static void iep2_job_done(struct iep2_dev *iep, struct iep2_ctx *ctx,
+ 	struct vb2_v4l2_buffer *dst;
+ 	int i;
+ 
+-	for (i = 0; i < IEP2_FRAMES_PER_JOB; i++) {
++	for (i = 0; i < iep2_frames(ctx); i++) {
+ 		dst = v4l2_m2m_dst_buf_remove(m2m);
+-		if (ctx->last && i == IEP2_FRAMES_PER_JOB - 1)
++		if (ctx->last && i == iep2_frames(ctx) - 1)
+ 			dst->flags |= V4L2_BUF_FLAG_LAST;
+ 		v4l2_m2m_buf_done(dst, state);
+ 	}
+@@ -729,6 +752,30 @@ static int iep2_queue_init(void *priv, struct vb2_queue *src_vq, struct vb2_queu
+ 	return iep2_init_vq(priv, dst_vq, V4L2_BUF_TYPE_VIDEO_CAPTURE, IEP2_FRAMES_PER_JOB);
+ }
+ 
++static int iep2_s_ctrl(struct v4l2_ctrl *ctrl)
++{
++	struct iep2_ctx *ctx = container_of(ctrl->handler, struct iep2_ctx, ctrls);
++
++	/* a job's output count is fixed while frames are in flight */
++	if (vb2_is_streaming(v4l2_m2m_get_dst_vq(ctx->fh.m2m_ctx)))
++		return -EBUSY;
++	ctx->frame_per_frame = ctrl->val;
++	return 0;
++}
++
++static const struct v4l2_ctrl_ops iep2_ctrl_ops = {
++	.s_ctrl = iep2_s_ctrl,
++};
++
++static const struct v4l2_ctrl_config iep2_frame_per_frame = {
++	.ops = &iep2_ctrl_ops,
++	.id = V4L2_CID_ROCKCHIP_IEP2_FRAME_PER_FRAME,
++	.name = "Frame per Frame",
++	.type = V4L2_CTRL_TYPE_BOOLEAN,
++	.max = 1,
++	.step = 1,
++};
++
+ static int iep2_open(struct file *file)
+ {
+ 	struct iep2_dev *iep = video_drvdata(file);
+@@ -754,9 +801,20 @@ static int iep2_open(struct file *file)
+ 	v4l2_fh_init(&ctx->fh, video_devdata(file));
+ 	ctx->iep = iep;
+ 
++	v4l2_ctrl_handler_init(&ctx->ctrls, 1);
++	v4l2_ctrl_new_custom(&ctx->ctrls, &iep2_frame_per_frame, NULL);
++	if (ctx->ctrls.error) {
++		ret = ctx->ctrls.error;
++		v4l2_ctrl_handler_free(&ctx->ctrls);
++		kfree(ctx);
++		goto unlock;
++	}
++	ctx->fh.ctrl_handler = &ctx->ctrls;
++
+ 	ctx->fh.m2m_ctx = v4l2_m2m_ctx_init(iep->m2m_dev, ctx, &iep2_queue_init);
+ 	if (IS_ERR(ctx->fh.m2m_ctx)) {
+ 		ret = PTR_ERR(ctx->fh.m2m_ctx);
++		v4l2_ctrl_handler_free(&ctx->ctrls);
+ 		kfree(ctx);
+ 		goto unlock;
+ 	}
+@@ -777,6 +835,7 @@ static int iep2_release(struct file *file)
+ 	v4l2_fh_del(&ctx->fh, file);
+ 	v4l2_fh_exit(&ctx->fh);
+ 	v4l2_m2m_ctx_release(ctx->fh.m2m_ctx);
++	v4l2_ctrl_handler_free(&ctx->ctrls);
+ 	kfree(ctx);
+ 	mutex_unlock(&iep->dev_mutex);
+ 	return 0;

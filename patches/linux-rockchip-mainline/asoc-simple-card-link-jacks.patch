@@ -1,0 +1,80 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] ASoC: simple-card: Jacks for the link components reporting a type
+
+simple-card creates a jack for each auxiliary device reporting a jack
+type. A codec on a DAI link, such as an HDMI codec reporting its plug
+state, gets none, and the card has no way to say a sink is attached.
+Create one for each link component reporting a type as well, once per
+component.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/sound/soc/generic/simple-card-utils.c b/sound/soc/generic/simple-card-utils.c
+--- a/sound/soc/generic/simple-card-utils.c
++++ b/sound/soc/generic/simple-card-utils.c
+@@ -874,6 +874,40 @@
+ }
+ EXPORT_SYMBOL_GPL(simple_util_init_aux_jacks);
+ 
++int simple_util_init_link_jacks(struct snd_soc_card *card)
++{
++	struct snd_soc_pcm_runtime *rtd;
++	struct snd_soc_component *component;
++	struct snd_soc_jack *jack;
++	char id[128];
++	int type, ret, i;
++
++	for_each_card_rtds(card, rtd) {
++		for_each_rtd_components(rtd, i, component) {
++			type = snd_soc_component_get_jack_type(component);
++			if (type <= 0)
++				continue;
++
++			/* a component on two links reports to one jack */
++			snprintf(id, sizeof(id), "%s-jack", component->name);
++			if (snd_soc_card_get_kcontrol(card, id))
++				continue;
++
++			jack = devm_kzalloc(card->dev, sizeof(*jack), GFP_KERNEL);
++			if (!jack)
++				return -ENOMEM;
++
++			ret = snd_soc_card_jack_new(card, id, type, jack);
++			if (ret)
++				return ret;
++
++			(void)snd_soc_component_set_jack(component, jack, NULL);
++		}
++	}
++	return 0;
++}
++EXPORT_SYMBOL_GPL(simple_util_init_link_jacks);
++
+ static struct simple_util_dai dummy_util_dais = {
+ 	.name = "dummy_util_dais",
+ };
+diff --git a/include/sound/simple_card_utils.h b/include/sound/simple_card_utils.h
+--- a/include/sound/simple_card_utils.h
++++ b/include/sound/simple_card_utils.h
+@@ -220,6 +220,7 @@
+ 			       struct simple_util_jack *sjack,
+ 			       int is_hp, char *prefix, char *pin);
+ int simple_util_init_aux_jacks(struct snd_soc_card *card, char *prefix);
++int simple_util_init_link_jacks(struct snd_soc_card *card);
+ int simple_util_init_priv(struct simple_util_priv *priv,
+ 			       struct link_info *li);
+ void simple_util_remove(struct platform_device *pdev);
+diff --git a/sound/soc/generic/simple-card.c b/sound/soc/generic/simple-card.c
+--- a/sound/soc/generic/simple-card.c
++++ b/sound/soc/generic/simple-card.c
+@@ -662,6 +662,10 @@
+ 		goto end;
+ 
+ 	ret = simple_util_init_aux_jacks(card, PREFIX);
++	if (ret < 0)
++		goto end;
++
++	ret = simple_util_init_link_jacks(card);
+ end:
+ 	return simple_ret(priv, ret);
+ }

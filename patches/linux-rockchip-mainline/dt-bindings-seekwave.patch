@@ -1,7 +1,14 @@
 From: Artem Butusov <art.sormy@gmail.com>
-Subject: [PATCH] dt-bindings: net: describe the Seekwave SDIO loader GPIOs
+Subject: [PATCH] dt-bindings: net: wireless: Add the Seekwave SV6160 Lite loader
+
+The SV6160 Lite (SWT6621S) loads its firmware over SDIO under a
+reset line, which the MMC power sequence also drives, and signals with
+a pair of wake lines, one each way. Describe the three GPIOs.
 
 Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ .../bindings/net/wireless/seekwave,sv6160lite.yaml        | 36 ++++++++++++++++++++++
+ 1 file changed, 36 insertions(+)
 
 --- /dev/null
 +++ b/Documentation/devicetree/bindings/net/wireless/seekwave,sv6160lite.yaml
@@ -42,14 +49,3 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 +  - reset-gpios
 +
 +additionalProperties: false
---- a/Documentation/devicetree/bindings/vendor-prefixes.yaml
-+++ b/Documentation/devicetree/bindings/vendor-prefixes.yaml
-@@ -1485,6 +1485,8 @@
-     description: Seagate Technology PLC
-   "^seeed,.*":
-     description: Seeed Technology Co., Ltd
-+  "^seekwave,.*":
-+    description: Seekwave Technology Co., Ltd.
-   "^seirobotics,.*":
-     description: Shenzhen SEI Robotics Co., Ltd
-   "^semtech,.*":

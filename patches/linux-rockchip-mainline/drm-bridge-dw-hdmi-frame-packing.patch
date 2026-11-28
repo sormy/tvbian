@@ -1,0 +1,62 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] drm/bridge: dw-hdmi: Frame-packed 3D modes
+
+A frame-packed mode carries both views and the active space between them
+as one frame of twice the lines, at twice the pixel clock, which a CRTC
+doubling its timings for stereo, CRTC_STEREO_DOUBLE, scans out whole.
+Time it so, from the mode's CRTC timings, and offer the screen's stereo
+modes where the platform says its encoder scans them out. The vendor
+InfoFrame already carries the 3D structure.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c b/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
+--- a/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
++++ b/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
+@@ -2005,9 +2005,11 @@
+ 	struct hdmi_vmode *vmode = &hdmi->hdmi_data.video_mode;
+ 	int hblank, vblank, h_de_hs, v_de_vs, hsync_len, vsync_len;
+ 	unsigned int vdisplay, hdisplay;
++	bool frame_packing = (mode->flags & DRM_MODE_FLAG_3D_MASK) ==
++			     DRM_MODE_FLAG_3D_FRAME_PACKING;
+ 
+ 	vmode->mpixelclock = mode->clock * 1000;
+-	if (mode->flags & DRM_MODE_FLAG_DBLCLK)
++	if (mode->flags & DRM_MODE_FLAG_DBLCLK || frame_packing)
+ 		vmode->mpixelclock *= 2;
+ 
+ 	dev_dbg(hdmi->dev, "final pixclk = %d\n", vmode->mpixelclock);
+@@ -2092,6 +2094,13 @@
+ 	v_de_vs = mode->vsync_start - mode->vdisplay;
+ 	vsync_len = mode->vsync_end - mode->vsync_start;
+ 
++	/* Frame packing sends both views and the space between as one frame */
++	if (frame_packing) {
++		vdisplay = mode->crtc_vdisplay;
++		vblank = mode->crtc_vtotal - mode->crtc_vdisplay;
++		v_de_vs = mode->crtc_vsync_start - mode->crtc_vdisplay;
++	}
++
+ 	/*
+ 	 * When we're setting an interlaced mode, we need
+ 	 * to adjust the vertical timing to suit.
+@@ -2617,6 +2626,7 @@
+ 	 */
+ 	drm_atomic_helper_connector_reset(connector);
+ 
++	connector->stereo_allowed = hdmi->plat_data->stereo_allowed;
+ 	drm_connector_attach_max_bpc_property(connector, 8, 16);
+ 
+ 	if (hdmi->plat_data->select_bus_format) {
+diff --git a/include/drm/bridge/dw_hdmi.h b/include/drm/bridge/dw_hdmi.h
+--- a/include/drm/bridge/dw_hdmi.h
++++ b/include/drm/bridge/dw_hdmi.h
+@@ -140,6 +140,8 @@
+ 	bool dblclk_allowed;
+ 	/* a sole bridge picks its bus format by the sink and the TMDS rate */
+ 	bool select_bus_format;
++	/* the encoder scans out frame-packed 3D modes, CRTC_STEREO_DOUBLE */
++	bool stereo_allowed;
+ 
+ 	/*
+ 	 * Private data passed to all the .mode_valid() and .configure_phy()

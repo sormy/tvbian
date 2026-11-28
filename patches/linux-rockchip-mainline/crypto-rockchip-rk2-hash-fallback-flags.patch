@@ -1,0 +1,111 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] crypto: rockchip: rk2: Pass the fallback only the caller's MAY_SLEEP
+
+A hash request forwarded to the software fallback took every flag of the
+caller's request, the crypto core's own among them, and its data by
+field. A request the core marks as carrying virtual addresses then
+reached the fallback as one, with only its scatterlist set: the fallback
+read past the caller's stack and oopsed (tcrypt's multi-update hash
+speed test, mode 400).
+
+Forward only CRYPTO_TFM_REQ_MAY_SLEEP and set the data with
+ahash_request_set_crypt(), as the RK3288 driver does.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+  drivers/crypto/rockchip/rk2_crypto_ahash.c | 34 ++++++++++++++++--------------
+  1 file changed, 18 insertions(+), 16 deletions(-)
+
+diff --git a/drivers/crypto/rockchip/rk2_crypto_ahash.c b/drivers/crypto/rockchip/rk2_crypto_ahash.c
+index 178245a..771df66 100644
+--- a/drivers/crypto/rockchip/rk2_crypto_ahash.c
++++ b/drivers/crypto/rockchip/rk2_crypto_ahash.c
+@@ -82,12 +82,11 @@ static int rk2_ahash_digest_fb(struct ahash_request *areq)
+ 	atomic_long_inc(&algt->stat_fb);
+ 
+ 	ahash_request_set_tfm(&rctx->fallback_req, tfmctx->fallback_tfm);
+-	ahash_request_set_callback(&rctx->fallback_req, areq->base.flags,
++	ahash_request_set_callback(&rctx->fallback_req,
++				   areq->base.flags & CRYPTO_TFM_REQ_MAY_SLEEP,
+ 				   areq->base.complete, areq->base.data);
+ 
+-	rctx->fallback_req.nbytes = areq->nbytes;
+-	rctx->fallback_req.src = areq->src;
+-	rctx->fallback_req.result = areq->result;
++	ahash_request_set_crypt(&rctx->fallback_req, areq->src, areq->result, areq->nbytes);
+ 
+ 	return crypto_ahash_digest(&rctx->fallback_req);
+ }
+@@ -161,7 +160,8 @@ int rk2_ahash_init(struct ahash_request *req)
+ 	struct rk2_ahash_ctx *ctx = crypto_ahash_ctx(tfm);
+ 
+ 	ahash_request_set_tfm(&rctx->fallback_req, ctx->fallback_tfm);
+-	ahash_request_set_callback(&rctx->fallback_req, req->base.flags,
++	ahash_request_set_callback(&rctx->fallback_req,
++				   req->base.flags & CRYPTO_TFM_REQ_MAY_SLEEP,
+ 				   req->base.complete, req->base.data);
+ 
+ 	return crypto_ahash_init(&rctx->fallback_req);
+@@ -183,10 +183,10 @@ int rk2_ahash_update(struct ahash_request *req)
+ 	struct rk2_ahash_ctx *ctx = crypto_ahash_ctx(tfm);
+ 
+ 	ahash_request_set_tfm(&rctx->fallback_req, ctx->fallback_tfm);
+-	ahash_request_set_callback(&rctx->fallback_req, req->base.flags,
++	ahash_request_set_callback(&rctx->fallback_req,
++				   req->base.flags & CRYPTO_TFM_REQ_MAY_SLEEP,
+ 				   req->base.complete, req->base.data);
+-	rctx->fallback_req.nbytes = req->nbytes;
+-	rctx->fallback_req.src = req->src;
++	ahash_request_set_crypt(&rctx->fallback_req, req->src, NULL, req->nbytes);
+ 
+ 	return crypto_ahash_update(&rctx->fallback_req);
+ }
+@@ -206,9 +206,10 @@ int rk2_ahash_final(struct ahash_request *req)
+ 	struct rk2_ahash_ctx *ctx = crypto_ahash_ctx(tfm);
+ 
+ 	ahash_request_set_tfm(&rctx->fallback_req, ctx->fallback_tfm);
+-	ahash_request_set_callback(&rctx->fallback_req, req->base.flags,
++	ahash_request_set_callback(&rctx->fallback_req,
++				   req->base.flags & CRYPTO_TFM_REQ_MAY_SLEEP,
+ 				   req->base.complete, req->base.data);
+-	rctx->fallback_req.result = req->result;
++	ahash_request_set_crypt(&rctx->fallback_req, NULL, req->result, 0);
+ 
+ 	return crypto_ahash_final(&rctx->fallback_req);
+ }
+@@ -229,12 +230,11 @@ int rk2_ahash_finup(struct ahash_request *req)
+ 	struct rk2_ahash_ctx *ctx = crypto_ahash_ctx(tfm);
+ 
+ 	ahash_request_set_tfm(&rctx->fallback_req, ctx->fallback_tfm);
+-	ahash_request_set_callback(&rctx->fallback_req, req->base.flags,
++	ahash_request_set_callback(&rctx->fallback_req,
++				   req->base.flags & CRYPTO_TFM_REQ_MAY_SLEEP,
+ 				   req->base.complete, req->base.data);
+ 
+-	rctx->fallback_req.nbytes = req->nbytes;
+-	rctx->fallback_req.src = req->src;
+-	rctx->fallback_req.result = req->result;
++	ahash_request_set_crypt(&rctx->fallback_req, req->src, req->result, req->nbytes);
+ 
+ 	return crypto_ahash_finup(&rctx->fallback_req);
+ }
+@@ -255,7 +255,8 @@ int rk2_ahash_import(struct ahash_request *req, const void *in)
+ 	struct rk2_ahash_ctx *ctx = crypto_ahash_ctx(tfm);
+ 
+ 	ahash_request_set_tfm(&rctx->fallback_req, ctx->fallback_tfm);
+-	ahash_request_set_callback(&rctx->fallback_req, req->base.flags,
++	ahash_request_set_callback(&rctx->fallback_req,
++				   req->base.flags & CRYPTO_TFM_REQ_MAY_SLEEP,
+ 				   req->base.complete, req->base.data);
+ 
+ 	return crypto_ahash_import(&rctx->fallback_req, in);
+@@ -277,7 +278,8 @@ int rk2_ahash_export(struct ahash_request *req, void *out)
+ 	struct rk2_ahash_ctx *ctx = crypto_ahash_ctx(tfm);
+ 
+ 	ahash_request_set_tfm(&rctx->fallback_req, ctx->fallback_tfm);
+-	ahash_request_set_callback(&rctx->fallback_req, req->base.flags,
++	ahash_request_set_callback(&rctx->fallback_req,
++				   req->base.flags & CRYPTO_TFM_REQ_MAY_SLEEP,
+ 				   req->base.complete, req->base.data);
+ 
+ 	return crypto_ahash_export(&rctx->fallback_req, out);

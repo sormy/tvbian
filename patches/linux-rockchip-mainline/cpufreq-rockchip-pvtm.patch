@@ -7,12 +7,18 @@ and voltage. Measure the CPU's and the GPU's the same way, from the
 vendor's own OPP table properties, and name each bin's opp-
 microvolt-L<n> columns before cpufreq-dt and the GPU's driver read their
 OPPs. The GPU is measured with its power domain on and its rate restored
-before the domain powers down. A count read off the bins' own rate and
-voltage, or none, gives no bin, and so does apply=0: each OPP then keeps
-opp-microvolt, the highest bin's.
+before the domain powers down. As the vendor's kernel, each is sampled
+once at the bins' voltage or above it. No count gives no bin, and so does
+apply=0: each OPP then keeps opp-microvolt, the highest bin's.
 
 Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
+  drivers/cpufreq/Kconfig.arm             |  13 ++
+  drivers/cpufreq/Makefile                |   1 +
+  drivers/cpufreq/cpufreq-dt-platdev.c    |   2 +
+  drivers/cpufreq/rockchip-cpufreq-pvtm.c | 287 ++++++++++++++++++++++++++++++++
+  4 files changed, 303 insertions(+)
+
 diff --git a/drivers/cpufreq/Kconfig.arm b/drivers/cpufreq/Kconfig.arm
 index a441668..bb78807 100644
 --- a/drivers/cpufreq/Kconfig.arm
@@ -64,10 +70,10 @@ index 371ca1f..c828889 100644
  	{ .compatible = "st,stih418", },
 diff --git a/drivers/cpufreq/rockchip-cpufreq-pvtm.c b/drivers/cpufreq/rockchip-cpufreq-pvtm.c
 new file mode 100644
-index 0000000..f46f3f0
+index 0000000..637fd1c
 --- /dev/null
 +++ b/drivers/cpufreq/rockchip-cpufreq-pvtm.c
-@@ -0,0 +1,315 @@
+@@ -0,0 +1,287 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * Rockchip PVTM bin selection for cpufreq-dt and the GPU: reads each PVTPLL
@@ -80,7 +86,6 @@ index 0000000..f46f3f0
 +#include <linux/cpu.h>
 +#include <linux/delay.h>
 +#include <linux/err.h>
-+#include <linux/math.h>
 +#include <linux/mfd/syscon.h>
 +#include <linux/module.h>
 +#include <linux/of.h>
@@ -92,9 +97,6 @@ index 0000000..f46f3f0
 +#include <linux/regulator/consumer.h>
 +
 +#define PVTM_SEL_CELLS 3	/* low, high, bin */
-+#define PVTM_SETTLE_SAMPLES 64	/* a lightly loaded rail falls slowly to the measuring voltage */
-+#define PVTM_SETTLE_DIV 200	/* consecutive counts within 0.5% */
-+#define PVTM_VOLT_SLACK_UV 12500	/* one PWM regulator step either way */
 +
 +static struct platform_device *cpufreq_dt_pdev, *pvtm_pdev;
 +static int gpu_token;
@@ -103,26 +105,6 @@ index 0000000..f46f3f0
 +module_param(apply, bool, 0444);
 +MODULE_PARM_DESC(apply, "run each OPP at the measured bin's voltage (default: on)");
 +
-+/* The count follows the rail down: the first reading near its last is the measurement */
-+static int rockchip_pvtm_settle(struct regmap *grf, u32 offset, u32 sample_us,
-+				u32 *value)
-+{
-+	u32 last = 0;
-+	int i, ret;
-+
-+	for (i = 0; i < PVTM_SETTLE_SAMPLES; i++) {
-+		usleep_range(sample_us, sample_us + 100);
-+		ret = regmap_read(grf, offset, value);
-+		if (ret)
-+			return ret;
-+		if (last && abs((int)*value - (int)last) <= last / PVTM_SETTLE_DIV)
-+			return 0;
-+		last = *value;
-+	}
-+
-+	return -ETIMEDOUT;
-+}
-+
 +static int rockchip_pvtm_read(struct device *dev, struct device_node *np,
 +			      struct clk *clk, const char *supply, u32 *value)
 +{
@@ -130,8 +112,7 @@ index 0000000..f46f3f0
 +	struct regulator *reg;
 +	unsigned long old_rate;
 +	struct regmap *grf;
-+	unsigned long rate_khz;
-+	int old_volt, got_uv, ret;
++	int old_volt, ret;
 +
 +	if (of_property_read_u32(np, "rockchip,pvtm-offset", &offset) ||
 +	    of_property_read_u32(np, "rockchip,pvtm-freq", &freq_khz) ||
@@ -155,16 +136,13 @@ index 0000000..f46f3f0
 +	if (ret)
 +		goto put_reg;
 +
-+	/* Exactly the bins' voltage: a range the boot voltage satisfies would leave it there */
-+	ret = regulator_set_voltage(reg, volt_uv, volt_uv);
++	/* At the bins' voltage or above, one sample, as the vendor's bins were made */
++	ret = regulator_set_voltage(reg, volt_uv, INT_MAX);
 +	if (!ret) {
-+		ret = rockchip_pvtm_settle(grf, offset, sample_us, value);
-+		rate_khz = clk_get_rate(clk) / 1000;
-+		got_uv = regulator_get_voltage(reg);
-+		dev_info(dev, "pvtm %u at %lu kHz, %d uV\n", *value, rate_khz, got_uv);
-+		if (!ret && (rate_khz != freq_khz ||
-+			     abs(got_uv - (int)volt_uv) > PVTM_VOLT_SLACK_UV))
-+			ret = -ERANGE;	/* not the conditions the bins were measured at */
++		usleep_range(sample_us, sample_us + 100);
++		ret = regmap_read(grf, offset, value);
++		dev_info(dev, "pvtm %u at %lu kHz, %d uV\n", *value,
++			 clk_get_rate(clk) / 1000, regulator_get_voltage(reg));
 +		regulator_set_voltage(reg, old_volt, old_volt);
 +	}
 +	clk_set_rate(clk, old_rate);

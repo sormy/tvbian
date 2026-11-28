@@ -64,11 +64,11 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
   * And RK3566 share the same vop version with Rk3568, so we
   * need to use soc_id for identification here.
   */
-+/* The Esmart windows each RK3528 line buffer split feeds, as the vendor's scale engine table */
++/* The Esmart windows each RK3528 line buffer split feeds: split 2 feeds Esmart1, not Esmart3 */
 +static const u32 rk3528_esmart_lb_wins[RK3528_ESMART_LB_MODES] = {
 +	BIT(ROCKCHIP_VOP2_ESMART0),
 +	BIT(ROCKCHIP_VOP2_ESMART0) | BIT(ROCKCHIP_VOP2_ESMART2),
-+	BIT(ROCKCHIP_VOP2_ESMART0) | BIT(ROCKCHIP_VOP2_ESMART2) | BIT(ROCKCHIP_VOP2_ESMART3),
++	BIT(ROCKCHIP_VOP2_ESMART0) | BIT(ROCKCHIP_VOP2_ESMART1) | BIT(ROCKCHIP_VOP2_ESMART2),
 +	BIT(ROCKCHIP_VOP2_ESMART0) | BIT(ROCKCHIP_VOP2_ESMART1) | BIT(ROCKCHIP_VOP2_ESMART2) |
 +	BIT(ROCKCHIP_VOP2_ESMART3),
 +};

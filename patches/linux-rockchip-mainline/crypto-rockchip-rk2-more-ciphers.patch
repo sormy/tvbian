@@ -1,0 +1,352 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] crypto: rockchip: rk2: The block cipher modes the engine reports
+
+The engine's BC_CTL selects AES, SM4, DES or TDES and its mode, and on
+the RK3528 each cipher's version register has a bit for each mode it
+implements, at the mode's code. The driver offered AES ECB, CBC and XTS
+alone.
+
+Offer ctr(aes); ecb, cbc and ctr(sm4); ecb and cbc(des) and (des3_ede),
+each where the engine's version register says so. Key size bits are
+AES's alone. Between segments the IV follows each mode: CBC the last
+ciphertext block, CTR the counter past the blocks done. CTR's partial
+block goes to the software fallback, judged by chunk size. Where no
+version register says, only the modes the RK3568 had are offered.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+  drivers/crypto/rockchip/rk2_crypto.c          |  80 +++++++++++++++----
+  drivers/crypto/rockchip/rk2_crypto.h          |  15 +++-
+  drivers/crypto/rockchip/rk2_crypto_skcipher.c | 108 +++++++++++++++++++-------
+  3 files changed, 158 insertions(+), 45 deletions(-)
+
+diff --git a/drivers/crypto/rockchip/rk2_crypto.c b/drivers/crypto/rockchip/rk2_crypto.c
+index d590ac6..9e906fd 100644
+--- a/drivers/crypto/rockchip/rk2_crypto.c
++++ b/drivers/crypto/rockchip/rk2_crypto.c
+@@ -7,6 +7,8 @@
+  */
+ 
+ #include "rk2_crypto.h"
++#include <crypto/des.h>
++#include <crypto/sm4.h>
+ #include <linux/clk.h>
+ #include <linux/crypto.h>
+ #include <linux/delay.h>
+@@ -151,7 +153,56 @@ static irqreturn_t rk2_crypto_irq_handle(int irq, void *dev_id)
+ 	return IRQ_HANDLED;
+ }
+ 
++/* A block cipher mode beyond AES's ECB, CBC and XTS, the engine's where it says so */
++#define RK2_SKCIPHER(mode, name, driver, bs, key_min, key_max, iv, chunk, set) { \
++	.type = CRYPTO_ALG_TYPE_SKCIPHER,					\
++	.rk2_mode = mode,							\
++	.alg.skcipher.base = {							\
++		.base.cra_name = name,						\
++		.base.cra_driver_name = driver,					\
++		.base.cra_priority = 300,					\
++		.base.cra_flags = CRYPTO_ALG_ASYNC | CRYPTO_ALG_NEED_FALLBACK,	\
++		.base.cra_blocksize = bs,					\
++		.base.cra_ctxsize = sizeof(struct rk2_cipher_ctx),		\
++		.base.cra_module = THIS_MODULE,					\
++		.init = rk2_cipher_tfm_init,					\
++		.exit = rk2_cipher_tfm_exit,					\
++		.min_keysize = key_min,						\
++		.max_keysize = key_max,						\
++		.ivsize = iv,							\
++		.chunksize = chunk,						\
++		.setkey = set,							\
++		.encrypt = rk2_skcipher_encrypt,				\
++		.decrypt = rk2_skcipher_decrypt,				\
++	},									\
++	.alg.skcipher.op.do_one_request = rk2_cipher_run,			\
++}
++
++#define RK2_AES(mode, name, driver, bs)						\
++	RK2_SKCIPHER(RK2_CRYPTO_AES | (mode), name, driver, bs,			\
++		     AES_MIN_KEY_SIZE, AES_MAX_KEY_SIZE, AES_BLOCK_SIZE, AES_BLOCK_SIZE,	\
++		     rk2_aes_setkey)
++#define RK2_SM4(mode, name, driver, bs)						\
++	RK2_SKCIPHER(RK2_CRYPTO_SM4 | (mode), name, driver, bs,			\
++		     SM4_KEY_SIZE, SM4_KEY_SIZE, SM4_BLOCK_SIZE, SM4_BLOCK_SIZE,		\
++		     rk2_sm4_setkey)
++
+ static const struct rk2_crypto_template rk2_crypto_algs_template[] = {
++	RK2_AES(RK2_CRYPTO_MODE_CTR, "ctr(aes)", "ctr-aes-rk2", 1),
++	RK2_SM4(RK2_CRYPTO_MODE_ECB, "ecb(sm4)", "ecb-sm4-rk2", SM4_BLOCK_SIZE),
++	RK2_SM4(RK2_CRYPTO_MODE_CBC, "cbc(sm4)", "cbc-sm4-rk2", SM4_BLOCK_SIZE),
++	RK2_SM4(RK2_CRYPTO_MODE_CTR, "ctr(sm4)", "ctr-sm4-rk2", 1),
++	RK2_SKCIPHER(RK2_CRYPTO_DES | RK2_CRYPTO_MODE_ECB, "ecb(des)", "ecb-des-rk2",
++		     DES_BLOCK_SIZE, DES_KEY_SIZE, DES_KEY_SIZE, 0, 0, rk2_des_setkey),
++	RK2_SKCIPHER(RK2_CRYPTO_DES | RK2_CRYPTO_MODE_CBC, "cbc(des)", "cbc-des-rk2",
++		     DES_BLOCK_SIZE, DES_KEY_SIZE, DES_KEY_SIZE, DES_BLOCK_SIZE, 0,
++		     rk2_des_setkey),
++	RK2_SKCIPHER(RK2_CRYPTO_TDES | RK2_CRYPTO_MODE_ECB, "ecb(des3_ede)", "ecb-des3-rk2",
++		     DES3_EDE_BLOCK_SIZE, DES3_EDE_KEY_SIZE, DES3_EDE_KEY_SIZE, 0, 0,
++		     rk2_des3_setkey),
++	RK2_SKCIPHER(RK2_CRYPTO_TDES | RK2_CRYPTO_MODE_CBC, "cbc(des3_ede)", "cbc-des3-rk2",
++		     DES3_EDE_BLOCK_SIZE, DES3_EDE_KEY_SIZE, DES3_EDE_KEY_SIZE,
++		     DES3_EDE_BLOCK_SIZE, 0, rk2_des3_setkey),
+ 	{
+ 	.type = CRYPTO_ALG_TYPE_SKCIPHER,
+ 	.rk2_mode = RK2_CRYPTO_AES_ECB,
+@@ -576,19 +627,16 @@ static void register_debugfs(struct rk2_crypto_dev *rkc)
+ static bool rk2_crypto_offered(struct rk2_crypto_dev *rkc,
+ 			       const struct rk2_crypto_template *t)
+ {
+-	u32 aes = readl(rkc->reg + CRYPTO_AES_VERSION);
+ 	u32 hash = readl(rkc->reg + CRYPTO_HASH_VERSION);
+ 
++	/* a cipher's version register has a bit for each mode, at the mode's code */
+ 	if (t->type == CRYPTO_ALG_TYPE_SKCIPHER) {
+-		switch (t->rk2_mode) {
+-		case RK2_CRYPTO_AES_ECB:
+-			return aes & CRYPTO_AES_ECB_FLAG;
+-		case RK2_CRYPTO_AES_CBC:
+-			return aes & CRYPTO_AES_CBC_FLAG;
+-		case RK2_CRYPTO_AES_XTS:
+-			return aes & CRYPTO_AES_XTS_FLAG;
+-		}
+-		return false;
++		u32 cipher = t->rk2_mode & RK2_CRYPTO_CIPHER_MASK;
++		u32 version = readl(rkc->reg + (cipher == RK2_CRYPTO_AES ? CRYPTO_AES_VERSION :
++						cipher == RK2_CRYPTO_SM4 ? CRYPTO_SM4_VERSION :
++						CRYPTO_DES_VERSION));
++
++		return version & BIT(FIELD_GET(RK2_CRYPTO_MODE_MASK, t->rk2_mode));
+ 	}
+ 
+ 	switch (t->rk2_mode) {
+@@ -610,15 +658,21 @@ static bool rk2_crypto_offered(struct rk2_crypto_dev *rkc,
+ 	return false;
+ }
+ 
++/* A mode only an engine's version registers offer: untested where none says */
++static bool rk2_crypto_beyond_rk3568(const struct rk2_crypto_template *t)
++{
++	return t->type == CRYPTO_ALG_TYPE_SKCIPHER && t->rk2_mode != RK2_CRYPTO_AES_ECB &&
++	       t->rk2_mode != RK2_CRYPTO_AES_CBC && t->rk2_mode != RK2_CRYPTO_AES_XTS;
++}
++
+ /* Keeps the templates the engine implements, where it says which */
+ static void rk2_crypto_keep_offered(struct rk2_crypto_dev *rkc)
+ {
+ 	int i, n = 0;
+ 
+-	if (!rkc->variant->version_regs)
+-		return;
+ 	for (i = 0; i < rkc->num_algs; i++)
+-		if (rk2_crypto_offered(rkc, &rkc->algs[i]))
++		if (rkc->variant->version_regs ? rk2_crypto_offered(rkc, &rkc->algs[i]) :
++		    !rk2_crypto_beyond_rk3568(&rkc->algs[i]))
+ 			rkc->algs[n++] = rkc->algs[i];
+ 	rkc->num_algs = n;
+ }
+diff --git a/drivers/crypto/rockchip/rk2_crypto.h b/drivers/crypto/rockchip/rk2_crypto.h
+index aa92bf5..264219f 100644
+--- a/drivers/crypto/rockchip/rk2_crypto.h
++++ b/drivers/crypto/rockchip/rk2_crypto.h
+@@ -69,8 +69,14 @@
+ 
+ #define RK2_CRYPTO_BC_CTL		0x0044
+ #define RK2_CRYPTO_AES			(0 << 8)
++#define RK2_CRYPTO_SM4			(1 << 8)
++#define RK2_CRYPTO_DES			(2 << 8)
++#define RK2_CRYPTO_TDES			(3 << 8)
++#define RK2_CRYPTO_CIPHER_MASK		(3 << 8)
+ #define RK2_CRYPTO_MODE_ECB		(0 << 4)
+ #define RK2_CRYPTO_MODE_CBC		(1 << 4)
++#define RK2_CRYPTO_MODE_CTR		(3 << 4)
++#define RK2_CRYPTO_MODE_MASK		(0xf << 4)
+ #define RK2_CRYPTO_XTS			(6 << 4)
+ 
+ #define RK2_CRYPTO_HASH_CTL		0x0048
+@@ -133,9 +139,6 @@
+ #define CRYPTO_DES_VERSION		0x0684
+ #define CRYPTO_SM4_VERSION		0x0688
+ #define CRYPTO_HASH_VERSION		0x068C
+-#define CRYPTO_AES_ECB_FLAG		BIT(0)
+-#define CRYPTO_AES_CBC_FLAG		BIT(1)
+-#define CRYPTO_AES_XTS_FLAG		BIT(6)
+ #define CRYPTO_HASH_SHA1_FLAG		BIT(0)
+ #define CRYPTO_HASH_SHA224_FLAG		BIT(1)
+ #define CRYPTO_HASH_SHA256_FLAG		BIT(2)
+@@ -254,6 +257,12 @@ int rk2_aes_setkey(struct crypto_skcipher *cipher, const u8 *key,
+ 		   unsigned int keylen);
+ int rk2_aes_xts_setkey(struct crypto_skcipher *cipher, const u8 *key,
+ 		       unsigned int keylen);
++int rk2_sm4_setkey(struct crypto_skcipher *cipher, const u8 *key,
++		   unsigned int keylen);
++int rk2_des_setkey(struct crypto_skcipher *cipher, const u8 *key,
++		   unsigned int keylen);
++int rk2_des3_setkey(struct crypto_skcipher *cipher, const u8 *key,
++		    unsigned int keylen);
+ int rk2_skcipher_encrypt(struct skcipher_request *req);
+ int rk2_skcipher_decrypt(struct skcipher_request *req);
+ 
+diff --git a/drivers/crypto/rockchip/rk2_crypto_skcipher.c b/drivers/crypto/rockchip/rk2_crypto_skcipher.c
+index d524a9d..238dbdb 100644
+--- a/drivers/crypto/rockchip/rk2_crypto_skcipher.c
++++ b/drivers/crypto/rockchip/rk2_crypto_skcipher.c
+@@ -12,6 +12,8 @@
+ #include <linux/unaligned.h>
+ #include <crypto/scatterwalk.h>
+ #include <crypto/aes.h>
++#include <crypto/internal/des.h>
++#include <crypto/sm4.h>
+ #include <crypto/xts.h>
+ #include "rk2_crypto.h"
+ 
+@@ -209,7 +211,7 @@ static int rk2_cipher_need_fallback(struct skcipher_request *req)
+ 	    container_of(alg, struct rk2_crypto_template, alg.skcipher.base);
+ 	struct scatterlist *sgs, *sgd;
+ 	unsigned int stodo, dtodo, len;
+-	unsigned int bs = crypto_skcipher_blocksize(tfm);
++	unsigned int bs = crypto_skcipher_chunksize(tfm);
+ 
+ 	if (!req->cryptlen)
+ 		return true;
+@@ -318,28 +320,14 @@ static int rk2_cipher_handle_req(struct skcipher_request *req)
+ 	return crypto_transfer_skcipher_request_to_engine(engine, req);
+ }
+ 
+-/**
+- * rk2_aes_setkey() - Configure the key for standard AES algorithms
+- * @cipher: The crypto skcipher handle.
+- * @key: Buffer containing the raw key material.
+- * @keylen: Length of the key in bytes.
+- *
+- * Validates key length, stores the key in the context, and configures
+- * the software fallback transformation.
+- *
+- * Return: 0 on success, or a negative error code on failure.
+- */
+-int rk2_aes_setkey(struct crypto_skcipher *cipher, const u8 *key,
+-		   unsigned int keylen)
++/* The key, for the engine and its software fallback alike */
++static int rk2_cipher_setkey(struct crypto_skcipher *cipher, const u8 *key,
++			     unsigned int keylen)
+ {
+ 	struct crypto_tfm *tfm = crypto_skcipher_tfm(cipher);
+ 	struct rk2_cipher_ctx *ctx = crypto_tfm_ctx(tfm);
+ 	int err;
+ 
+-	if (keylen != AES_KEYSIZE_128 && keylen != AES_KEYSIZE_192 &&
+-	    keylen != AES_KEYSIZE_256)
+-		return -EINVAL;
+-
+ 	ctx->keylen = keylen;
+ 	memcpy(ctx->key, key, keylen);
+ 
+@@ -368,6 +356,48 @@ int rk2_aes_setkey(struct crypto_skcipher *cipher, const u8 *key,
+  *
+  * Return: 0 on success, or a negative error code on failure.
+  */
++/**
++ * rk2_aes_setkey() - Configure the key for standard AES algorithms
++ * @cipher: The crypto skcipher handle.
++ * @key: Buffer containing the raw key material.
++ * @keylen: Length of the key in bytes.
++ *
++ * Validates key length, stores the key in the context, and configures
++ * the software fallback transformation.
++ *
++ * Return: 0 on success, or a negative error code on failure.
++ */
++int rk2_aes_setkey(struct crypto_skcipher *cipher, const u8 *key,
++		   unsigned int keylen)
++{
++	if (keylen != AES_KEYSIZE_128 && keylen != AES_KEYSIZE_192 &&
++	    keylen != AES_KEYSIZE_256)
++		return -EINVAL;
++	return rk2_cipher_setkey(cipher, key, keylen);
++}
++
++int rk2_sm4_setkey(struct crypto_skcipher *cipher, const u8 *key,
++		   unsigned int keylen)
++{
++	if (keylen != SM4_KEY_SIZE)
++		return -EINVAL;
++	return rk2_cipher_setkey(cipher, key, keylen);
++}
++
++int rk2_des_setkey(struct crypto_skcipher *cipher, const u8 *key,
++		   unsigned int keylen)
++{
++	return verify_skcipher_des_key(cipher, key) ?:
++	       rk2_cipher_setkey(cipher, key, keylen);
++}
++
++int rk2_des3_setkey(struct crypto_skcipher *cipher, const u8 *key,
++		    unsigned int keylen)
++{
++	return verify_skcipher_des3_key(cipher, key) ?:
++	       rk2_cipher_setkey(cipher, key, keylen);
++}
++
+ int rk2_aes_xts_setkey(struct crypto_skcipher *cipher, const u8 *key,
+ 		       unsigned int keylen)
+ {
+@@ -449,6 +479,34 @@ int rk2_skcipher_decrypt(struct skcipher_request *req)
+  * Return: Always 0. Errors are reported through the crypto engine
+  *         finalization callback.
+  */
++/* A big-endian counter advanced by blocks */
++static void rk2_ctr_add(u8 *ctr, unsigned int size, unsigned int blocks)
++{
++	int i;
++
++	for (i = size - 1; i >= 0 && blocks; i--) {
++		blocks += ctr[i];
++		ctr[i] = blocks;
++		blocks >>= 8;
++	}
++}
++
++/* The IV the next segment starts from, as each mode chains its blocks */
++static void rk2_cipher_next_iv(struct skcipher_request *areq,
++			       struct rk2_cipher_rctx *rctx,
++			       struct scatterlist *sgd, unsigned int len,
++			       unsigned int ivsize)
++{
++	if ((rctx->mode & RK2_CRYPTO_MODE_MASK) == RK2_CRYPTO_MODE_CTR) {
++		rk2_ctr_add(areq->iv, ivsize, len / ivsize);
++	} else if (rctx->mode & RK2_CRYPTO_DEC) {
++		memcpy(areq->iv, rctx->backup_iv, ivsize);
++		memzero_explicit(rctx->backup_iv, ivsize);
++	} else {
++		scatterwalk_map_and_copy(areq->iv, sgd, len - ivsize, ivsize, 0);
++	}
++}
++
+ int rk2_cipher_run(struct crypto_engine *engine, void *async_req)
+ {
+ 	struct skcipher_request *areq = container_of(async_req, struct skcipher_request, base);
+@@ -484,7 +542,7 @@ int rk2_cipher_run(struct crypto_engine *engine, void *async_req)
+ 			err = -EINVAL;
+ 			goto exit_no_pm;
+ 		}
+-	} else {
++	} else if ((algt->rk2_mode & RK2_CRYPTO_CIPHER_MASK) == RK2_CRYPTO_AES) {
+ 		switch (ctx->keylen) {
+ 		case AES_KEYSIZE_128:
+ 			m |= RK2_CRYPTO_AES_128BIT_key;
+@@ -662,16 +720,8 @@ int rk2_cipher_run(struct crypto_engine *engine, void *async_req)
+ 			goto exit;
+ 		}
+ 
+-		if (update_iv) {
+-			offset = this_len - ivsize;
+-			if (rctx->mode & RK2_CRYPTO_DEC) {
+-				memcpy(areq->iv, rctx->backup_iv, ivsize);
+-				memzero_explicit(rctx->backup_iv, ivsize);
+-			} else {
+-				scatterwalk_map_and_copy(areq->iv, sgd, offset,
+-							 ivsize, 0);
+-			}
+-		}
++		if (update_iv)
++			rk2_cipher_next_iv(areq, rctx, sgd, this_len, ivsize);
+ 		sgs = sg_next(sgs);
+ 		sgd = sg_next(sgd);
+ 	}

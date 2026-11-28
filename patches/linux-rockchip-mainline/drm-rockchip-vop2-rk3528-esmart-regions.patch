@@ -1,0 +1,350 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] drm/rockchip: vop2: The RK3528's Esmart regions as planes
+
+Each Esmart window shows up to four regions, each its own buffer,
+format, size and place, as the vendor's kernel offers them with
+support-multi-area; the driver drove region 0 alone. Register regions
+1 to 3 of each RK3528 Esmart as overlay planes, named as the vendor
+names them. A region shares its window's layer, CSC, mirror and
+blending: it needs its window shown on the same CRTC at the same zpos
+with the same of each, takes none of the port's layers, and the mixer
+stacks the windows alone. The engine scans a window's regions in turn:
+a region after a gap, or sharing a line with the one before, stays dark,
+so each needs the one before shown above it.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
+--- a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
++++ b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
+@@ -1359,7 +1359,7 @@
+ 	if (!vop2->enable_count)
+ 		return;
+ 
+-	drm_dbg(vop2->drm, "%s disable\n", win->data->name);
++	drm_dbg(vop2->drm, "%s disable\n", win->name);
+ 
+ 	if (state)
+ 		old_pstate = drm_atomic_get_old_plane_state(state, plane);
+@@ -2199,6 +2199,108 @@
+ 	return 0;
+ }
+ 
++/* The region shown before this one, its window's for region 1 */
++static struct vop2_win *vop2_region_before(struct vop2_win *win)
++{
++	struct vop2 *vop2 = win->vop2;
++	unsigned int i;
++
++	if (win->region == 1)
++		return win->parent;
++	for (i = 0; i < vop2->registered_num_wins; i++)
++		if (vop2->win[i].parent == win->parent &&
++		    vop2->win[i].region == win->region - 1)
++			return &vop2->win[i];
++	return NULL;
++}
++
++/*
++ * A region shows in its window's layer, which it shares: through the
++ * window's CSC, mirror and blending. It needs its window shown on the same
++ * CRTC, at the same zpos, with the same of each of those; and the region
++ * before it shown above it, sharing no line, as the engine scans them in
++ * turn: measured, a region after a gap or beside the one before is dark.
++ */
++static int vop2_region_check(struct drm_atomic_commit *state,
++			     struct vop2_win *win)
++{
++	struct drm_plane_state *ps, *pps, *bps;
++
++	ps = drm_atomic_get_plane_state(state, &win->base);
++	if (IS_ERR(ps))
++		return PTR_ERR(ps);
++	if (!ps->visible)
++		return 0;
++
++	pps = drm_atomic_get_plane_state(state, &win->parent->base);
++	if (IS_ERR(pps))
++		return PTR_ERR(pps);
++	bps = drm_atomic_get_plane_state(state, &vop2_region_before(win)->base);
++	if (IS_ERR(bps))
++		return PTR_ERR(bps);
++	if (!bps->visible || bps->crtc != ps->crtc || bps->dst.y2 > ps->dst.y1) {
++		drm_dbg_kms(win->vop2->drm, "%s shows below the region before it\n",
++			    win->name);
++		return -EINVAL;
++	}
++
++	if (!pps->visible || pps->crtc != ps->crtc || pps->zpos != ps->zpos ||
++	    pps->rotation != ps->rotation || pps->alpha != ps->alpha ||
++	    pps->pixel_blend_mode != ps->pixel_blend_mode ||
++	    pps->color_encoding != ps->color_encoding ||
++	    pps->color_range != ps->color_range ||
++	    pps->fb->format->is_yuv != ps->fb->format->is_yuv ||
++	    pps->fb->format->has_alpha != ps->fb->format->has_alpha) {
++		drm_dbg_kms(win->vop2->drm,
++			    "%s shows with %s: on it, at its zpos, colour and blending\n",
++			    win->name, win->parent->name);
++		return -EINVAL;
++	}
++	return 0;
++}
++
++/*
++ * The mixer stacks windows: renumber the windows' normalized zpos without
++ * their regions, each region at its window's.
++ */
++static int vop2_region_normalize_zpos(struct drm_atomic_commit *state,
++				      struct drm_crtc_state *crtc_state)
++{
++	struct drm_plane_state *ps, *next;
++	struct drm_plane *plane;
++	unsigned int layer = 0;
++
++	for (;;) {
++		next = NULL;
++		drm_atomic_crtc_state_for_each_plane(plane, crtc_state) {
++			ps = drm_atomic_get_plane_state(state, plane);
++			if (IS_ERR(ps))
++				return PTR_ERR(ps);
++			if (to_vop2_win(plane)->parent ||
++			    ps->normalized_zpos < layer)
++				continue;
++			if (!next || ps->normalized_zpos < next->normalized_zpos)
++				next = ps;
++		}
++		if (!next)
++			break;
++		next->normalized_zpos = layer++;
++	}
++
++	drm_atomic_crtc_state_for_each_plane(plane, crtc_state) {
++		struct vop2_win *win = to_vop2_win(plane);
++
++		if (!win->parent)
++			continue;
++		ps = drm_atomic_get_plane_state(state, plane);
++		next = drm_atomic_get_plane_state(state, &win->parent->base);
++		if (IS_ERR(ps) || IS_ERR(next))
++			return IS_ERR(ps) ? PTR_ERR(ps) : PTR_ERR(next);
++		ps->normalized_zpos = next->normalized_zpos;
++	}
++	return 0;
++}
++
+ static int vop2_crtc_atomic_check(struct drm_crtc *crtc,
+ 				  struct drm_atomic_commit *state)
+ {
+@@ -2216,13 +2318,22 @@
+ 	if (ret)
+ 		return ret;
+ 
+-	drm_atomic_crtc_state_for_each_plane(plane, crtc_state)
+-		nplanes++;
++	drm_atomic_crtc_state_for_each_plane(plane, crtc_state) {
++		struct vop2_win *win = to_vop2_win(plane);
++
++		if (!win->parent) {
++			nplanes++;
++			continue;
++		}
++		ret = vop2_region_check(state, win);
++		if (ret)
++			return ret;
++	}
+ 
+ 	if (nplanes > vp->nlayers)
+ 		return -EINVAL;
+ 
+-	return 0;
++	return vop2_region_normalize_zpos(state, crtc_state);
+ }
+ 
+ static void vop2_crtc_atomic_begin(struct drm_crtc *crtc,
+@@ -2475,7 +2586,7 @@
+ 	dma_addr_t fb_addr;
+ 	int i;
+ 
+-	seq_printf(s, "    %s: %s\n", win->data->name, !pstate ?
++	seq_printf(s, "    %s: %s\n", win->name, !pstate ?
+ 		   "DISABLED" : pstate->crtc ? "ACTIVE" : "DISABLED");
+ 
+ 	if (!pstate || !pstate->fb)
+@@ -2903,7 +3014,7 @@
+ 				       &vop2_plane_funcs, win_data->formats,
+ 				       win_data->nformats,
+ 				       win_data->format_modifiers,
+-				       win->type, win_data->name);
++				       win->type, win->name);
+ 	if (ret) {
+ 		drm_err(vop2->drm, "failed to initialize plane %d\n", ret);
+ 		return ret;
+@@ -3212,10 +3323,45 @@
+ 	return win_data->type;
+ }
+ 
++/*
++ * Region n of an Esmart window: region 0's registers, n blocks on; what the
++ * window's regions share, its CSC, mirror, colour key and bus, is not its.
++ */
++static int vop2_region_init(struct vop2 *vop2, struct vop2_win *win,
++			    struct vop2_win *parent, unsigned int n)
++{
++	struct reg_field regs[VOP2_WIN_MAX_REG];
++	unsigned int i;
++
++	*win = (struct vop2_win) {
++		.vop2 = vop2,
++		.data = parent->data,
++		.win_id = parent->win_id,
++		.offset = parent->offset + n * RK3568_SMART_REGION_SIZE,
++		.type = DRM_PLANE_TYPE_OVERLAY,
++		.parent = parent,
++		.region = n,
++	};
++	/* named as the vendor names them: Esmart0-win1 is Esmart0's region 1 */
++	win->name = devm_kasprintf(vop2->dev, GFP_KERNEL, "%.*s%u",
++				   (int)strlen(parent->name) - 1, parent->name, n);
++	if (!win->name)
++		return -ENOMEM;
++
++	for (i = 0; i < vop2->data->nr_smart_regs; i++) {
++		regs[i] = vop2->data->smart_reg[i];
++		if (regs[i].reg < RK3568_SMART_REGION0_CTRL ||
++		    regs[i].reg >= RK3568_SMART_REGION0_CTRL + RK3568_SMART_REGION_SIZE)
++			regs[i].reg = 0xffffffff;
++	}
++	return vop2_regmap_init(win, regs, vop2->data->nr_smart_regs);
++}
++
+ static int vop2_win_init(struct vop2 *vop2)
+ {
+ 	const struct vop2_data *vop2_data = vop2->data;
+ 	struct vop2_win *win;
++	unsigned int n = vop2_data->win_size, r;
+ 	int i, ret;
+ 
+ 	for (i = 0; i < vop2_data->win_size; i++) {
+@@ -3223,6 +3369,7 @@
+ 
+ 		win = &vop2->win[i];
+ 		win->data = win_data;
++		win->name = win_data->name;
+ 		win->type = vop2_win_type(vop2, win_data);
+ 		win->offset = win_data->base;
+ 		win->win_id = i;
+@@ -3237,7 +3384,17 @@
+ 			return ret;
+ 	}
+ 
+-	vop2->registered_num_wins = vop2_data->win_size;
++	for (i = 0; i < vop2_data->win_size; i++) {
++		if (vop2_cluster_window(&vop2->win[i]))
++			continue;
++		for (r = 1; r <= vop2_data->esmart_regions; r++) {
++			ret = vop2_region_init(vop2, &vop2->win[n++], &vop2->win[i], r);
++			if (ret)
++				return ret;
++		}
++	}
++
++	vop2->registered_num_wins = n;
+ 
+ 	return 0;
+ }
+@@ -3320,7 +3477,7 @@
+ 		return -ENODEV;
+ 
+ 	/* Allocate vop2 struct and its vop2_win array */
+-	alloc_size = struct_size(vop2, win, vop2_data->win_size);
++	alloc_size = struct_size(vop2, win, vop2_num_wins(vop2_data));
+ 	vop2 = devm_kzalloc(dev, alloc_size, GFP_KERNEL);
+ 	if (!vop2)
+ 		return -ENOMEM;
+diff --git a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.h b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.h
+--- a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.h
++++ b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.h
+@@ -218,6 +218,10 @@
+ 	u32 offset;
+ 
+ 	enum drm_plane_type type;
++	const char *name;
++	/* a region's window: it shows at its window's layer, zpos and colour */
++	struct vop2_win *parent;
++	u8 region;
+ };
+ 
+ struct vop2_video_port_data {
+@@ -304,6 +308,8 @@
+ 	unsigned int nr_cluster_regs;
+ 	unsigned int nr_smart_regs;
+ 	unsigned int win_size;
++	/* the display regions each Esmart window shows beside its first */
++	unsigned int esmart_regions;
+ 	unsigned int regs_dump_size;
+ 	unsigned int soc_id;
+ 	const struct vop2_wb_data *wb;
+@@ -625,6 +631,7 @@
+ #define RK3568_SMART_REGION0_SCL_FACTOR_CBR	0x38
+ #define RK3568_SMART_REGION0_SCL_OFFSET		0x3C
+ #define RK3568_SMART_REGION1_CTRL		0x40
++#define RK3568_SMART_REGION_SIZE		0x30
+ #define RK3568_SMART_REGION1_YRGB_MST		0x44
+ #define RK3568_SMART_REGION1_CBR_MST		0x48
+ #define RK3568_SMART_REGION1_VIR		0x4C
+@@ -910,6 +917,17 @@
+ 	return win->data->feature & WIN_FEATURE_CLUSTER;
+ }
+ 
++/* The windows a VOP registers: each window, then each Esmart's other regions */
++static inline unsigned int vop2_num_wins(const struct vop2_data *data)
++{
++	unsigned int i, n = data->win_size;
++
++	for (i = 0; i < data->win_size; i++)
++		if (!(data->win[i].feature & WIN_FEATURE_CLUSTER))
++			n += data->esmart_regions;
++	return n;
++}
++
+ static inline struct vop2_video_port *to_vop2_video_port(struct drm_crtc *crtc)
+ {
+ 	return container_of(crtc, struct vop2_video_port, crtc);
+diff --git a/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c b/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c
+--- a/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c
++++ b/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c
+@@ -1985,6 +1985,8 @@
+ 	drm_atomic_crtc_for_each_plane(plane, &vp->crtc) {
+ 		struct vop2_win *win = to_vop2_win(plane);
+ 
++		if (win->parent)
++			continue;
+ 		if (plane->state->normalized_zpos == 0 &&
+ 		    !is_opaque(plane->state->alpha) &&
+ 		    !vop2_cluster_window(win)) {
+@@ -2017,7 +2019,7 @@
+ 		/*
+ 		 * Need to configure alpha from second layer.
+ 		 */
+-		if (zpos == 0)
++		if (zpos == 0 || win->parent)
+ 			continue;
+ 
+ 		if (plane->state->pixel_blend_mode == DRM_MODE_BLEND_PREMULTI)
+@@ -2201,6 +2203,8 @@
+ 		struct vop2_win *win = to_vop2_win(plane);
+ 		struct vop2_win *old_win;
+ 
++		if (win->parent)
++			continue;
+ 		layer_id = (u8)(plane->state->normalized_zpos + ofs);
+ 		/*
+ 		 * Find the layer this win bind in old state.
+@@ -2770,6 +2774,7 @@
+ 	.vp = rk3528_vop_video_ports,
+ 	.win = rk3528_vop_win_data,
+ 	.win_size = ARRAY_SIZE(rk3528_vop_win_data),
++	.esmart_regions = 3,
+ 	.cluster_reg = rk3576_vop_cluster_regs,
+ 	.nr_cluster_regs = ARRAY_SIZE(rk3576_vop_cluster_regs),
+ 	.smart_reg = rk3568_vop_smart_regs,

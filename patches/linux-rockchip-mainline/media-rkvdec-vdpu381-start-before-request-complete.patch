@@ -1,0 +1,157 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] media: rkvdec: Start the VDPU381 before completing the request
+
+A run completed its request's controls, then started the decoder, which
+idled for it. Start it first. A run that starts the decoder before it
+is done holds a completion its interrupt and watchdog wait for, so a
+job that ends early is never finished under it.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+  .../platform/rockchip/rkvdec/rkvdec-vdpu381-h264.c  |  4 ++--
+  .../platform/rockchip/rkvdec/rkvdec-vdpu381-hevc.c  |  4 ++--
+  .../platform/rockchip/rkvdec/rkvdec-vdpu381-vp9.c   |  4 ++--
+  drivers/media/platform/rockchip/rkvdec/rkvdec.c     | 21 +++++++++++++--------
+  drivers/media/platform/rockchip/rkvdec/rkvdec.h     |  2 ++
+  5 files changed, 21 insertions(+), 14 deletions(-)
+
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-h264.c b/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-h264.c
+index 85c24c6..e8eed99 100644
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-h264.c
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-h264.c
+@@ -442,13 +442,13 @@ static int rkvdec_h264_run(struct rkvdec_ctx *ctx)
+ 
+ 	config_registers(ctx, &run);
+ 
+-	rkvdec_run_postamble(ctx, &run.base);
+-
+ 	rkvdec_schedule_watchdog(rkvdec, h264_ctx->regs.common.reg032_timeout_threshold);
+ 
+ 	/* Start decoding! */
+ 	writel(VDPU381_DEC_E_BIT, rkvdec->regs + VDPU381_REG_DEC_E);
+ 
++	rkvdec_run_postamble(ctx, &run.base);
++
+ 	return 0;
+ }
+ 
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-hevc.c b/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-hevc.c
+index 1518b06..a391ce6 100644
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-hevc.c
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-hevc.c
+@@ -611,13 +611,13 @@ static int rkvdec_hevc_run(struct rkvdec_ctx *ctx)
+ 
+ 	config_registers(ctx, &run);
+ 
+-	rkvdec_run_postamble(ctx, &run.base);
+-
+ 	rkvdec_schedule_watchdog(rkvdec, hevc_ctx->regs.common.reg032_timeout_threshold);
+ 
+ 	/* Start decoding! */
+ 	writel(VDPU381_DEC_E_BIT, rkvdec->regs + VDPU381_REG_DEC_E);
+ 
++	rkvdec_run_postamble(ctx, &run.base);
++
+ 	return 0;
+ }
+ 
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-vp9.c b/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-vp9.c
+index 88f4396..1e3fafe 100644
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-vp9.c
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-vp9.c
+@@ -771,8 +771,6 @@ static int rkvdec_vp9_run(struct rkvdec_ctx *ctx)
+ 	/* Configure hardware registers. */
+ 	config_registers(ctx, &run);
+ 
+-	rkvdec_run_postamble(ctx, &run.base);
+-
+ 	u64 timeout_threshold = vp9_ctx->regs.common.reg032_timeout_threshold;
+ 	unsigned long axi_rate = clk_get_rate(rkvdec->axi_clk);
+ 
+@@ -786,6 +784,8 @@ static int rkvdec_vp9_run(struct rkvdec_ctx *ctx)
+ 
+ 	writel(VDPU381_DEC_E_BIT, rkvdec->regs + VDPU381_REG_DEC_E);
+ 
++	rkvdec_run_postamble(ctx, &run.base);
++
+ 	return 0;
+ }
+ 
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec.c b/drivers/media/platform/rockchip/rkvdec/rkvdec.c
+index f773208..c004a4d 100644
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec.c
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec.c
+@@ -1331,19 +1331,20 @@ static void rkvdec_device_run(void *priv)
+ 	struct rkvdec_ctx *ctx = priv;
+ 	struct rkvdec_dev *rkvdec = ctx->dev;
+ 	const struct rkvdec_coded_fmt_desc *desc = ctx->coded_fmt_desc;
+-	int ret;
++	int pm, ret;
+ 
+ 	if (WARN_ON(!desc))
+ 		return;
+ 
+-	ret = pm_runtime_resume_and_get(rkvdec->dev);
+-	if (ret < 0) {
+-		rkvdec_job_finish_no_pm(ctx, VB2_BUF_STATE_ERROR);
+-		return;
+-	}
++	/* A run may start the decoder before it is done: its IRQ waits for it */
++	reinit_completion(&rkvdec->run_done);
++	pm = pm_runtime_resume_and_get(rkvdec->dev);
++	ret = pm < 0 ? pm : desc->ops->run(ctx);
++	complete_all(&rkvdec->run_done);
+ 
+-	ret = desc->ops->run(ctx);
+-	if (ret)
++	if (pm < 0)
++		rkvdec_job_finish_no_pm(ctx, VB2_BUF_STATE_ERROR);
++	else if (ret)
+ 		rkvdec_job_finish(ctx, VB2_BUF_STATE_ERROR);
+ }
+ 
+@@ -1691,6 +1692,7 @@ static irqreturn_t rkvdec_irq_handler(int irq, void *priv)
+ 	const struct rkvdec_variant *variant = rkvdec->variant;
+ 	irqreturn_t ret;
+ 
++	wait_for_completion(&rkvdec->run_done);
+ 	ret = variant->ops->irq_handler(ctx);
+ 	/* The decoder idles until the next job: start it here, not from a worker */
+ 	v4l2_m2m_run_next(rkvdec->m2m_dev);
+@@ -1776,6 +1778,7 @@ static void rkvdec_watchdog_func(struct work_struct *work)
+ 
+ 	rkvdec = container_of(to_delayed_work(work), struct rkvdec_dev,
+ 			      watchdog_work);
++	wait_for_completion(&rkvdec->run_done);
+ 	ctx = v4l2_m2m_get_curr_priv(rkvdec->m2m_dev);
+ 	if (ctx) {
+ 		dev_err(rkvdec->dev, "Frame processing timed out!\n");
+@@ -1980,6 +1983,8 @@ static int rkvdec_probe(struct platform_device *pdev)
+ 	rkvdec->variant = variant;
+ 	mutex_init(&rkvdec->vdev_lock);
+ 	INIT_DELAYED_WORK(&rkvdec->watchdog_work, rkvdec_watchdog_func);
++	init_completion(&rkvdec->run_done);
++	complete_all(&rkvdec->run_done);
+ 
+ 	ret = rkvdec_disable_multicore(rkvdec);
+ 	if (ret)
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec.h b/drivers/media/platform/rockchip/rkvdec/rkvdec.h
+index 27ef848..74345c8 100644
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec.h
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec.h
+@@ -16,6 +16,7 @@
+ #include <linux/videodev2.h>
+ #include <linux/wait.h>
+ #include <linux/clk.h>
++#include <linux/completion.h>
+ 
+ #include <media/v4l2-common.h>
+ #include <media/v4l2-ctrls.h>
+@@ -157,6 +158,7 @@ struct rkvdec_dev {
+ 	void __iomem *link;
+ 	struct mutex vdev_lock; /* serializes ioctls */
+ 	struct delayed_work watchdog_work;
++	struct completion run_done;
+ 	struct gen_pool *sram_pool;
+ 	unsigned long sram_virt;
+ 	dma_addr_t sram_dma;

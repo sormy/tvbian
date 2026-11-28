@@ -34,6 +34,7 @@
 #          ./build.sh test                    tests/, in the build container
 #   env:   TVB_BUILD_CPUS (all cores), TVB_BUILD_MEMORY (8g), TVB_BUILD_SUITE (Debian stable),
 #          TVB_BUILD_REVISION (0~local), TVB_BUILD_CACHE (1; 0: clean), TVB_BUILD_CCACHE_SIZE (5G),
+#          TVB_BUILD_DEBUG (0; 1: a kernel's DEBUG_PATCHES too),
 #          TVB_RELEASE_GUARD (1; 0: skip the guard on paths changing package),
 #          TVB_APT_KEEP_DAYS (183: how long apt keeps a version after a newer one replaced it),
 #          TVB_BUILD_CCACHE_DIR (in the work volume; a host directory for CI's cache to keep,
@@ -166,6 +167,7 @@ run() {  # run a command inside the image, the repo read-only at /repo
   "$RT" run ${PLATFORM:+"$PLATFORM"} --rm --name "$name" -l project=tvbian -l tvbian.work="$WORK" \
     --cpus "$CPUS" --memory "$MEMORY" -e TVB_BUILD_CPUS="$CPUS" -e TVB_BUILD_REVISION="${TVB_BUILD_REVISION:-0~local}" \
     -e TVB_BUILD_CACHE="${TVB_BUILD_CACHE:-1}" -e TVB_BUILD_CCACHE_SIZE="${TVB_BUILD_CCACHE_SIZE:-5G}" \
+    -e TVB_BUILD_DEBUG="${TVB_BUILD_DEBUG:-0}" \
     -e TVB_BUILD_SUITE="$SUITE" -e TVB_APT_KEEP_DAYS="${TVB_APT_KEEP_DAYS:-183}" \
     -v "$WORK:/work" -v "$PWD:/repo:ro$rel" -v "$PWD/$OUT:/out${rel:+:${rel#,}}" ${ccache[@]+"${ccache[@]}"} \
     -w /repo "$IMAGE" "$@" </dev/null

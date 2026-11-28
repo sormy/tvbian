@@ -1,0 +1,73 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] mmc: sdhci-of-dwcmshc: Test parameters for the HS400 delay line
+
+For a debug build: hs400_txclk_tap, hs400_cmdout_tap and strbin_tap
+override the driver's HS400 taps where 0 or more, and writing
+apply_taps sets them while the card runs, so a sweep for a card's
+working window needs no reboot.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+  drivers/mmc/host/sdhci-of-dwcmshc.c | 42 +++++++++++++++++++++++++++++++++++++
+  1 file changed, 42 insertions(+)
+
+diff --git a/drivers/mmc/host/sdhci-of-dwcmshc.c b/drivers/mmc/host/sdhci-of-dwcmshc.c
+index 1baa2379c..e44a1efbc 100644
+--- a/drivers/mmc/host/sdhci-of-dwcmshc.c
++++ b/drivers/mmc/host/sdhci-of-dwcmshc.c
+@@ -749,6 +749,44 @@ static void rk35xx_sdhci_cqe_post_disable(struct mmc_host *mmc)
+ 	sdhci_writel(host, ctrl, dwc_priv->vendor_specific_area2 + CQHCI_CFG);
+ }
+ 
++/*
++ * The test of an HS400 delay line, for a debug build: each tap overrides the driver's where 0 or
++ * more, and apply_taps writes them while the card runs, so a sweep needs no reboot.
++ */
++static int hs400_txclk_tap = -1;
++module_param(hs400_txclk_tap, int, 0644);
++static int hs400_cmdout_tap = -1;
++module_param(hs400_cmdout_tap, int, 0644);
++static int strbin_tap = -1;
++module_param(strbin_tap, int, 0644);
++static struct sdhci_host *test_host;
++
++static void dwcmshc_rk35xx_write_test_taps(struct sdhci_host *host)
++{
++	if (hs400_txclk_tap >= 0)
++		sdhci_writel(host, DWCMSHC_EMMC_DLL_DLYENA | DLL_TXCLK_TAPNUM_FROM_SW |
++			     DLL_RXCLK_NO_INVERTER << DWCMSHC_EMMC_DLL_RXCLK_SRCSEL |
++			     hs400_txclk_tap, DWCMSHC_EMMC_DLL_TXCLK);
++	if (hs400_cmdout_tap >= 0)
++		sdhci_writel(host, DLL_CMDOUT_SRC_CLK_NEG | DLL_CMDOUT_EN_SRC_CLK_NEG |
++			     DWCMSHC_EMMC_DLL_DLYENA | hs400_cmdout_tap |
++			     DLL_CMDOUT_TAPNUM_FROM_SW, DECMSHC_EMMC_DLL_CMDOUT);
++	if (strbin_tap >= 0)
++		sdhci_writel(host, DWCMSHC_EMMC_DLL_DLYENA | strbin_tap |
++			     DLL_STRBIN_TAPNUM_FROM_SW, DWCMSHC_EMMC_DLL_STRBIN);
++}
++
++static int apply_taps_set(const char *val, const struct kernel_param *kp)
++{
++	if (!test_host || test_host->mmc->ios.timing != MMC_TIMING_MMC_HS400)
++		return -ENODEV;
++	dwcmshc_rk35xx_write_test_taps(test_host);
++	return 0;
++}
++
++static const struct kernel_param_ops apply_taps_ops = { .set = apply_taps_set };
++module_param_cb(apply_taps, &apply_taps_ops, NULL, 0200);
++
+ static void dwcmshc_rk3568_set_clock(struct sdhci_host *host, unsigned int clock)
+ {
+ 	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
+@@ -873,6 +911,10 @@ static void dwcmshc_rk3568_set_clock(struct sdhci_host *host, unsigned int clock
+ 		DLL_STRBIN_TAPNUM_FROM_SW;
+ 	sdhci_writel(host, extra, DWCMSHC_EMMC_DLL_STRBIN);
+ 
++	test_host = host;
++	if (host->mmc->ios.timing == MMC_TIMING_MMC_HS400)
++		dwcmshc_rk35xx_write_test_taps(host);
++
+ enable_clk:
+ 	/*
+ 	 * The sdclk frequency select bits in SDHCI_CLOCK_CONTROL are not functional

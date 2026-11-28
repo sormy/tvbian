@@ -77,7 +77,7 @@ diff --git a/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c b/drivers/gpu/drm/rock
  		.pre_scan_max_dly = { 8, 6, 2, 0 },
  		.offset = 0xc00,
  		.pixel_rate = 1,
-+		.nlayers = 3,
++		.nlayers = 4,
 +	}, {
 +		.id = 1,
 +		.max_output = { 720, 576 },

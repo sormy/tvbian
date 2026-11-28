@@ -1,0 +1,39 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] ASoC: rockchip: sai: Offer 12 and 24 kHz
+
+The SAI derives any rate from its MCLK, but its DAIs offered the
+standard rates of SNDRV_PCM_RATE_8000_384000 alone, which leave out
+12 and 24 kHz. Offer them too.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/sound/soc/rockchip/rockchip_sai.c b/sound/soc/rockchip/rockchip_sai.c
+--- a/sound/soc/rockchip/rockchip_sai.c
++++ b/sound/soc/rockchip/rockchip_sai.c
+@@ -33,6 +33,8 @@
+ #define WAIT_TIME_MS_MAX	10000
+ 
+ #define MAX_LANES		4
++#define SAI_RATES		(SNDRV_PCM_RATE_8000_384000 | SNDRV_PCM_RATE_12000 | \
++				 SNDRV_PCM_RATE_24000)
+ 
+ enum fpw_mode {
+ 	FPW_ONE_BCLK_WIDTH,
+@@ -1126,7 +1128,7 @@
+ 		dai->playback.stream_name = "Playback";
+ 		dai->playback.channels_min = 1;
+ 		dai->playback.channels_max = 512;
+-		dai->playback.rates = SNDRV_PCM_RATE_8000_384000;
++		dai->playback.rates = SAI_RATES;
+ 		dai->playback.formats = SNDRV_PCM_FMTBIT_S8 |
+ 					SNDRV_PCM_FMTBIT_S16_LE |
+ 					SNDRV_PCM_FMTBIT_S24_LE |
+@@ -1142,7 +1144,7 @@
+ 		dai->capture.stream_name = "Capture";
+ 		dai->capture.channels_min = 1;
+ 		dai->capture.channels_max = 512;
+-		dai->capture.rates = SNDRV_PCM_RATE_8000_384000;
++		dai->capture.rates = SAI_RATES;
+ 		dai->capture.formats = SNDRV_PCM_FMTBIT_S8 |
+ 				       SNDRV_PCM_FMTBIT_S16_LE |
+ 				       SNDRV_PCM_FMTBIT_S24_LE |

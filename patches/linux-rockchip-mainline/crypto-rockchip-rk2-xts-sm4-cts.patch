@@ -1,0 +1,125 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] crypto: rockchip: rk2 - Add XTS for SM4 and CTS for AES
+
+The crypto v2 engine's SM4 version register offers XTS, which Rockchip's
+kernel drives as xts(sm4), and its AES one offers CTS, mode 2, which no
+driver used. Offer both. XTS for SM4 takes the AES XTS path, the data and
+tweak keys in their two banks, without the AES key-size bits. CTS runs
+any length from one block up as one DMA item, as XTS does, since the
+engine steals from the last two blocks once per job.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+  drivers/crypto/rockchip/rk2_crypto.c          |  6 ++++++
+  drivers/crypto/rockchip/rk2_crypto.h          |  4 ++++
+  drivers/crypto/rockchip/rk2_crypto_skcipher.c | 25 +++++++++++++++++++------
+  3 files changed, 29 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/crypto/rockchip/rk2_crypto.c b/drivers/crypto/rockchip/rk2_crypto.c
+index feaaae68e..61dde2e0f 100644
+--- a/drivers/crypto/rockchip/rk2_crypto.c
++++ b/drivers/crypto/rockchip/rk2_crypto.c
+@@ -281,9 +281,15 @@ static const struct rk2_crypto_template rk2_crypto_algs_template[] = {
+ 	RK2_HMAC(RK2_CRYPTO_SHA512, "hmac(sha512)", "rk2-hmac-sha512", SHA512_DIGEST_SIZE,
+ 		 struct sha512_state, SHA512_BLOCK_SIZE),
+ 	RK2_AES(RK2_CRYPTO_MODE_CTR, "ctr(aes)", "ctr-aes-rk2", 1),
++	RK2_SKCIPHER(RK2_CRYPTO_AES | RK2_CRYPTO_MODE_CTS, "cts(cbc(aes))", "cts-cbc-aes-rk2",
++		     RK2_PRIORITY_BELOW_CPU, AES_BLOCK_SIZE, AES_MIN_KEY_SIZE, AES_MAX_KEY_SIZE,
++		     AES_BLOCK_SIZE, 1, rk2_aes_setkey),
+ 	RK2_SM4(RK2_CRYPTO_MODE_ECB, "ecb(sm4)", "ecb-sm4-rk2", SM4_BLOCK_SIZE),
+ 	RK2_SM4(RK2_CRYPTO_MODE_CBC, "cbc(sm4)", "cbc-sm4-rk2", SM4_BLOCK_SIZE),
+ 	RK2_SM4(RK2_CRYPTO_MODE_CTR, "ctr(sm4)", "ctr-sm4-rk2", 1),
++	RK2_SKCIPHER(RK2_CRYPTO_SM4 | RK2_CRYPTO_XTS, "xts(sm4)", "xts-sm4-rk2", RK2_PRIORITY,
++		     SM4_BLOCK_SIZE, 2 * SM4_KEY_SIZE, 2 * SM4_KEY_SIZE, SM4_BLOCK_SIZE,
++		     SM4_BLOCK_SIZE, rk2_sm4_xts_setkey),
+ 	RK2_SKCIPHER(RK2_CRYPTO_DES | RK2_CRYPTO_MODE_ECB, "ecb(des)", "ecb-des-rk2", RK2_PRIORITY,
+ 		     DES_BLOCK_SIZE, DES_KEY_SIZE, DES_KEY_SIZE, 0, 0, rk2_des_setkey),
+ 	RK2_SKCIPHER(RK2_CRYPTO_DES | RK2_CRYPTO_MODE_CBC, "cbc(des)", "cbc-des-rk2", RK2_PRIORITY,
+diff --git a/drivers/crypto/rockchip/rk2_crypto.h b/drivers/crypto/rockchip/rk2_crypto.h
+index 44670f82a..de1a8e56f 100644
+--- a/drivers/crypto/rockchip/rk2_crypto.h
++++ b/drivers/crypto/rockchip/rk2_crypto.h
+@@ -79,6 +79,7 @@
+ #define RK2_CRYPTO_CIPHER_MASK		(3 << 8)
+ #define RK2_CRYPTO_MODE_ECB		(0 << 4)
+ #define RK2_CRYPTO_MODE_CBC		(1 << 4)
++#define RK2_CRYPTO_MODE_CTS		(2 << 4)
+ #define RK2_CRYPTO_MODE_CTR		(3 << 4)
+ #define RK2_CRYPTO_MODE_MASK		(0xf << 4)
+ #define RK2_CRYPTO_XTS			(6 << 4)
+@@ -98,6 +99,8 @@
+ #define RK2_CRYPTO_AES_ECB		(RK2_CRYPTO_AES | RK2_CRYPTO_MODE_ECB)
+ #define RK2_CRYPTO_AES_CBC		(RK2_CRYPTO_AES | RK2_CRYPTO_MODE_CBC)
+ #define RK2_CRYPTO_AES_XTS		(RK2_CRYPTO_AES | RK2_CRYPTO_XTS)
++#define RK2_CRYPTO_IS_XTS(mode)		(((mode) & RK2_CRYPTO_MODE_MASK) == RK2_CRYPTO_XTS)
++#define RK2_CRYPTO_IS_CTS(mode)		(((mode) & RK2_CRYPTO_MODE_MASK) == RK2_CRYPTO_MODE_CTS)
+ #define RK2_CRYPTO_AES_128BIT_key	(0 << 2)
+ #define RK2_CRYPTO_AES_192BIT_key	(1 << 2)
+ #define RK2_CRYPTO_AES_256BIT_key	(2 << 2)
+@@ -301,6 +304,7 @@ int rk2_cipher_tfm_init(struct crypto_skcipher *tfm);
+ void rk2_cipher_tfm_exit(struct crypto_skcipher *tfm);
+ int rk2_aes_setkey(struct crypto_skcipher *cipher, const u8 *key,
+ 		   unsigned int keylen);
++int rk2_sm4_xts_setkey(struct crypto_skcipher *cipher, const u8 *key, unsigned int keylen);
+ int rk2_aes_xts_setkey(struct crypto_skcipher *cipher, const u8 *key,
+ 		       unsigned int keylen);
+ int rk2_sm4_setkey(struct crypto_skcipher *cipher, const u8 *key,
+diff --git a/drivers/crypto/rockchip/rk2_crypto_skcipher.c b/drivers/crypto/rockchip/rk2_crypto_skcipher.c
+index d4fa50e40..548e352b6 100644
+--- a/drivers/crypto/rockchip/rk2_crypto_skcipher.c
++++ b/drivers/crypto/rockchip/rk2_crypto_skcipher.c
+@@ -216,12 +216,16 @@ static int rk2_cipher_need_fallback(struct skcipher_request *req)
+ 	if (!req->cryptlen)
+ 		return true;
+ 
++	/* CTS steals from the block before the last, as a whole block or none */
++	if (RK2_CRYPTO_IS_CTS(algt->rk2_mode) && req->cryptlen < AES_BLOCK_SIZE)
++		return true;
++
+ 	/*
+-	 * The hardware XTS implementation programs the tweak once before
+-	 * DMA starts and cannot update it at SG boundaries. Restrict to
+-	 * exactly one source and one destination SG entry.
++	 * The hardware programs XTS's tweak, and steals CTS's last blocks, once
++	 * before DMA starts, not at SG boundaries: one source and one
++	 * destination SG entry.
+ 	 */
+-	if (algt->rk2_mode == RK2_CRYPTO_AES_XTS) {
++	if (RK2_CRYPTO_IS_XTS(algt->rk2_mode) || RK2_CRYPTO_IS_CTS(algt->rk2_mode)) {
+ 		if (sg_nents_for_len(req->src, req->cryptlen) != 1)
+ 			return true;
+ 		if (sg_nents_for_len(req->dst, req->cryptlen) != 1)
+@@ -384,6 +388,14 @@ int rk2_sm4_setkey(struct crypto_skcipher *cipher, const u8 *key,
+ 	return rk2_cipher_setkey(cipher, key, keylen);
+ }
+ 
++/* XTS takes two SM4 keys, the data's and the tweak's */
++int rk2_sm4_xts_setkey(struct crypto_skcipher *cipher, const u8 *key, unsigned int keylen)
++{
++	if (keylen != 2 * SM4_KEY_SIZE)
++		return -EINVAL;
++	return rk2_aes_xts_setkey(cipher, key, keylen);
++}
++
+ int rk2_des_setkey(struct crypto_skcipher *cipher, const u8 *key,
+ 		   unsigned int keylen)
+ {
+@@ -520,7 +532,8 @@ int rk2_cipher_run(struct crypto_engine *engine, void *async_req)
+ 	struct rk2_crypto_lli *dd = &rkc->tl[0];
+ 	struct scatterlist *sgs, *sgd;
+ 	int ivsize = crypto_skcipher_ivsize(tfm);
+-	bool update_iv = ivsize && areq->iv && algt->rk2_mode != RK2_CRYPTO_AES_XTS;
++	bool update_iv = ivsize && areq->iv && !RK2_CRYPTO_IS_XTS(algt->rk2_mode) &&
++			 !RK2_CRYPTO_IS_CTS(algt->rk2_mode);
+ 	unsigned int len = areq->cryptlen;
+ 	unsigned int this_len, todo, offset;
+ 	unsigned long timeout = 0;
+@@ -624,7 +637,7 @@ int rk2_cipher_run(struct crypto_engine *engine, void *async_req)
+ 		err = 0;
+ 		writel(m, rkc->reg + RK2_CRYPTO_BC_CTL);
+ 
+-		if (algt->rk2_mode == RK2_CRYPTO_AES_XTS) {
++		if (RK2_CRYPTO_IS_XTS(algt->rk2_mode)) {
+ 			for (i = 0; i < ctx->keylen / 8; i++) {
+ 				writel(get_unaligned_be32(ctx->key + i * 4),
+ 				       rkc->reg + RK2_CRYPTO_KEY0 + i * 4);

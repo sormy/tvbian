@@ -1,0 +1,119 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] media: rkvdec: A test parameter that fails the next job
+
+The VDPU381's recovery from a job that times out or faults is untested:
+no stream found makes one, and a watchdog shortened to make one ends
+jobs the core is still running, which no recovery is meant to survive.
+
+Add fail_next_job: 1 gives the next job a timeout of one cycle, so the
+core times it out itself; 2 points its output where nothing is mapped,
+so it faults on the IOMMU. The parameter clears itself.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+  .../platform/rockchip/rkvdec/rkvdec-vdpu381-h264.c |  1 +
+  .../platform/rockchip/rkvdec/rkvdec-vdpu381-hevc.c |  1 +
+  .../platform/rockchip/rkvdec/rkvdec-vdpu381-regs.h |  2 ++
+  .../platform/rockchip/rkvdec/rkvdec-vdpu381-vp9.c  |  1 +
+  drivers/media/platform/rockchip/rkvdec/rkvdec.c    | 26 ++++++++++++++++++++++
+  drivers/media/platform/rockchip/rkvdec/rkvdec.h    |  1 +
+  6 files changed, 32 insertions(+)
+
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-h264.c b/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-h264.c
+index e8eed99..6d942f5 100644
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-h264.c
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-h264.c
+@@ -445,6 +445,7 @@ static int rkvdec_h264_run(struct rkvdec_ctx *ctx)
+ 	rkvdec_schedule_watchdog(rkvdec, h264_ctx->regs.common.reg032_timeout_threshold);
+ 
+ 	/* Start decoding! */
++	rkvdec_vdpu381_test_failure(rkvdec);
+ 	writel(VDPU381_DEC_E_BIT, rkvdec->regs + VDPU381_REG_DEC_E);
+ 
+ 	rkvdec_run_postamble(ctx, &run.base);
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-hevc.c b/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-hevc.c
+index a391ce6..46702bb 100644
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-hevc.c
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-hevc.c
+@@ -614,6 +614,7 @@ static int rkvdec_hevc_run(struct rkvdec_ctx *ctx)
+ 	rkvdec_schedule_watchdog(rkvdec, hevc_ctx->regs.common.reg032_timeout_threshold);
+ 
+ 	/* Start decoding! */
++	rkvdec_vdpu381_test_failure(rkvdec);
+ 	writel(VDPU381_DEC_E_BIT, rkvdec->regs + VDPU381_REG_DEC_E);
+ 
+ 	rkvdec_run_postamble(ctx, &run.base);
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-regs.h b/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-regs.h
+index 154f566..da5c8f4 100644
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-regs.h
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-regs.h
+@@ -40,6 +40,8 @@
+ #define VDPU381_DEC_IRQ_DISABLE	BIT(4)
+ 
+ #define VDPU381_REG_STA_INT		0x380
++#define VDPU381_REG_TIMEOUT_THRESHOLD	0x080
++#define VDPU381_REG_DECOUT_BASE		0x208
+ #define VDPU381_STA_INT_DEC_RDY_STA	BIT(2)
+ #define VDPU381_STA_INT_ERROR		BIT(4)
+ #define VDPU381_STA_INT_TIMEOUT		BIT(5)
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-vp9.c b/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-vp9.c
+index 1e3fafe..55d8c33 100644
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-vp9.c
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-vp9.c
+@@ -782,6 +782,7 @@ static int rkvdec_vp9_run(struct rkvdec_ctx *ctx)
+ 	schedule_delayed_work(&rkvdec->watchdog_work,
+ 			      msecs_to_jiffies(watchdog_time));
+ 
++	rkvdec_vdpu381_test_failure(rkvdec);
+ 	writel(VDPU381_DEC_E_BIT, rkvdec->regs + VDPU381_REG_DEC_E);
+ 
+ 	rkvdec_run_postamble(ctx, &run.base);
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec.c b/drivers/media/platform/rockchip/rkvdec/rkvdec.c
+index c004a4d..57555bd 100644
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec.c
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec.c
+@@ -1312,6 +1312,32 @@ void rkvdec_memcpy_toio(void __iomem *dst, void *src, size_t len)
+ #endif
+ }
+ 
++enum rkvdec_test_failure {
++	RKVDEC_TEST_NONE,
++	RKVDEC_TEST_TIMEOUT,
++	RKVDEC_TEST_FAULT,
++};
++
++static int fail_next_job;
++module_param(fail_next_job, int, 0644);
++MODULE_PARM_DESC(fail_next_job, "Test: the next job times out (1) or writes where nothing is mapped (2)");
++
++/* An IOVA the DMA API allocates only when the space is nearly full */
++#define RKVDEC_UNMAPPED_IOVA	0x1000
++
++/* The recovery under test, as no stream makes a job time out or fault */
++void rkvdec_vdpu381_test_failure(struct rkvdec_dev *rkvdec)
++{
++	switch (xchg(&fail_next_job, RKVDEC_TEST_NONE)) {
++	case RKVDEC_TEST_TIMEOUT:
++		writel(1, rkvdec->regs + VDPU381_REG_TIMEOUT_THRESHOLD);
++		break;
++	case RKVDEC_TEST_FAULT:
++		writel(RKVDEC_UNMAPPED_IOVA, rkvdec->regs + VDPU381_REG_DECOUT_BASE);
++		break;
++	}
++}
++
+ void rkvdec_schedule_watchdog(struct rkvdec_dev *rkvdec, u32 timeout_threshold)
+ {
+ 	/* Set watchdog at 2 times the hardware timeout threshold */
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec.h b/drivers/media/platform/rockchip/rkvdec/rkvdec.h
+index 74345c8..0e301d8 100644
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec.h
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec.h
+@@ -234,6 +234,7 @@ void rkvdec_run_preamble(struct rkvdec_ctx *ctx, struct rkvdec_run *run);
+ void rkvdec_run_postamble(struct rkvdec_ctx *ctx, struct rkvdec_run *run);
+ void rkvdec_memcpy_toio(void __iomem *dst, void *src, size_t len);
+ void rkvdec_schedule_watchdog(struct rkvdec_dev *rkvdec, u32 timeout_threshold);
++void rkvdec_vdpu381_test_failure(struct rkvdec_dev *rkvdec);
+ 
+ void rkvdec_quirks_disable_qos(struct rkvdec_ctx *ctx);
+ 

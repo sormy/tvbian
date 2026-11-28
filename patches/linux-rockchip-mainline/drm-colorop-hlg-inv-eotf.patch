@@ -1,0 +1,57 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] drm/colorop: Add the HLG inverse EOTF curve
+
+A plane converted from SDR to an HLG output ends in BT.2100's HLG
+inverse EOTF, the inverse OOTF and the OETF, for the 1000 cd/m^2
+reference display BT.2408 maps SDR white onto. The fixed curves name
+PQ's but no HLG one.
+
+Add DRM_COLOROP_1D_CURVE_HLG_INV_EOTF, "HLG Inverse EOTF": display
+light in BT.2020 primaries, 1.0 the nominal peak, out to the HLG
+signal. Its inverse OOTF weights each component by the luminance of
+all three, which the curve's documentation states.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+  drivers/gpu/drm/drm_colorop.c |  1 +
+  include/drm/drm_colorop.h     | 15 +++++++++++++++
+  2 files changed, 16 insertions(+)
+
+diff --git a/drivers/gpu/drm/drm_colorop.c b/drivers/gpu/drm/drm_colorop.c
+index 682fcc651..953ab00a4 100644
+--- a/drivers/gpu/drm/drm_colorop.c
++++ b/drivers/gpu/drm/drm_colorop.c
+@@ -79,6 +79,7 @@ static const char * const colorop_curve_1d_type_names[] = {
+ 	[DRM_COLOROP_1D_CURVE_BT2020_OETF] = "BT.2020 OETF",
+ 	[DRM_COLOROP_1D_CURVE_GAMMA22] = "Gamma 2.2",
+ 	[DRM_COLOROP_1D_CURVE_GAMMA22_INV] = "Gamma 2.2 Inverse",
++	[DRM_COLOROP_1D_CURVE_HLG_INV_EOTF] = "HLG Inverse EOTF",
+ };
+ 
+ static const struct drm_prop_enum_list drm_colorop_lut1d_interpolation_list[] = {
+diff --git a/include/drm/drm_colorop.h b/include/drm/drm_colorop.h
+index 224fae40e..842000ee9 100644
+--- a/include/drm/drm_colorop.h
++++ b/include/drm/drm_colorop.h
+@@ -126,6 +126,21 @@ enum drm_colorop_curve_1d_type {
+ 	 * The inverse of &DRM_COLOROP_1D_CURVE_GAMMA22
+ 	 */
+ 	DRM_COLOROP_1D_CURVE_GAMMA22_INV,
++
++	/**
++	 * @DRM_COLOROP_1D_CURVE_HLG_INV_EOTF:
++	 *
++	 * enum string "HLG Inverse EOTF"
++	 *
++	 * The Rec. ITU-R BT.2100-2 hybrid log-gamma (HLG) inverse EOTF for
++	 * the reference display: nominal peak 1000 cd/m^2, black 0, system
++	 * gamma 1.2. The input is display light in BT.2020 primaries, 1.0
++	 * the nominal peak. The inverse OOTF scales each component by
++	 * Y^(1/1.2 - 1), Y the BT.2100 luminance of all three, then the
++	 * HLG OETF encodes each. Represented by H.273
++	 * TransferCharacteristics code point 18.
++	 */
++	DRM_COLOROP_1D_CURVE_HLG_INV_EOTF,
+ 	/**
+ 	 * @DRM_COLOROP_1D_CURVE_COUNT:
+ 	 *

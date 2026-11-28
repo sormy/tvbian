@@ -1,0 +1,203 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] media: rockchip: vdpp: NV21 in and out, NV24 and NV42 out
+
+The VDPP takes a 4:2:0 source with its chroma either way round, and
+writes 4:2:0 or 4:4:4, each either way round, as the vendor's MPP drives
+it; the driver offered NV12 alone. Offer NV12 and NV21 as the source,
+NV24 and NV42 beside them as the destination, the chroma scaled to the
+whole picture for 4:4:4.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/drivers/media/platform/rockchip/vdpp/rockchip-vdpp-m2m.c b/drivers/media/platform/rockchip/vdpp/rockchip-vdpp-m2m.c
+--- a/drivers/media/platform/rockchip/vdpp/rockchip-vdpp-m2m.c
++++ b/drivers/media/platform/rockchip/vdpp/rockchip-vdpp-m2m.c
+@@ -35,8 +35,10 @@
+ #define VDPP_DST_HEIGHT_ALIGN	1
+ #define VDPP_STRIDE_UNIT	4	/* stride registers count 32-bit words */
+ 
++#define VDPP_FMT_YUV444		0
+ #define VDPP_FMT_YUV420		3
+ #define VDPP_YUV_SWAP_SP_UV	0
++#define VDPP_YUV_SWAP_SP_VU	1
+ #define VDPP_TIMEOUT_CYCLES	0x8ffffff
+ #define VDPP_INT_ERRORS		(VDPP_INT_CONFIG_ERROR | VDPP_INT_TIMEOUT | VDPP_INT_BUS_ERROR)
+ #define VDPP_RESET_TIMEOUT_US	5
+@@ -87,14 +89,42 @@
+ 	       VDPP_PIC_HEIGHT(h - 1) | VDPP_PIC_DOWN_REDUNDANT(h - height);
+ }
+ 
++struct vdpp_fmt {
++	u32 fourcc;
++	u8 fmt;
++	u8 swap;
++};
++
++/* the 4:2:0 ones first: the source's, as the engine takes no other */
++#define VDPP_SRC_FMTS		2
++
++static const struct vdpp_fmt vdpp_fmts[] = {
++	{ V4L2_PIX_FMT_NV12, VDPP_FMT_YUV420, VDPP_YUV_SWAP_SP_UV },
++	{ V4L2_PIX_FMT_NV21, VDPP_FMT_YUV420, VDPP_YUV_SWAP_SP_VU },
++	{ V4L2_PIX_FMT_NV24, VDPP_FMT_YUV444, VDPP_YUV_SWAP_SP_UV },
++	{ V4L2_PIX_FMT_NV42, VDPP_FMT_YUV444, VDPP_YUV_SWAP_SP_VU },
++};
++
++static const struct vdpp_fmt *vdpp_find_fmt(u32 fourcc, bool output)
++{
++	unsigned int i, n = output ? VDPP_SRC_FMTS : ARRAY_SIZE(vdpp_fmts);
++
++	for (i = 0; i < n; i++)
++		if (vdpp_fmts[i].fourcc == fourcc)
++			return &vdpp_fmts[i];
++	return NULL;
++}
++
+ static void vdpp_config(struct vdpp_dev *vdpp, struct vdpp_ctx *ctx)
+ {
+ 	const struct v4l2_pix_format *dst = &ctx->dst_fmt;
+ 	const struct v4l2_rect *crop = &ctx->crop;
++	const struct vdpp_fmt *in = vdpp_find_fmt(ctx->src_fmt.pixelformat, true);
++	const struct vdpp_fmt *out = vdpp_find_fmt(dst->pixelformat, false);
+ 
+ 	vdpp_write(vdpp, VDPP_CONFIG0,
+-		   VDPP_SRC_FMT(VDPP_FMT_YUV420) | VDPP_SRC_YUV_SWAP(VDPP_YUV_SWAP_SP_UV) |
+-		   VDPP_DST_FMT(VDPP_FMT_YUV420) | VDPP_DST_YUV_SWAP(VDPP_YUV_SWAP_SP_UV));
++		   VDPP_SRC_FMT(in->fmt) | VDPP_SRC_YUV_SWAP(in->swap) |
++		   VDPP_DST_FMT(out->fmt) | VDPP_DST_YUV_SWAP(out->swap));
+ 	vdpp_write(vdpp, VDPP_WORK_MODE, VDPP_WORK_MODE_VEP);
+ 	vdpp_write(vdpp, VDPP_CLK_GATE, VDPP_CLK_ON_ALL);
+ 
+@@ -108,7 +138,8 @@
+ 		   vdpp_pic_size(dst->width, dst->height, VDPP_DST_HEIGHT_ALIGN));
+ 	vdpp_write(vdpp, VDPP_TIMEOUT_CFG, VDPP_TIMEOUT_CFG_EN | VDPP_TIMEOUT_CYCLES);
+ 
+-	vdpp_zme_config(vdpp->zme, crop->width, crop->height, dst->width, dst->height);
++	vdpp_zme_config(vdpp->zme, crop->width, crop->height, dst->width, dst->height,
++			out->fmt == VDPP_FMT_YUV444);
+ }
+ 
+ static void vdpp_set_frame(struct vdpp_dev *vdpp, const struct v4l2_pix_format *pix,
+@@ -199,16 +230,22 @@
+ 	return IRQ_NONE;
+ }
+ 
+-static void vdpp_prepare_format(struct v4l2_pix_format *pix)
++static void vdpp_prepare_format(struct v4l2_pix_format *pix, bool output)
+ {
+-	pix->pixelformat = V4L2_PIX_FMT_NV12;
++	const struct vdpp_fmt *fmt = vdpp_find_fmt(pix->pixelformat, output);
++
++	if (!fmt)
++		pix->pixelformat = V4L2_PIX_FMT_NV12;
+ 	pix->field = V4L2_FIELD_NONE;
+ 	pix->width = ALIGN(clamp(pix->width, VDPP_MIN_SIZE, VDPP_MAX_WIDTH), VDPP_SIZE_STEP);
+ 	pix->height = ALIGN(clamp(pix->height, VDPP_MIN_SIZE, VDPP_MAX_HEIGHT), VDPP_SIZE_STEP);
+ 	pix->bytesperline = ALIGN(pix->width, VDPP_WIDTH_ALIGN);
+-	/* chroma for the whole rows the engine reads */
+-	pix->sizeimage = pix->bytesperline *
+-			 (pix->height + ALIGN(pix->height, VDPP_SRC_HEIGHT_ALIGN) / 2);
++	/* chroma for the whole rows the engine reads: half of them, twice as wide at 4:4:4 */
++	if (fmt && fmt->fmt == VDPP_FMT_YUV444)
++		pix->sizeimage = pix->bytesperline * pix->height * 3;
++	else
++		pix->sizeimage = pix->bytesperline *
++				 (pix->height + ALIGN(pix->height, VDPP_SRC_HEIGHT_ALIGN) / 2);
+ }
+ 
+ static void vdpp_reset_crop(struct vdpp_ctx *ctx)
+@@ -235,17 +272,19 @@
+ 
+ static int vdpp_enum_fmt(struct file *file, void *priv, struct v4l2_fmtdesc *f)
+ {
+-	if (f->index)
++	unsigned int n = V4L2_TYPE_IS_OUTPUT(f->type) ? VDPP_SRC_FMTS : ARRAY_SIZE(vdpp_fmts);
++
++	if (f->index >= n)
+ 		return -EINVAL;
+ 
+-	f->pixelformat = V4L2_PIX_FMT_NV12;
++	f->pixelformat = vdpp_fmts[f->index].fourcc;
+ 	return 0;
+ }
+ 
+ static int vdpp_enum_framesizes(struct file *file, void *priv,
+ 				struct v4l2_frmsizeenum *fsize)
+ {
+-	if (fsize->index || fsize->pixel_format != V4L2_PIX_FMT_NV12)
++	if (fsize->index || !vdpp_find_fmt(fsize->pixel_format, false))
+ 		return -EINVAL;
+ 
+ 	fsize->type = V4L2_FRMSIZE_TYPE_STEPWISE;
+@@ -272,7 +311,7 @@
+ 
+ static int vdpp_try_fmt(struct file *file, void *priv, struct v4l2_format *f)
+ {
+-	vdpp_prepare_format(&f->fmt.pix);
++	vdpp_prepare_format(&f->fmt.pix, V4L2_TYPE_IS_OUTPUT(f->type));
+ 	return 0;
+ }
+ 
+@@ -284,7 +323,7 @@
+ 	if (vb2_is_busy(v4l2_m2m_get_vq(ctx->fh.m2m_ctx, f->type)))
+ 		return -EBUSY;
+ 
+-	vdpp_prepare_format(&f->fmt.pix);
++	vdpp_prepare_format(&f->fmt.pix, V4L2_TYPE_IS_OUTPUT(f->type));
+ 	*dst = f->fmt.pix;
+ 	return 0;
+ }
+@@ -531,7 +570,7 @@
+ 
+ 	ctx->src_fmt.width = VDPP_MAX_WIDTH;
+ 	ctx->src_fmt.height = VDPP_MAX_HEIGHT;
+-	vdpp_prepare_format(&ctx->src_fmt);
++	vdpp_prepare_format(&ctx->src_fmt, true);
+ 	ctx->dst_fmt = ctx->src_fmt;
+ 	vdpp_reset_crop(ctx);
+ 
+diff --git a/drivers/media/platform/rockchip/vdpp/rockchip-vdpp-zme.c b/drivers/media/platform/rockchip/vdpp/rockchip-vdpp-zme.c
+--- a/drivers/media/platform/rockchip/vdpp/rockchip-vdpp-zme.c
++++ b/drivers/media/platform/rockchip/vdpp/rockchip-vdpp-zme.c
+@@ -13,6 +13,7 @@
+ #define VDPP_ZME_PHASES			17
+ #define VDPP_ZME_TAPS			8
+ #define VDPP_ZME_FMT_YUV420		4
++#define VDPP_ZME_FMT_YUV444		6
+ #define VDPP_ZME_SCL_MULTI_PHASE	3
+ #define VDPP_ZME_DOWN_SHIFT		12
+ #define VDPP_ZME_UP_SHIFT		16
+@@ -533,13 +534,17 @@
+ 	vdpp_zme_write_coe(zme, plane->ver_coe, vdpp_zme_tap6[vdpp_zme_ratio(src_h, dst_h)]);
+ }
+ 
+-void vdpp_zme_config(void __iomem *zme, u32 src_w, u32 src_h, u32 dst_w, u32 dst_h)
++/* a 4:2:0 source, to a 4:2:0 or, with yuv444, a 4:4:4 destination */
++void vdpp_zme_config(void __iomem *zme, u32 src_w, u32 src_h, u32 dst_w, u32 dst_h,
++		     bool yuv444)
+ {
++	u32 div = yuv444 ? 1 : VDPP_ZME_CHROMA_DIV;
++
+ 	writel_relaxed(VDPP_ZME_FORMAT_IN(VDPP_ZME_FMT_YUV420) |
+-		       VDPP_ZME_FORMAT_OUT(VDPP_ZME_FMT_YUV420) | VDPP_ZME_AUTO_GATING_EN,
+-		       zme + VDPP_ZME_CTRL);
++		       VDPP_ZME_FORMAT_OUT(yuv444 ? VDPP_ZME_FMT_YUV444 : VDPP_ZME_FMT_YUV420) |
++		       VDPP_ZME_AUTO_GATING_EN, zme + VDPP_ZME_CTRL);
+ 	vdpp_zme_plane(zme, &vdpp_zme_yrgb, src_w, src_h, dst_w, dst_h);
+ 	vdpp_zme_plane(zme, &vdpp_zme_cbcr,
+ 		       src_w / VDPP_ZME_CHROMA_DIV, src_h / VDPP_ZME_CHROMA_DIV,
+-		       dst_w / VDPP_ZME_CHROMA_DIV, dst_h / VDPP_ZME_CHROMA_DIV);
++		       dst_w / div, dst_h / div);
+ }
+diff --git a/drivers/media/platform/rockchip/vdpp/rockchip-vdpp-zme.h b/drivers/media/platform/rockchip/vdpp/rockchip-vdpp-zme.h
+--- a/drivers/media/platform/rockchip/vdpp/rockchip-vdpp-zme.h
++++ b/drivers/media/platform/rockchip/vdpp/rockchip-vdpp-zme.h
+@@ -11,6 +11,7 @@
+ /* past it MPP gathers lines before scaling, which is not programmed here */
+ #define VDPP_ZME_MAX_DOWNSCALE	4
+ 
+-void vdpp_zme_config(void __iomem *zme, u32 src_w, u32 src_h, u32 dst_w, u32 dst_h);
++void vdpp_zme_config(void __iomem *zme, u32 src_w, u32 src_h, u32 dst_w, u32 dst_h,
++		     bool yuv444);
+ 
+ #endif

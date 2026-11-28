@@ -1,0 +1,187 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] media: rockchip: vdpp: Recover a failed or stalled job without a reboot
+
+A bus error reset the core from its interrupt: the soft reset timed out
+on the IOMMU still stalled on the faulted write, and the CRU reset that
+followed, pulsed under a busy core, left VDPP and IEP2 with no output
+until a reboot. A job that never raised an interrupt waited forever.
+
+End a failed job, and one past its time, from a watchdog that can
+sleep: reset the IOMMU through an empty domain attached to the group
+VDPP shares with IEP2, then soft-reset the core; the CRU reset stays
+alone.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+  .../platform/rockchip/vdpp/rockchip-vdpp-m2m.c     | 80 +++++++++++++++++-----
+  1 file changed, 64 insertions(+), 16 deletions(-)
+
+diff --git a/drivers/media/platform/rockchip/vdpp/rockchip-vdpp-m2m.c b/drivers/media/platform/rockchip/vdpp/rockchip-vdpp-m2m.c
+index e7bb212..481c516 100644
+--- a/drivers/media/platform/rockchip/vdpp/rockchip-vdpp-m2m.c
++++ b/drivers/media/platform/rockchip/vdpp/rockchip-vdpp-m2m.c
+@@ -5,9 +5,9 @@
+  */
+ 
+ #include <linux/clk.h>
+-#include <linux/delay.h>
+ #include <linux/interrupt.h>
+ #include <linux/io.h>
++#include <linux/iommu.h>
+ #include <linux/iopoll.h>
+ #include <linux/module.h>
+ #include <linux/of.h>
+@@ -15,6 +15,7 @@
+ #include <linux/pm_runtime.h>
+ #include <linux/reset.h>
+ #include <linux/slab.h>
++#include <linux/workqueue.h>
+ #include <media/v4l2-ctrls.h>
+ #include <media/v4l2-device.h>
+ #include <media/v4l2-ioctl.h>
+@@ -43,7 +44,8 @@
+ #define VDPP_TIMEOUT_CYCLES	0x8ffffff
+ #define VDPP_INT_ERRORS		(VDPP_INT_CONFIG_ERROR | VDPP_INT_TIMEOUT | VDPP_INT_BUS_ERROR)
+ #define VDPP_RESET_TIMEOUT_US	5
+-#define VDPP_CRU_RESET_US	5
++/* twice VDPP_TIMEOUT_CYCLES at the slowest core clock */
++#define VDPP_WATCHDOG_MS	1000
+ 
+ struct vdpp_dev {
+ 	struct v4l2_device v4l2_dev;
+@@ -56,6 +58,8 @@ struct vdpp_dev {
+ 	struct clk_bulk_data *clks;
+ 	int num_clks;
+ 	struct reset_control *rstc;	/* held while streaming: the engine is the IEP2's too */
++	struct delayed_work watchdog;	/* ends a job that failed or never ended */
++	struct iommu_domain *empty_domain;
+ };
+ 
+ struct vdpp_ctx {
+@@ -185,31 +189,57 @@ static void vdpp_device_run(void *priv)
+ 	vdpp_set_frame(vdpp, &ctx->dst_fmt, dst, VDPP_DST_ADDR_Y, VDPP_DST_ADDR_UV);
+ 	vdpp_write(vdpp, VDPP_INT_EN, VDPP_INT_FRM_DONE | VDPP_INT_OSD_MAX | VDPP_INT_ERRORS);
+ 
++	schedule_delayed_work(&vdpp->watchdog, msecs_to_jiffies(VDPP_WATCHDOG_MS));
++
+ 	/* registers before the start */
+ 	wmb();
+ 	writel(VDPP_FRM_EN, vdpp->base + VDPP_FRM_START);
+ }
+ 
++/*
++ * A faulted write keeps the IOMMU stalled, and the core's soft reset waits on
++ * it: reset the IOMMU first, attaching an empty domain to the group VDPP shares
++ * with IEP2, then the core. Its CRU reset stays alone: pulsed under a busy core
++ * it hangs the bus.
++ */
+ static void vdpp_reset(struct vdpp_dev *vdpp)
+ {
++	struct iommu_group *group = iommu_group_get(vdpp->dev);
+ 	u32 status;
+ 
++	if (group && vdpp->empty_domain && !iommu_attach_group(vdpp->empty_domain, group))
++		iommu_detach_group(vdpp->empty_domain, group);
++	iommu_group_put(group);
++
+ 	writel(VDPP_ACLK_SRESET_P, vdpp->base + VDPP_CONFIG0);
+-	if (!readl_poll_timeout_atomic(vdpp->base + VDPP_STATUS, status,
+-				       status & VDPP_ARST_FINISH_DONE, 0,
+-				       VDPP_RESET_TIMEOUT_US))
+-		return;
++	if (readl_poll_timeout(vdpp->base + VDPP_STATUS, status, status & VDPP_ARST_FINISH_DONE,
++			       0, VDPP_RESET_TIMEOUT_US))
++		dev_err(vdpp->dev, "soft reset timed out\n");
++}
++
++static void vdpp_job_finish(struct vdpp_dev *vdpp, struct vdpp_ctx *ctx,
++			    enum vb2_buffer_state state)
++{
++	v4l2_m2m_buf_done(v4l2_m2m_dst_buf_remove(ctx->fh.m2m_ctx), state);
++	v4l2_m2m_buf_done(v4l2_m2m_src_buf_remove(ctx->fh.m2m_ctx), state);
++	v4l2_m2m_job_finish(vdpp->m2m_dev, ctx->fh.m2m_ctx);
++}
++
++static void vdpp_watchdog(struct work_struct *work)
++{
++	struct vdpp_dev *vdpp = container_of(to_delayed_work(work), struct vdpp_dev, watchdog);
++	struct vdpp_ctx *ctx = v4l2_m2m_get_curr_priv(vdpp->m2m_dev);
+ 
+-	dev_warn(vdpp->dev, "soft reset timed out, resetting through the CRU\n");
+-	reset_control_assert(vdpp->rstc);
+-	udelay(VDPP_CRU_RESET_US);
+-	reset_control_deassert(vdpp->rstc);
++	if (!ctx)
++		return;
++	dev_err(vdpp->dev, "job failed or timed out, resetting\n");
++	vdpp_reset(vdpp);
++	vdpp_job_finish(vdpp, ctx, VB2_BUF_STATE_ERROR);
+ }
+ 
+ static irqreturn_t vdpp_irq(int irq, void *data)
+ {
+ 	struct vdpp_dev *vdpp = data;
+-	enum vb2_buffer_state state = VB2_BUF_STATE_DONE;
+ 	struct vdpp_ctx *ctx;
+ 	u32 status;
+ 
+@@ -231,15 +261,18 @@ static irqreturn_t vdpp_irq(int irq, void *data)
+ 		goto handled;
+ 	}
+ 
++	/* past its time the watchdog has the job */
++	if (!cancel_delayed_work(&vdpp->watchdog))
++		goto handled;
++
++	/* the reset sleeps: the watchdog ends a failed job */
+ 	if (status & VDPP_INT_ERRORS) {
+ 		dev_err(vdpp->dev, "job failed, status %#x\n", status);
+-		state = VB2_BUF_STATE_ERROR;
+-		vdpp_reset(vdpp);
++		schedule_delayed_work(&vdpp->watchdog, 0);
++		goto handled;
+ 	}
+ 
+-	v4l2_m2m_buf_done(v4l2_m2m_dst_buf_remove(ctx->fh.m2m_ctx), state);
+-	v4l2_m2m_buf_done(v4l2_m2m_src_buf_remove(ctx->fh.m2m_ctx), state);
+-	v4l2_m2m_job_finish(vdpp->m2m_dev, ctx->fh.m2m_ctx);
++	vdpp_job_finish(vdpp, ctx, VB2_BUF_STATE_DONE);
+ 
+ handled:
+ 	pm_runtime_put(vdpp->dev);
+@@ -660,6 +693,11 @@ static const struct v4l2_m2m_ops vdpp_m2m_ops = {
+ 	.device_run	= vdpp_device_run,
+ };
+ 
++static void vdpp_free_domain(void *domain)
++{
++	iommu_domain_free(domain);
++}
++
+ static int vdpp_probe(struct platform_device *pdev)
+ {
+ 	struct device *dev = &pdev->dev;
+@@ -693,6 +731,15 @@ static int vdpp_probe(struct platform_device *pdev)
+ 	if (irq < 0)
+ 		return irq;
+ 
++	INIT_DELAYED_WORK(&vdpp->watchdog, vdpp_watchdog);
++	if (iommu_get_domain_for_dev(dev)) {
++		vdpp->empty_domain = iommu_paging_domain_alloc(dev);
++		if (IS_ERR(vdpp->empty_domain))
++			vdpp->empty_domain = NULL;
++		else if (devm_add_action_or_reset(dev, vdpp_free_domain, vdpp->empty_domain))
++			return -ENOMEM;
++	}
++
+ 	ret = devm_request_irq(dev, irq, vdpp_irq, IRQF_SHARED, dev_name(dev), vdpp);
+ 	if (ret)
+ 		return dev_err_probe(dev, ret, "failed to request IRQ\n");
+@@ -734,6 +781,7 @@ static void vdpp_remove(struct platform_device *pdev)
+ 	struct vdpp_dev *vdpp = platform_get_drvdata(pdev);
+ 
+ 	video_unregister_device(&vdpp->vfd);
++	cancel_delayed_work_sync(&vdpp->watchdog);
+ 	v4l2_m2m_release(vdpp->m2m_dev);
+ 	v4l2_device_unregister(&vdpp->v4l2_dev);
+ 	pm_runtime_disable(&pdev->dev);

@@ -1,0 +1,555 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] crypto: rockchip: rk2 - Add GCM for AES and SM4
+
+The crypto v2 engine computes GCM itself: it takes the associated data
+and the text as one DMA list of two items, the associated data first and
+marked as such, builds the counter from the 12-byte IV, and leaves the
+tag in its tag registers. Rockchip's kernel drives gcm(aes) and gcm(sm4)
+this way; the engine's version register offers the mode as bit 8.
+
+Copy a request's associated data and text into one coherent buffer, run
+that list, and copy the text and the tag back, checking the tag on
+decryption. A request without associated data or text, or larger than
+the buffer, goes to the software fallback, as Rockchip's kernel sends it.
+AES ranks under the CPU's GCM and SM4 over the generic one, as the
+driver ranks its other modes.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+  drivers/crypto/Kconfig                    |   2 +
+  drivers/crypto/rockchip/Makefile          |   3 +-
+  drivers/crypto/rockchip/rk2_crypto.c      |  69 ++++++--
+  drivers/crypto/rockchip/rk2_crypto.h      |  34 ++++
+  drivers/crypto/rockchip/rk2_crypto_aead.c | 268 ++++++++++++++++++++++++++++++
+  5 files changed, 362 insertions(+), 14 deletions(-)
+
+diff --git a/drivers/crypto/Kconfig b/drivers/crypto/Kconfig
+index 08c97508d..1e9eca725 100644
+--- a/drivers/crypto/Kconfig
++++ b/drivers/crypto/Kconfig
+@@ -689,7 +689,9 @@ config CRYPTO_DEV_ROCKCHIP2
+ 	select CRYPTO_AES
+ 	select CRYPTO_CBC
+ 	select CRYPTO_ECB
++	select CRYPTO_AEAD
+ 	select CRYPTO_ENGINE
++	select CRYPTO_GCM
+ 	select CRYPTO_HASH
+ 	select CRYPTO_MD5
+ 	select CRYPTO_SHA1
+diff --git a/drivers/crypto/rockchip/Makefile b/drivers/crypto/rockchip/Makefile
+index ea946ba0d..0be9b8a17 100644
+--- a/drivers/crypto/rockchip/Makefile
++++ b/drivers/crypto/rockchip/Makefile
+@@ -7,4 +7,5 @@ rk_crypto-objs := rk3288_crypto.o \
+ obj-$(CONFIG_CRYPTO_DEV_ROCKCHIP2) += rk_crypto2.o
+ rk_crypto2-objs := rk2_crypto.o \
+ 		   rk2_crypto_skcipher.o \
+-		   rk2_crypto_ahash.o
++		   rk2_crypto_ahash.o \
++		   rk2_crypto_aead.o
+diff --git a/drivers/crypto/rockchip/rk2_crypto.c b/drivers/crypto/rockchip/rk2_crypto.c
+index bc15b3b2b..feaaae68e 100644
+--- a/drivers/crypto/rockchip/rk2_crypto.c
++++ b/drivers/crypto/rockchip/rk2_crypto.c
+@@ -8,6 +8,7 @@
+ 
+ #include "rk2_crypto.h"
+ #include <crypto/des.h>
++#include <crypto/gcm.h>
+ #include <crypto/sm4.h>
+ #include <linux/clk.h>
+ #include <linux/crypto.h>
+@@ -244,7 +245,33 @@ static irqreturn_t rk2_crypto_irq_handle(int irq, void *dev_id)
+ 		     SM4_KEY_SIZE, SM4_KEY_SIZE, SM4_BLOCK_SIZE, SM4_BLOCK_SIZE,		\
+ 		     rk2_sm4_setkey)
+ 
++/* GCM, the engine computing the tag; AES's under the CPU's instructions, SM4's over its C */
++#define RK2_GCM(cipher, name, driver, prio) {					\
++	.type = CRYPTO_ALG_TYPE_AEAD,						\
++	.rk2_mode = (cipher) | RK2_CRYPTO_GCM,					\
++	.alg.aead.base = {							\
++		.base.cra_name = name,						\
++		.base.cra_driver_name = driver,					\
++		.base.cra_priority = prio,					\
++		.base.cra_flags = CRYPTO_ALG_ASYNC | CRYPTO_ALG_NEED_FALLBACK,	\
++		.base.cra_blocksize = 1,					\
++		.base.cra_ctxsize = sizeof(struct rk2_aead_ctx),		\
++		.base.cra_module = THIS_MODULE,					\
++		.init = rk2_aead_tfm_init,					\
++		.exit = rk2_aead_tfm_exit,					\
++		.setkey = rk2_aead_setkey,					\
++		.setauthsize = rk2_aead_setauthsize,				\
++		.encrypt = rk2_aead_encrypt,					\
++		.decrypt = rk2_aead_decrypt,					\
++		.ivsize = GCM_AES_IV_SIZE,					\
++		.maxauthsize = AES_BLOCK_SIZE,					\
++	},									\
++	.alg.aead.op.do_one_request = rk2_aead_run,				\
++}
++
+ static const struct rk2_crypto_template rk2_crypto_algs_template[] = {
++	RK2_GCM(RK2_CRYPTO_AES, "gcm(aes)", "gcm-aes-rk2", RK2_PRIORITY_BELOW_CPU),
++	RK2_GCM(RK2_CRYPTO_SM4, "gcm(sm4)", "gcm-sm4-rk2", RK2_PRIORITY),
+ 	RK2_HMAC(RK2_CRYPTO_MD5, "hmac(md5)", "rk2-hmac-md5", MD5_DIGEST_SIZE,
+ 		 struct md5_state, MD5_HMAC_BLOCK_SIZE),
+ 	RK2_HMAC(RK2_CRYPTO_SHA1, "hmac(sha1)", "rk2-hmac-sha1", SHA1_DIGEST_SIZE,
+@@ -711,7 +738,7 @@ static bool rk2_crypto_offered(struct rk2_crypto_dev *rkc,
+ 	u32 hash = readl(rkc->reg + CRYPTO_HASH_VERSION);
+ 
+ 	/* a cipher's version register has a bit for each mode, at the mode's code */
+-	if (t->type == CRYPTO_ALG_TYPE_SKCIPHER) {
++	if (t->type == CRYPTO_ALG_TYPE_SKCIPHER || t->type == CRYPTO_ALG_TYPE_AEAD) {
+ 		u32 cipher = t->rk2_mode & RK2_CRYPTO_CIPHER_MASK;
+ 		u32 version = readl(rkc->reg + (cipher == RK2_CRYPTO_AES ? CRYPTO_AES_VERSION :
+ 						cipher == RK2_CRYPTO_SM4 ? CRYPTO_SM4_VERSION :
+@@ -763,6 +790,21 @@ static void rk2_crypto_keep_offered(struct rk2_crypto_dev *rkc)
+ 	rkc->num_algs = n;
+ }
+ 
++static void rk2_crypto_unregister_one(struct rk2_crypto_template *t)
++{
++	switch (t->type) {
++	case CRYPTO_ALG_TYPE_SKCIPHER:
++		crypto_engine_unregister_skcipher(&t->alg.skcipher);
++		break;
++	case CRYPTO_ALG_TYPE_AHASH:
++		crypto_engine_unregister_ahash(&t->alg.hash);
++		break;
++	case CRYPTO_ALG_TYPE_AEAD:
++		crypto_engine_unregister_aead(&t->alg.aead);
++		break;
++	}
++}
++
+ static int rk2_crypto_register(struct rk2_crypto_dev *rkc)
+ {
+ 	int i, k, err = 0;
+@@ -776,6 +818,9 @@ static int rk2_crypto_register(struct rk2_crypto_dev *rkc)
+ 		case CRYPTO_ALG_TYPE_AHASH:
+ 			err = crypto_engine_register_ahash(&rkc->algs[i].alg.hash);
+ 			break;
++		case CRYPTO_ALG_TYPE_AEAD:
++			err = crypto_engine_register_aead(&rkc->algs[i].alg.aead);
++			break;
+ 		}
+ 		if (err)
+ 			goto err_cipher_algs;
+@@ -783,12 +828,8 @@ static int rk2_crypto_register(struct rk2_crypto_dev *rkc)
+ 	return 0;
+ 
+  err_cipher_algs:
+-	for (k = 0; k < i; k++) {
+-		if (rkc->algs[k].type == CRYPTO_ALG_TYPE_SKCIPHER)
+-			crypto_engine_unregister_skcipher(&rkc->algs[k].alg.skcipher);
+-		else
+-			crypto_engine_unregister_ahash(&rkc->algs[k].alg.hash);
+-	}
++	for (k = 0; k < i; k++)
++		rk2_crypto_unregister_one(&rkc->algs[k]);
+ 	return err;
+ }
+ 
+@@ -796,12 +837,8 @@ static void rk2_crypto_unregister(struct rk2_crypto_dev *rkc)
+ {
+ 	int i;
+ 
+-	for (i = 0; i < rkc->num_algs; i++) {
+-		if (rkc->algs[i].type == CRYPTO_ALG_TYPE_SKCIPHER)
+-			crypto_engine_unregister_skcipher(&rkc->algs[i].alg.skcipher);
+-		else
+-			crypto_engine_unregister_ahash(&rkc->algs[i].alg.hash);
+-	}
++	for (i = 0; i < rkc->num_algs; i++)
++		rk2_crypto_unregister_one(&rkc->algs[i]);
+ }
+ 
+ static const struct of_device_id crypto_of_id_table[] = {
+@@ -849,6 +886,12 @@ static int rk2_crypto_probe(struct platform_device *pdev)
+ 	if (!rkc->tl)
+ 		return -ENOMEM;
+ 
++	rkc->aead_buf = dmam_alloc_coherent(dev, RK2_AEAD_BUF_SIZE, &rkc->aead_phy, GFP_KERNEL);
++	if (!rkc->aead_buf) {
++		err = -ENOMEM;
++		goto err_dma;
++	}
++
+ 	rkc->reg = devm_platform_ioremap_resource(pdev, 0);
+ 	if (IS_ERR(rkc->reg)) {
+ 		err = dev_err_probe(dev, PTR_ERR(rkc->reg), "Fail to get resources\n");
+diff --git a/drivers/crypto/rockchip/rk2_crypto.h b/drivers/crypto/rockchip/rk2_crypto.h
+index 58c6257ba..44670f82a 100644
+--- a/drivers/crypto/rockchip/rk2_crypto.h
++++ b/drivers/crypto/rockchip/rk2_crypto.h
+@@ -11,6 +11,7 @@
+ #include <linux/bitfield.h>
+ #include <crypto/aes.h>
+ #include <crypto/engine.h>
++#include <crypto/internal/aead.h>
+ #include <crypto/internal/hash.h>
+ #include <crypto/internal/skcipher.h>
+ #include <crypto/md5.h>
+@@ -23,6 +24,7 @@
+ #include <linux/device.h>
+ #include <linux/io.h>
+ #include <linux/reset.h>
++#include <linux/sizes.h>
+ #include <linux/types.h>
+ 
+ #define RK2_CRYPTO_CLK_CTL		0x0000
+@@ -80,6 +82,7 @@
+ #define RK2_CRYPTO_MODE_CTR		(3 << 4)
+ #define RK2_CRYPTO_MODE_MASK		(0xf << 4)
+ #define RK2_CRYPTO_XTS			(6 << 4)
++#define RK2_CRYPTO_GCM			(8 << 4)
+ 
+ #define RK2_CRYPTO_HASH_CTL		0x0048
+ #define RK2_CRYPTO_HW_PAD		BIT(2)
+@@ -118,6 +121,10 @@
+ #define RK2_CRYPTO_CH4_KEY0		0x01c0
+ 
+ #define RK2_CRYPTO_CH0_PC_LEN_0		0x0280
++#define RK2_CRYPTO_CH0_AAD_LEN_0	0x02C0
++#define RK2_CRYPTO_CH0_TAG_0		0x0320
++#define RK2_CRYPTO_TAG_VALID		0x03E0
++#define RK2_CRYPTO_CH0_TAG_VALID	BIT(0)
+ 
+ #define RK2_CRYPTO_CH0_IV_LEN		0x0300
+ 
+@@ -167,6 +174,7 @@
+ #define RK2_LLI_DMA_CTRL_LIST_INT	BIT(8)
+ #define RK2_LLI_DMA_CTRL_LAST		BIT(0)
+ 
++#define RK2_LLI_STRING_AAD		BIT(3)
+ #define RK2_LLI_STRING_LAST		BIT(2)
+ #define RK2_LLI_STRING_FIRST		BIT(1)
+ #define RK2_LLI_CIPHER_START		BIT(0)
+@@ -204,6 +212,9 @@ struct rk2_crypto_dev {
+ 	int status;
+ 	struct rk2_crypto_lli *tl;
+ 	dma_addr_t t_phy;
++	/* a GCM request's associated data and text, which the engine reads and writes in place */
++	u8 *aead_buf;
++	dma_addr_t aead_phy;
+ 	struct rk2_crypto_template *algs;
+ 	int num_algs;
+ #ifdef CONFIG_CRYPTO_DEV_ROCKCHIP2_DEBUG
+@@ -235,6 +246,21 @@ struct rk2_cipher_ctx {
+ 	struct crypto_skcipher *fallback_tfm;
+ };
+ 
++/* the largest GCM request the engine takes, its data and text; a larger one is software's */
++#define RK2_AEAD_BUF_SIZE		SZ_64K
++
++struct rk2_aead_ctx {
++	unsigned int keylen;
++	u8 key[AES_MAX_KEY_SIZE];
++	struct crypto_aead *fallback;
++};
++
++struct rk2_aead_rctx {
++	u32 mode;
++	/* must be last, see __ctx placement */
++	struct aead_request fallback_req;
++};
++
+ struct rk2_cipher_rctx {
+ 	struct rk2_crypto_dev *dev;
+ 	u8 backup_iv[AES_BLOCK_SIZE];
+@@ -250,6 +276,7 @@ struct rk2_crypto_template {
+ 	union {
+ 		struct skcipher_engine_alg skcipher;
+ 		struct ahash_engine_alg hash;
++		struct aead_engine_alg aead;
+ 	} alg;
+ 	atomic_long_t stat_req;
+ 	atomic_long_t stat_fb;
+@@ -262,6 +289,13 @@ struct rk2_crypto_template {
+ void rk2_crypto_soft_reset(struct rk2_crypto_dev *rkc);
+ int rk2_cipher_run(struct crypto_engine *engine, void *async_req);
+ int rk2_hash_run(struct crypto_engine *engine, void *breq);
++int rk2_aead_run(struct crypto_engine *engine, void *async_req);
++int rk2_aead_tfm_init(struct crypto_aead *tfm);
++void rk2_aead_tfm_exit(struct crypto_aead *tfm);
++int rk2_aead_setkey(struct crypto_aead *tfm, const u8 *key, unsigned int keylen);
++int rk2_aead_setauthsize(struct crypto_aead *tfm, unsigned int authsize);
++int rk2_aead_encrypt(struct aead_request *req);
++int rk2_aead_decrypt(struct aead_request *req);
+ 
+ int rk2_cipher_tfm_init(struct crypto_skcipher *tfm);
+ void rk2_cipher_tfm_exit(struct crypto_skcipher *tfm);
+diff --git a/drivers/crypto/rockchip/rk2_crypto_aead.c b/drivers/crypto/rockchip/rk2_crypto_aead.c
+new file mode 100644
+index 000000000..ccfad729a
+--- /dev/null
++++ b/drivers/crypto/rockchip/rk2_crypto_aead.c
+@@ -0,0 +1,268 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * GCM on the Rockchip crypto v2 engine: AES and SM4.
++ *
++ * The engine takes a request's associated data and its text as one list of two items, the
++ * associated data first, and computes the tag itself from the 12-byte IV. Both are copied into
++ * one buffer the engine reads and writes, so a request is one list whatever its scatterlists.
++ */
++
++#include <crypto/aes.h>
++#include <crypto/gcm.h>
++#include <crypto/internal/aead.h>
++#include <crypto/scatterwalk.h>
++#include <crypto/sm4.h>
++#include <linux/iopoll.h>
++#include <linux/pm_runtime.h>
++#include <linux/unaligned.h>
++
++#include "rk2_crypto.h"
++
++/* the text's offset in the buffer, past the associated data, as the engine's DMA aligns */
++#define RK2_AEAD_ALIGN		64
++#define RK2_TAG_POLL_US		50000
++
++static bool rk2_aead_need_fallback(struct aead_request *req, unsigned int text)
++{
++	return !req->assoclen || !text ||
++	       ALIGN(req->assoclen, RK2_AEAD_ALIGN) + text > RK2_AEAD_BUF_SIZE;
++}
++
++static int rk2_aead_fallback(struct aead_request *req, bool dec)
++{
++	struct crypto_aead *tfm = crypto_aead_reqtfm(req);
++	struct rk2_aead_ctx *ctx = crypto_aead_ctx(tfm);
++	struct rk2_aead_rctx *rctx = aead_request_ctx(req);
++	struct rk2_crypto_template *algt =
++		container_of(crypto_aead_alg(tfm), struct rk2_crypto_template, alg.aead.base);
++
++	atomic_long_inc(&algt->stat_fb);
++	aead_request_set_tfm(&rctx->fallback_req, ctx->fallback);
++	aead_request_set_callback(&rctx->fallback_req, req->base.flags, req->base.complete,
++				  req->base.data);
++	aead_request_set_crypt(&rctx->fallback_req, req->src, req->dst, req->cryptlen, req->iv);
++	aead_request_set_ad(&rctx->fallback_req, req->assoclen);
++
++	return dec ? crypto_aead_decrypt(&rctx->fallback_req) :
++		     crypto_aead_encrypt(&rctx->fallback_req);
++}
++
++static int rk2_aead_crypt(struct aead_request *req, bool dec)
++{
++	struct crypto_aead *tfm = crypto_aead_reqtfm(req);
++	struct rk2_aead_rctx *rctx = aead_request_ctx(req);
++	struct rk2_crypto_template *algt =
++		container_of(crypto_aead_alg(tfm), struct rk2_crypto_template, alg.aead.base);
++	unsigned int authsize = crypto_aead_authsize(tfm);
++	unsigned int text;
++
++	if (dec && req->cryptlen < authsize)
++		return -EINVAL;
++	text = req->cryptlen - (dec ? authsize : 0);
++	if (rk2_aead_need_fallback(req, text))
++		return rk2_aead_fallback(req, dec);
++	if (!algt->dev)
++		return -ENODEV;
++
++	rctx->mode = algt->rk2_mode | (dec ? RK2_CRYPTO_DEC : 0);
++	return crypto_transfer_aead_request_to_engine(algt->dev->engine, req);
++}
++
++int rk2_aead_encrypt(struct aead_request *req)
++{
++	return rk2_aead_crypt(req, false);
++}
++
++int rk2_aead_decrypt(struct aead_request *req)
++{
++	return rk2_aead_crypt(req, true);
++}
++
++int rk2_aead_setkey(struct crypto_aead *tfm, const u8 *key, unsigned int keylen)
++{
++	struct rk2_aead_ctx *ctx = crypto_aead_ctx(tfm);
++	struct rk2_crypto_template *algt =
++		container_of(crypto_aead_alg(tfm), struct rk2_crypto_template, alg.aead.base);
++	int err;
++
++	if ((algt->rk2_mode & RK2_CRYPTO_CIPHER_MASK) == RK2_CRYPTO_AES)
++		err = aes_check_keylen(keylen);
++	else
++		err = keylen == SM4_KEY_SIZE ? 0 : -EINVAL;
++	if (err)
++		return err;
++
++	memcpy(ctx->key, key, keylen);
++	ctx->keylen = keylen;
++	return crypto_aead_setkey(ctx->fallback, key, keylen);
++}
++
++int rk2_aead_setauthsize(struct crypto_aead *tfm, unsigned int authsize)
++{
++	struct rk2_aead_ctx *ctx = crypto_aead_ctx(tfm);
++	int err = crypto_gcm_check_authsize(authsize);
++
++	return err ?: crypto_aead_setauthsize(ctx->fallback, authsize);
++}
++
++static u32 rk2_aead_key_bits(unsigned int keylen)
++{
++	switch (keylen) {
++	case AES_KEYSIZE_192:
++		return RK2_CRYPTO_AES_192BIT_key;
++	case AES_KEYSIZE_256:
++		return RK2_CRYPTO_AES_256BIT_key;
++	default:
++		return RK2_CRYPTO_AES_128BIT_key;
++	}
++}
++
++/* The engine's list: the associated data, then the text, written back where it was read */
++static void rk2_aead_list(struct rk2_crypto_dev *rkc, unsigned int assoclen, unsigned int text)
++{
++	struct rk2_crypto_lli *aad = &rkc->tl[0], *pc = &rkc->tl[1];
++	dma_addr_t at = rkc->aead_phy + ALIGN(assoclen, RK2_AEAD_ALIGN);
++
++	memset(aad, 0, sizeof(*aad) * 2);
++	aad->src_addr = cpu_to_le32(lower_32_bits(rkc->aead_phy));
++	aad->src_len = cpu_to_le32(assoclen);
++	aad->user = cpu_to_le32(RK2_LLI_CIPHER_START | RK2_LLI_STRING_FIRST |
++				RK2_LLI_STRING_LAST | RK2_LLI_STRING_AAD);
++	aad->next = cpu_to_le32(lower_32_bits(rkc->t_phy + sizeof(*aad)));
++
++	pc->src_addr = cpu_to_le32(lower_32_bits(at));
++	pc->src_len = cpu_to_le32(text);
++	pc->dst_addr = cpu_to_le32(lower_32_bits(at));
++	pc->dst_len = cpu_to_le32(text);
++	pc->user = cpu_to_le32(RK2_LLI_STRING_FIRST | RK2_LLI_STRING_LAST);
++	pc->dma_ctrl = cpu_to_le32(RK2_LLI_DMA_CTRL_DST_INT | RK2_LLI_DMA_CTRL_LAST |
++				   RK2_LLI_DMA_CTRL_LIST_INT);
++	pc->next = cpu_to_le32(1);
++}
++
++static int rk2_aead_engine(struct rk2_crypto_dev *rkc, struct aead_request *req, u32 mode,
++			   unsigned int text, u8 *tag)
++{
++	struct rk2_aead_ctx *ctx = crypto_aead_ctx(crypto_aead_reqtfm(req));
++	u32 valid;
++	int err, i;
++
++	if ((mode & RK2_CRYPTO_CIPHER_MASK) == RK2_CRYPTO_AES)
++		mode |= rk2_aead_key_bits(ctx->keylen);
++	writel(mode | RK2_CRYPTO_ENABLE | 0xffff0000, rkc->reg + RK2_CRYPTO_BC_CTL);
++
++	for (i = 0; i < ctx->keylen / 4; i++)
++		writel(get_unaligned_be32(ctx->key + i * 4), rkc->reg + RK2_CRYPTO_KEY0 + i * 4);
++	for (i = 0; i < GCM_AES_IV_SIZE / 4; i++)
++		writel(get_unaligned_be32(req->iv + i * 4), rkc->reg + RK2_CRYPTO_CH0_IV_0 + i * 4);
++	writel(GCM_AES_IV_SIZE, rkc->reg + RK2_CRYPTO_CH0_IV_LEN);
++	writel(text, rkc->reg + RK2_CRYPTO_CH0_PC_LEN_0);
++	writel(0, rkc->reg + RK2_CRYPTO_CH0_PC_LEN_0 + 4);
++	writel(req->assoclen, rkc->reg + RK2_CRYPTO_CH0_AAD_LEN_0);
++	writel(0, rkc->reg + RK2_CRYPTO_CH0_AAD_LEN_0 + 4);
++
++	rk2_aead_list(rkc, req->assoclen, text);
++	writel(RK2_CRYPTO_DMA_INT_ALL_MASK, rkc->reg + RK2_CRYPTO_DMA_INT_ST);
++	writel(RK2_CRYPTO_DMA_INT_ENABLE_ALL, rkc->reg + RK2_CRYPTO_DMA_INT_EN);
++	writel(lower_32_bits(rkc->t_phy), rkc->reg + RK2_CRYPTO_DMA_LLI_ADDR);
++
++	reinit_completion(&rkc->complete);
++	rkc->status = 0;
++	writel(RK2_CRYPTO_DMA_CTL_START | (RK2_CRYPTO_DMA_CTL_START << 16),
++	       rkc->reg + RK2_CRYPTO_DMA_CTL);
++
++	if (!wait_for_completion_timeout(&rkc->complete, msecs_to_jiffies(2000))) {
++		dev_err(rkc->dev, "DMA timeout\n");
++		rk2_crypto_soft_reset(rkc);
++		synchronize_irq(rkc->irq);
++		return -ETIMEDOUT;
++	}
++	if (!rkc->status) {
++		rk2_crypto_soft_reset(rkc);
++		return -EIO;
++	}
++
++	err = readl_poll_timeout(rkc->reg + RK2_CRYPTO_TAG_VALID, valid,
++				 valid & RK2_CRYPTO_CH0_TAG_VALID, 1, RK2_TAG_POLL_US);
++	if (err) {
++		rk2_crypto_soft_reset(rkc);
++		return err;
++	}
++	for (i = 0; i < AES_BLOCK_SIZE / 4; i++)
++		put_unaligned_be32(readl(rkc->reg + RK2_CRYPTO_CH0_TAG_0 + i * 4), tag + i * 4);
++
++	return 0;
++}
++
++int rk2_aead_run(struct crypto_engine *engine, void *async_req)
++{
++	struct aead_request *req = container_of(async_req, struct aead_request, base);
++	struct crypto_aead *tfm = crypto_aead_reqtfm(req);
++	struct rk2_aead_rctx *rctx = aead_request_ctx(req);
++	struct rk2_crypto_template *algt =
++		container_of(crypto_aead_alg(tfm), struct rk2_crypto_template, alg.aead.base);
++	struct rk2_crypto_dev *rkc = algt->dev;
++	unsigned int authsize = crypto_aead_authsize(tfm);
++	bool dec = rctx->mode & RK2_CRYPTO_DEC;
++	unsigned int text = req->cryptlen - (dec ? authsize : 0);
++	u8 *at = rkc->aead_buf + ALIGN(req->assoclen, RK2_AEAD_ALIGN);
++	u8 tag[AES_BLOCK_SIZE], sent[AES_BLOCK_SIZE];
++	int err;
++
++	scatterwalk_map_and_copy(rkc->aead_buf, req->src, 0, req->assoclen, 0);
++	scatterwalk_map_and_copy(at, req->src, req->assoclen, text, 0);
++
++	err = pm_runtime_resume_and_get(rkc->dev);
++	if (err)
++		goto finalize;
++	atomic_long_inc(&algt->stat_req);
++	atomic_long_inc(&rkc->nreq);
++	err = rk2_aead_engine(rkc, req, rctx->mode, text, tag);
++	writel(0xffff0000, rkc->reg + RK2_CRYPTO_BC_CTL);
++	pm_runtime_mark_last_busy(rkc->dev);
++	pm_runtime_put_autosuspend(rkc->dev);
++	if (err)
++		goto finalize;
++
++	if (dec) {
++		scatterwalk_map_and_copy(sent, req->src, req->assoclen + text, authsize, 0);
++		if (crypto_memneq(sent, tag, authsize)) {
++			err = -EBADMSG;
++			goto finalize;
++		}
++	}
++	if (req->src != req->dst)
++		scatterwalk_map_and_copy(rkc->aead_buf, req->dst, 0, req->assoclen, 1);
++	scatterwalk_map_and_copy(at, req->dst, req->assoclen, text, 1);
++	if (!dec)
++		scatterwalk_map_and_copy(tag, req->dst, req->assoclen + text, authsize, 1);
++
++finalize:
++	memzero_explicit(tag, sizeof(tag));
++	local_bh_disable();
++	crypto_finalize_aead_request(engine, req, err);
++	local_bh_enable();
++	return 0;
++}
++
++int rk2_aead_tfm_init(struct crypto_aead *tfm)
++{
++	struct rk2_aead_ctx *ctx = crypto_aead_ctx(tfm);
++
++	ctx->fallback = crypto_alloc_aead(crypto_tfm_alg_name(&tfm->base), 0,
++					  CRYPTO_ALG_NEED_FALLBACK);
++	if (IS_ERR(ctx->fallback))
++		return PTR_ERR(ctx->fallback);
++
++	crypto_aead_set_reqsize(tfm, sizeof(struct rk2_aead_rctx) +
++				crypto_aead_reqsize(ctx->fallback));
++	return 0;
++}
++
++void rk2_aead_tfm_exit(struct crypto_aead *tfm)
++{
++	struct rk2_aead_ctx *ctx = crypto_aead_ctx(tfm);
++
++	memzero_explicit(ctx->key, sizeof(ctx->key));
++	crypto_free_aead(ctx->fallback);
++}

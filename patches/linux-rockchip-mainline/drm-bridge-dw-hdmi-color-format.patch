@@ -1,0 +1,132 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] drm/bridge: dw-hdmi: Take the color format userspace asks for
+
+A platform letting dw-hdmi choose its output format got RGB, or YCbCr
+4:2:0 where RGB does not fit, with no way to ask for YCbCr 4:4:4 or
+4:2:2. Attach the "color format" property there, and offer 4:4:4 and
+4:2:2, at 10 bits where max bpc and the sink allow, when it asks for
+them and the sink takes them; "AUTO" keeps RGB, then 4:2:0.
+
+Such a platform sends 4:4:4, as the RK3528's VOP2 does to HDMI, so ask
+it for that and let the controller's colour space converter decimate it
+to 4:2:2.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c b/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
+--- a/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
++++ b/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
+@@ -2593,6 +2593,7 @@
+ 	struct drm_connector *connector = &hdmi->connector;
+ 	struct cec_connector_info conn_info;
+ 	struct cec_notifier *notifier;
++	unsigned long formats;
+ 
+ 	if (hdmi->version >= 0x200a)
+ 		connector->ycbcr_420_allowed =
+@@ -2618,6 +2619,15 @@
+ 
+ 	drm_connector_attach_max_bpc_property(connector, 8, 16);
+ 
++	if (hdmi->plat_data->select_bus_format) {
++		formats = BIT(DRM_OUTPUT_COLOR_FORMAT_RGB444) |
++			  BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR444) |
++			  BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR422);
++		if (connector->ycbcr_420_allowed)
++			formats |= BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR420);
++		drm_connector_attach_color_format_property(connector, formats);
++	}
++
+ 	if (hdmi->version >= 0x200a && hdmi->plat_data->use_drm_infoframe) {
+ 		drm_connector_attach_hdr_output_metadata_property(connector);
+ 		if (!drm_mode_create_hdmi_colorspace_property(connector, 0))
+@@ -2668,31 +2678,48 @@
+ /*
+  * The formats a sole bridge offers, best first: 10 bits where max bpc and
+  * the sink allow, then 8; at each depth RGB, then YCbCr 4:2:0 where the
+- * sink takes the mode so, each only at a TMDS rate the sink takes.
++ * sink takes the mode so, each only at a TMDS rate the sink takes. YCbCr
++ * 4:4:4 and 4:2:2 only when asked for, so that "AUTO" stays RGB, then 4:2:0.
+  */
+ static unsigned int dw_hdmi_select_bus_fmts(const struct drm_connector *conn,
+ 					    const struct drm_display_mode *mode,
+-					    u8 max_bpc, u32 *fmts)
++					    u8 max_bpc,
++					    enum drm_connector_color_format asked,
++					    u32 *fmts)
+ {
+ 	const struct drm_display_info *info = &conn->display_info;
+ 	unsigned int max_tmds = info->max_tmds_clock ?: 340000;
++	bool deep = max_bpc >= 10 && info->bpc >= 10;
+ 	bool rgb = !drm_mode_is_420_only(info, mode);
+ 	bool y420 = conn->ycbcr_420_allowed &&
+ 		    (drm_mode_is_420_only(info, mode) ||
+ 		     drm_mode_is_420_also(info, mode));
++	bool y444 = rgb && asked == DRM_CONNECTOR_COLOR_FORMAT_YCBCR444 &&
++		    (info->color_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR444));
++	bool y422 = rgb && asked == DRM_CONNECTOR_COLOR_FORMAT_YCBCR422 &&
++		    (info->color_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR422));
+ 	unsigned int i = 0;
+ 
+-	if (max_bpc >= 10 && info->bpc >= 10) {
++	if (deep) {
+ 		if (rgb && mode->clock * 10 / 8 <= max_tmds)
+ 			fmts[i++] = MEDIA_BUS_FMT_RGB101010_1X30;
+ 		if (y420 && (info->hdmi.y420_dc_modes & DRM_EDID_YCBCR420_DC_30) &&
+ 		    mode->clock / 2 * 10 / 8 <= max_tmds)
+ 			fmts[i++] = MEDIA_BUS_FMT_UYYVYY10_0_5X30;
++		if (y444 && mode->clock * 10 / 8 <= max_tmds)
++			fmts[i++] = MEDIA_BUS_FMT_YUV10_1X30;
++		/* 4:2:2 carries up to 12 bits at the pixel clock */
++		if (y422)
++			fmts[i++] = MEDIA_BUS_FMT_UYVY10_1X20;
+ 	}
+ 	if (rgb)
+ 		fmts[i++] = MEDIA_BUS_FMT_RGB888_1X24;
+ 	if (y420)
+ 		fmts[i++] = MEDIA_BUS_FMT_UYYVYY8_0_5X24;
++	if (y444)
++		fmts[i++] = MEDIA_BUS_FMT_YUV8_1X24;
++	if (y422)
++		fmts[i++] = MEDIA_BUS_FMT_UYVY8_1X16;
+ 
+ 	return i;
+ }
+@@ -2725,6 +2752,7 @@
+ 	    list_is_first(&bridge->chain_node, &bridge->encoder->bridge_chain)) {
+ 		if (hdmi->plat_data->select_bus_format) {
+ 			*num_output_fmts = dw_hdmi_select_bus_fmts(conn, mode, max_bpc,
++								   conn_state->color_format,
+ 								   output_fmts);
+ 			return output_fmts;
+ 		}
+@@ -2840,6 +2868,9 @@
+ 					u32 output_fmt,
+ 					unsigned int *num_input_fmts)
+ {
++	struct dw_hdmi *hdmi = bridge->driver_private;
++	/* a platform choosing the format sends 4:4:4; 4:2:2 is decimated here */
++	bool yuv422_in = !hdmi->plat_data->select_bus_format;
+ 	u32 *input_fmts;
+ 	unsigned int i = 0;
+ 
+@@ -2867,7 +2898,8 @@
+ 		input_fmts[i++] = MEDIA_BUS_FMT_RGB888_1X24;
+ 		break;
+ 	case MEDIA_BUS_FMT_UYVY8_1X16:
+-		input_fmts[i++] = MEDIA_BUS_FMT_UYVY8_1X16;
++		if (yuv422_in)
++			input_fmts[i++] = MEDIA_BUS_FMT_UYVY8_1X16;
+ 		input_fmts[i++] = MEDIA_BUS_FMT_YUV8_1X24;
+ 		input_fmts[i++] = MEDIA_BUS_FMT_RGB888_1X24;
+ 		break;
+@@ -2884,7 +2916,8 @@
+ 		input_fmts[i++] = MEDIA_BUS_FMT_RGB101010_1X30;
+ 		break;
+ 	case MEDIA_BUS_FMT_UYVY10_1X20:
+-		input_fmts[i++] = MEDIA_BUS_FMT_UYVY10_1X20;
++		if (yuv422_in)
++			input_fmts[i++] = MEDIA_BUS_FMT_UYVY10_1X20;
+ 		input_fmts[i++] = MEDIA_BUS_FMT_YUV10_1X30;
+ 		input_fmts[i++] = MEDIA_BUS_FMT_RGB101010_1X30;
+ 		break;

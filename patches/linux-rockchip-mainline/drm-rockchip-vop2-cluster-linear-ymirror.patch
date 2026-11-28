@@ -1,0 +1,69 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] drm/rockchip: vop2: Cluster Y mirror of a linear buffer on RK3528 and RK3576
+
+A Cluster window's mirror bits in the AFBC decoder's rotate mode apply
+to an AFBC buffer alone. On the RK3528 and RK3576 the window mirrors a
+linear buffer's Y by bit 21 of its own CTRL0, which the vendor's kernel
+sets for a linear buffer there. Set it, and refuse a linear buffer only
+the X mirror on those SoCs.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
+--- a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
++++ b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
+@@ -1223,6 +1223,13 @@
+ 	}
+ }
+ 
++/* A Cluster window mirrors a linear buffer's Y by its own control, not the AFBC decoder */
++static bool vop2_cluster_linear_ymirror(const struct vop2 *vop2)
++{
++	return vop2->version == VOP_VERSION_RK3528 ||
++	       vop2->version == VOP_VERSION_RK3576;
++}
++
+ static int vop2_plane_atomic_check(struct drm_plane *plane,
+ 				   struct drm_atomic_commit *astate)
+ {
+@@ -1333,7 +1340,8 @@
+ 	}
+ 
+ 	if (vop2_cluster_window(win) && !drm_is_afbc(fb->modifier) &&
+-	    pstate->rotation & (DRM_MODE_REFLECT_X | DRM_MODE_REFLECT_Y)) {
++	    pstate->rotation & (DRM_MODE_REFLECT_X |
++				(vop2_cluster_linear_ymirror(vop2) ? 0 : DRM_MODE_REFLECT_Y))) {
+ 		drm_dbg_kms(vop2->drm,
+ 			    "Cluster windows mirror AFBC buffers only\n");
+ 		return -EINVAL;
+@@ -1624,6 +1632,8 @@
+ 	}
+ 
+ 	vop2_win_write(win, VOP2_WIN_YMIRROR, ymirror);
++	if (vop2_cluster_window(win) && vop2_cluster_linear_ymirror(vop2))
++		vop2_win_write(win, VOP2_WIN_CLUSTER_YMIRROR, ymirror && !afbc_en);
+ 
+ 	if (rotate_90 || rotate_270) {
+ 		act_info = swahw32(act_info);
+diff --git a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.h b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.h
+--- a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.h
++++ b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.h
+@@ -98,6 +98,7 @@
+ 	VOP2_WIN_CSC_MODE,
+ 	VOP2_WIN_XMIRROR,
+ 	VOP2_WIN_YMIRROR,
++	VOP2_WIN_CLUSTER_YMIRROR,
+ 	VOP2_WIN_RB_SWAP,
+ 	VOP2_WIN_UV_SWAP,
+ 	VOP2_WIN_ACT_INFO,
+diff --git a/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c b/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c
+--- a/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c
++++ b/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c
+@@ -476,6 +476,7 @@
+ 	[VOP2_WIN_AFBC_ROTATE_270] = REG_FIELD(RK3568_CLUSTER_WIN_AFBCD_ROTATE_MODE, 1, 1),
+ 	[VOP2_WIN_XMIRROR] = REG_FIELD(RK3568_CLUSTER_WIN_AFBCD_ROTATE_MODE, 2, 2),
+ 	[VOP2_WIN_YMIRROR] = REG_FIELD(RK3568_CLUSTER_WIN_AFBCD_ROTATE_MODE, 3, 3),
++	[VOP2_WIN_CLUSTER_YMIRROR] = REG_FIELD(RK3568_CLUSTER_WIN_CTRL0, 21, 21),
+ 	[VOP2_WIN_COLOR_KEY] = { .reg = 0xffffffff },
+ 	[VOP2_WIN_COLOR_KEY_EN] = { .reg = 0xffffffff },
+ 	[VOP2_WIN_SCALE_CBCR_X] = { .reg = 0xffffffff },

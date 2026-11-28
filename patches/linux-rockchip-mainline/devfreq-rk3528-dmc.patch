@@ -7,8 +7,9 @@ raising an interrupt when it finishes late. Drive it through the
 firmware's own calls: its version, its parameter page, the rates it
 trained, and the rate change, with the lit output's type and line time
 where the display driver reports them, so the change lands in its
-blanking. The table's rows the firmware did not train are disabled, and
-a trained rate between rows takes the next row's voltage. Each rate
+blanking. As the vendor's driver, and so as Android, the table's enabled
+rows take the trained rates in order, each at its row's voltage, and no
+trained rate past the last row is offered. Each rate
 holds the memory controller's supply at or above its row's voltage; on
 the RK3518 that rail is the CPU's too, which may need more. The vendor
 holds the DDR at its top trained rate, so the performance governor is
@@ -19,8 +20,8 @@ Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
  drivers/devfreq/Kconfig      |  15 ++
  drivers/devfreq/Makefile     |   1 +
- drivers/devfreq/rk3528_dmc.c | 453 +++++++++++++++++++++++++++++++++++
- 3 files changed, 469 insertions(+)
+ drivers/devfreq/rk3528_dmc.c | 457 +++++++++++++++++++++++++++++++++++
+ 3 files changed, 473 insertions(+)
 
 diff --git a/drivers/devfreq/Kconfig b/drivers/devfreq/Kconfig
 index c999c4a..ffbf13c 100644
@@ -62,10 +63,9 @@ index 404179d..65dc92d 100644
  
 diff --git a/drivers/devfreq/rk3528_dmc.c b/drivers/devfreq/rk3528_dmc.c
 new file mode 100644
-index 0000000..cebd77e
 --- /dev/null
 +++ b/drivers/devfreq/rk3528_dmc.c
-@@ -0,0 +1,453 @@
+@@ -0,0 +1,457 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * RK3528 DDR frequency scaling: the trusted firmware retrains the DDR at
@@ -208,7 +208,8 @@ index 0000000..cebd77e
 +
 +	reinit_completion(&dmc->done);
 +	res = rk3528_dmc_sip(RK3528_SHARE_PAGE_DDR, RK3528_SIP_DRAM_SET_RATE);
-+	if ((long)res.a1 == RK3528_SIP_RATE_PENDING) {
++	/* the firmware's code is a 32-bit int in a 64-bit register */
++	if ((int)res.a1 == RK3528_SIP_RATE_PENDING) {
 +		enable_irq(dmc->complete_irq);
 +		/* the firmware's interrupt is answered from WFI only */
 +		cpu_latency_qos_update_request(&dmc->qos, 0);
@@ -301,11 +302,18 @@ index 0000000..cebd77e
 + * The firmware lists the rates it trained the DDR at: a listed rate between
 + * the table's rows takes the next row's voltage, and the other rows go.
 + */
++/*
++ * As Rockchip's rockchip_dmcfreq_adjust_opp_table(), and so as Android: the
++ * table's enabled rows, in order, take the rates the firmware trained, in
++ * order, each at its row's voltage; a trained rate past the last enabled row
++ * is not offered, nor a row past the last trained rate.
++ */
 +static int rk3528_dmc_trained_opps(struct rk3528_dmc *dmc)
 +{
-+	unsigned long trained[RK3528_MAX_FREQS], rate, volt;
++	unsigned long trained[RK3528_MAX_FREQS], rows[RK3528_MAX_FREQS], volts[RK3528_MAX_FREQS];
++	unsigned long rate;
 +	struct dev_pm_opp *opp;
-+	u32 count;
++	u32 count, nrows = 0;
 +	int i, ret;
 +
 +	if (rk3528_dmc_sip(RK3528_SHARE_PAGE_DDR, RK3528_SIP_DRAM_GET_FREQ_INFO).a0)
@@ -317,29 +325,25 @@ index 0000000..cebd77e
 +	for (i = 0; i < count; i++)
 +		trained[i] = readl(dmc->params + RK3528_PARAM_FREQ_MHZ + 4 * i) * HZ_PER_MHZ;
 +
-+	for (i = 0; i < count; i++) {
-+		rate = trained[i];
-+		opp = dev_pm_opp_find_freq_ceil(dmc->dev, &rate);
-+		if (IS_ERR(opp)) {
-+			dev_warn(dmc->dev, "no row at or above %lu Hz\n", trained[i]);
-+			continue;
-+		}
-+		volt = dev_pm_opp_get_voltage(opp);
++	for (rate = 0; nrows < RK3528_MAX_FREQS &&
++	     !IS_ERR(opp = dev_pm_opp_find_freq_ceil(dmc->dev, &rate)); rate++) {
++		rows[nrows] = rate;
++		volts[nrows++] = dev_pm_opp_get_voltage(opp);
 +		dev_pm_opp_put(opp);
-+		if (rate == trained[i])
-+			continue;
-+		ret = dev_pm_opp_add(dmc->dev, trained[i], volt);
++	}
++
++	for (i = 0; i < nrows; i++)
++		dev_pm_opp_disable(dmc->dev, rows[i]);
++	for (i = 0; i < min(count, nrows); i++) {
++		ret = dev_pm_opp_add(dmc->dev, trained[i], volts[i]);
++		if (ret == -EEXIST)
++			ret = dev_pm_opp_enable(dmc->dev, trained[i]);
 +		if (ret)
 +			return ret;
 +	}
-+
-+	for (rate = 0; !IS_ERR(opp = dev_pm_opp_find_freq_ceil(dmc->dev, &rate)); rate++) {
-+		dev_pm_opp_put(opp);
-+		for (i = 0; i < count && trained[i] != rate; i++)
-+			;
-+		if (i == count)
-+			dev_pm_opp_disable(dmc->dev, rate);
-+	}
++	if (count > nrows)
++		dev_info(dmc->dev, "%u trained rates past the table's %u rows not offered\n",
++			 count - nrows, nrows);
 +
 +	return 0;
 +}

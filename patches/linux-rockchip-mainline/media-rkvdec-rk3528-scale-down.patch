@@ -1,0 +1,665 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] media: rkvdec: Scale the RK3528's picture down by half
+
+The RK3528's decoder writes a second picture, scaled down by an integer
+ratio each way, beside the one it reconstructs and references, at
+registers 198 and 199 with its ratios in register 29: a 4K stream
+decoded for a 1080p display needs a quarter of the scanout bandwidth.
+
+A client asks as for other stateless decoders that scale: S_SELECTION
+with the COMPOSE target on CAPTURE, before CAPTURE buffers exist. The
+ratio is the smallest power of two the variant can, 2 on the RK3528,
+that fits the picture in the rectangle; G_FMT then reports the scaled
+format. A buffer holds the scaled NV12 picture first, the full picture
+after it, then the collocated motion vectors, so references and row
+buffers keep the full size. 8-bit 4:2:0 linear pictures only, for H.264,
+HEVC and VP9. The fit is judged on the stream's coded size, not the
+decoder's padding of it: VP9's 2176 lines would not halve into 1080.
+
+Half is the limit, measured on the RK3518 with video.py's scale suite,
+a 3840x2160 stream asked for 1080, 540 and 270 lines: half within 65 dB
+of FFmpeg's area scale for each codec; a quarter and an eighth about
+10 dB, with every ratio code from 1 to 24 tried.
+
+Register 29's ratio fields are five bits each way, as Rockchip's MPP
+lays them out; nothing wrote the two-bit fields before. A TRY_FMT no
+longer moves the running buffer layout.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+  .../media/platform/rockchip/rkvdec/rkvdec-rcb.c    |  4 +-
+  .../platform/rockchip/rkvdec/rkvdec-vdpu381-h264.c | 18 ++--
+  .../platform/rockchip/rkvdec/rkvdec-vdpu381-hevc.c | 18 ++--
+  .../platform/rockchip/rkvdec/rkvdec-vdpu381-regs.h | 54 +++++++++---
+  .../platform/rockchip/rkvdec/rkvdec-vdpu381-vp9.c  | 41 +++++----
+  .../platform/rockchip/rkvdec/rkvdec-vdpu383-h264.c |  4 +-
+  .../platform/rockchip/rkvdec/rkvdec-vdpu383-hevc.c |  4 +-
+  drivers/media/platform/rockchip/rkvdec/rkvdec.c    | 99 +++++++++++++++++++---
+  drivers/media/platform/rockchip/rkvdec/rkvdec.h    | 27 +++++-
+  9 files changed, 208 insertions(+), 61 deletions(-)
+
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec-rcb.c b/drivers/media/platform/rockchip/rkvdec/rkvdec-rcb.c
+index e557e3f9c..d1743e9a7 100644
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec-rcb.c
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec-rcb.c
+@@ -170,8 +170,8 @@ int rkvdec_allocate_rcb(struct rkvdec_ctx *ctx,
+ 		goto err_alloc;
+ 	cfg->rcb_count = rcb_count;
+ 
+-	width = ctx->decoded_fmt.fmt.pix_mp.width;
+-	height = ctx->decoded_fmt.fmt.pix_mp.height;
++	width = ctx->layout.picture.width;
++	height = ctx->layout.picture.height;
+ 
+ 	/* The SRAM first, to the buffers this stream uses, in the variant's order */
+ 	for (i = 0; rkvdec->sram_pool && sram_order && i < rcb_count; i++) {
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-h264.c b/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-h264.c
+index e8eed99db..d372aa0f6 100644
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-h264.c
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-h264.c
+@@ -217,7 +217,6 @@ static void config_registers(struct rkvdec_ctx *ctx,
+ 	struct vb2_v4l2_buffer *src_buf = run->base.bufs.src;
+ 	struct vb2_v4l2_buffer *dst_buf = run->base.bufs.dst;
+ 	struct rkvdec_vdpu381_regs_h264 *regs = &h264_ctx->regs;
+-	const struct v4l2_format *f;
+ 	dma_addr_t rlc_addr;
+ 	dma_addr_t dst_addr;
+ 	u32 hor_virstride;
+@@ -257,8 +256,7 @@ static void config_registers(struct rkvdec_ctx *ctx,
+ 	regs->common.reg017_slice_number.slice_num = MAX_SLICE_NUMBER;
+ 
+ 	/* Set strides */
+-	f = &ctx->decoded_fmt;
+-	dst_fmt = &f->fmt.pix_mp;
++	dst_fmt = &ctx->layout.picture;
+ 	hor_virstride = dst_fmt->plane_fmt[0].bytesperline;
+ 	ver_virstride = dst_fmt->height;
+ 	y_virstride = hor_virstride * ver_virstride;
+@@ -309,10 +307,10 @@ static void config_registers(struct rkvdec_ctx *ctx,
+ 		buf_dma = vb2_dma_contig_plane_dma_addr(vb_buf, 0);
+ 
+ 		/* Set reference addresses */
+-		regs->h264_addr.reg164_180_ref_base[i] = buf_dma;
++		regs->h264_addr.reg164_180_ref_base[i] = buf_dma + ctx->layout.picture_offset;
+ 
+ 		/* Set COLMV addresses */
+-		regs->h264_addr.reg182_198_colmv_base[i] = buf_dma + ctx->colmv_offset;
++		regs->h264_addr.reg182_198_colmv_base[i] = buf_dma + ctx->layout.colmv_offset;
+ 
+ 		struct rkvdec_vdpu381_h264_ref_info *ref_info =
+ 			&regs->h264_param.reg099_102_ref_info_regs[i / 4].ref_info[i % 4];
+@@ -339,11 +337,15 @@ static void config_registers(struct rkvdec_ctx *ctx,
+ 
+ 	/* Set output base address */
+ 	dst_addr = vb2_dma_contig_plane_dma_addr(&dst_buf->vb2_buf, 0);
+-	regs->common_addr.decout_base = dst_addr;
+-	regs->common_addr.error_ref_base = dst_addr;
++	regs->common_addr.decout_base = dst_addr + ctx->layout.picture_offset;
++	regs->common_addr.error_ref_base = dst_addr + ctx->layout.picture_offset;
++	rkvdec_vdpu381_set_scale_down(&regs->common, &ctx->decoded_fmt.fmt.pix_mp,
++				      rkvdec_scaled_shift(ctx), dst_addr,
++				      &regs->h264_addr.scale_down_luma_base,
++				      &regs->h264_addr.scale_down_chroma_base);
+ 
+ 	/* Set colmv address */
+-	regs->common_addr.colmv_cur_base = dst_addr + ctx->colmv_offset;
++	regs->common_addr.colmv_cur_base = dst_addr + ctx->layout.colmv_offset;
+ 
+ 	/* Set RCB addresses */
+ 	for (i = 0; i < rkvdec_rcb_buf_count(ctx); i++)
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-hevc.c b/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-hevc.c
+index a391ce641..eaf1cd379 100644
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-hevc.c
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-hevc.c
+@@ -389,7 +389,6 @@ static void config_registers(struct rkvdec_ctx *ctx,
+ 	const struct v4l2_pix_format_mplane *dst_fmt;
+ 	struct vb2_v4l2_buffer *src_buf = run->base.bufs.src;
+ 	struct vb2_v4l2_buffer *dst_buf = run->base.bufs.dst;
+-	const struct v4l2_format *f;
+ 	dma_addr_t rlc_addr;
+ 	u32 hor_virstride = 0;
+ 	u32 ver_virstride = 0;
+@@ -422,8 +421,7 @@ static void config_registers(struct rkvdec_ctx *ctx,
+ 	regs->common.reg017_slice_number.slice_num = 1;
+ 
+ 	/* Set strides */
+-	f = &ctx->decoded_fmt;
+-	dst_fmt = &f->fmt.pix_mp;
++	dst_fmt = &ctx->layout.picture;
+ 	hor_virstride = dst_fmt->plane_fmt[0].bytesperline;
+ 	ver_virstride = dst_fmt->height;
+ 	y_virstride = hor_virstride * ver_virstride;
+@@ -464,10 +462,10 @@ static void config_registers(struct rkvdec_ctx *ctx,
+ 		u32 valid = !!(dec_params->num_active_dpb_entries > i);
+ 
+ 		/* Set reference addresses */
+-		regs->hevc_addr.reg164_180_ref_base[i] = buf_dma;
++		regs->hevc_addr.reg164_180_ref_base[i] = buf_dma + ctx->layout.picture_offset;
+ 
+ 		/* Set COLMV addresses */
+-		regs->hevc_addr.reg182_198_colmv_base[i] = buf_dma + ctx->colmv_offset;
++		regs->hevc_addr.reg182_198_colmv_base[i] = buf_dma + ctx->layout.colmv_offset;
+ 
+ 		regs->hevc_param.reg067_082_ref_poc[i] =
+ 			dpb[i].pic_order_cnt_val;
+@@ -483,11 +481,15 @@ static void config_registers(struct rkvdec_ctx *ctx,
+ 
+ 	/* Set output base address */
+ 	dst_addr = vb2_dma_contig_plane_dma_addr(&dst_buf->vb2_buf, 0);
+-	regs->common_addr.decout_base = dst_addr;
+-	regs->common_addr.error_ref_base = dst_addr;
++	regs->common_addr.decout_base = dst_addr + ctx->layout.picture_offset;
++	regs->common_addr.error_ref_base = dst_addr + ctx->layout.picture_offset;
++	rkvdec_vdpu381_set_scale_down(&regs->common, &ctx->decoded_fmt.fmt.pix_mp,
++				      rkvdec_scaled_shift(ctx), dst_addr,
++				      &regs->hevc_addr.scale_down_luma_base,
++				      &regs->hevc_addr.scale_down_chroma_base);
+ 
+ 	/* Set colmv address */
+-	regs->common_addr.colmv_cur_base = dst_addr + ctx->colmv_offset;
++	regs->common_addr.colmv_cur_base = dst_addr + ctx->layout.colmv_offset;
+ 
+ 	/* Set RCB addresses */
+ 	for (i = 0; i < rkvdec_rcb_buf_count(ctx); i++)
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-regs.h b/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-regs.h
+index 154f56680..a832c7619 100644
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-regs.h
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-regs.h
+@@ -260,21 +260,27 @@ struct rkvdec_vdpu381_regs_common {
+ 	} reg028_multiply_core_ctrl;
+ 
+ 	struct {
+-		u32 scale_down_hor_ratio	: 2;
+-		u32 reserved0			: 6;
+-		u32 scale_down_vrz_ratio	: 2;
+-		u32 reserved1			: 22;
++		u32 y_wratio			: 5;
++		u32 reserved0			: 3;
++		u32 y_hratio			: 5;
++		u32 reserved1			: 3;
++		u32 c_wratio			: 5;
++		u32 reserved2			: 3;
++		u32 c_hratio			: 5;
++		u32 reserved3			: 1;
++		u32 roi_mode			: 1;
++		u32 tile_mode			: 1;
+ 	} reg029_scale_down_ctrl;
+ 
+ 	struct {
+-		u32 y_scale_down_tile8x8_hor_stride	: 20;
+-		u32 reserved0				: 12;
+-	} reg030_y_scale_down_tile8x8_hor_stride;
++		u32 y_scale_down_hor_stride	: 20;
++		u32 reserved0			: 12;
++	} reg030_y_scale_down_hor_stride;
+ 
+ 	struct {
+-		u32 uv_scale_down8x8_tile_hor_stride	: 20;
+-		u32 reserved0				: 12;
+-	} reg031_uv_scale_down_tile8x8_hor_stride;
++		u32 uv_scale_down_hor_stride	: 20;
++		u32 reserved0			: 12;
++	} reg031_uv_scale_down_hor_stride;
+ 
+ 	u32 reg032_timeout_threshold;
+ } __packed;
+@@ -607,6 +613,8 @@ struct rkvdec_vdpu381_regs_h26x_addr {
+ 	u32 reg181_scanlist_addr;
+ 	u32 reg182_198_colmv_base[16];
+ 	u32 reg199_cabactbl_base;
++	u32 scale_down_luma_base;
++	u32 scale_down_chroma_base;
+ } __packed;
+ 
+ struct rkvdec_vdpu381_regs_vp9_addr {
+@@ -627,6 +635,8 @@ struct rkvdec_vdpu381_regs_vp9_addr {
+ 	u32 scanlist_addr;
+ 	u32 colmv_base[16];
+ 	u32 cabactbl_base;
++	u32 scale_down_luma_base;
++	u32 scale_down_chroma_base;
+ } __packed;
+ 
+ struct rkvdec_vdpu381_regs_h26x_highpoc {
+@@ -692,4 +702,28 @@ rkvdec_vdpu381_set_picture(struct rkvdec_vdpu381_regs_common *common,
+ 	common->reg019_uv_hor_stride.uv_hor_virstride = hor_virstride / 16;
+ }
+ 
++/*
++ * The picture scaled down by 1 << shift each way, written beside the full one:
++ * its luma at addr, its chroma after it, by the stride of the scaled format.
++ */
++static inline void
++rkvdec_vdpu381_set_scale_down(struct rkvdec_vdpu381_regs_common *common,
++			      const struct v4l2_pix_format_mplane *scaled,
++			      unsigned int shift, dma_addr_t addr,
++			      u32 *luma_base, u32 *chroma_base)
++{
++	u32 stride = scaled->plane_fmt[0].bytesperline;
++	u32 ratio = 1 << shift;
++
++	common->reg012_secondary_en.scale_down_en = !!shift;
++	common->reg029_scale_down_ctrl.y_wratio = shift ? ratio : 0;
++	common->reg029_scale_down_ctrl.y_hratio = shift ? ratio : 0;
++	common->reg029_scale_down_ctrl.c_wratio = shift ? ratio : 0;
++	common->reg029_scale_down_ctrl.c_hratio = shift ? ratio : 0;
++	common->reg030_y_scale_down_hor_stride.y_scale_down_hor_stride = stride / 16;
++	common->reg031_uv_scale_down_hor_stride.uv_scale_down_hor_stride = stride / 16;
++	*luma_base = shift ? addr : 0;
++	*chroma_base = shift ? addr + stride * scaled->height : 0;
++}
++
+ #endif /* __RKVDEC_REGS_H__ */
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-vp9.c b/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-vp9.c
+index 1e3fafecb..bb21af28f 100644
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-vp9.c
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu381-vp9.c
+@@ -277,7 +277,7 @@ static void config_ref_registers(struct rkvdec_ctx *ctx,
+ 				 struct rkvdec_decoded_buffer *ref_buf,
+ 				 int i)
+ {
+-	const struct v4l2_pix_format_mplane *pix = &ctx->decoded_fmt.fmt.pix_mp;
++	const struct v4l2_pix_format_mplane *pix = &ctx->layout.picture;
+ 	unsigned int aligned_pitch, aligned_height, y_len;
+ 	struct rkvdec_vp9_ctx *vp9_ctx = ctx->priv;
+ 	struct rkvdec_vdpu381_regs_vp9 *regs = &vp9_ctx->regs;
+@@ -303,15 +303,18 @@ static void config_ref_registers(struct rkvdec_ctx *ctx,
+ 	switch (i) {
+ 	case 0:
+ 		regs->vp9_addr.vp9_referlast_base =
+-			vb2_dma_contig_plane_dma_addr(&ref_buf->base.vb.vb2_buf, 0);
++			vb2_dma_contig_plane_dma_addr(&ref_buf->base.vb.vb2_buf, 0) +
++			ctx->layout.picture_offset;
+ 		break;
+ 	case 1:
+ 		regs->vp9_addr.vp9_refergolden_base =
+-			vb2_dma_contig_plane_dma_addr(&ref_buf->base.vb.vb2_buf, 0);
++			vb2_dma_contig_plane_dma_addr(&ref_buf->base.vb.vb2_buf, 0) +
++			ctx->layout.picture_offset;
+ 		break;
+ 	case 2:
+ 		regs->vp9_addr.vp9_referalfter_base =
+-			vb2_dma_contig_plane_dma_addr(&ref_buf->base.vb.vb2_buf, 0);
++			vb2_dma_contig_plane_dma_addr(&ref_buf->base.vb.vb2_buf, 0) +
++			ctx->layout.picture_offset;
+ 		break;
+ 	}
+ 
+@@ -430,15 +433,15 @@ static dma_addr_t get_mv_base_addr(struct rkvdec_ctx *ctx, struct rkvdec_decoded
+ 	unsigned int aligned_pitch, aligned_height, yuv_len;
+ 
+ 	/* An AFBC picture's motion vectors follow it where every buffer keeps them */
+-	if (v4l2_is_format_afbc(ctx->decoded_fmt.fmt.pix_mp.pixelformat))
+-		return addr + ctx->colmv_offset;
++	if (v4l2_is_format_afbc(ctx->layout.picture.pixelformat))
++		return addr + ctx->layout.colmv_offset;
+ 
+ 	aligned_height = round_up(buf->vp9.height, 64);
+ 
+-	aligned_pitch = ctx->decoded_fmt.fmt.pix_mp.plane_fmt[0].bytesperline;
++	aligned_pitch = ctx->layout.picture.plane_fmt[0].bytesperline;
+ 	yuv_len = (aligned_height * aligned_pitch * 3) / 2;
+ 
+-	return addr + yuv_len;
++	return addr + ctx->layout.picture_offset + yuv_len;
+ }
+ 
+ static void config_registers(struct rkvdec_ctx *ctx,
+@@ -486,15 +489,15 @@ static void config_registers(struct rkvdec_ctx *ctx,
+ 	regs->common.reg011_important_en.dec_clkgate_e = 1;
+ 	regs->common.reg011_important_en.dec_timeout_e = 1;
+ 
+-	aligned_height = round_up(ctx->decoded_fmt.fmt.pix_mp.height, 64);
++	aligned_height = round_up(ctx->layout.picture.height, 64);
+ 
+ 	/* use capture buffer's bytesperline as hw stride, same as HEVC. */
+-	aligned_pitch = ctx->decoded_fmt.fmt.pix_mp.plane_fmt[0].bytesperline;
++	aligned_pitch = ctx->layout.picture.plane_fmt[0].bytesperline;
+ 	y_len = aligned_height * aligned_pitch;
+ 
+-	pixels = ctx->decoded_fmt.fmt.pix_mp.height * ctx->decoded_fmt.fmt.pix_mp.width;
++	pixels = ctx->layout.picture.height * ctx->layout.picture.width;
+ 
+-	rkvdec_vdpu381_set_picture(&regs->common, &ctx->decoded_fmt.fmt.pix_mp, y_len);
++	rkvdec_vdpu381_set_picture(&regs->common, &ctx->layout.picture, y_len);
+ 
+ 	stream_len = vb2_get_plane_payload(&run->base.bufs.src->vb2_buf, 0);
+ 
+@@ -616,11 +619,15 @@ static void config_registers(struct rkvdec_ctx *ctx,
+ 
+ 	/* Set output base address */
+ 	dst_addr = vb2_dma_contig_plane_dma_addr(&dst->base.vb.vb2_buf, 0);
+-	regs->common_addr.decout_base = dst_addr;
+-	regs->common_addr.error_ref_base = dst_addr;
++	regs->common_addr.decout_base = dst_addr + ctx->layout.picture_offset;
++	regs->common_addr.error_ref_base = dst_addr + ctx->layout.picture_offset;
++	rkvdec_vdpu381_set_scale_down(&regs->common, &ctx->decoded_fmt.fmt.pix_mp,
++				      rkvdec_scaled_shift(ctx), dst_addr,
++				      &regs->vp9_addr.scale_down_luma_base,
++				      &regs->vp9_addr.scale_down_chroma_base);
+ 
+ 	/* Set colmv address */
+-	regs->common_addr.colmv_cur_base = dst_addr + ctx->colmv_offset;
++	regs->common_addr.colmv_cur_base = dst_addr + ctx->layout.colmv_offset;
+ 
+ 	/* Set RCB addresses */
+ 	for (i = 0; i < rkvdec_rcb_buf_count(ctx); i++)
+@@ -663,8 +670,8 @@ static int validate_dec_params(struct rkvdec_ctx *ctx,
+ 	 * Userspace should update the capture/decoded format when the
+ 	 * resolution changes.
+ 	 */
+-	if (aligned_width != ctx->decoded_fmt.fmt.pix_mp.width ||
+-	    aligned_height != ctx->decoded_fmt.fmt.pix_mp.height) {
++	if (aligned_width != ctx->layout.picture.width ||
++	    aligned_height != ctx->layout.picture.height) {
+ 		dev_err(ctx->dev->dev,
+ 			"unexpected bitstream resolution %dx%d\n",
+ 			dec_params->frame_width_minus_1 + 1,
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu383-h264.c b/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu383-h264.c
+index 5ec755733..bf4c3c757 100644
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu383-h264.c
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu383-h264.c
+@@ -317,7 +317,7 @@ static void config_registers(struct rkvdec_ctx *ctx,
+ 		regs->h26x_addr.reg195_210_payload_st_ref_base[i] = buf_dma;
+ 
+ 		/* Set COLMV addresses */
+-		regs->h26x_addr.reg217_232_colmv_ref_base[i] = buf_dma + ctx->colmv_offset;
++		regs->h26x_addr.reg217_232_colmv_ref_base[i] = buf_dma + ctx->layout.colmv_offset;
+ 	}
+ 
+ 	/* Set rlc base address (input stream) */
+@@ -331,7 +331,7 @@ static void config_registers(struct rkvdec_ctx *ctx,
+ 	regs->h26x_addr.reg192_payload_st_cur_base = dst_addr;
+ 
+ 	/* Set colmv address */
+-	regs->h26x_addr.reg216_colmv_cur_base = dst_addr + ctx->colmv_offset;
++	regs->h26x_addr.reg216_colmv_cur_base = dst_addr + ctx->layout.colmv_offset;
+ 
+ 	/* Set RCB addresses */
+ 	for (i = 0; i < rkvdec_rcb_buf_count(ctx); i++) {
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu383-hevc.c b/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu383-hevc.c
+index 3462d995d..7253c6293 100644
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu383-hevc.c
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec-vdpu383-hevc.c
+@@ -418,7 +418,7 @@ static void config_registers(struct rkvdec_ctx *ctx,
+ 		regs->h26x_addr.reg195_210_payload_st_ref_base[i] = buf_dma;
+ 
+ 		/* Set COLMV addresses */
+-		regs->h26x_addr.reg217_232_colmv_ref_base[i] = buf_dma + ctx->colmv_offset;
++		regs->h26x_addr.reg217_232_colmv_ref_base[i] = buf_dma + ctx->layout.colmv_offset;
+ 	}
+ 
+ 	/* Set rlc base address (input stream) */
+@@ -432,7 +432,7 @@ static void config_registers(struct rkvdec_ctx *ctx,
+ 	regs->h26x_addr.reg192_payload_st_cur_base = dst_addr;
+ 
+ 	/* Set colmv address */
+-	regs->h26x_addr.reg216_colmv_cur_base = dst_addr + ctx->colmv_offset;
++	regs->h26x_addr.reg216_colmv_cur_base = dst_addr + ctx->layout.colmv_offset;
+ 
+ 	/* Set RCB addresses */
+ 	for (i = 0; i < rkvdec_rcb_buf_count(ctx); i++) {
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec.c b/drivers/media/platform/rockchip/rkvdec/rkvdec.c
+index f37c2acf6..87ae1052a 100644
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec.c
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec.c
+@@ -115,10 +115,24 @@ static void rkvdec_fill_afbc_pixfmt(struct v4l2_pix_format_mplane *pix_mp)
+ 			   blocks * block_bytes;
+ }
+ 
++/* The scaler writes 8-bit 4:2:0 linear pictures only */
++static unsigned int rkvdec_scale_shift(struct rkvdec_ctx *ctx, u32 pixelformat)
++{
++	return pixelformat == V4L2_PIX_FMT_NV12 ? ctx->scale_shift : 0;
++}
++
++/*
++ * The client's format for a full-size pix_mp, and the buffer's layout: the
++ * picture scaled down where COMPOSE asked, the full one after it.
++ */
+ static void rkvdec_fill_decoded_pixfmt(struct rkvdec_ctx *ctx,
+-				       struct v4l2_pix_format_mplane *pix_mp)
++				       struct v4l2_pix_format_mplane *pix_mp,
++				       struct rkvdec_layout *layout)
+ {
+ 	const struct rkvdec_variant *variant = ctx->dev->variant;
++	struct v4l2_pix_format_mplane *full = &layout->picture;
++	unsigned int shift = rkvdec_scale_shift(ctx, pix_mp->pixelformat);
++	u32 stride, height;
+ 
+ 	if (v4l2_is_format_afbc(pix_mp->pixelformat))
+ 		rkvdec_fill_afbc_pixfmt(pix_mp);
+@@ -126,9 +140,20 @@ static void rkvdec_fill_decoded_pixfmt(struct rkvdec_ctx *ctx,
+ 		v4l2_fill_pixfmt_mp(pix_mp, pix_mp->pixelformat, pix_mp->width,
+ 				    pix_mp->height);
+ 
+-	ctx->colmv_offset = pix_mp->plane_fmt[0].sizeimage;
++	*full = *pix_mp;
++	layout->picture_offset = 0;
++	if (shift) {
++		stride = ALIGN(full->plane_fmt[0].bytesperline >> shift, RKVDEC_SCALED_ALIGN);
++		height = ALIGN(full->height >> shift, RKVDEC_SCALED_ALIGN);
++		pix_mp->width = full->width >> shift;
++		pix_mp->height = height;
++		pix_mp->plane_fmt[0].bytesperline = stride;
++		layout->picture_offset = ALIGN(stride * height * 3 / 2, RKVDEC_PICTURE_ALIGN);
++	}
+ 
+-	pix_mp->plane_fmt[0].sizeimage += variant->ops->colmv_size(pix_mp->width, pix_mp->height);
++	layout->colmv_offset = layout->picture_offset + full->plane_fmt[0].sizeimage;
++	pix_mp->plane_fmt[0].sizeimage = layout->colmv_offset +
++					 variant->ops->colmv_size(full->width, full->height);
+ }
+ 
+ static void rkvdec_reset_fmt(struct rkvdec_ctx *ctx, struct v4l2_format *f,
+@@ -153,7 +178,7 @@ static void rkvdec_reset_decoded_fmt(struct rkvdec_ctx *ctx)
+ 	f->type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+ 	f->fmt.pix_mp.width = ctx->coded_fmt.fmt.pix_mp.width;
+ 	f->fmt.pix_mp.height = ctx->coded_fmt.fmt.pix_mp.height;
+-	rkvdec_fill_decoded_pixfmt(ctx, &f->fmt.pix_mp);
++	rkvdec_fill_decoded_pixfmt(ctx, &f->fmt.pix_mp, &ctx->layout);
+ }
+ 
+ static int rkvdec_try_ctrl(struct v4l2_ctrl *ctrl)
+@@ -797,11 +822,10 @@ static int rkvdec_querycap(struct file *file, void *priv,
+ 	return 0;
+ }
+ 
+-static int rkvdec_try_capture_fmt(struct file *file, void *priv,
+-				  struct v4l2_format *f)
++static int rkvdec_try_decoded_fmt(struct rkvdec_ctx *ctx, struct v4l2_format *f,
++				  struct rkvdec_layout *layout)
+ {
+ 	struct v4l2_pix_format_mplane *pix_mp = &f->fmt.pix_mp;
+-	struct rkvdec_ctx *ctx = file_to_rkvdec_ctx(file);
+ 	const struct rkvdec_coded_fmt_desc *coded_desc;
+ 
+ 	/*
+@@ -824,12 +848,20 @@ static int rkvdec_try_capture_fmt(struct file *file, void *priv,
+ 				       &pix_mp->height,
+ 				       &coded_desc->frmsize);
+ 
+-	rkvdec_fill_decoded_pixfmt(ctx, pix_mp);
++	rkvdec_fill_decoded_pixfmt(ctx, pix_mp, layout);
+ 	pix_mp->field = V4L2_FIELD_NONE;
+ 
+ 	return 0;
+ }
+ 
++static int rkvdec_try_capture_fmt(struct file *file, void *priv,
++				  struct v4l2_format *f)
++{
++	struct rkvdec_layout layout;
++
++	return rkvdec_try_decoded_fmt(file_to_rkvdec_ctx(file), f, &layout);
++}
++
+ static int rkvdec_try_output_fmt(struct file *file, void *priv,
+ 				 struct v4l2_format *f)
+ {
+@@ -875,7 +907,7 @@ static int rkvdec_s_capture_fmt(struct file *file, void *priv,
+ 	if (vb2_is_busy(vq))
+ 		return -EBUSY;
+ 
+-	ret = rkvdec_try_capture_fmt(file, priv, f);
++	ret = rkvdec_try_decoded_fmt(ctx, f, &ctx->layout);
+ 	if (ret)
+ 		return ret;
+ 
+@@ -940,6 +972,8 @@ static int rkvdec_s_output_fmt(struct file *file, void *priv,
+ 	if (desc->fourcc == V4L2_PIX_FMT_VP9_FRAME)
+ 		ctx->image_fmt = RKVDEC_IMG_FMT_420_8BIT;
+ 
++	/* a new stream asks its own COMPOSE */
++	ctx->scale_shift = 0;
+ 	rkvdec_reset_decoded_fmt(ctx);
+ 
+ 	/* Propagate colorspace information to capture. */
+@@ -978,6 +1012,7 @@ static int rkvdec_g_selection(struct file *file, void *priv,
+ {
+ 	struct rkvdec_ctx *ctx = file_to_rkvdec_ctx(file);
+ 	const struct v4l2_pix_format_mplane *pix = &ctx->decoded_fmt.fmt.pix_mp;
++	const struct v4l2_pix_format_mplane *full = &ctx->layout.picture;
+ 	bool vp9 = ctx->coded_fmt.fmt.pix_mp.pixelformat == V4L2_PIX_FMT_VP9_FRAME;
+ 	u32 top = !vp9 && v4l2_is_format_afbc(pix->pixelformat) ?
+ 		  RKVDEC_AFBC_TOP_LINES : 0;
+@@ -987,17 +1022,56 @@ static int rkvdec_g_selection(struct file *file, void *priv,
+ 
+ 	switch (s->target) {
+ 	case V4L2_SEL_TGT_COMPOSE:
+-	case V4L2_SEL_TGT_COMPOSE_DEFAULT:
+ 		s->r = (struct v4l2_rect){ 0, top, pix->width, pix->height };
+ 		return 0;
++	case V4L2_SEL_TGT_COMPOSE_DEFAULT:
++		s->r = (struct v4l2_rect){ 0, top, full->width, full->height };
++		return 0;
+ 	case V4L2_SEL_TGT_COMPOSE_BOUNDS:
+-		s->r = (struct v4l2_rect){ 0, 0, pix->width, pix->height + top };
++		s->r = (struct v4l2_rect){ 0, 0, full->width, full->height + top };
+ 		return 0;
+ 	}
+ 
+ 	return -EINVAL;
+ }
+ 
++/*
++ * COMPOSE scales the picture down by the smallest power of two the variant
++ * can that fits it in the rectangle, before capture buffers exist.
++ */
++static int rkvdec_s_selection(struct file *file, void *priv,
++			      struct v4l2_selection *s)
++{
++	struct rkvdec_ctx *ctx = file_to_rkvdec_ctx(file);
++	const struct v4l2_pix_format_mplane *coded = &ctx->coded_fmt.fmt.pix_mp;
++	const struct v4l2_pix_format_mplane *full = &ctx->layout.picture;
++	unsigned int max = ctx->dev->variant->scale_shift_max;
++	struct v4l2_format f = ctx->decoded_fmt;
++	unsigned int shift = 0;
++	int ret;
++
++	if (s->type != V4L2_BUF_TYPE_VIDEO_CAPTURE || s->target != V4L2_SEL_TGT_COMPOSE)
++		return -EINVAL;
++	if (vb2_is_busy(v4l2_m2m_get_vq(ctx->fh.m2m_ctx, V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE)))
++		return -EBUSY;
++
++	/* the stream's size, not the decoder's padding of it */
++	while (shift < max && ((coded->width >> shift) > s->r.width ||
++			       (coded->height >> shift) > s->r.height))
++		shift++;
++	ctx->scale_shift = shift;
++
++	f.fmt.pix_mp.width = full->width;
++	f.fmt.pix_mp.height = full->height;
++	ret = rkvdec_try_decoded_fmt(ctx, &f, &ctx->layout);
++	if (ret)
++		return ret;
++	ctx->decoded_fmt = f;
++
++	s->r = (struct v4l2_rect){ 0, 0, f.fmt.pix_mp.width, f.fmt.pix_mp.height };
++	return 0;
++}
++
+ static int rkvdec_enum_output_fmt(struct file *file, void *priv,
+ 				  struct v4l2_fmtdesc *f)
+ {
+@@ -1039,6 +1113,7 @@ static const struct v4l2_ioctl_ops rkvdec_ioctl_ops = {
+ 	.vidioc_enum_fmt_vid_out = rkvdec_enum_output_fmt,
+ 	.vidioc_enum_fmt_vid_cap = rkvdec_enum_capture_fmt,
+ 	.vidioc_g_selection = rkvdec_g_selection,
++	.vidioc_s_selection = rkvdec_s_selection,
+ 
+ 	.vidioc_reqbufs = v4l2_m2m_ioctl_reqbufs,
+ 	.vidioc_querybuf = v4l2_m2m_ioctl_querybuf,
+@@ -1911,6 +1986,8 @@ static const struct rkvdec_variant rk3528_variant = {
+ 	.rcb_sram_order = vdpu381_rcb_sram_order,
+ 	.ops = &vdpu381_variant_ops,
+ 	.quirks = RKVDEC_QUIRK_NO_MBAFF_422,
++	/* a quarter wrote no picture, whatever its ratio code */
++	.scale_shift_max = 1,
+ };
+ 
+ static const struct rcb_size_info vdpu383_rcb_sizes[] = {
+diff --git a/drivers/media/platform/rockchip/rkvdec/rkvdec.h b/drivers/media/platform/rockchip/rkvdec/rkvdec.h
+index 04b06e351..764dfb335 100644
+--- a/drivers/media/platform/rockchip/rkvdec/rkvdec.h
++++ b/drivers/media/platform/rockchip/rkvdec/rkvdec.h
+@@ -32,6 +32,10 @@
+ /* 4:2:2 in MBAFF: chroma not yet decoded right */
+ #define RKVDEC_QUIRK_NO_MBAFF_422	BIT(1)
+ 
++/* the scaled picture's stride and height, and the full picture's start after it */
++#define RKVDEC_SCALED_ALIGN		16
++#define RKVDEC_PICTURE_ALIGN		256
++
+ #define RKVDEC_1080P_PIXELS		(1920 * 1088)
+ #define RKVDEC_4K_PIXELS		(4096 * 2304)
+ #define RKVDEC_8K_PIXELS		(7680 * 4320)
+@@ -94,6 +98,8 @@ struct rkvdec_variant {
+ 	const struct rkvdec_variant_ops *ops;
+ 	bool has_single_reg_region;
+ 	unsigned int quirks;
++	/* the largest scale-down shift each way, 0 where it cannot scale */
++	unsigned int scale_shift_max;
+ };
+ 
+ struct rkvdec_coded_fmt_ops {
+@@ -200,6 +206,17 @@ static inline u32 rkvdec_afbc_payload_offset(u32 width, u32 height)
+ 		     SZ_4K);
+ }
+ 
++/*
++ * A capture buffer: the client's picture, scaled down or the full one; when
++ * scaled, the full picture the decoder references at picture_offset after it;
++ * then the collocated motion vectors at colmv_offset.
++ */
++struct rkvdec_layout {
++	struct v4l2_pix_format_mplane picture;
++	u32 picture_offset;
++	u32 colmv_offset;
++};
++
+ struct rkvdec_ctx {
+ 	struct v4l2_fh fh;
+ 	struct v4l2_format coded_fmt;
+@@ -209,12 +226,20 @@ struct rkvdec_ctx {
+ 	struct rkvdec_dev *dev;
+ 	enum rkvdec_image_fmt image_fmt;
+ 	struct rkvdec_rcb_config *rcb_config;
+-	u32 colmv_offset;
++	struct rkvdec_layout layout;
++	/* COMPOSE: the client's picture scaled down by 1 << scale_shift */
++	unsigned int scale_shift;
+ 	void *priv;
+ 	u8 has_sps_st_rps: 1;
+ 	u8 has_sps_lt_rps: 1;
+ };
+ 
++/* The shift the capture buffers are scaled down by, 0 when they hold the full picture */
++static inline unsigned int rkvdec_scaled_shift(const struct rkvdec_ctx *ctx)
++{
++	return ctx->layout.picture_offset ? ctx->scale_shift : 0;
++}
++
+ static inline struct rkvdec_ctx *file_to_rkvdec_ctx(struct file *filp)
+ {
+ 	return container_of(file_to_v4l2_fh(filp), struct rkvdec_ctx, fh);

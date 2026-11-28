@@ -1,7 +1,8 @@
 #!/bin/bash
 # Build one kernel's .debs from a kernel/<family>.conf, inside the build container.
 set -euo pipefail
-# shellcheck source=/dev/null  # the conf: REPO, FOLLOW, BRANCH or COMMIT, CONFIG, FRAGMENT, PATCHES
+# shellcheck source=/dev/null  # the conf: REPO, FOLLOW, BRANCH or COMMIT, CONFIG, FRAGMENT, PATCHES,
+# DEBUG_PATCHES
 . "/repo/$1"
 FAMILY=$(basename "$1" .conf)
 TREE=/work/$FAMILY/linux
@@ -10,6 +11,8 @@ echo "  building $COMMIT"
 
 # TVB_BUILD_CACHE=0: a clean-room build, no reused download, no compiler cache
 CACHE=${TVB_BUILD_CACHE:-1}
+# TVB_BUILD_DEBUG=1: the conf's DEBUG_PATCHES too, test hooks no release ships
+DEBUG=${TVB_BUILD_DEBUG:-0}
 # shellcheck source=/dev/null
 . /repo/build-env/ccache.sh
 # per kernel, so kernels built at once never write the same step log
@@ -53,7 +56,8 @@ else
 fi
 
 n=0
-for entry in $PATCHES; do
+[ "$DEBUG" = 1 ] || DEBUG_PATCHES=
+for entry in $PATCHES ${DEBUG_PATCHES:-}; do
   n=$((n + 1))
   step "patch-$n" patch -p1 --forward --batch -d "${entry%%:*}" -i "/repo/${entry#*:}"
 done

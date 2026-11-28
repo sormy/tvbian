@@ -1,0 +1,124 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] media: rockchip: vdpp: DMSR edge enhancement as the sharpness control
+
+The VDPP's DMSR sharpens edges after the scaler; MPP turns it on with
+fixed defaults. Offer it as V4L2_CID_SHARPNESS, off by default so the
+node stays a plain scaler, and program MPP's default registers when on.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/drivers/media/platform/rockchip/vdpp/rockchip-vdpp-m2m.c b/drivers/media/platform/rockchip/vdpp/rockchip-vdpp-m2m.c
+--- a/drivers/media/platform/rockchip/vdpp/rockchip-vdpp-m2m.c
++++ b/drivers/media/platform/rockchip/vdpp/rockchip-vdpp-m2m.c
+@@ -1,7 +1,7 @@
+ // SPDX-License-Identifier: GPL-2.0
+ /*
+  * Rockchip VDPP: an NV12 frame scaled to the CAPTURE size, as the vendor's
+- * MPP programs the RK3528's VDPP, with its enhancement off
++ * MPP programs the RK3528's VDPP, its DMSR edge enhancement on request
+  */
+ 
+ #include <linux/clk.h>
+@@ -15,6 +15,7 @@
+ #include <linux/pm_runtime.h>
+ #include <linux/reset.h>
+ #include <linux/slab.h>
++#include <media/v4l2-ctrls.h>
+ #include <media/v4l2-device.h>
+ #include <media/v4l2-ioctl.h>
+ #include <media/v4l2-mem2mem.h>
+@@ -63,6 +64,18 @@
+ 	struct v4l2_pix_format src_fmt;
+ 	struct v4l2_pix_format dst_fmt;
+ 	struct v4l2_rect crop;
++	struct v4l2_ctrl_handler ctrls;
++	struct v4l2_ctrl *dmsr;
++};
++
++/* MPP's DMSR defaults, as its set_dmsr_to_vdpp_reg() writes them */
++static const u32 vdpp_dmsr_regs[] = {
++	0x003c001e, 0x0028000a, 0x00140000, 0x000a0000,
++	0x000a0000, 0x000a0000, 0x000a0000, 0x08880888,
++	0x19990ccc, 0x19991999, 0x0d001999, 0x1a400690,
++	0xffff0000, 0x00000014, 0x00000501, 0x00101010,
++	0x00500010, 0x0c100c08, 0x00000a05, 0x0006040a,
++	0x00000000,
+ };
+ 
+ static inline void vdpp_write(struct vdpp_dev *vdpp, u32 reg, u32 val)
+@@ -121,10 +134,16 @@
+ 	const struct v4l2_rect *crop = &ctx->crop;
+ 	const struct vdpp_fmt *in = vdpp_find_fmt(ctx->src_fmt.pixelformat, true);
+ 	const struct vdpp_fmt *out = vdpp_find_fmt(dst->pixelformat, false);
++	bool dmsr = v4l2_ctrl_g_ctrl(ctx->dmsr);
++	unsigned int i;
+ 
+ 	vdpp_write(vdpp, VDPP_CONFIG0,
+ 		   VDPP_SRC_FMT(in->fmt) | VDPP_SRC_YUV_SWAP(in->swap) |
+-		   VDPP_DST_FMT(out->fmt) | VDPP_DST_YUV_SWAP(out->swap));
++		   VDPP_DST_FMT(out->fmt) | VDPP_DST_YUV_SWAP(out->swap) |
++		   (dmsr ? VDPP_DMSR_EN : 0));
++	if (dmsr)
++		for (i = 0; i < ARRAY_SIZE(vdpp_dmsr_regs); i++)
++			vdpp_write(vdpp, VDPP_DMSR + i * sizeof(u32), vdpp_dmsr_regs[i]);
+ 	vdpp_write(vdpp, VDPP_WORK_MODE, VDPP_WORK_MODE_VEP);
+ 	vdpp_write(vdpp, VDPP_CLK_GATE, VDPP_CLK_ON_ALL);
+ 
+@@ -577,15 +596,27 @@
+ 	v4l2_fh_init(&ctx->fh, video_devdata(file));
+ 	ctx->vdpp = vdpp;
+ 
++	v4l2_ctrl_handler_init(&ctx->ctrls, 1);
++	ctx->dmsr = v4l2_ctrl_new_std(&ctx->ctrls, NULL, V4L2_CID_SHARPNESS, 0, 1, 1, 0);
++	ret = ctx->ctrls.error;
++	if (ret)
++		goto free_ctrls;
++	ctx->fh.ctrl_handler = &ctx->ctrls;
++
+ 	ctx->fh.m2m_ctx = v4l2_m2m_ctx_init(vdpp->m2m_dev, ctx, &vdpp_queue_init);
+ 	if (IS_ERR(ctx->fh.m2m_ctx)) {
+ 		ret = PTR_ERR(ctx->fh.m2m_ctx);
+-		kfree(ctx);
+-		goto unlock;
++		goto free_ctrls;
+ 	}
+ 
+ 	v4l2_fh_add(&ctx->fh, file);
+ 	ret = 0;
++	goto unlock;
++
++free_ctrls:
++	v4l2_ctrl_handler_free(&ctx->ctrls);
++	v4l2_fh_exit(&ctx->fh);
++	kfree(ctx);
+ unlock:
+ 	mutex_unlock(&vdpp->dev_mutex);
+ 	return ret;
+@@ -600,6 +631,7 @@
+ 	v4l2_fh_del(&ctx->fh, file);
+ 	v4l2_fh_exit(&ctx->fh);
+ 	v4l2_m2m_ctx_release(ctx->fh.m2m_ctx);
++	v4l2_ctrl_handler_free(&ctx->ctrls);
+ 	kfree(ctx);
+ 	mutex_unlock(&vdpp->dev_mutex);
+ 	return 0;
+diff --git a/drivers/media/platform/rockchip/vdpp/rockchip-vdpp-regs.h b/drivers/media/platform/rockchip/vdpp/rockchip-vdpp-regs.h
+--- a/drivers/media/platform/rockchip/vdpp/rockchip-vdpp-regs.h
++++ b/drivers/media/platform/rockchip/vdpp/rockchip-vdpp-regs.h
+@@ -12,6 +12,7 @@
+ #define     VDPP_FRM_EN				BIT(0)
+ 
+ #define VDPP_CONFIG0			0x0004
++#define     VDPP_DMSR_EN			BIT(24)
+ #define     VDPP_ACLK_SRESET_P			BIT(21)
+ #define     VDPP_DST_YUV_SWAP(x)		(((x) & 3) << 12)
+ #define     VDPP_DST_FMT(x)			(((x) & 3) << 8)
+@@ -57,6 +58,8 @@
+ #define VDPP_DST_ADDR_Y			0x0068
+ #define VDPP_DST_ADDR_UV		0x006c
+ 
++#define VDPP_DMSR			0x0080
++
+ /* the scaler's own register window */
+ #define VDPP_ZME_YRGB_HOR_COE		0x0000
+ #define VDPP_ZME_YRGB_VER_COE		0x0200

@@ -1,0 +1,30 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] dt-bindings: display: rockchip: rk3528-vop: Allow the gamma LUT
+
+The RK3528's VOP has a gamma lookup table for VP0 in a register window
+of its own, as the RK3568's and RK3588's do: allow it as a second
+register range, named gamma-lut.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/Documentation/devicetree/bindings/display/rockchip/rockchip,rk3528-vop.yaml b/Documentation/devicetree/bindings/display/rockchip/rockchip,rk3528-vop.yaml
+--- a/Documentation/devicetree/bindings/display/rockchip/rockchip,rk3528-vop.yaml
++++ b/Documentation/devicetree/bindings/display/rockchip/rockchip,rk3528-vop.yaml
+@@ -12,9 +12,15 @@
+   compatible:
+     const: rockchip,rk3528-vop
+   reg:
+-    maxItems: 1
++    minItems: 1
++    items:
++      - description: the registers
++      - description: VP0's gamma lookup table
+   reg-names:
+-    const: vop
++    minItems: 1
++    items:
++      - const: vop
++      - const: gamma-lut
+   interrupts:
+     minItems: 1
+     maxItems: 4

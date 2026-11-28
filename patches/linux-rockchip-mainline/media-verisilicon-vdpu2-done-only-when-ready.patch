@@ -1,0 +1,29 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] media: verisilicon: A VDPU2 decode is done only when the core says ready
+
+The VDPU2's interrupt handler took the pending bit, set for any cause,
+as a finished job: a bus error, a timeout or a decode error came back
+as a good picture, and the core went on in the state the error left it
+in. On an RK3528 a write the IOMMU faulted ended so, and MPEG-2 and
+MPEG-4 decoded wrong until a VP8 job reprogrammed the core.
+
+Take the ready bit, as the G1's handler does.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+  .../media/platform/verisilicon/rockchip_vpu_hw.c   |    2 +-
+  1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/media/platform/verisilicon/rockchip_vpu_hw.c b/drivers/media/platform/verisilicon/rockchip_vpu_hw.c
+index 406ef54..b58a726 100644
+--- a/drivers/media/platform/verisilicon/rockchip_vpu_hw.c
++++ b/drivers/media/platform/verisilicon/rockchip_vpu_hw.c
+@@ -546,7 +546,7 @@ static irqreturn_t rockchip_vpu2_vdpu_irq(int irq, void *dev_id)
+ 	u32 status;
+ 
+ 	status = vdpu_read(vpu, VDPU_REG_INTERRUPT);
+-	state = (status & VDPU_REG_INTERRUPT_DEC_IRQ) ?
++	state = (status & VDPU_REG_INTERRUPT_DEC_RDY_INT) ?
+ 		VB2_BUF_STATE_DONE : VB2_BUF_STATE_ERROR;
+ 
+ 	vdpu_write(vpu, 0, VDPU_REG_INTERRUPT);

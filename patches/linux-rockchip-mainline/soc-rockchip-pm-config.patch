@@ -1,0 +1,117 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] soc: rockchip: Hand the suspend firmware the board's sleep configuration
+
+Rockchip's BL31 takes a board's sleep mode, wake sources and PWM-driven
+regulators from the kernel through its SIP_SUSPEND_MODE call, as
+Rockchip's kernel sends them from the board's rockchip,pm-* node. Without
+them its deep suspend wakes on nothing the board wires: an RK3528 box
+suspended by its remote's power key stayed asleep until power was cut,
+where Rockchip's kernel woke it on the same key. Send the node's
+rockchip,sleep-mode-config, rockchip,wakeup-config and
+rockchip,pwm-regulator-config at probe, each a mask of the firmware's
+flags, and refuse the probe where the firmware refuses one.
+
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ drivers/soc/rockchip/Kconfig | 9 +++++++++
+ drivers/soc/rockchip/Makefile | 1 +
+ drivers/soc/rockchip/pm_config.c | 63 ++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 73 insertions(+)
+
+diff --git a/drivers/soc/rockchip/Kconfig b/drivers/soc/rockchip/Kconfig
+index 785f60c..ce74a89 100644
+--- a/drivers/soc/rockchip/Kconfig
++++ b/drivers/soc/rockchip/Kconfig
+@@ -30,4 +30,13 @@ config ROCKCHIP_DTPM
+ 	  on this platform. That will create all the power capping capable
+ 	  devices.
+ 
++config ROCKCHIP_PM_CONFIG
++	tristate "Rockchip suspend firmware configuration"
++	depends on HAVE_ARM_SMCCC
++	help
++	  Hands Rockchip's suspend firmware (BL31) the board's sleep mode,
++	  wake sources and PWM-driven regulators from the device tree, so
++	  that deep suspend wakes on what the board wires: its remote, its
++	  power button.
++
+ endif
+diff --git a/drivers/soc/rockchip/Makefile b/drivers/soc/rockchip/Makefile
+index 23d4144..332dfda 100644
+--- a/drivers/soc/rockchip/Makefile
++++ b/drivers/soc/rockchip/Makefile
+@@ -5,3 +5,4 @@
+ obj-$(CONFIG_ROCKCHIP_GRF) += grf.o
+ obj-$(CONFIG_ROCKCHIP_IODOMAIN) += io-domain.o
+ obj-$(CONFIG_ROCKCHIP_DTPM) += dtpm.o
++obj-$(CONFIG_ROCKCHIP_PM_CONFIG) += pm_config.o
+diff --git a/drivers/soc/rockchip/pm_config.c b/drivers/soc/rockchip/pm_config.c
+new file mode 100644
+index 0000000..3320914
+--- /dev/null
++++ b/drivers/soc/rockchip/pm_config.c
+@@ -0,0 +1,63 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Rockchip's suspend firmware takes the board's sleep mode, wake sources and
++ * PWM-driven regulators from the kernel: without them its deep suspend wakes
++ * on nothing the board wires.
++ */
++
++#include <linux/arm-smccc.h>
++#include <linux/mod_devicetable.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++
++#define ROCKCHIP_SIP_SUSPEND_MODE	0x82000003
++
++static const struct {
++	const char *property;
++	u32 type;
++} rockchip_pm_configs[] = {
++	{ "rockchip,sleep-mode-config", 0x01 },
++	{ "rockchip,wakeup-config", 0x02 },
++	{ "rockchip,pwm-regulator-config", 0x03 },
++};
++
++static int rockchip_pm_config_probe(struct platform_device *pdev)
++{
++	struct device_node *np = pdev->dev.of_node;
++	struct arm_smccc_res res;
++	unsigned int i;
++	u32 value;
++
++	for (i = 0; i < ARRAY_SIZE(rockchip_pm_configs); i++) {
++		if (of_property_read_u32(np, rockchip_pm_configs[i].property, &value))
++			continue;
++		arm_smccc_smc(ROCKCHIP_SIP_SUSPEND_MODE, rockchip_pm_configs[i].type,
++			      value, 0, 0, 0, 0, 0, &res);
++		if (res.a0)
++			return dev_err_probe(&pdev->dev, -EIO,
++					     "firmware refused %s: %ld\n",
++					     rockchip_pm_configs[i].property,
++					     (long)res.a0);
++	}
++
++	return 0;
++}
++
++static const struct of_device_id rockchip_pm_config_of_match[] = {
++	{ .compatible = "rockchip,pm-rk3528" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, rockchip_pm_config_of_match);
++
++static struct platform_driver rockchip_pm_config_driver = {
++	.probe = rockchip_pm_config_probe,
++	.driver = {
++		.name = "rockchip-pm-config",
++		.of_match_table = rockchip_pm_config_of_match,
++	},
++};
++module_platform_driver(rockchip_pm_config_driver);
++
++MODULE_DESCRIPTION("Rockchip suspend firmware configuration");
++MODULE_LICENSE("GPL");

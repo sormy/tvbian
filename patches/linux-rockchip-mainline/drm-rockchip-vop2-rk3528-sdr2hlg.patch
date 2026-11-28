@@ -1,0 +1,184 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] drm/rockchip: vop2: RK3528 SDR to HLG as a plane color pipeline
+
+VP0's SDR to HDR stage encodes HLG as well as PQ, its destination mode
+bit 3. Offer the HLG inverse EOTF as the pipeline's last curve beside
+PQ's, and name the pipeline "SDR to HDR". For HLG the multiplier sets
+SDR white as a share of the 1000 cd/m^2 peak, from 2^-16, the white
+term's 12 bits full, to 1; the stage's other fixed terms are those
+Rockchip's userspace sets for an HLG output.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+  drivers/gpu/drm/rockchip/rockchip_drm_vop2.c | 40 +++++++++++++++++++++-------
+  drivers/gpu/drm/rockchip/rockchip_drm_vop2.h |  5 +++-
+  drivers/gpu/drm/rockchip/rockchip_vop2_reg.c | 13 ++++++---
+  3 files changed, 43 insertions(+), 15 deletions(-)
+
+diff --git a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
+index 12344e268..59a6b6d28 100644
+--- a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
++++ b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
+@@ -3106,13 +3106,21 @@ static irqreturn_t vop2_isr(int irq, void *data)
+ 	return ret;
+ }
+ 
+-/* the SDR to HDR stage's terms: Q13 matrix coefficients under 4, white from 100 to 10000 nits */
++/*
++ * The SDR to HDR stage's terms: Q13 matrix coefficients under 4; white from
++ * 100 to 10000 nits for PQ, from 2^-16 of HLG's peak, the white term's 12 bits
++ * full, to the peak.
++ */
+ #define VOP2_S2H_CSC_SHIFT		19
+ #define VOP2_S2H_CSC_MAX		(4ULL << 32)
+ #define VOP2_S2H_MULT_MIN		(5ULL << 30)
+ #define VOP2_S2H_MULT_MAX		(125ULL << 32)
+ #define VOP2_S2H_PQ_125_WHITE		(125 << 16)
+ #define VOP2_S2H_WHITE_SCALE		1020
++#define VOP2_S2H_HLG_MULT_MIN		BIT_ULL(16)
++#define VOP2_S2H_HLG_MULT_MAX		BIT_ULL(32)
++#define VOP2_S2H_HLG_PEAK		BIT(16)
++#define VOP2_S2H_HLG_WHITE_SCALE	850
+ #define VOP2_S2H_OPS			4
+ #define S31_32_SIGN			BIT_ULL(63)
+ 
+@@ -3131,7 +3139,7 @@ vop2_colorop_state(struct drm_atomic_commit *state, struct drm_colorop *colorop)
+ 
+ /*
+  * The SDR to HDR stage as the plane's pipeline asks: gamma 2.2 decoded, a 3x4
+- * matrix, a multiplier setting SDR white, PQ encoded, all in use or none.
++ * matrix, a multiplier setting SDR white, PQ or HLG encoded, all in use or none.
+  */
+ int vop2_sdr2hdr_of(struct drm_atomic_commit *state, const struct drm_plane_state *pstate,
+ 		    struct vop2_sdr2hdr *s2h)
+@@ -3140,7 +3148,8 @@ int vop2_sdr2hdr_of(struct drm_atomic_commit *state, const struct drm_plane_stat
+ 	struct drm_colorop *colorop = pstate->color_pipeline;
+ 	const struct drm_color_ctm_3x4 *ctm;
+ 	unsigned int i, bypassed = 0;
+-	u64 v, mult;
++	u64 v, mult, min, max;
++	u32 peak, scale;
+ 
+ 	memset(s2h, 0, sizeof(*s2h));
+ 	for (i = 0; i < VOP2_S2H_OPS; i++, colorop = colorop->next) {
+@@ -3152,9 +3161,9 @@ int vop2_sdr2hdr_of(struct drm_atomic_commit *state, const struct drm_plane_stat
+ 	if (bypassed == VOP2_S2H_OPS)
+ 		return 0;
+ 	if (bypassed || !ops[1]->data ||
+-	    ops[0]->curve_1d_type != DRM_COLOROP_1D_CURVE_GAMMA22 ||
+-	    ops[3]->curve_1d_type != DRM_COLOROP_1D_CURVE_PQ_125_INV_EOTF)
++	    ops[0]->curve_1d_type != DRM_COLOROP_1D_CURVE_GAMMA22)
+ 		return -EINVAL;
++	s2h->hlg = ops[3]->curve_1d_type == DRM_COLOROP_1D_CURVE_HLG_INV_EOTF;
+ 
+ 	ctm = ops[1]->data->data;
+ 	for (i = 0; i < ARRAY_SIZE(ctm->matrix); i++) {
+@@ -3169,11 +3178,21 @@ int vop2_sdr2hdr_of(struct drm_atomic_commit *state, const struct drm_plane_stat
+ 		s2h->csc[i - i / 4] = (v + BIT_ULL(VOP2_S2H_CSC_SHIFT - 1)) >> VOP2_S2H_CSC_SHIFT;
+ 	}
+ 
++	if (s2h->hlg) {
++		min = VOP2_S2H_HLG_MULT_MIN;
++		max = VOP2_S2H_HLG_MULT_MAX;
++		peak = VOP2_S2H_HLG_PEAK;
++		scale = VOP2_S2H_HLG_WHITE_SCALE;
++	} else {
++		min = VOP2_S2H_MULT_MIN;
++		max = VOP2_S2H_MULT_MAX;
++		peak = VOP2_S2H_PQ_125_WHITE;
++		scale = VOP2_S2H_WHITE_SCALE;
++	}
+ 	mult = ops[2]->multiplier;
+-	if (mult < VOP2_S2H_MULT_MIN || mult > VOP2_S2H_MULT_MAX)
++	if (mult < min || mult > max)
+ 		return -EINVAL;
+-	s2h->white = DIV_ROUND_CLOSEST((u64)(intlog10(VOP2_S2H_PQ_125_WHITE) -
+-					     intlog10(mult >> 16)) * VOP2_S2H_WHITE_SCALE,
++	s2h->white = DIV_ROUND_CLOSEST((u64)(intlog10(peak) - intlog10(mult >> 16)) * scale,
+ 				       1 << 24);
+ 	s2h->on = true;
+ 	return 0;
+@@ -3195,7 +3214,8 @@ static int vop2_colorop_init(struct vop2 *vop2, struct drm_colorop *colorop,
+ 		return drm_plane_colorop_mult_init(vop2->drm, colorop, plane, funcs, flags);
+ 	default:
+ 		return drm_plane_colorop_curve_1d_init(vop2->drm, colorop, plane, funcs,
+-						       BIT(DRM_COLOROP_1D_CURVE_PQ_125_INV_EOTF),
++						       BIT(DRM_COLOROP_1D_CURVE_PQ_125_INV_EOTF) |
++						       BIT(DRM_COLOROP_1D_CURVE_HLG_INV_EOTF),
+ 						       flags);
+ 	}
+ }
+@@ -3220,7 +3240,7 @@ static int vop2_plane_init_color_pipeline(struct vop2 *vop2, struct drm_plane *p
+ 
+ 	if (!ret) {
+ 		pipeline.type = ops[0]->base.id;
+-		pipeline.name = kasprintf(GFP_KERNEL, "SDR to PQ %d", ops[0]->base.id);
++		pipeline.name = kasprintf(GFP_KERNEL, "SDR to HDR %d", ops[0]->base.id);
+ 		ret = -ENOMEM;
+ 		if (pipeline.name)
+ 			ret = drm_plane_create_color_pipeline_property(plane, &pipeline, 1);
+diff --git a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.h b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.h
+index 036d4d3e1..7187c6851 100644
+--- a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.h
++++ b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.h
+@@ -253,10 +253,12 @@ struct vop2_video_port_data {
+  * struct vop2_sdr2hdr - the SDR to HDR stage, as a plane's colorop pipeline asks
+  * @on: the pipeline is in use
+  * @csc: the BT.709 to BT.2020 matrix, Q13, row by row
+- * @white: the SDR white's term, -log10 of its luminance over 10000 nits, scaled
++ * @hlg: HLG encoded, not PQ
++ * @white: the SDR white's term, -log10 of its luminance over the curve's peak, scaled
+  */
+ struct vop2_sdr2hdr {
+ 	bool on;
++	bool hlg;
+ 	u16 csc[9];
+ 	s16 white;
+ };
+@@ -511,6 +513,7 @@ enum dst_factor_mode {
+ #define RK3528_OVL_SYS_PORT_SEL_IMD		0x504
+ #define RK3528_SDR2HDR_CTRL			0x2010
+ #define RK3528_SDR2HDR_CTRL__EN				BIT(0)
++#define RK3528_SDR2HDR_CTRL__HLG			BIT(3)
+ #define RK3528_SDR2HDR_CTRL__AUTO_GATING		BIT(1)
+ #define RK3528_SDR_CFG_COE0			0x2014
+ #define RK3528_SDR_CFG_COE1			0x2018
+diff --git a/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c b/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c
+index 1cd41d206..12d7b8dd4 100644
+--- a/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c
++++ b/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c
+@@ -2607,8 +2607,10 @@ static u32 rk3528_ovl_sys_route(struct vop2 *vop2, unsigned int phys_id, u32 vp_
+  * port assignment and the delay of the windows live in the OVL_SYS block
+  * instead of the window registers.
+  */
+-/* the SDR to HDR stage's fixed terms, as Rockchip's userspace sets them for a PQ output */
++/* the SDR to HDR stage's fixed terms, as Rockchip's userspace sets them for each output */
+ #define RK3528_SDR_CFG_COE1_PQ		4913
++#define RK3528_SDR_CFG_COE1_HLG		4094
++#define RK3528_SDR_CFG_COE0_HLG		((-171 & 0xfff) << 16)
+ #define RK3528_HDRVIVID_CTRL_S2H	0x203
+ #define RK3528_SDR_SMGAIN_WORDS		64
+ #define RK3528_SDR_SMGAIN_UNITY		(1024 | 1024 << 16)
+@@ -2675,8 +2677,10 @@ static void rk3528_vop2_setup_sdr2hdr(struct vop2_video_port *vp)
+ 		csc[i] = s2h.csc[2 * i] | (2 * i + 1 < ARRAY_SIZE(s2h.csc) ?
+ 					   s2h.csc[2 * i + 1] << 16 : 0);
+ 	rk3528_vop2_write_words(vop2, RK3528_SDR_CSC_COE00_01, csc, ARRAY_SIZE(csc));
+-	vop2_writel(vop2, RK3528_SDR_CFG_COE0, (u16)s2h.white & 0xfff);
+-	vop2_writel(vop2, RK3528_SDR_CFG_COE1, RK3528_SDR_CFG_COE1_PQ);
++	vop2_writel(vop2, RK3528_SDR_CFG_COE0,
++		    ((u16)s2h.white & 0xfff) | (s2h.hlg ? RK3528_SDR_CFG_COE0_HLG : 0));
++	vop2_writel(vop2, RK3528_SDR_CFG_COE1,
++		    s2h.hlg ? RK3528_SDR_CFG_COE1_HLG : RK3528_SDR_CFG_COE1_PQ);
+ 	rk3528_vop2_write_words(vop2, RK3528_SDRINVGAMMA_CURVE, rk3528_sdr_inv_gamma,
+ 				ARRAY_SIZE(rk3528_sdr_inv_gamma));
+ 	rk3528_vop2_write_words(vop2, RK3528_SDRINVGAMMA_STARTIDX, rk3528_sdr_inv_gamma_start,
+@@ -2686,7 +2690,8 @@ static void rk3528_vop2_setup_sdr2hdr(struct vop2_video_port *vp)
+ 	for (i = 0; i < RK3528_SDR_SMGAIN_WORDS; i++)
+ 		vop2_writel(vop2, RK3528_SDR_SMGAIN + i * sizeof(u32), RK3528_SDR_SMGAIN_UNITY);
+ 	vop2_writel(vop2, RK3528_HDRVIVID_CTRL, RK3528_HDRVIVID_CTRL_S2H);
+-	vop2_writel(vop2, RK3528_SDR2HDR_CTRL, RK3528_SDR2HDR_CTRL__EN);
++	vop2_writel(vop2, RK3528_SDR2HDR_CTRL,
++		    RK3528_SDR2HDR_CTRL__EN | (s2h.hlg ? RK3528_SDR2HDR_CTRL__HLG : 0));
+ 	vop2_writel(vop2, RK3576_OVL_CTRL(vp->id), ovl_ctrl | RK3576_OVL_CTRL__SDR2HDR_PATH);
+ }
+ 

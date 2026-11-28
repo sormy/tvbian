@@ -1,0 +1,103 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] soc: rockchip: pm_config: Power off as a sleep the wake sources end
+
+Rockchip's boards ask, by rockchip,virtual-poweroff, that power-off be
+a sleep: BL31 sleeps on the wake sources the driver sent at probe, and
+a wake starts the board afresh. Rockchip's kernel does so, its remote's
+power key starting a box its user turned off. Where the board asks, take
+the secondary CPUs down at power-off, tell the firmware, and enter
+PSCI's SYSTEM_SUSPEND with no return, as Rockchip's kernel does.
+
+smp_shutdown_nonboot_cpus() is not exported, so the driver is built in.
+
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ drivers/soc/rockchip/Kconfig | 6 +++---
+ drivers/soc/rockchip/pm_config.c | 33 +++++++++++++++++++++++++++++++++
+ 2 files changed, 36 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/soc/rockchip/Kconfig b/drivers/soc/rockchip/Kconfig
+index ce74a89..8d887f8 100644
+--- a/drivers/soc/rockchip/Kconfig
++++ b/drivers/soc/rockchip/Kconfig
+@@ -31,12 +31,12 @@ config ROCKCHIP_DTPM
+ 	  devices.
+ 
+ config ROCKCHIP_PM_CONFIG
+-	tristate "Rockchip suspend firmware configuration"
+-	depends on HAVE_ARM_SMCCC
++	bool "Rockchip suspend firmware configuration"
++	depends on HAVE_ARM_SMCCC && HOTPLUG_CPU
+ 	help
+ 	  Hands Rockchip's suspend firmware (BL31) the board's sleep mode,
+ 	  wake sources and PWM-driven regulators from the device tree, so
+ 	  that deep suspend wakes on what the board wires: its remote, its
+-	  power button.
++	  power button. Where the board asks, power-off is a sleep they end.
+ 
+ endif
+diff --git a/drivers/soc/rockchip/pm_config.c b/drivers/soc/rockchip/pm_config.c
+index 3320914..40b6abe 100644
+--- a/drivers/soc/rockchip/pm_config.c
++++ b/drivers/soc/rockchip/pm_config.c
+@@ -6,12 +6,19 @@
+  */
+ 
+ #include <linux/arm-smccc.h>
++#include <linux/cpu.h>
+ #include <linux/mod_devicetable.h>
+ #include <linux/module.h>
+ #include <linux/of.h>
+ #include <linux/platform_device.h>
++#include <linux/psci.h>
++#include <linux/reboot.h>
++#include <linux/smp.h>
++#include <uapi/linux/psci.h>
+ 
+ #define ROCKCHIP_SIP_SUSPEND_MODE	0x82000003
++#define ROCKCHIP_VIRTUAL_POWEROFF	0x07
++#define ROCKCHIP_VIRTUAL_POWEROFF_EN	0
+ 
+ static const struct {
+ 	const char *property;
+@@ -22,6 +29,25 @@ static const struct {
+ 	{ "rockchip,pwm-regulator-config", 0x03 },
+ };
+ 
++/*
++ * The firmware sleeps in place of powering off, on the sleep mode and wake
++ * sources sent at probe, and a wake starts the board afresh: a remote's
++ * power key brings back a box its user turned off.
++ */
++static int rockchip_pm_virtual_poweroff(struct sys_off_data *data)
++{
++	struct arm_smccc_res res;
++
++	smp_shutdown_nonboot_cpus(smp_processor_id());
++	arm_smccc_smc(ROCKCHIP_SIP_SUSPEND_MODE, ROCKCHIP_VIRTUAL_POWEROFF,
++		      ROCKCHIP_VIRTUAL_POWEROFF_EN, 1, 0, 0, 0, 0, &res);
++	if (res.a0)
++		return NOTIFY_DONE;
++	arm_smccc_smc(PSCI_1_0_FN64_SYSTEM_SUSPEND, 0, 0, 0, 0, 0, 0, 0, &res);
++
++	return NOTIFY_DONE;
++}
++
+ static int rockchip_pm_config_probe(struct platform_device *pdev)
+ {
+ 	struct device_node *np = pdev->dev.of_node;
+@@ -41,6 +67,13 @@ static int rockchip_pm_config_probe(struct platform_device *pdev)
+ 					     (long)res.a0);
+ 	}
+ 
++	if (!of_property_read_u32(np, "rockchip,virtual-poweroff", &value) && value)
++		return devm_register_sys_off_handler(&pdev->dev,
++						     SYS_OFF_MODE_POWER_OFF_PREPARE,
++						     SYS_OFF_PRIO_DEFAULT,
++						     rockchip_pm_virtual_poweroff,
++						     NULL);
++
+ 	return 0;
+ }
+ 

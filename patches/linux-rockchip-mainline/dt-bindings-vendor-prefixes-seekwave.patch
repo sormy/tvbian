@@ -1,0 +1,22 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] dt-bindings: vendor-prefixes: Add Seekwave
+
+Seekwave Technology makes the SV6160 Lite (SWT6621S) SDIO Wi-Fi and
+Bluetooth chip found on Rockchip TV boxes.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ Documentation/devicetree/bindings/vendor-prefixes.yaml | 2 ++
+ 1 file changed, 2 insertions(+)
+
+--- a/Documentation/devicetree/bindings/vendor-prefixes.yaml
++++ b/Documentation/devicetree/bindings/vendor-prefixes.yaml
+@@ -1485,6 +1485,8 @@
+     description: Seagate Technology PLC
+   "^seeed,.*":
+     description: Seeed Technology Co., Ltd
++  "^seekwave,.*":
++    description: Seekwave Technology Co., Ltd.
+   "^seirobotics,.*":
+     description: Shenzhen SEI Robotics Co., Ltd
+   "^semtech,.*":

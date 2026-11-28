@@ -1,0 +1,32 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] ASoC: hdmi-codec: Report its jack type
+
+A card that creates jacks for the components reporting a type, as
+simple-card does for its auxiliary devices, can then give the HDMI
+codec the jack its plug state goes to.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/sound/soc/codecs/hdmi-codec.c b/sound/soc/codecs/hdmi-codec.c
+--- a/sound/soc/codecs/hdmi-codec.c
++++ b/sound/soc/codecs/hdmi-codec.c
+@@ -972,6 +972,11 @@
+ 	}
+ }
+ 
++static int hdmi_codec_get_jack_type(struct snd_soc_component *component)
++{
++	return SND_JACK_LINEOUT;
++}
++
+ static int hdmi_codec_set_jack(struct snd_soc_component *component,
+ 			       struct snd_soc_jack *jack,
+ 			       void *data)
+@@ -1120,6 +1125,7 @@
+ 	.use_pmdown_time	= 1,
+ 	.endianness		= 1,
+ 	.set_jack		= hdmi_codec_set_jack,
++	.get_jack_type		= hdmi_codec_get_jack_type,
+ };
+ 
+ static int hdmi_codec_probe(struct platform_device *pdev)

@@ -1,0 +1,32 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] drm/rockchip: vop2: Gamma LUT on the RK3528's VP0
+
+The RK3528's VP0 has a 1024-entry gamma lookup table, loaded as the
+RK3588's is; VP1, the composite port, has none. Give VP0 its length,
+and attach the gamma properties only to a port that has a table.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
+--- a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
++++ b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
+@@ -3082,7 +3082,7 @@
+ 		drm_crtc_attach_background_color_property(&vp->crtc);
+ 
+ 		drm_crtc_helper_add(&vp->crtc, &vop2_crtc_helper_funcs);
+-		if (vop2->lut_regs) {
++		if (vop2->lut_regs && vop2_data->vp[vp->id].gamma_lut_len) {
+ 			const struct vop2_video_port_data *vp_data = &vop2_data->vp[vp->id];
+ 
+ 			drm_mode_crtc_set_gamma_size(&vp->crtc, vp_data->gamma_lut_len);
+diff --git a/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c b/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c
+--- a/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c
++++ b/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c
+@@ -2646,6 +2646,7 @@
+ 		.offset = 0xc00,
+ 		.pixel_rate = 1,
+ 		.nlayers = 4,
++		.gamma_lut_len = 1024,
+ 	}, {
+ 		.id = 1,
+ 		.max_output = { 720, 576 },

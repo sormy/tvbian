@@ -1,0 +1,23 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] net: phy: rockchip: the RK3528 FEPHY's hot threshold as a test parameter
+
+A test hook, in a debug build only: hot_mc moves the temperature over which
+the receive detect drops to 160 mV, so a check can make the switch happen at
+the box's own temperature and back.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+ drivers/net/phy/rockchip.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/drivers/net/phy/rockchip.c b/drivers/net/phy/rockchip.c
+--- a/drivers/net/phy/rockchip.c
++++ b/drivers/net/phy/rockchip.c
+@@ -198,6 +198,7 @@ struct rk3528_ephy {
+ };
+ 
+ static int rk3528_hot_mc = RK3528_HOT_MC;
++module_param_named(hot_mc, rk3528_hot_mc, int, 0644);
+ 
+ /* The SoC's temperature, polled: over RK3528_HOT_MC the receive detect at 160 mV */
+ static void rk3528_ephy_hot_work(struct work_struct *work)

@@ -1,0 +1,87 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] drm/rockchip: vop2: Rotate AFBC by 90 and 270 on the RK3528's Cluster0
+
+The RK3528's Cluster0 rotates an AFBC buffer by 90 and 270 degrees, and
+the vendor's kernel offers it; offer it here too. Its decoder turns a
+picture clockwise for its 90-degree bit, where DRM's 90 is anticlockwise,
+as the vendor's kernel shows too: set the other bit, and take the
+transform offset for the turn the hardware makes.
+
+A linear buffer asked to rotate by 90 or 270 was taken and scanned out
+as garbage: refuse it, as the vendor does.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
+--- a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
++++ b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
+@@ -435,6 +435,22 @@
+ 		return true;
+ }
+ 
++/*
++ * The rotation to set the window's AFBC decoder to: the RK3528's turns a
++ * picture clockwise for its 90-degree bit, where DRM's 90 is anticlockwise.
++ */
++static unsigned int vop2_afbc_rotation(const struct drm_plane_state *pstate)
++{
++	struct vop2_win *win = to_vop2_win(pstate->plane);
++	unsigned int rotation = pstate->rotation;
++
++	if (win->vop2->version == VOP_VERSION_RK3528 &&
++	    rotation & (DRM_MODE_ROTATE_90 | DRM_MODE_ROTATE_270))
++		rotation ^= DRM_MODE_ROTATE_90 | DRM_MODE_ROTATE_270;
++
++	return rotation;
++}
++
+ static u32 vop2_afbc_transform_offset(struct drm_plane_state *pstate,
+ 				      bool afbc_half_block_en)
+ {
+@@ -464,7 +480,7 @@
+ 
+ 	bottom_crop_line_num = align16_crop + align64_crop;
+ 
+-	switch (pstate->rotation &
++	switch (vop2_afbc_rotation(pstate) &
+ 		(DRM_MODE_REFLECT_X | DRM_MODE_REFLECT_Y |
+ 		 DRM_MODE_ROTATE_90 | DRM_MODE_ROTATE_270)) {
+ 	case DRM_MODE_REFLECT_X | DRM_MODE_REFLECT_Y:
+@@ -1309,6 +1325,13 @@
+ 		return -EINVAL;
+ 	}
+ 
++	if (!drm_is_afbc(fb->modifier) &&
++	    pstate->rotation & (DRM_MODE_ROTATE_90 | DRM_MODE_ROTATE_270)) {
++		drm_dbg_kms(vop2->drm,
++			    "Only AFBC buffers rotate by 90 and 270 degrees\n");
++		return -EINVAL;
++	}
++
+ 	if (vop2_cluster_window(win) && !drm_is_afbc(fb->modifier) &&
+ 	    pstate->rotation & (DRM_MODE_REFLECT_X | DRM_MODE_REFLECT_Y)) {
+ 		drm_dbg_kms(vop2->drm,
+@@ -1421,8 +1444,8 @@
+ 	bool dither_up;
+ 	bool xmirror = pstate->rotation & DRM_MODE_REFLECT_X ? true : false;
+ 	bool ymirror = pstate->rotation & DRM_MODE_REFLECT_Y ? true : false;
+-	bool rotate_270 = pstate->rotation & DRM_MODE_ROTATE_270;
+-	bool rotate_90 = pstate->rotation & DRM_MODE_ROTATE_90;
++	bool rotate_270 = vop2_afbc_rotation(pstate) & DRM_MODE_ROTATE_270;
++	bool rotate_90 = vop2_afbc_rotation(pstate) & DRM_MODE_ROTATE_90;
+ 	struct rockchip_gem_object *rk_obj;
+ 	unsigned long offset;
+ 	bool half_block_en;
+diff --git a/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c b/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c
+--- a/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c
++++ b/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c
+@@ -2741,7 +2741,8 @@
+ 		.nformats = ARRAY_SIZE(formats_cluster),
+ 		.format_modifiers = format_modifiers_afbc,
+ 		.layer_sel_id = { 0, 0xf, 0xf, 0xf },
+-		.supported_rotations = DRM_MODE_REFLECT_X | DRM_MODE_REFLECT_Y,
++		.supported_rotations = DRM_MODE_ROTATE_90 | DRM_MODE_ROTATE_270 |
++				       DRM_MODE_REFLECT_X | DRM_MODE_REFLECT_Y,
+ 		.type = DRM_PLANE_TYPE_OVERLAY,
+ 		.axi_yrgb_r_id = 2,
+ 		.axi_uv_r_id = 3,

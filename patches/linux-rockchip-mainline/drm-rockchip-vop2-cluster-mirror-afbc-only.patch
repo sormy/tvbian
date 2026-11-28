@@ -1,0 +1,27 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] drm/rockchip: vop2: Refuse mirroring a linear buffer on a Cluster window
+
+A Cluster window takes its mirror bits from the AFBC decoder's rotate
+mode register, which applies only to an AFBC buffer. A linear buffer
+with REFLECT_X or REFLECT_Y passes the atomic check and is shown
+unmirrored. Refuse the combination, so userspace mirrors it another way.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+diff --git a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
+--- a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
++++ b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
+@@ -1309,6 +1309,13 @@
+ 		return -EINVAL;
+ 	}
+ 
++	if (vop2_cluster_window(win) && !drm_is_afbc(fb->modifier) &&
++	    pstate->rotation & (DRM_MODE_REFLECT_X | DRM_MODE_REFLECT_Y)) {
++		drm_dbg_kms(vop2->drm,
++			    "Cluster windows mirror AFBC buffers only\n");
++		return -EINVAL;
++	}
++
+ 	if ((cstate->background_color << 16) &&
+ 	    (fb->format->has_alpha || pstate->alpha != 0xffff)) {
+ 		drm_dbg_kms(vop2->drm,

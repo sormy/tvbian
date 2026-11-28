@@ -1,0 +1,111 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] regulator: pwm-regulator: Never set a voltage below the requested minimum
+
+A PWM rounds the duty cycle it is asked for to its clock, down, as the
+PWM API asks of .apply. In continuous mode the regulator then sets
+whatever voltage that rounded duty gives, which can fall below the
+minimum the consumer asked for, and reports the duty it asked for, not
+the one the PWM runs. On a Rockchip RK3528 the CPU rail, asked for
+900.7 mV at a 5000 ns period, ran 1667 ns of a requested 1700: about
+897 mV while the regulator reported 900.7.
+
+Read the PWM's own state where it can give it, for the voltage
+reported, and after setting a voltage step the duty toward the higher
+voltage until the PWM's state reaches the requested minimum, never
+past the requested maximum.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+  drivers/regulator/pwm-regulator.c | 55 +++++++++++++++++++++++++++++++++++----
+  1 file changed, 50 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/regulator/pwm-regulator.c b/drivers/regulator/pwm-regulator.c
+index 7434b6b22..a6047777c 100644
+--- a/drivers/regulator/pwm-regulator.c
++++ b/drivers/regulator/pwm-regulator.c
+@@ -142,7 +142,7 @@ static int pwm_regulator_is_enabled(struct regulator_dev *dev)
+ 	return pwm_is_enabled(drvdata->pwm);
+ }
+ 
+-static int pwm_regulator_get_voltage(struct regulator_dev *rdev)
++static int pwm_regulator_state_uV(struct regulator_dev *rdev, struct pwm_state pstate)
+ {
+ 	struct pwm_regulator_data *drvdata = rdev_get_drvdata(rdev);
+ 	unsigned int min_uV_duty = drvdata->continuous.min_uV_dutycycle;
+@@ -151,12 +151,9 @@ static int pwm_regulator_get_voltage(struct regulator_dev *rdev)
+ 	int min_uV = rdev->constraints->min_uV;
+ 	int max_uV = rdev->constraints->max_uV;
+ 	int diff_uV = max_uV - min_uV;
+-	struct pwm_state pstate;
+ 	unsigned int diff_duty;
+ 	unsigned int voltage;
+ 
+-	pwm_get_state(drvdata->pwm, &pstate);
+-
+ 	if (!pstate.enabled) {
+ 		if (pstate.polarity == PWM_POLARITY_INVERSED)
+ 			pstate.duty_cycle = pstate.period;
+@@ -187,6 +184,54 @@ static int pwm_regulator_get_voltage(struct regulator_dev *rdev)
+ 	return voltage + min_uV;
+ }
+ 
++/* The state the PWM runs, its period and duty rounded to its clock, where it can say */
++static void pwm_regulator_hw_state(struct pwm_device *pwm, struct pwm_state *pstate)
++{
++	if (pwm_get_state_hw(pwm, pstate))
++		pwm_get_state(pwm, pstate);
++}
++
++static int pwm_regulator_get_voltage(struct regulator_dev *rdev)
++{
++	struct pwm_regulator_data *drvdata = rdev_get_drvdata(rdev);
++	struct pwm_state pstate;
++
++	pwm_regulator_hw_state(drvdata->pwm, &pstate);
++
++	return pwm_regulator_state_uV(rdev, pstate);
++}
++
++/*
++ * A PWM rounds the duty cycle to its clock, down as the PWM API asks: where that lands under the
++ * requested minimum, move the duty a step at a time toward the higher voltage until the PWM takes
++ * it, never past the requested maximum.
++ */
++static int pwm_regulator_reach_min(struct regulator_dev *rdev, struct pwm_state pstate,
++				   int req_min_uV, int req_max_uV)
++{
++	struct pwm_regulator_data *drvdata = rdev_get_drvdata(rdev);
++	bool up = drvdata->continuous.max_uV_dutycycle > drvdata->continuous.min_uV_dutycycle;
++	struct pwm_state hw, next = pstate;
++	u64 step;
++	int uV;
++
++	pwm_regulator_hw_state(drvdata->pwm, &hw);
++	for (step = 1; step <= pstate.period; step *= 2) {
++		uV = pwm_regulator_state_uV(rdev, hw);
++		if (uV < 0 || uV >= req_min_uV)
++			return 0;
++		next.duty_cycle = up ? min(pstate.duty_cycle + step, pstate.period) :
++				       pstate.duty_cycle - min(step, pstate.duty_cycle);
++		if (pwm_apply_might_sleep(drvdata->pwm, &next))
++			break;
++		pwm_regulator_hw_state(drvdata->pwm, &hw);
++		if (pwm_regulator_state_uV(rdev, hw) > req_max_uV)
++			break;
++	}
++
++	return pwm_apply_might_sleep(drvdata->pwm, &pstate);
++}
++
+ static int pwm_regulator_set_voltage(struct regulator_dev *rdev,
+ 				     int req_min_uV, int req_max_uV,
+ 				     unsigned int *selector)
+@@ -232,7 +277,7 @@ static int pwm_regulator_set_voltage(struct regulator_dev *rdev,
+ 		return ret;
+ 	}
+ 
+-	return 0;
++	return pwm_regulator_reach_min(rdev, pstate, req_min_uV, req_max_uV);
+ }
+ 
+ static const struct regulator_ops pwm_regulator_voltage_table_ops = {

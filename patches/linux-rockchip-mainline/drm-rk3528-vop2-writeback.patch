@@ -17,14 +17,20 @@ A writeback encoder drives no interface, so the video port skips it when
 it routes its outputs, and it is made a clone of every other encoder so
 it can run beside the output of its port.
 
+A job ends unwritten when its port stops or the writeback moves to
+another port, its vsyncs no longer coming, and a writeback is refused
+while every job slot is pending, so no completion ever signals the
+wrong job. The engine is stopped before such a job ends:
+left on past its port's last frame, it wrote on once the IOMMU was
+detached, its buffer's address taken as physical memory.
+
 Signed-off-by: Artem Butusov <art.sormy@gmail.com>
 ---
----
  drivers/gpu/drm/rockchip/rockchip_drm_drv.c  |  19 ++
- drivers/gpu/drm/rockchip/rockchip_drm_vop2.c | 243 +++++++++++++++++++
+ drivers/gpu/drm/rockchip/rockchip_drm_vop2.c | 303 +++++++++++++++++++
  drivers/gpu/drm/rockchip/rockchip_drm_vop2.h |  36 +++
  drivers/gpu/drm/rockchip/rockchip_vop2_reg.c |  18 ++
- 4 files changed, 316 insertions(+)
+ 4 files changed, 376 insertions(+)
 
 diff --git a/drivers/gpu/drm/rockchip/rockchip_drm_drv.c b/drivers/gpu/drm/rockchip/rockchip_drm_drv.c
 index da32c34..0957439 100644
@@ -64,7 +70,7 @@ index da32c34..0957439 100644
  	if (ret)
  		goto err_unbind_all;
 diff --git a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
-index f62d4a1..9888047 100644
+index f62d4a1..caef37c 100644
 --- a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
 +++ b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.c
 @@ -21,11 +21,14 @@
@@ -82,7 +88,26 @@ index f62d4a1..9888047 100644
  #include <drm/drm_flip_work.h>
  #include <drm/drm_framebuffer.h>
  #include <drm/drm_gem_framebuffer_helper.h>
-@@ -1868,6 +1871,10 @@ static void vop2_crtc_atomic_enable(struct drm_crtc *crtc,
+@@ -1070,6 +1073,8 @@ static bool vop2_gamma_lut_in_use(struct vop2 *vop2, struct vop2_video_port *vp)
+ 	return gamma_en_vp_id != nr_vps && gamma_en_vp_id != vp->id;
+ }
+ 
++static void vop2_wb_cancel(struct vop2_video_port *vp);
++
+ static void vop2_crtc_atomic_disable(struct drm_crtc *crtc,
+ 				     struct drm_atomic_commit *state)
+ {
+@@ -1086,6 +1091,9 @@ static void vop2_crtc_atomic_disable(struct drm_crtc *crtc,
+ 	old_crtc_state = drm_atomic_get_old_crtc_state(state, crtc);
+ 	drm_atomic_helper_disable_planes_on_crtc(old_crtc_state, false);
+ 
++	if (vop2->data->wb && FIELD_GET(RK3568_LUT_PORT_SEL__WB_VP,
++					vop2_readl(vop2, RK3568_LUT_PORT_SEL)) == vp->id)
++		vop2_wb_cancel(vp);
+ 	drm_crtc_vblank_off(crtc);
+ 	vop2_crtc_disable_irq(vp, VP_INT_POST_BUF_EMPTY);
+ 
+@@ -1868,6 +1876,10 @@ static void vop2_crtc_atomic_enable(struct drm_crtc *crtc,
  	drm_for_each_encoder_mask(encoder, crtc->dev, crtc_state->encoder_mask) {
  		struct rockchip_encoder *rkencoder = to_rockchip_encoder(encoder);
  
@@ -93,7 +118,7 @@ index f62d4a1..9888047 100644
  		/*
  		 * for drive a high resolution(4KP120, 8K), vop on rk3588/rk3576 need
  		 * process multi(1/2/4/8) pixels per cycle, so the dclk feed by the
-@@ -2054,6 +2061,29 @@ static int vop2_crtc_atomic_check_gamma(struct vop2_video_port *vp,
+@@ -2054,6 +2066,80 @@ static int vop2_crtc_atomic_check_gamma(struct vop2_video_port *vp,
  	return 0;
  }
  
@@ -101,6 +126,53 @@ index f62d4a1..9888047 100644
 + * It converts RGB to YUV only. The encoders set the port's bus format after
 + * the connectors' checks, so the writeback's format is checked here.
 + */
++/* The engine stops at the port's next frame start */
++static void vop2_wb_stop(struct vop2 *vop2)
++{
++	regmap_clear_bits(vop2->map, RK3568_WB_CTRL, RK3568_WB_CTRL__ENABLE);
++	regmap_set_bits(vop2->map, RK3568_REG_CFG_DONE,
++			RK3568_REG_CFG_DONE__WB_CFG_DONE |
++			RK3568_REG_CFG_DONE__WB_CFG_DONE << 16 |
++			RK3568_REG_CFG_DONE__GLB_CFG_DONE_EN);
++}
++
++/*
++ * Every writeback still pending ends unwritten: the port it waits on stops,
++ * or the writeback moves to another port, and its vsyncs no longer come.
++ * The engine stops first: left on past its port's last frame, it writes on
++ * once the IOMMU is detached, its buffer's address taken as physical.
++ */
++static void vop2_wb_cancel(struct vop2_video_port *vp)
++{
++	struct vop2 *vop2 = vp->vop2;
++	unsigned long flags;
++	int i;
++
++	spin_lock_irqsave(&vop2->wb_lock, flags);
++	vop2_wb_stop(vop2);
++	for (i = 0; i < VOP2_WB_JOB_MAX; i++) {
++		if (!vop2->wb_job_vsyncs[i])
++			continue;
++		vop2->wb_job_vsyncs[i] = 0;
++		drm_writeback_signal_completion(&vop2->wb, -ETIMEDOUT);
++		drm_crtc_vblank_put(&vp->crtc);
++	}
++	spin_unlock_irqrestore(&vop2->wb_lock, flags);
++}
++
++static bool vop2_wb_slots_full(struct vop2 *vop2)
++{
++	unsigned long flags;
++	bool full = true;
++	int i;
++
++	spin_lock_irqsave(&vop2->wb_lock, flags);
++	for (i = 0; i < VOP2_WB_JOB_MAX; i++)
++		full &= !!vop2->wb_job_vsyncs[i];
++	spin_unlock_irqrestore(&vop2->wb_lock, flags);
++	return full;
++}
++
 +static int vop2_wb_check_output(struct vop2_video_port *vp, struct drm_atomic_commit *state,
 +				struct drm_crtc_state *crtc_state)
 +{
@@ -117,13 +189,17 @@ index f62d4a1..9888047 100644
 +	    is_yuv_output(to_rockchip_crtc_state(crtc_state)->bus_format))
 +		return -EINVAL;
 +
++	/* a job's slot is freed when it completes: none is taken from one still pending */
++	if (vop2_wb_slots_full(vp->vop2))
++		return -EBUSY;
++
 +	return 0;
 +}
 +
  static int vop2_crtc_atomic_check(struct drm_crtc *crtc,
  				  struct drm_atomic_commit *state)
  {
-@@ -2067,6 +2097,10 @@ static int vop2_crtc_atomic_check(struct drm_crtc *crtc,
+@@ -2067,6 +2153,10 @@ static int vop2_crtc_atomic_check(struct drm_crtc *crtc,
  	if (ret)
  		return ret;
  
@@ -134,7 +210,7 @@ index f62d4a1..9888047 100644
  	drm_atomic_crtc_state_for_each_plane(plane, crtc_state)
  		nplanes++;
  
-@@ -2103,6 +2137,164 @@ static void vop2_crtc_queue_event(struct drm_crtc *crtc)
+@@ -2103,6 +2193,168 @@ static void vop2_crtc_queue_event(struct drm_crtc *crtc)
  	spin_unlock_irq(&crtc->dev->event_lock);
  }
  
@@ -153,7 +229,7 @@ index f62d4a1..9888047 100644
 +static enum vop2_wb_format vop2_wb_format(u32 format)
 +{
 +	switch (format) {
-+	case DRM_FORMAT_BGR888:
++	case DRM_FORMAT_RGB888:	/* the engine's BGR888: B first in memory */
 +		return VOP2_WB_BGR888;
 +	case DRM_FORMAT_RGB565:
 +		return VOP2_WB_RGB565;
@@ -215,6 +291,7 @@ index f62d4a1..9888047 100644
 +	u16 hdisplay = crtc_state->mode.hdisplay;
 +	struct drm_framebuffer *fb;
 +	u32 ctrl, fifo_throd;
++	unsigned int old_vp;
 +
 +	if (!conn_state || conn_state->crtc != &vp->crtc ||
 +	    !conn_state->writeback_job || !conn_state->writeback_job->fb)
@@ -241,6 +318,9 @@ index f62d4a1..9888047 100644
 +
 +	fifo_throd = min_t(u32, fb->pitches[0] >> 4, vop2->data->wb->fifo_depth);
 +
++	old_vp = FIELD_GET(RK3568_LUT_PORT_SEL__WB_VP, vop2_readl(vop2, RK3568_LUT_PORT_SEL));
++	if (old_vp != vp->id && old_vp < vop2->data->nr_vps)
++		vop2_wb_cancel(&vop2->vps[old_vp]);
 +	regmap_update_bits(vop2->map, RK3568_LUT_PORT_SEL, RK3568_LUT_PORT_SEL__WB_VP,
 +			   FIELD_PREP(RK3568_LUT_PORT_SEL__WB_VP, vp->id));
 +	vop2_writel(vop2, RK3568_WB_YRGB_MST,
@@ -299,7 +379,7 @@ index f62d4a1..9888047 100644
  static void vop2_crtc_atomic_flush(struct drm_crtc *crtc,
  				   struct drm_atomic_commit *state)
  {
-@@ -2122,6 +2314,9 @@ static void vop2_crtc_atomic_flush(struct drm_crtc *crtc,
+@@ -2122,6 +2374,9 @@ static void vop2_crtc_atomic_flush(struct drm_crtc *crtc,
  
  	vop2_post_config(crtc, false, crtc_state, old_crtc_state);
  
@@ -309,19 +389,20 @@ index f62d4a1..9888047 100644
  	vop2_cfg_done(vp);
  
  	vop2_crtc_queue_event(crtc);
-@@ -2460,6 +2655,48 @@ static irqreturn_t rk3576_vp_isr(int irq, void *data)
+@@ -2460,6 +2715,48 @@ static irqreturn_t rk3576_vp_isr(int irq, void *data)
  	return ret;
  }
  
 +/*
-+ * The writeback engine runs while enabled, so it is enabled for one frame:
-+ * the commit's cfg_done latches it at a frame start, this one stops it at
-+ * the next and the job ends at the frame start after that.
++ * The writeback engine runs while enabled. The commit's cfg_done latches it
++ * at the next frame start, or at the one after where the commit lands
++ * between a frame start and its interrupt; so a job's second frame start
++ * stops it at the third, where the job ends with a whole frame written.
 + */
 +static void vop2_wb_handle_vsync(struct vop2_video_port *vp)
 +{
 +	struct vop2 *vop2 = vp->vop2;
-+	bool pending = false;
++	bool stop = false;
 +	int i;
 +
 +	if (!vop2->data->wb)
@@ -333,24 +414,23 @@ index f62d4a1..9888047 100644
 +
 +	spin_lock(&vop2->wb_lock);
 +
-+	for (i = 0; i < VOP2_WB_JOB_MAX; i++)
-+		pending |= vop2->wb_job_vsyncs[i];
-+
-+	if (pending) {
-+		regmap_clear_bits(vop2->map, RK3568_WB_CTRL, RK3568_WB_CTRL__ENABLE);
-+		regmap_set_bits(vop2->map, RK3568_REG_CFG_DONE,
-+				RK3568_REG_CFG_DONE__WB_CFG_DONE |
-+				RK3568_REG_CFG_DONE__WB_CFG_DONE << 16 |
-+				RK3568_REG_CFG_DONE__GLB_CFG_DONE_EN);
-+	}
-+
 +	for (i = 0; i < VOP2_WB_JOB_MAX; i++) {
-+		if (!vop2->wb_job_vsyncs[i] || --vop2->wb_job_vsyncs[i])
++		if (!vop2->wb_job_vsyncs[i])
 +			continue;
 +
-+		drm_writeback_signal_completion(&vop2->wb, 0);
-+		drm_crtc_vblank_put(&vp->crtc);
++		switch (--vop2->wb_job_vsyncs[i]) {
++		case 1:
++			stop = true;
++			break;
++		case 0:
++			drm_writeback_signal_completion(&vop2->wb, 0);
++			drm_crtc_vblank_put(&vp->crtc);
++			break;
++		}
 +	}
++
++	if (stop)
++		vop2_wb_stop(vop2);
 +
 +	spin_unlock(&vop2->wb_lock);
 +}
@@ -358,7 +438,7 @@ index f62d4a1..9888047 100644
  static irqreturn_t vop2_isr(int irq, void *data)
  {
  	struct vop2 *vop2 = data;
-@@ -2490,6 +2727,7 @@ static irqreturn_t vop2_isr(int irq, void *data)
+@@ -2490,6 +2787,7 @@ static irqreturn_t vop2_isr(int irq, void *data)
  			}
  
  			if (irqs & VP_INT_FS_FIELD) {
@@ -366,7 +446,7 @@ index f62d4a1..9888047 100644
  				drm_crtc_handle_vblank(crtc);
  				spin_lock(&crtc->dev->event_lock);
  				if (vp->event) {
-@@ -2985,6 +3223,7 @@ static int vop2_bind(struct device *dev, struct device *master, void *data)
+@@ -2985,6 +3283,7 @@ static int vop2_bind(struct device *dev, struct device *master, void *data)
  
  	mutex_init(&vop2->vop2_lock);
  	mutex_init(&vop2->ovl_lock);
@@ -374,7 +454,7 @@ index f62d4a1..9888047 100644
  
  	ret = devm_request_irq(dev, vop2->irq, vop2_isr, IRQF_SHARED, dev_name(dev), vop2);
  	if (ret)
-@@ -2994,6 +3233,10 @@ static int vop2_bind(struct device *dev, struct device *master, void *data)
+@@ -2994,6 +3293,10 @@ static int vop2_bind(struct device *dev, struct device *master, void *data)
  	if (ret)
  		return ret;
  
@@ -386,7 +466,7 @@ index f62d4a1..9888047 100644
  		struct drm_crtc *crtc;
  
 diff --git a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.h b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.h
-index 4750dbf..0eb04dd 100644
+index 4750dbf..c4b8441 100644
 --- a/drivers/gpu/drm/rockchip/rockchip_drm_vop2.h
 +++ b/drivers/gpu/drm/rockchip/rockchip_drm_vop2.h
 @@ -9,6 +9,7 @@
@@ -401,8 +481,8 @@ index 4750dbf..0eb04dd 100644
  	void (*setup_overlay)(struct vop2_video_port *vp);
  };
  
-+/* A writeback job ends two frame starts after its commit */
-+#define VOP2_WB_JOB_VSYNCS	2
++/* A writeback job ends three frame starts after its commit */
++#define VOP2_WB_JOB_VSYNCS	3
 +#define VOP2_WB_JOB_MAX		2
 +
 +struct vop2_wb_data {
@@ -461,7 +541,7 @@ index 4750dbf..0eb04dd 100644
  #define RK3568_VP_DSP_CTRL__STANDBY			BIT(31)
  #define RK3568_VP_DSP_CTRL__DSP_LUT_EN			BIT(28)
 diff --git a/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c b/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c
-index 4b135dc..216d5e8 100644
+index a6c52f6..d37a4d3 100644
 --- a/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c
 +++ b/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c
 @@ -183,6 +183,13 @@ static const uint32_t formats_rk3576_esmart[] = {
@@ -469,7 +549,7 @@ index 4b135dc..216d5e8 100644
  };
  
 +static const u32 formats_wb[] = {
-+	DRM_FORMAT_BGR888,
++	DRM_FORMAT_RGB888,
 +	DRM_FORMAT_ARGB8888,
 +	DRM_FORMAT_RGB565,
 +	DRM_FORMAT_NV12,

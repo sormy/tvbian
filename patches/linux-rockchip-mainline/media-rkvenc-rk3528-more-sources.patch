@@ -1,0 +1,47 @@
+From: Artem Butusov <art.sormy@gmail.com>
+Subject: [PATCH] media: rockchip: rkvenc: The VEPU540C's 4:4:4 sources
+
+The VEPU540C reads YUV444SP (12) and YUV444P (13) besides the ten
+source formats the driver offered, as Rockchip's MPP lists them, with
+the same U-V swap its table sets. Offer NV24 and NV42, YUV444M and
+YVU444M; the encoder takes the chroma stride in bytes, twice the luma's
+for NV24.
+
+MPP also lists ARGB1555 (3) and ARGB4444 (14), but never drives them:
+an RGB555 source hung an RK3528 past its watchdog, so neither is
+offered.
+
+Signed-off-by: Artem Butusov <art.sormy@gmail.com>
+---
+  drivers/media/platform/rockchip/rkvenc/rkvenc-v4l2.c    | 4 ++++
+  drivers/media/platform/rockchip/rkvenc/rkvenc-vepu541.h | 2 ++
+  2 files changed, 6 insertions(+)
+
+diff --git a/drivers/media/platform/rockchip/rkvenc/rkvenc-v4l2.c b/drivers/media/platform/rockchip/rkvenc/rkvenc-v4l2.c
+index be446fff2..518355928 100644
+--- a/drivers/media/platform/rockchip/rkvenc/rkvenc-v4l2.c
++++ b/drivers/media/platform/rockchip/rkvenc/rkvenc-v4l2.c
+@@ -54,6 +54,10 @@ static const struct rkvenc_fmt rkvenc_output_fmts[] = {
+ 	{ V4L2_PIX_FMT_RGB24, RKVENC_CFMT_BGR888 },
+ 	{ V4L2_PIX_FMT_BGR24, RKVENC_CFMT_BGR888, true },
+ 	{ V4L2_PIX_FMT_RGB565, RKVENC_CFMT_BGR565, true },
++	{ V4L2_PIX_FMT_NV24, RKVENC_CFMT_YUV444SP },
++	{ V4L2_PIX_FMT_NV42, RKVENC_CFMT_YUV444SP, true },
++	{ V4L2_PIX_FMT_YUV444M, RKVENC_CFMT_YUV444P, true },
++	{ V4L2_PIX_FMT_YVU444M, RKVENC_CFMT_YUV444P },
+ };
+ 
+ static const struct rkvenc_fmt rkvenc_capture_fmts[] = {
+diff --git a/drivers/media/platform/rockchip/rkvenc/rkvenc-vepu541.h b/drivers/media/platform/rockchip/rkvenc/rkvenc-vepu541.h
+index 056912e8b..ed4e5acb7 100644
+--- a/drivers/media/platform/rockchip/rkvenc/rkvenc-vepu541.h
++++ b/drivers/media/platform/rockchip/rkvenc/rkvenc-vepu541.h
+@@ -35,6 +35,8 @@ enum rkvenc_cfmt {
+ 	RKVENC_CFMT_YUV420P = 7,
+ 	RKVENC_CFMT_YUYV422 = 8,
+ 	RKVENC_CFMT_UYVY422 = 9,
++	RKVENC_CFMT_YUV444SP = 12,
++	RKVENC_CFMT_YUV444P = 13,
+ };
+ 
+ /* rbuv_swap: red and blue, or U and V, swapped; alpha_swap: alpha first */
